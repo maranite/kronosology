@@ -1,17 +1,19 @@
 # Kronosology
 
-> A reverse-engineering knowledge base, patching toolkit, and update-builder for the
+> A knowledge base, patching tool and update-builder for the
 > [Korg Kronos](https://www.korg.com/products/synthesizers/kronos2/) workstation.
 
 The Korg Kronos is a remarkable instrument — a Linux box, a digital signal processor,
 and a music workstation rolled into one — but its inner workings are essentially
 undocumented outside Korg's engineering team. **Kronosology** is what came out of
-several intensive weeks of reverse engineering: a corpus of analysis notes, a working
+several intensive weeks of studying: a corpus of analysis notes, a working
 tool to install patched binaries on a stock unit, and a builder for custom Korg-format
 OS update packages.
 
-Most of the project is in [`docs/`](docs/). The two executable parts are
-[`patcher/`](patcher/) and [`update-builder/`](update-builder/).
+Most of the learnings are recorded in [`docs/`](docs/) (forewarning: it's a pretty dry read!).
+
+
+The two executable parts are [`patcher/`](patcher/README.md) and [`update-builder/`](update-builder/README.md).
 
 ---
 
@@ -22,12 +24,12 @@ Most of the project is in [`docs/`](docs/). The two executable parts are
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
 | Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |
 | Understand the boot integrity chain (loadoa → loadmod → cryptoloop → OA → Eva) | [docs/system_overview.md](docs/system_overview.md), [docs/modules/loadoa.md](docs/modules/loadoa.md), [docs/modules/loadmod.ko.md](docs/modules/loadmod.ko.md) |
-| Understand the EX-bank authorization algorithm (Base32 + Blowfish-CFB + MD5 + chip secret) | [docs/crypto/auth_string_algorithm.md](docs/crypto/auth_string_algorithm.md) |
 | Understand the Atmel NV2AC security IC protocol (GPA stream cipher) | [docs/crypto/atmel_nv2ac.md](docs/crypto/atmel_nv2ac.md) |
 | Understand the OS-update signature algorithm (SHA-1 + `UpdaterScriptsKey`) | [docs/crypto/update_signature.md](docs/crypto/update_signature.md) |
 | Understand the on-disk format of programs / combis / drum kits / wave sequences / etc. | [docs/preload/](docs/preload/) |
+| Understand the EX-bank authorization algorithm (Base32 + Blowfish-CFB + MD5 + chip secret) | [docs/crypto/auth_string_algorithm.md](docs/crypto/auth_string_algorithm.md) |
 | **Patch a stock Kronos to accept any EX-bank install** | [patcher/](patcher/README.md) |
-| **Build your own custom OS-update package** | [update-builder/](update-builder/README.md)) |
+| **Build your own custom OS-update package** | [update-builder/](update-builder/README.md) |
 | Set up Ghidra to follow along with the analysis | [docs/workflow/ghidra_setup.md](docs/workflow/ghidra_setup.md) |
 | Export a patched .ko from a Ghidra session (reloc-aware diff) | [docs/workflow/export_patched_ko.md](docs/workflow/export_patched_ko.md) |
 | Add a new external-symbol import to a Linux 2.6 .ko by ELF surgery | [tools/README.md](tools/README.md) |
@@ -186,7 +188,7 @@ alongside the binary they belong to — see for example
 
 This is research notes more than a "project". If you've used this work, found a
 bug, extended it to a different Kronos OS version, or want to discuss any aspect
-of the reverse engineering, please open an issue or a PR.
+of the studying, please open an issue or a PR.
 
 If you're starting your own Kronos exploration, [`docs/workflow/`](docs/workflow/)
 has the methodology notes.

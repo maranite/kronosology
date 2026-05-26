@@ -1,4 +1,4 @@
-# Korg Kronos — Reverse Engineering Knowledge Base
+# Korg Kronos — studying Knowledge Base
 
 A comprehensive reference for the studied internals of the Korg Kronos OS,
 binaries, kernel modules, security model, and file formats.
