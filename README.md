@@ -28,7 +28,8 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 | Understand the OS-update signature algorithm (SHA-1 + `UpdaterScriptsKey`) | [docs/crypto/update_signature.md](docs/crypto/update_signature.md) |
 | Understand the on-disk format of programs / combis / drum kits / wave sequences / etc. | [docs/preload/](docs/preload/) |
 | Understand the EX-bank authorization algorithm (Base32 + Blowfish-CFB + MD5 + chip secret) | [docs/crypto/auth_string_algorithm.md](docs/crypto/auth_string_algorithm.md) |
-| **Patch a stock Kronos to accept any EX-bank install** | [patcher/](patcher/README.md) |
+| **Patch a stock Kronos via SSH** (you have root access — uprooting tarball etc.) | [patcher/](patcher/README.md) |
+| **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/README.md) |
 | **Build your own custom OS-update package** | [update-builder/](update-builder/README.md) |
 | Set up Ghidra to follow along with the analysis | [docs/workflow/ghidra_setup.md](docs/workflow/ghidra_setup.md) |
 | Export a patched .ko from a Ghidra session (reloc-aware diff) | [docs/workflow/export_patched_ko.md](docs/workflow/export_patched_ko.md) |
@@ -52,10 +53,14 @@ kronosology/
 │   ├── interfaces/                 /proc/.oacmd, file formats
 │   ├── preload/                    on-disk preset memory formats
 │   └── workflow/                   Ghidra setup, patch deployment, analysis methodology
-├── patcher/                        live-Kronos patcher
+├── patcher/                        live-Kronos patcher (for rooted Kronos via SSH)
 │   ├── README.md                   how to use it
 │   └── kronos_patcher.sh           the script (busybox-compatible)
-├── update-builder/                 OS-update package builder
+├── updater-package/                USB-stick installer for NON-rooted Kronos
+│   ├── README.md                   how to build + use
+│   ├── build_updater.sh            produces output/kronosology-installer/
+│   └── output/kronosology-installer/  (built by the build script)
+├── update-builder/                 OS-update package builder (low-level)
 │   ├── README.md                   internals + usage
 │   └── update_builder.py
 └── tools/                          reusable techniques
@@ -67,27 +72,48 @@ kronosology/
 
 ## Patching a stock Kronos
 
-`patcher/kronos_patcher.sh` is a self-contained, idempotent, rollback-safe shell script
-that converts a stock Korg Kronos (any v3.1+ Kronos with the known stock MD5s) into one
-running our patched `OA.ko` — which removes all EX-bank authorization requirements so
-that any EX expansion installs cleanly without per-device authorization strings.
+Two install paths — pick whichever matches your access level:
 
-Quick start (assumes you have root SSH access, e.g. via
-[uprooting/kronos_rooting](https://github.com/uprooting/kronos_rooting)):
+### Path A — USB-stick installer (no rooting required)
+
+If you have a stock, non-rooted Kronos, the easiest path is the USB-stick installer
+under [`updater-package/`](updater-package/). It plugs into Korg's own OS-update
+flow: build the package once, copy the contents to a FAT-formatted USB stick, and
+trigger an OS update from the Kronos front panel. The Kronos itself runs our
+patcher as the update's PRETAR script. No SSH, no command line, no rooting tarball
+needed by the end user.
+
+```sh
+cd updater-package && sh build_updater.sh
+cp -r output/kronosology-installer/* /media/your-usb-stick/
+# then plug into Kronos and use the front-panel "OS update" menu
+```
+
+Full instructions: [`updater-package/README.md`](updater-package/README.md).
+
+### Path B — direct SSH patcher (for already-rooted Kronos)
+
+If you already have root SSH access (e.g. via [uprooting/kronos_rooting](https://github.com/uprooting/kronos_rooting)),
+the patcher in [`patcher/`](patcher/) runs directly:
 
 ```sh
 scp patcher/kronos_patcher.sh root@<kronos-ip>:/tmp/
 ssh root@<kronos-ip>
 sh /tmp/kronos_patcher.sh --verify   # diagnostic; no changes
 sh /tmp/kronos_patcher.sh            # apply; backs up originals first
-# then full power-cycle (NOT a soft reboot — see why below)
 ```
 
-What the patcher actually does, in one sentence: it copies `OA.ko` out of the
-cryptoloop-encrypted `/korg/Mod` image, patches it in 56 places to bypass EX-bank
-authorization, patches `loadoa` so that on next boot it loads that file instead of
-the cryptoloop one, and patches `loadmod.ko` so that the integrity-check chain still
-believes the system is unmodified.
+Both paths use the **same script** internally (`kronos_patcher.sh`) with the same
+verification, the same backups, and the same MD5 checks — they differ only in how
+the script is delivered to the Kronos.
+
+### What the patcher actually does
+
+It copies `OA.ko` out of the cryptoloop-encrypted `/korg/Mod` image, patches it in
+56 places to bypass EX-bank authorization, patches `loadoa` so that on next boot it
+loads that file instead of the cryptoloop one, and patches `loadmod.ko` so that the
+integrity-check chain still believes the system is unmodified. After applying,
+**always power-cycle** (not soft-reboot — see below).
 
 Full details under [`patcher/README.md`](patcher/README.md) and the design rationale
 under [`docs/workflow/deploying_patches.md`](docs/workflow/deploying_patches.md).

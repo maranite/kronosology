@@ -1,4 +1,17 @@
 #!/bin/sh
+# Kronosology updater — PRETAR script
+# This is the kronos_patcher.sh, invoked by UpdateOS as root during a stock
+# Korg Kronos OS update. It applies the EX-bank-authorization bypass patches
+# to /sbin/loadmod.ko, /sbin/loadoa, and /sbin/OA.ko, copies OA.ko and
+# KorgUsbAudioDriver.ko out of the /korg/Mod cryptoloop into /sbin/, and
+# backs up the originals to /korg/rw/kronos_patcher_backup/.
+#
+# This pretar exits 0 on success AND on already-patched state (idempotent).
+# On any patch-site mismatch it rolls back to originals and exits non-zero,
+# which causes UpdateOS to abort cleanly without extracting the tarball.
+echo "==============================================================="
+echo "Kronosology installer — UpdateOS PRETAR"
+echo "==============================================================="
 # Kronos OA-bypass patcher
 # ========================
 # Applies the patches that:

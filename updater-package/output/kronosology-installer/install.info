@@ -1,0 +1,4 @@
+VERSION=kronosology-1.0
+SOURCE=kronosology.tar.gz
+PRETARSCRIPT=pretar.sh
+SIGNATURE=e8f1f0c7d461f3103a48c476a7a92087bc82ef91
