@@ -81,6 +81,7 @@ set lists, globals, KARMA data, effect presets, drum-track patterns.
 | How to export a patched `.ko` from Ghidra (reloc-aware diff) | [workflow/export_patched_ko.md](workflow/export_patched_ko.md) |
 | **Deploying patched binaries (full recipe + script)** | [workflow/deploying_patches.md](workflow/deploying_patches.md) |
 | Applying byte patches inside the Ghidra project | [workflow/ghidra_patch_application.md](workflow/ghidra_patch_application.md) |
+| **Boot-time optimisation analysis** (where the ~26 s goes, what's worth optimising) | [workflow/boot_optimization_analysis.md](workflow/boot_optimization_analysis.md) |
 | Phased deep-analysis campaign (prototypes → structs → returns → globals) | [workflow/analysis_campaign.md](workflow/analysis_campaign.md) |
 | CPU affinity, thread model & multi-core scaling (4-core ready; 8+ requires patches) | [workflow/cpu_affinity_and_scaling.md](workflow/cpu_affinity_and_scaling.md) |
 
