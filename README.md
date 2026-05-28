@@ -21,6 +21,10 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 
 | You want to... | Go to |
 |---|---|
+| **Patch a stock Kronos via SSH** (you have root access — uprooting tarball etc.) | [patcher/](patcher/) |
+| **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/) |
+| **Build your own custom OS-update package** | [update-builder/](update-builder/) |
+| **Install or Remove EXs banks via SSH** | [InstallEXs](docs/modules/InstallEXs.md) |
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
 | Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |
 | Understand the boot integrity chain (loadoa → loadmod → cryptoloop → OA → Eva) | [docs/system_overview.md](docs/system_overview.md), [docs/modules/loadoa.md](docs/modules/loadoa.md), [docs/modules/loadmod.ko.md](docs/modules/loadmod.ko.md) |
@@ -28,9 +32,6 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 | Understand the OS-update signature algorithm (SHA-1 + `UpdaterScriptsKey`) | [docs/crypto/update_signature.md](docs/crypto/update_signature.md) |
 | Understand the on-disk format of programs / combis / drum kits / wave sequences / etc. | [docs/preload/](docs/preload/) |
 | Understand the EX-bank authorization algorithm (Base32 + Blowfish-CFB + MD5 + chip secret) | [docs/crypto/auth_string_algorithm.md](docs/crypto/auth_string_algorithm.md) |
-| **Patch a stock Kronos via SSH** (you have root access — uprooting tarball etc.) | [patcher/](patcher/README.md) |
-| **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/README.md) |
-| **Build your own custom OS-update package** | [update-builder/](update-builder/README.md) |
 | Set up Ghidra to follow along with the analysis | [docs/workflow/ghidra_setup.md](docs/workflow/ghidra_setup.md) |
 | Export a patched .ko from a Ghidra session (reloc-aware diff) | [docs/workflow/export_patched_ko.md](docs/workflow/export_patched_ko.md) |
 | Add a new external-symbol import to a Linux 2.6 .ko by ELF surgery | [tools/README.md](tools/README.md) |

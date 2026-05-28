@@ -7,14 +7,66 @@ PCM bank files to `/korg/rw/PCM/Bank<NN>` and the per-bank "option file" to
 | Property | Value |
 |---|---|
 | Path on device | `/sbin/InstallEXs` |
-| Source path | `dump from kronos/sbin/InstallEXs` |
-| Architecture | x86 LE 32-bit ELF executable (ET_EXEC) |
-| Size | ~138 KB |
-| Functions | 210 (Ghidra) / 59 nm-defined |
-| C++ mangled symbols | 52 |
-| Compiler | GCC 4.5.0 |
-| Source path leaked | `/home/pocky/Development/GitHub/KRONOS/Main/OPOS/Projects/x2100/Tools/InstallEXsApp` |
-| `UpdaterScriptsKey` | **Same 16 bytes as UpdateOS**, located at file offset `0xa610` |
+
+
+## Command Line Usage
+
+### To install an EXs
+1. Download any Kronos EXs bank
+2. `scp` the folder to the kronos  (or copy it to a USB stick and then insert that usb stick)
+3. Run:
+```bash
+InstallEXs -f [exsins_filename] -p [path] [-v] [t 1]
+```
+Where
+| Parameter | Description |
+|--|--|
+| exsins_filename | The file name (including the exsins extension) of the EXs###.exsins file in the unzipped EXs folder |
+| path | the absolute path to the EXs folder you are installing |
+| -v | Optional. Verifies (instead of installing) the EXs Bank |
+| -t 1 | Optional. Targets /korg/rw2/ (2nd hard drive) instead of primary drive |
+
+
+### To remove an installed EXs
+
+Run `ls /korg/rw/Options/` to see a list of all removable options.
+
+Then run:
+```bash
+InstallEXs -r Sxxx
+```
+where `Sxxx` is the filename of the option you would like to remove.
+
+
+
+## What InstallEXs does with expansions
+For any given expansion, where `xxx` is the expansion bank number, InstallEXs unpacks the `EXsxxx.tar.gz` file to `/korg/rw/PCM/` (or `/korg/rw2/PCM/` if `-t 1` was specified), and then copies the `Sxxx` file into `/korg/rw/Options/`. The Options folder is where OA.ko finds its list of all authorizable EXs banks.
+
+### Options file format
+Each `Sxxx` file is a 4 line plain text file which adopts the following format:
+```text
+EXS name
+Description
+Bank Number
+2,[slot|UUID],EXS name & description
+```
+For example, a factory bank has a `slot` number in the last line (24):
+```text
+EXs23
+2 Church Pianos
+23
+2,24,EXs23 2 Church Pianos
+```
+
+Whereas an aftermarket expansion has a `uuid`:
+```text
+EXs214
+PCreek 10 Selections Vol.2
+214
+2,uuid:a19cc863-e36d-44d1-8b1b-da3219fef650,EXs214 PCreek 10 Selections Vol.2
+```
+
+TODO: Determine whether the uuid plays a role in the authorisation of the bank.
 
 ---
 
