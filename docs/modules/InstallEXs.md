@@ -66,30 +66,7 @@ PCreek 10 Selections Vol.2
 2,uuid:a19cc863-e36d-44d1-8b1b-da3219fef650,EXs214 PCreek 10 Selections Vol.2
 ```
 
-TODO: Determine whether the uuid plays a role in the authorisation of the bank.
 
----
-
-## Where the secret lives
-
-InstallEXs hard-codes the same `UpdaterScriptsKey` as UpdateOS (shared `UpdaterScriptsKey.h`
-in the original source tree under `STG/platformRT/CopyProtKeys`). This means anyone with
-the key can produce a valid `.exsins` package for any EX, on any Kronos.
-
-```
-Key (16 bytes) — file offset 0xa610 in InstallEXs:
-  13 d0 af ef e0 3c 9b 92 16 2f ae ff 77 53 55 e1
-```
-
----
-
-## Files involved at install time
-
-| File on USB | Role |
-|---|---|
-| `EXsInstall.exsins` | Manifest. KEY=VALUE format with at minimum: `OPTIONFILE`, `EXSNUM`, `SIGNATURE` |
-| `<OPTIONFILE>` | Plain-text EX metadata (4–5 lines: `EXs<num>\n<friendly name>\n<num>\n<type>,<id>,<full name>\n`). Gets MD5-fingerprinted into the auth string |
-| PCM bank file(s) | Copied to `/korg/rw/PCM/Bank<NN>` (and `/korg/rw2/PCM/...` on dual-drive units) |
 
 ---
 
@@ -114,19 +91,6 @@ Globals: `gOptionFileName`, `gOptionFileBaseName`, `gSignature`, `gDoVerifyOnly`
 Crypto imports from libc/libcrypto: `EVP_DigestInit`, `EVP_DigestUpdate`, `EVP_DigestFinal`,
 `EVP_sha1`, `MD5_Init`, `MD5_Update`, `MD5_Final`, `uuid_generate`.
 
----
-
-## What InstallEXs does NOT do
-
-| Missing capability | Consequence |
-|---|---|
-| Writes nothing to `/korg/rw/Startup/AuthorizationStrings` | Even after a successful install, the EX is only listed as "installed", not "authorised". OA.ko's per-bank auth check (`IsAuthorizedMultisampleBank`) still requires a matching line in AuthorizationStrings |
-| No interaction with the Atmel chip | Cannot derive an auth string itself |
-
-The historical workflow assumed Korg provided a separate auth string (printed on the EX
-purchase confirmation, entered via the front panel's "Authorize" screen, which is in Eva
-and writes via `/proc/.oacmd AU:`). That's why we have a per-device chip secret but no
-per-EX-install auth string generation in InstallEXs.
 
 ---
 
@@ -148,13 +112,13 @@ with the stock `OA.ko` unchanged (so future Korg OS updates still work).
 
 ---
 
-## Status
+## Factoid
 
-| Item | Status |
-|---|---|
-| Phase 1 prototypes | 26 applied, 4 errors |
-| Phase 2 struct layouts | 0 (small class count) |
-| Phase 3a return types | 3 refined |
-| Documented | Yes |
-| Versioned in Ghidra | No |
-| Patch planned | Yes — see above |
+InstallEXs hard-codes the same `UpdaterScriptsKey` as UpdateOS (shared `UpdaterScriptsKey.h`
+in the original source tree under `STG/platformRT/CopyProtKeys`). This means anyone with
+the key can produce a valid `.exsins` package for any EX, on any Kronos.
+
+```
+Key (16 bytes) — file offset 0xa610 in InstallEXs:
+  13 d0 af ef e0 3c 9b 92 16 2f ae ff 77 53 55 e1
+```
