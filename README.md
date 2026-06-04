@@ -24,6 +24,8 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 | **Patch a stock Kronos via SSH** (you have root access — uprooting tarball etc.) | [patcher/](patcher/) |
 | **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/) |
 | **Build your own custom OS-update package** | [update-builder/](update-builder/) |
+| **Decrypt the encrypted Mod / Eva / WaveMotion images offline** | [scripts/](scripts/) |
+| **Diff two firmware versions across the encrypted volumes** | [scripts/](scripts/) — `diff_kronos_versions.sh` |
 | **Install or Remove EXs banks via SSH** | [InstallEXs](docs/modules/InstallEXs.md) |
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
 | Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |
@@ -64,9 +66,15 @@ kronosology/
 ├── update-builder/                 OS-update package builder (low-level)
 │   ├── README.md                   internals + usage
 │   └── update_builder.py
-└── tools/                          reusable techniques
-    ├── README.md
-    └── patch_omapnks4_cleanup.py   demo of adding new symbol imports to a .ko
+├── tools/                          reusable techniques
+│   ├── README.md
+│   └── patch_omapnks4_cleanup.py   demo of adding new symbol imports to a .ko
+└── scripts/                        offline crypto tools for the encrypted volumes
+    ├── README.md                   complete usage + how the encryption works
+    ├── decrypt_kronos_img.py       AES-256-CBC + plain IV decryptor (Mod/Eva/WaveMotion), pure Python
+    ├── mount_kronos_img.sh         cryptsetup mount helper (alternative to Python path)
+    ├── diff_kronos_versions.sh     end-to-end version diff across encrypted volumes
+    └── getloopkey.s                i386 asm — on-device LOOP_GET_STATUS64 probe (key recovery)
 ```
 
 ---
@@ -128,6 +136,43 @@ See [docs/modules/OmapNKS4Module.ko_chip_wedge.md](docs/modules/OmapNKS4Module.k
 
 ---
 
+## Decrypting and diffing the firmware images
+
+The three loop-back images on the Kronos (`Mod.img`, `Eva.img`,
+`WaveMotion.img`) are AES-256-CBC encrypted by the kernel's cryptoloop
+driver. The keys are derived at boot from `/.pairFact3` via the stgNV2AC
+security chip, but the *final* AES keys turn out to be universal across
+every Kronos unit and every firmware version we've checked
+(2014 / 3.2.1 / 3.2.2 update packages + live-device dumps). The tools in
+[`scripts/`](scripts/) ship those keys inline, so you can decrypt and
+inspect the encrypted volumes offline with no hardware involvement:
+
+```sh
+# Decrypt one image to a plaintext ext2 (pure Python, no root):
+python3 scripts/decrypt_kronos_img.py KRONOS_Update_3_2_2/mnt/korg/ro/Mod.img  Mod_plain.img
+
+# Browse without mounting (no root):
+debugfs -R 'ls -l /'              Mod_plain.img
+debugfs -R 'dump /OA.ko OA.ko'    Mod_plain.img
+
+# Full version diff — decrypts both, extracts everything, reports what changed:
+sh scripts/diff_kronos_versions.sh  KRONOS_Update_3_2_1  KRONOS_Update_3_2_2/mnt
+```
+
+The diff script answers questions like "what actually changed between
+3.2.1 and 3.2.2?" in one shell command. (Answer for that specific pair:
+`OA.ko` had a real ~16-byte `.text` change; `loadmod.ko` had 974 bytes
+in one localized region; everything else was either byte-identical or
+just a rebuild-date stamp.)
+
+If a future Kronos firmware rotates the cryptoloop keys, the same folder
+contains `getloopkey.s` — an i386-assembly on-device probe that
+recovers the new keys via the `LOOP_GET_STATUS64` ioctl. Full method
+notes, build instructions, and the per-tool usage are in
+[`scripts/README.md`](scripts/README.md).
+
+---
+
 ## Building a custom OS update package
 
 `update-builder/update_builder.py` produces installable `.tar.gz` update packages in
@@ -168,6 +213,8 @@ Full internals, signature algorithm, and command reference in
 | `InstallEXs` — EX install flow | Comprehensive |
 | `update_builder.py` — produces signed packages | ✅ working |
 | Cryptoloop key derivation chain (pairFact + dongle) | Documented, intercepted at hook level |
+| Cryptoloop keys (Mod / Eva / WaveMotion) — extracted, validated, embedded in tools | ✅ all 3 keys, universal across units/versions |
+| Offline decrypt + mount + version-diff toolchain (`scripts/`) | ✅ working — no Kronos, no `cryptsetup`, no `sudo` for the Python path |
 | Per-binary patches, tested live on hardware | ✅ verified end-to-end via patcher script |
 
 ---

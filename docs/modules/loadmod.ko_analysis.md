@@ -29,7 +29,7 @@ The status code written to `/tmp/stgStatus`:
 | 0 | Success | — |
 | 1 | MD5 filesystem integrity check failed | `VerifyCodeIntegrityMd5` |
 | 3 | Kernel check failed (register_cdrom / init_cdrom_command magic values) | `RegisterFakeCdromDriver` |
-| 4 | Cannot read `pairFact` authorization file / `/proc/iFactc3` unreadable | `VerifyCdromHookActive` (or similar) |
+| 4 | Cannot read `/.pairFact3` authorization blob | `ReadPairFactAndVerify` (at offset `0x4e90`) |
 | 5 | Security IC (stgNV2AC via OmapNKS4Module.ko) communication failed | `VerifyDongleLicense` |
 
 Error code 2 is never generated. Sequence is 1 → 3 → 4 → 5.
@@ -131,7 +131,7 @@ When a mount targeting these paths is detected, the hook sets up an encrypted lo
 | `ReadPairFactAndVerify` | `0x00004e90` | Read and verify the `pairFact` file |
 | `DecryptAndFeedPathToMd5` | `0x00004fe0` | Decrypt a path string and feed to MD5 |
 
-`pairFact` is a file containing encryption keys for the encrypted loop filesystems. It is itself encrypted with a key stored in the stgNV2AC hardware IC. Readable via `/proc/iFactc3` (a proc entry created by the modified Korg kernel).
+`pairFact` is the 80-byte blob at **`/.pairFact3`** — a regular file at the root of the EXT2 root partition. It contains the (chip-encrypted) keys for the three encrypted loop filesystems. `ReadPairFactAndVerify` assembles the path `/.pairFact3` byte-by-byte on the stack and calls `filp_open`, then passes the contents to the stgNV2AC chip via `OmapNKS4Module.ko` to recover the three AES-256 keys. (The kronoshacker blog's claim of a `/proc/iFactc3` proc entry was wrong — verified by direct `ls /proc/iFactc3` on a live 3.2.2 device.) See [docs/crypto/cryptoloop_keys.md](../crypto/cryptoloop_keys.md) for the full chain and the recovered final keys.
 
 ### Filesystem integrity
 

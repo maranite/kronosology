@@ -10,8 +10,12 @@ Korg synthesizer kernel-level copy protection module. Runs on kernel 2.6.32 i386
 2. **CDROM driver registration** — `RegisterFakeCdromDriver` registers a fake
    `cdrom_device_info` with the kernel; the real `stgNV2AC_*` calls go to the
    hardware dongle.
-3. **Anti-tamper probe** — `VerifyCdromHookActive` opens `/proc/iFactc3`,
-   reads 0x50 bytes, and exercises the dongle with a known magic number.
+3. **Anti-tamper probe** — `ReadPairFactAndVerify` (offset `0x4e90`) opens
+   the regular file **`/.pairFact3`**, reads 0x50 bytes, and exercises the
+   dongle with a known magic number. (The blog described this path as
+   `/proc/iFactc3`, but binary analysis shows the path is assembled
+   byte-by-byte on the stack as `/.pairFact3`, and `/proc/iFactc3` does
+   not exist on a running 3.2.2 device.)
 4. **Signal mask** — blocks all signals on current task (prevents debugger
    interrupts from working cleanly).
 5. **VMA alloc** — `FindAndAllocVmaForCode` walks `mm->mmap` for a VMA at

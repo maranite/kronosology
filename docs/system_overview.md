@@ -41,8 +41,8 @@ Overall system architecture as understood from RE of kernel modules and supporti
 │   ├── loadmod.ko        security/setup kernel module
 │   └── loadoa            userspace loader that inserts modules
 ├── proc/
-│   ├── .update           kernel thread proc entry (created by loadmod.ko)
-│   └── iFactc3           proc entry created by Korg-patched kernel; provides pairFact data
+│   └── .update           kernel thread proc entry (created by loadmod.ko)
+├── .pairFact3            encrypted 80-byte key blob at filesystem root (read by loadmod at init)
 └── tmp/
     ├── stgStatus         error code written by loadmod.ko for loadoa to display
     ├── UpdateOS          if present, run by /proc/.update kernel thread
@@ -61,7 +61,7 @@ Overall system architecture as understood from RE of kernel modules and supporti
    a. insmod loadmod.ko
       ├─ VerifyCodeIntegrityMd5    — MD5 check of filesystem  [error 1 on fail]
       ├─ RegisterFakeCdromDriver   — installs fake cdrom, stores 0x22FB39CC in kernel  [error 3 on fail]
-      ├─ ReadPairFactAndVerify     — reads /proc/iFactc3, decrypts pairFact  [error 4 on fail]
+      ├─ ReadPairFactAndVerify     — opens /.pairFact3, reads encrypted pairFact data  [error 4 on fail]
       ├─ RetrieveSecurityICKey     — queries stgNV2AC IC via OmapNKS4Module.ko  [error 5 on fail]
       ├─ Hooks sys_mount / sys_oldumount (encrypted loop mounts for /korg/Eva, /korg/Mod, /korg/rw/PCM/WaveMotion)
       ├─ Creates /proc/.update kernel thread (polls for /sbin/UpdateOS or /tmp/UpdateOS)
@@ -169,7 +169,7 @@ The Korg 2.6.32 kernel has at minimum these non-standard modifications:
 
 1. **`register_cdrom()`** — returns a magic value instead of 0 on success
 2. **`init_cdrom_command()`** — returns **-42** (`0xFFFFFFD6`) instead of 0
-3. **`/proc/iFactc3`** — proc entry added to the kernel (not created by any module); provides pairFact data to loadmod.ko
+3. **`/.pairFact3`** — encrypted 80-byte key blob at the root of the ext2 root partition; read by `loadmod.ko`'s `ReadPairFactAndVerify` at init. NOT a proc entry (the blog's `/proc/iFactc3` claim was wrong — verified by direct `ls /proc/iFactc3` on a live 3.2.2 device and by binary RE of loadmod showing `/.pairFact3` assembled byte-by-byte on the stack). The blob is encrypted with the stgNV2AC chip secret. The filename is filtered out of the loadmod MD5 integrity check (names starting with `.pairFact` are skipped). See [docs/crypto/cryptoloop_keys.md](crypto/cryptoloop_keys.md) for the full analysis and the decrypted final keys.
 
 ---
 
