@@ -1,0 +1,96 @@
+#!/bin/sh
+#
+# /sbin/InstallEXs — auto-auth wrapper
+#
+# Replaces the stock ELF binary at /sbin/InstallEXs (which is moved to
+# /sbin/InstallEXs.real by install.sh).  Eva calls this via execve() with the
+# same arguments it would pass to the original binary, so all arguments are
+# forwarded unchanged.
+#
+# After a successful install the wrapper writes a GEN: command to
+# /proc/.oaauth (provided by oa_authgen.ko), reads back the 24-char auth
+# string, then submits it to /proc/.oacmd as "AU:<string>".  Stock OA.ko
+# then calls VerifyAndSaveAuthString() which validates the string against the
+# chip secret and appends it to /korg/rw/Startup/AuthorizationStrings.
+#
+# Usage is identical to the stock binary:
+#   InstallEXs -f EXs285.exsins -p /mnt/updaterSource/EXs285 [-t 1]
+#   InstallEXs -r S285
+#   InstallEXs -v -f EXs285.exsins -p /path
+
+REAL=/sbin/InstallEXs.real
+OAAUTH=/proc/.oaauth
+OACMD=/proc/.oacmd
+OPTIONS_DIR=/korg/rw/Options
+
+# ── 1. Run the real installer with all original arguments ─────────────────────
+"$REAL" "$@"
+rc=$?
+[ $rc -ne 0 ] && exit $rc
+
+# ── 2. Skip auth submission for verify / remove / uninstall modes ─────────────
+for a in "$@"; do
+    case "$a" in
+        -v|-r|-u) exit 0 ;;
+    esac
+done
+
+# ── 3. Derive the option file name from the -f argument ───────────────────────
+#  The -f value is the .exsins filename, e.g. "EXs285.exsins".
+#  The option file is always "S<bank_number>", e.g. "S285".
+f_val=""
+take_next=0
+for a in "$@"; do
+    if [ $take_next -eq 1 ]; then
+        f_val="$a"
+        take_next=0
+    fi
+    [ "$a" = "-f" ] && take_next=1
+done
+
+if [ -n "$f_val" ]; then
+    # Strip directory component and .exsins suffix, then strip leading "EXs"
+    base=$(basename "$f_val" .exsins)
+    raw=$(echo "$base" | sed 's/^[Ee][Xx][Ss]//')
+    opt_id="S${raw}"
+    # If the file isn't found, try zero-padded form (e.g. bank 16 → S016 not S16)
+    if [ ! -f "$OPTIONS_DIR/$opt_id" ]; then
+        padded=$(printf 'S%03d' "$raw" 2>/dev/null)
+        [ -f "$OPTIONS_DIR/$padded" ] && opt_id="$padded"
+    fi
+fi
+
+# Fallback: pick the most recently modified file in Options/ — the one InstallEXs.real just wrote
+if [ -z "$opt_id" ] || [ ! -f "$OPTIONS_DIR/$opt_id" ]; then
+    opt_id=$(ls -t "$OPTIONS_DIR" 2>/dev/null | head -1)
+fi
+
+# Verify the option file actually exists before trying to auth it
+if [ -z "$opt_id" ] || [ ! -f "$OPTIONS_DIR/$opt_id" ]; then
+    echo "oa_authgen: warning: could not determine option file — skipping auth" >&2
+    exit 0
+fi
+
+# ── 4. Generate and submit the auth string ────────────────────────────────────
+if [ ! -w "$OAAUTH" ]; then
+    echo "oa_authgen: /proc/.oaauth not writable — is oa_authgen.ko loaded?" >&2
+    exit 0
+fi
+
+printf 'GEN:%s' "$opt_id" > "$OAAUTH"
+authstr=$(cat "$OAAUTH")
+
+if [ -z "$authstr" ]; then
+    echo "oa_authgen: GEN command returned empty string for $opt_id" >&2
+    exit 0
+fi
+
+if [ ! -w "$OACMD" ]; then
+    echo "oa_authgen: /proc/.oacmd not writable — is OA.ko loaded?" >&2
+    exit 0
+fi
+
+printf 'AU:%s' "$authstr" > "$OACMD"
+
+echo "oa_authgen: submitted auth string for $opt_id" >&2
+exit 0

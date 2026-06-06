@@ -1,0 +1,5 @@
+VERSION=auto-auth-1.0
+SOURCE=auto-auth.tar.gz
+PRETARSCRIPT=pretar.sh
+POSTTARSCRIPT=posttar.sh
+SIGNATURE=4e872c67daee63b20efc015e736fdcc248f53ef8

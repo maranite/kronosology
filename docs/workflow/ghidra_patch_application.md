@@ -30,17 +30,27 @@ in the listing view.
 
 ### Method A — use the bundled GhidraScript (recommended)
 
-A script lives at `~/ghidra_scripts/ApplyKronosLoadmodPatch.java` (and the analogous
-ones for loadoa and OA.ko, if/when added). To run:
+GhidraScripts live in `~/ghidra_scripts/` under category **Kronos**:
 
-1. Open the target program (e.g. `loadmod.ko`).
+| Script                        | Target        | Patches                                                  |
+|-------------------------------|---------------|----------------------------------------------------------|
+| `ApplyKronosLoadmodPatch.java`| `loadmod.ko`  | 3-site bypass (MD5 self-check + 2 inner verifications)   |
+| `ApplyKronosOaPatch.java`     | `OA.ko`       | 11-run canonical bypass (magic-value skip + 6 IsUsingAny* specializations) |
+
+To run one:
+
+1. Open the target program (e.g. `OA.ko`).
 2. `Window → Script Manager` (or the toolbar button).
 3. Find the relevant `ApplyKronos*.java` under category **Kronos**.
 4. Double-click to run.
 5. The script verifies the original bytes match before writing; it skips any patch
    already applied; it refuses to touch anything that doesn't match either original
    *or* patched bytes (and warns).
-6. `File → Save loadmod.ko` to persist.
+6. `File → Save` to persist.
+
+The OA.ko script addresses patches by ELF **section name + offset** (not Ghidra
+linear address), so it works unchanged on any firmware version where these
+specific functions haven't been reorganized. Verified on 3.2.1 and 3.2.2.
 
 ### Method B — Ghidra GUI
 
@@ -80,7 +90,8 @@ file. The expected resulting MD5s are:
 | `loadmod.ko` | `0x3f80` (6 B) | **stock — needs applying** |
 | `loadoa`     | `0x0804b696` (16 B) | already patched (your earlier work) |
 | `loadoa`     | `0x0804b9c0` (32 B) | already patched (your earlier work) |
-| `OA.ko`      | 7 sites (56 byte runs) | already patched (your earlier work) |
+| `OA.ko` (3.2.1) | 11 patch runs / 369 B | already patched (canonical MD5 `163550b6…`) |
+| `OA.ko` (3.2.2) | 11 patch runs / 369 B | apply via `ApplyKronosOaPatch.java` after import |
 
 ---
 

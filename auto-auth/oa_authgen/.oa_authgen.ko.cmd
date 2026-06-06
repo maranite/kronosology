@@ -1,0 +1,1 @@
+cmd_/mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.ko := ld -r -m elf_i386 -T /tmp/linux-kronos/scripts/module-common.lds --build-id -o /mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.ko /mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.o /mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.mod.o

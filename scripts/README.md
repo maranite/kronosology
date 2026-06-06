@@ -2,37 +2,28 @@
 
 Four standalone tools that together let you decrypt, browse, mount, and
 *diff* the three encrypted loop-back filesystems that the Kronos uses for its
-core binaries — entirely off-device, without `cryptsetup` (Python path) or
-without any privileged operation at all (the debugfs path).
+core binaries — entirely off-device.
 
-The three encrypted volumes are:
+Kronos firmware has 3 encrypted volumes, each of which are encrypted using the following keys:
 
-| Image                         | Mount point on device          | Contents |
-|-------------------------------|--------------------------------|----------|
-| `/korg/ro/Mod.img`            | `/korg/Mod`                    | `OA.ko` (the synthesis engine) and a couple of small kernel modules |
-| `/korg/ro/Eva.img`            | `/korg/Eva`                    | `Eva` (the main userspace application), `UpdateOS`, network/disk helpers |
-| `/korg/ro/WaveMotion.img`     | `/korg/rw/PCM/WaveMotion`      | EP-1 electric-piano physical-model `.wmms` data (Rhodes / Wurlitzer) |
+| Image                         | Mount point on device          | Contents | Key (31 chars + `\x00`)                 |
+|-------------------------------|--------------------------------|----------|------------------------------------------|
+| `/korg/ro/Mod.img`            | `/korg/Mod`                    | `OA.ko` (the synthesis engine) and a couple of small kernel modules | `a336a15cd841ec8926b99e7c3884eaa`        |
+| `/korg/ro/Eva.img`            | `/korg/Eva`                    | `Eva` (the main userspace application), `UpdateOS`, network/disk helpers | `342ee59d549c7d329d835537be0540d`        |
+| `/korg/ro/WaveMotion.img`     | `/korg/rw/PCM/WaveMotion`      | EP-1 electric-piano physical-model `.wmms` data (Rhodes / Wurlitzer) | `3e72c0e59fc017a9eb7d7e1168a4cdb`        |
 
-`loadmod.ko` sets these up at boot via Linux cryptoloop. Each volume uses
-**AES-256-CBC with a "plain" IV** (sector number as LE32 in `IV[0..3]`,
-zeros in `IV[4..15]`) and a key delivered to the kernel as part of a
-`LOOP_SET_STATUS64` ioctl. The key originates from `/.pairFact3` (an
-80-byte blob the stgNV2AC chip decrypts), but the *final* AES keys are
-universal across every Kronos unit and every firmware version we have
-tested (2014, 3.2.1, 3.2.2 update packages, plus live-device dumps —
-9-for-9 verified). That means **the keys are constants** and the tools
-here ship them inline; you do not need to talk to the security chip to
-decrypt these volumes ever again.
 
-The keys (as 31 printable ASCII hex chars + one trailing null byte — a
+Note: The keys are 31 printable ASCII hex chars + one trailing null byte — a
 quirk of Korg's `HexEncode` writing 31 chars into a pre-zeroed 32-byte
-buffer):
+buffer.
+`loadmod.ko` sets these mounts up at boot via Linux cryptoloop. 
+Each volume uses **AES-256-CBC with a "plain" IV** (sector number as LE32 in `IV[0..3]`,
+zeros in `IV[4..15]`) and a key delivered to the kernel as part of a
+`LOOP_SET_STATUS64` ioctl. 
 
-| Volume          | Key (31 chars + `\x00`)                 |
-|-----------------|------------------------------------------|
-| `Mod.img`       | `a336a15cd841ec8926b99e7c3884eaa`        |
-| `Eva.img`       | `342ee59d549c7d329d835537be0540d`        |
-| `WaveMotion.img`| `3e72c0e59fc017a9eb7d7e1168a4cdb`        |
+The key originates from `/.pairFact3` (an 80-byte blob the stgNV2AC chip decrypts), 
+but the *final* AES keys are universal and **constant** across every Kronos unit and every firmware version. 
+You do not need the Kronos' ATMEL security chip to decrypt these volumes.
 
 See [`docs/modules/loadmod.ko.md`](../docs/modules/loadmod.ko.md) for the
 boot-time integrity chain that delivers these keys to the kernel, and
@@ -45,9 +36,10 @@ volumes fit into the wider boot sequence.
 
 | File                       | Purpose | Needs root? | Needs the Kronos? |
 |----------------------------|---------|-------------|--------------------|
-| `decrypt_kronos_img.py`    | Decrypt an encrypted `.img` into a plaintext ext2 (pure Python) | No | No |
-| `mount_kronos_img.sh`      | Mount an encrypted `.img` directly via `cryptsetup` | Yes (root) | No |
+| `decrypt_kronos_img.py`    | Decrypt an `.img` into a plaintext ext2 img | No | No |
+| `mount_kronos_img.sh`      | Mount an encrypted `.img` file | Yes | No |
 | `diff_kronos_versions.sh`  | End-to-end version diff: decrypt + extract + manifest + diff | No | No |
+| `patch_oa_ko.py`           | Apply the canonical 11-site "bypass everything" patch set to any stock OA.ko (works across firmware versions because patches are addressed by ELF section + offset, not file offset) | No | No |
 | `getloopkey.s`             | i386 assembly source for an on-device tool that prints `LOOP_GET_STATUS64` output (used once, to recover the keys above) | (root on Kronos) | Yes |
 
 ---
@@ -58,7 +50,7 @@ Pure Python, no `sudo`, no `cryptsetup`. Requires `python3-cryptography`
 (`pip install cryptography` or `apt install python3-cryptography`).
 
 ```sh
-# 1) Just check whether a key works (reads only sector 2 — instant):
+# 1) Check whether a key works (reads only sector 2 — instant):
 python3 decrypt_kronos_img.py --check path/to/Mod.img
 
 # 2) Decrypt a single image to a plaintext ext2:
@@ -289,6 +281,42 @@ For the 3.2.1 → 3.2.2 case, drilling in this way revealed that:
   from a single small insertion. Ideal target for Ghidra Version Tracking.
 - **loadmod.ko** has 974 differing bytes in one localized 1 KB region
   (0x6cca–0x70a8) — the actual semantic change in the update is here.
+
+---
+
+## `patch_oa_ko.py` — apply the canonical patch set offline
+
+For when you have a new firmware version's stock `OA.ko` and want the same
+"bypass everything" patches that the `patcher/kronos_patcher.sh` script
+deploys. Pure Python, no Ghidra needed, no root.
+
+```sh
+# Apply patches:
+python3 patch_oa_ko.py /path/to/stock/OA.ko ./OA.ko.patched
+
+# Check whether a binary is patched or stock:
+python3 patch_oa_ko.py --verify /path/to/OA.ko
+```
+
+The 11-patch table is embedded in the script and is addressed by
+**ELF section name + section-relative offset** (not file offset), so the
+same table works across firmware revisions that don't reorganize these
+specific functions. The script:
+
+- Recognises known stock and patched MD5s (3.2.1 + 3.2.2 listed inline)
+- Verifies the original bytes at each patch site before writing
+- Refuses to touch any site whose bytes don't match either the stock or
+  the patched values (catches partial/corrupted/version-mismatched files)
+- Re-runnable: idempotent on an already-patched binary
+
+Sanity check: applying the table to stock 3.2.1 produces a binary with
+MD5 `163550b60b7508b2c0ba1fd314b0b944` — byte-for-byte identical to the
+canonical patched 3.2.1 OA.ko produced by the original analyst session.
+
+The Ghidra equivalent — `ApplyKronosOaPatch.java` — lives in
+`~/ghidra_scripts/` and applies the same patches inside an open Ghidra
+program (see [`docs/workflow/ghidra_patch_application.md`](../docs/workflow/ghidra_patch_application.md)
+for the broader in-Ghidra patching workflow).
 
 ---
 

@@ -25,7 +25,7 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 | **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/) |
 | **Build your own custom OS-update package** | [update-builder/](update-builder/) |
 | **Decrypt the encrypted Mod / Eva / WaveMotion images offline** | [scripts/](scripts/) |
-| **Diff two firmware versions across the encrypted volumes** | [scripts/](scripts/) — `diff_kronos_versions.sh` |
+| **Diff the encrypted volumes between 2 firmware update versions** | [scripts/](scripts/) — `diff_kronos_versions.sh` |
 | **Install or Remove EXs banks via SSH** | [InstallEXs](docs/modules/InstallEXs.md) |
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
 | Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |

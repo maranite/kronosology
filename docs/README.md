@@ -44,6 +44,7 @@ remain authoritative for their topics and are linked from here.
 | OS-update script signature (SHA-1 + 16-byte `UpdaterScriptsKey`) | [crypto/update_signature.md](crypto/update_signature.md) |
 | Atmel NV2AC chip protocol & GPA stream cipher | [crypto/atmel_nv2ac.md](crypto/atmel_nv2ac.md) |
 | **Cryptoloop keys (Mod/Eva/WaveMotion) — full chain + recovered keys** | [crypto/cryptoloop_keys.md](crypto/cryptoloop_keys.md) |
+| **EX-expansion authorization storage & verification flow** (file ↔ chip ↔ render check) | [crypto/ex_auth_storage_flow.md](crypto/ex_auth_storage_flow.md) |
 
 ### Userspace ↔ kernel interfaces — `interfaces/`
 
