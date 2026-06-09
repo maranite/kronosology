@@ -390,7 +390,7 @@ The decryption keys for the three loop volumes were the main barrier to
 in-the-image binaries (`OA.ko`, `Eva`, `loadmod.ko` after a rebuild,
 `UpdateOS`, the panel/audio drivers) became as readable as any other
 ELF on disk. The diff workflow built on top of that turned firmware
-update analysis from "spend a week reverse-engineering OA.ko 3.2.2" to
+update analysis from "spend a week studying OA.ko 3.2.2" to
 "run one shell command and see that only 8 bytes of Eva changed and
 they're the build date."
 

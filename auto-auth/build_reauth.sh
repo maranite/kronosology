@@ -28,7 +28,7 @@ DUM_SRC="$HERE/updater_msg/DisplayUpdaterMessage"
 # ── Staging ──────────────────────────────────────────────────────────────────
 echo "[build] cleaning staging $STAGING"
 rm -rf "$STAGING"
-mkdir -p "$STAGING"
+mkdir -p "$STAGING" "$STAGING/mnt"
 
 # ── Minimal source tar ────────────────────────────────────────────────────────
 # UpdateOS requires a SOURCE tar to exist; we extract a harmless stamp file
@@ -128,22 +128,19 @@ done
 
 echo "auto-reauth: found $total EX libraries to authorise"
 "$DUM" "Authorising $total EX libraries..."
+echo "set 0" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 
 # ── Authorise each EX ─────────────────────────────────────────────────────────
-# Option file format (example /korg/rw/Options/S023):
-#   Line 1: EXs23
-#   Line 2: 2 Church Pianos
-#   Line 3: 23
-#   Line 4: 2,24,EXs23 2 Church Pianos
-#              ^  ^-- UID (non-zero = paid/needs authorisation)
-#              \-- bank type
 authorised=0
 skipped=0
 failed=0
 
+_progress_step=$(( total > 0 ? 100 / total : 100 ))
+_progress=0
+
 for opt_file in "$OPTIONS"/S*; do
     [ -f "$opt_file" ] || continue
-    opt_id=$(basename "$opt_file")
+    opt_id="${opt_file##*/}"
 
     uid=$(awk -F',' 'NR==4{ gsub(/[[:space:]]/, "", $2); print $2; exit }' \
           "$opt_file" 2>/dev/null)
@@ -168,8 +165,12 @@ for opt_file in "$OPTIONS"/S*; do
         echo "auto-reauth: WARNING: GEN:$opt_id failed"
         failed=$((failed + 1))
     fi
+
+    _progress=$(( _progress + _progress_step ))
+    echo "set $_progress" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 done
 
+echo "set 100" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 echo "auto-reauth: done — authorised=$authorised skipped=$skipped failed=$failed"
 
 if [ "$failed" -gt 0 ]; then

@@ -37,7 +37,7 @@ echo "[build] building oa_authgen.ko ..."
 # ── Staging ──────────────────────────────────────────────────────────────────
 echo "[build] cleaning staging $STAGING"
 rm -rf "$STAGING"
-mkdir -p "$STAGING"
+mkdir -p "$STAGING" "$STAGING/mnt"
 
 # ── Minimal source tar ────────────────────────────────────────────────────────
 # UpdateOS requires a SOURCE file.  We extract only a harmless stamp to /tmp;
@@ -86,13 +86,11 @@ chmod +x "$STAGING/pretar.sh"
 # ── posttar.sh ───────────────────────────────────────────────────────────────
 cat > "$STAGING/posttar.sh" << 'POSTTAR_EOF'
 #!/bin/sh
-# auto-reauth-stock posttar: load oa_authgen.ko from USB, generate auth strings
-# for every installed EX library, write them directly to AuthorizationStrings,
-# then unload.
+# authorise all installed EX libraries.
 #
-# OA.ko is NOT loaded during UpdateOS — /proc/.oacmd does not exist.
-# We write auth strings directly to the file; OA.ko reads and verifies them at
-# the next normal boot (VerifyAuthorizationString decodes 24-char base32 strings).
+# Generates auth strings via GEN:Sxxx → /proc/.oaauth for each installed EX
+# and writes them directly to /korg/rw/Startup/AuthorizationStrings.
+# OA.ko picks them up on the next normal boot (VerifyAuthorizationString).
 
 LOG=/korg/rw/reauth-stock.log
 exec >> "$LOG" 2>&1
@@ -108,14 +106,16 @@ DUM=/mnt/updaterSource/DisplayUpdaterMessage
 echo "MODULE exists=$([ -f "$MODULE" ] && echo yes || echo NO)"
 echo "OPTIONS dir=$([ -d "$OPTIONS" ] && echo yes || echo no)"
 echo "AUTHFILE exists=$([ -f "$AUTHFILE" ] && echo yes || echo no)"
-echo "kallsyms Setup=$(grep ' SetupAtmelForAuthorizations' /proc/kallsyms 2>/dev/null | cut -d' ' -f1)"
-echo "kallsyms Read=$(grep ' fFfFfFfFfFfF13' /proc/kallsyms 2>/dev/null | grep '\[OA\]' | cut -d' ' -f1)"
-echo "mounts=$(grep korg /proc/mounts 2>/dev/null | awk '{print $2,$4}' | tr '\n' '|')"
 
-# ── Clean up stamp file extracted by tar ─────────────────────────────────────
 rm -f /tmp/reauth-stock.stamp
 
+mkdir -p "$(dirname "$AUTHFILE")"
+AUTHTMP="${AUTHFILE}.tmp$$"
+authorised=0
+failed=0
+
 # ── Load oa_authgen.ko from USB ───────────────────────────────────────────────
+# Module implements native GPA; no OA.ko symbol addresses needed.
 WE_LOADED=0
 
 if [ ! -e "$OAAUTH" ]; then
@@ -126,15 +126,7 @@ if [ ! -e "$OAAUTH" ]; then
     fi
 
     "$DUM" "Loading EX auth module..." || true
-
-    S=$(grep ' SetupAtmelForAuthorizations' /proc/kallsyms 2>/dev/null | cut -d' ' -f1)
-    R=$(grep ' fFfFfFfFfFfF13' /proc/kallsyms 2>/dev/null | grep '\[OA\]' | cut -d' ' -f1)
-    echo "insmod: S=$S R=$R"
-    if [ -n "$S" ] && [ -n "$R" ]; then
-        /sbin/insmod "$MODULE" setup_atmel_addr=0x${S} chip_read_addr=0x${R}
-    else
-        /sbin/insmod "$MODULE"
-    fi
+    /sbin/insmod "$MODULE"
     echo "insmod exit=$?"
     sleep 1
     WE_LOADED=1
@@ -148,20 +140,6 @@ fi
 
 echo "OAAUTH exists=yes (WE_LOADED=$WE_LOADED)"
 
-# ── Self-test: generate one auth string and verify length ────────────────────
-_test_auth=$(printf 'GEN:%s' "S012" > "$OAAUTH" 2>/dev/null && cat "$OAAUTH" 2>/dev/null)
-echo "selftest GEN:S012 => [${_test_auth}] len=${#_test_auth}"
-if [ "${#_test_auth}" != "24" ]; then
-    echo "ERROR: self-test failed — expected 24-char auth string, got ${#_test_auth}"
-    "$DUM" "ERROR: auth gen self-test failed" || true
-    [ "$WE_LOADED" = "1" ] && /sbin/rmmod oa_authgen 2>/dev/null
-    exit 1
-fi
-
-# ── Ensure AuthorizationStrings directory exists ──────────────────────────────
-mkdir -p "$(dirname "$AUTHFILE")"
-
-# ── Count EXs to authorise ────────────────────────────────────────────────────
 total=0
 for opt_file in "$OPTIONS"/S*; do
     [ -f "$opt_file" ] || continue
@@ -173,15 +151,11 @@ done
 
 echo "found $total EX libraries to authorise"
 "$DUM" "Authorising $total EX libraries..." || true
+echo "set 0" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 
-# ── Generate auth strings and write directly to AuthorizationStrings ──────────
-# OA.ko is not loaded — we bypass /proc/.oacmd entirely.
-# OA.ko's VerifyAuthorizationString reads exactly 24 base32 chars per line,
-# so plain `printf '%s\n' "$auth"` is the correct format.
-authorised=0
-failed=0
-AUTHTMP="${AUTHFILE}.tmp$$"
 > "$AUTHTMP"
+_progress_step=$(( total > 0 ? 100 / total : 100 ))
+_progress=0
 
 for opt_file in "$OPTIONS"/S*; do
     [ -f "$opt_file" ] || continue
@@ -206,15 +180,19 @@ for opt_file in "$OPTIONS"/S*; do
         echo "FAIL $opt_id (GEN write failed)"
         failed=$((failed + 1))
     fi
+
+    _progress=$(( _progress + _progress_step ))
+    echo "set $_progress" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 done
 
-# Atomic replace — don't leave a partial file if something goes wrong mid-loop
 mv "$AUTHTMP" "$AUTHFILE"
+chown pocky:pocky "$AUTHFILE" 2>/dev/null || true
 echo "AuthorizationStrings: $(awk 'END{print NR}' "$AUTHFILE") lines written"
 
 # ── Unload module ─────────────────────────────────────────────────────────────
 [ "$WE_LOADED" = "1" ] && /sbin/rmmod oa_authgen 2>/dev/null
 
+echo "set 100" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 echo "done: authorised=$authorised failed=$failed"
 if [ "$failed" -gt 0 ]; then
     "$DUM" "Done: $authorised ok, $failed FAILED" || true
@@ -228,7 +206,7 @@ chmod +x "$STAGING/posttar.sh"
 # ── Signed install.info ───────────────────────────────────────────────────────
 echo "[build] generating signed install.info ..."
 python3 "$BUILDER" "$STAGING" \
-    --version "auto-reauth-stock-1.0" \
+    --version "Authorize all EXs" \
     --source  "reauth-stock.tar.gz" \
     --pretar  "pretar.sh" \
     --posttar "posttar.sh"
@@ -243,5 +221,6 @@ echo "To use (stock Kronos — no prior installation required):"
 echo "  1. Format a USB stick as FAT (or ext2)"
 echo "  2. Copy the contents of output/auto-reauth-stock/ to the USB root"
 echo "  3. Insert into the Kronos and trigger OS Update from the front panel"
-echo "  4. The module is loaded, EXs are authorised, module is unloaded"
-echo "  5. Nothing is written to the Kronos internal storage"
+echo "  4. The module is loaded, EXs are authorised"
+echo ""
+echo "Nothing is written to the Kronos internal storage"

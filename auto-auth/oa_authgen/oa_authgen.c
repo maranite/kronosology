@@ -1,10 +1,11 @@
 /*
  * oa_authgen.ko — EX authorisation string generator for Korg Kronos
  *
- * Reads the 24-byte per-device Atmel NV2AC chip secret via the already-exported
- * stgNV2AC_sync_read_cmd symbol from OmapNKS4Module.ko, then computes the
- * Blowfish-CFB-8 / MD5 / custom-base32 authorisation string for a given option
- * file using the same algorithm as OA.ko::ParseAuth.
+ * Reads the 24-byte per-device Atmel NV2AC chip secret using a native
+ * implementation of the GPA (Group Authentication Protocol) — reverse-
+ * engineered from OA_322.ko.  Only stgNV2AC_sync_cmd and
+ * stgNV2AC_sync_read_cmd (OmapNKS4Module.ko) are required; OA.ko need not
+ * be present.  Compatible with Korg Kronos UpdateOS context.
  *
  * Interface: /proc/.oaauth
  *   write "GEN:<option_id>"  e.g. "GEN:S285"  → auth string becomes available
@@ -26,21 +27,22 @@
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
+#include <linux/random.h>
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("kronos-re");
 MODULE_DESCRIPTION("EX auth string generator for Kronos OA.ko");
 
 /*
- * setup_atmel_addr — OA.ko's SetupAtmelForAuthorizations.
- * chip_read_addr   — OA.ko's fFfFfFfFfFfF13 encrypted chip-read function.
+ * setup_atmel_addr — OA.ko's SetupAtmelForAuthorizations (optional).
+ * chip_read_addr   — OA.ko's fFfFfFfFfFfF13 encrypted chip-read (optional).
  *
- * Both are required.  Obtain from /proc/kallsyms at insmod time:
+ * If both are omitted the module runs its own native GPA implementation and
+ * needs no OA.ko — suitable for UpdateOS where OA.ko is not loaded.
+ *
+ * If OA.ko IS loaded and addresses are known, pass them for a faster path:
  *   SETUP=$(grep ' SetupAtmelForAuthorizations' /proc/kallsyms | cut -d' ' -f1)
  *   READ=$(grep ' fFfFfFfFfFfF13.*\[OA\]' /proc/kallsyms | cut -d' ' -f1)
  *   insmod oa_authgen.ko setup_atmel_addr=0x${SETUP} chip_read_addr=0x${READ}
- *
- * After SetupAtmelForAuthorizations the Atmel chip uses an encrypted session;
- * fFfFfFfFfFfF13 handles the per-read cipher synchronisation internally.
  */
 static unsigned long setup_atmel_addr;
 module_param(setup_atmel_addr, ulong, 0444);
@@ -78,6 +80,7 @@ module_param(decode_addr, ulong, 0444);
  * Returns 0 on success, negative error code on failure.
  * -------------------------------------------------------------------------- */
 extern int stgNV2AC_sync_read_cmd(void *cmd_data, void *response_dest);
+extern int stgNV2AC_sync_cmd(void *cmd_data, int cmd_size);
 
 /* 16-byte Atmel CryptoMemory Read Config Zone command packet */
 struct nv2ac_cmd {
@@ -692,6 +695,410 @@ static ssize_t read_option_file(const char *opt_id, u8 *buf, size_t max_len)
 	return ret;
 }
 
+/* ==========================================================================
+ * Native GPA (Group Authentication Protocol) implementation
+ * ==========================================================================
+ * Reverse-engineered from OA_322.ko:
+ *   SetupAtmelForAuthorizations   nm 0x207a50
+ *   fFfFfFfFfFfF13                nm 0x4f4850  authenticated zone read
+ *   fFfFfFfFfFfF1C                nm 0x4f4a90  multi-byte read (used in setup)
+ *   bzzzzzzzzzzzt12               nm 0x4f3d10  cipher state advance
+ *   bzzzzzzzzzzzt16               nm 0x4f3fe0  MAC proof sender
+ *   sdflkjsvnd2g                  nm 0x4f61d0  challenge generator
+ *   fFfFfFfFfFfF11                            MAC computation
+ *
+ * Only stgNV2AC_sync_cmd / stgNV2AC_sync_read_cmd (OmapNKS4.ko) are used.
+ * Both are available during UpdateOS even when OA.ko is absent.
+ * ========================================================================== */
+
+static u8 gpa_mode;         /* 0=unauthenticated, 1=mode1, 2=mode2 */
+static u8 gpa_cs[20];       /* cipher state */
+static u8 gpa_rxbuf[64];    /* DMA receive buffer */
+
+/* --------------------------------------------------------------------------
+ * gpa_bzt12 — advance the GPA cipher state by one input byte.
+ * RE from OA_322.ko bzzzzzzzzzzzt12 (nm 0x4f3d10).
+ * -------------------------------------------------------------------------- */
+static void gpa_bzt12(u8 input)
+{
+	u8 s0  = gpa_cs[0],  s1  = gpa_cs[1],  s2  = gpa_cs[2],  s3  = gpa_cs[3];
+	u8 s4  = gpa_cs[4],  s5  = gpa_cs[5],  s6  = gpa_cs[6],  s7  = gpa_cs[7];
+	u8 s8  = gpa_cs[8],  s9  = gpa_cs[9],  s10 = gpa_cs[10], s11 = gpa_cs[11];
+	u8 s12 = gpa_cs[12], s13 = gpa_cs[13], s14 = gpa_cs[14], s15 = gpa_cs[15];
+	u8 s16 = gpa_cs[16], s17 = gpa_cs[17], s18 = gpa_cs[18], s19 = gpa_cs[19];
+
+	u8 t     = input ^ s0;
+	u8 lo4   = t & 0x0f;
+	u8 lo5   = t & 0x1f;
+	u8 hi3   = (u8)(t >> 5);
+	u8 rot_t = hi3 | (u8)(lo4 << 3);
+	u8 mid   = (u8)(t >> 3);
+
+	u8 rots1, sum1, rots8, sum2, norm3, cl_final, mux;
+
+	rots1 = (u8)((s1 >> 4) | ((s1 & 0x0f) << 1));
+	sum1  = rots1 + s2;
+	if (sum1 >= 0x20) sum1 -= 0x1f;
+
+	rots8 = (u8)((s8 >> 6) | ((s8 & 0x3f) << 1));
+	sum2  = rots8 + s9;
+	if (sum2 & 0x80) sum2 -= 0x7f;
+
+	norm3 = s16 + s15;
+	if (norm3 >= 0x20) norm3 -= 0x1f;
+
+	cl_final = sum1 ^ s2;
+	mux      = ((norm3 ^ s16) & sum2) | ((u8)(~sum2) & cl_final);
+
+	gpa_cs[0]  = (u8)(((s0 & 0x0f) << 4) | (mux & 0x0f));
+	gpa_cs[1]  = s3;   gpa_cs[2]  = lo5 ^ s5;  gpa_cs[3]  = s4;
+	gpa_cs[4]  = s2;   gpa_cs[5]  = s6;         gpa_cs[6]  = s7;
+	gpa_cs[7]  = sum1; gpa_cs[8]  = s9;         gpa_cs[9]  = rot_t ^ s10;
+	gpa_cs[10] = s11;  gpa_cs[11] = s12;        gpa_cs[12] = s13;
+	gpa_cs[13] = s14;  gpa_cs[14] = sum2;       gpa_cs[15] = s17;
+	gpa_cs[16] = mid ^ s18; gpa_cs[17] = s16;  gpa_cs[18] = s19;
+	gpa_cs[19] = norm3;
+}
+
+/* --------------------------------------------------------------------------
+ * Soft 128-bit arithmetic — replaces GMP used inside sdflkjsvnd2g.
+ * __int128 is unavailable on 32-bit kernel targets; use {hi,lo} u64 pairs.
+ *
+ * All operands in addmod/double_mod/mulmod are maintained < m by invariant.
+ * Safe for moduli > 2^127 (proven: overflow in addmod always yields < m).
+ * -------------------------------------------------------------------------- */
+struct u128 { u64 hi; u64 lo; };
+
+/* GPA moduli from OA_322.ko .rodata string concatenation (nm 0x4f61d0) */
+static const struct u128 GPA_P = { 0xcf8aa5362f182eeeULL, 0x7089aef5be7ba844ULL };
+static const struct u128 GPA_Q = { 0xcf8aa5362f182ef0ULL, 0x3d8ac5ebdfe1fc69ULL };
+
+static int u128_lt(struct u128 a, struct u128 b)
+{
+	return (a.hi < b.hi) || (a.hi == b.hi && a.lo < b.lo);
+}
+
+static int u128_ge(struct u128 a, struct u128 b)
+{
+	return !u128_lt(a, b);
+}
+
+static int u128_zero(struct u128 a)
+{
+	return (a.hi == 0) && (a.lo == 0);
+}
+
+static int u128_lsb(struct u128 a) { return (int)(a.lo & 1); }
+
+static struct u128 u128_add(struct u128 a, struct u128 b)
+{
+	struct u128 r;
+	r.lo = a.lo + b.lo;
+	r.hi = a.hi + b.hi + (r.lo < a.lo ? 1 : 0);
+	return r;
+}
+
+static struct u128 u128_sub(struct u128 a, struct u128 b)
+{
+	struct u128 r;
+	r.lo = a.lo - b.lo;
+	r.hi = a.hi - b.hi - (a.lo < b.lo ? 1 : 0);
+	return r;
+}
+
+static struct u128 u128_shl1(struct u128 a)
+{
+	struct u128 r;
+	r.hi = (a.hi << 1) | (a.lo >> 63);
+	r.lo = a.lo << 1;
+	return r;
+}
+
+static struct u128 u128_shr1(struct u128 a)
+{
+	struct u128 r;
+	r.lo = (a.lo >> 1) | (a.hi << 63);
+	r.hi = a.hi >> 1;
+	return r;
+}
+
+static struct u128 u128_from_u64(u64 v)
+{
+	struct u128 r; r.hi = 0; r.lo = v; return r;
+}
+
+/* addmod: a+b mod m. Safe for a,b < m and m > 2^127 (overflow => result < m) */
+static struct u128 gpa_addmod(struct u128 a, struct u128 b, struct u128 m)
+{
+	struct u128 r = u128_add(a, b);
+	/* if carry occurred: r = a+b-2^128 < m (since a+b < 2m and 2m > 2^128) */
+	if (u128_lt(r, a)) return r;
+	if (u128_ge(r, m)) r = u128_sub(r, m);
+	return r;
+}
+
+/* double_mod: 2a mod m */
+static struct u128 gpa_double_mod(struct u128 a, struct u128 m)
+{
+	struct u128 r = u128_shl1(a);
+	if (u128_lt(r, a)) return r;  /* overflow: 2a-2^128 < m */
+	if (u128_ge(r, m)) r = u128_sub(r, m);
+	return r;
+}
+
+/* mulmod: a*b mod m. All operands < m by invariant — no need for initial a%=m. */
+static struct u128 gpa_mulmod(struct u128 a, struct u128 b, struct u128 m)
+{
+	struct u128 result = u128_from_u64(0);
+	/* b is at most ~127 bits (acc < P < 2^128) */
+	while (!u128_zero(b)) {
+		if (u128_lsb(b)) result = gpa_addmod(result, a, m);
+		a = gpa_double_mod(a, m);
+		b = u128_shr1(b);
+	}
+	return result;
+}
+
+static struct u128 gpa_powmod(struct u128 base, struct u128 exp, struct u128 m)
+{
+	struct u128 result = u128_from_u64(1);
+	while (!u128_zero(exp)) {
+		if (u128_lsb(exp)) result = gpa_mulmod(result, base, m);
+		base = gpa_mulmod(base, base, m);
+		exp = u128_shr1(exp);
+	}
+	return result;
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_challenge — compute 8-byte GPA challenge from 7-byte nonce.
+ * RE from OA_322.ko sdflkjsvnd2g (nm 0x4f61d0).
+ *
+ * Byte order (confirmed via disasm): nonce[6] is MSB, nonce[0] is LSB.
+ * Output selection (confirmed): buf[1,2,3,5,7,11,13,15] of 16-byte buffer.
+ * mode_arg=0 in all SetupAtmelForAuthorizations call sites.
+ * -------------------------------------------------------------------------- */
+static void gpa_challenge(const u8 *nonce7, int mode_arg, u8 *out8)
+{
+	struct u128 X, acc;
+	u8  buf[16];
+	int bi, bit, i;
+	static const int sel[8] = {1, 2, 3, 5, 7, 11, 13, 15};
+	u64 x_raw = 0;
+
+	/* nonce[6] is MSB (bytes loaded high-index-first then left-shifted) */
+	for (i = 6; i >= 0; i--)
+		x_raw = (x_raw << 8) | nonce7[i];
+	X = u128_from_u64(x_raw);
+	X = gpa_mulmod(X, X, GPA_Q);  /* X = nonce^2 mod Q */
+
+	/* acc = 2^((mode_arg+17)*128) mod P */
+	{
+		struct u128 two = u128_from_u64(2);
+		u32 e = (u32)(mode_arg + 17) * 128;
+		acc = gpa_powmod(two, u128_from_u64(e), GPA_P);
+	}
+
+	memset(buf, 0, sizeof(buf));
+	for (bi = 0; bi < 16; bi++) {
+		for (bit = 0x01; bit <= 0x80; bit <<= 1) {
+			struct u128 r;
+			acc = gpa_double_mod(acc, GPA_P);
+			r   = gpa_powmod(X, acc, GPA_Q);
+			if (u128_lsb(r)) buf[bi] |= (u8)bit;
+		}
+	}
+	for (i = 0; i < 8; i++)
+		out8[i] = buf[sel[i]];
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_read_n — read `count` bytes from chip addr with cipher advances.
+ * RE from OA_322.ko fFfFfFfFfFfF1C (nm 0x4f4a90).
+ * ALWAYS advances cipher (even in mode 0) — used during setup.
+ * XOR decryption only for addr > 0xaf with mode==2.
+ * -------------------------------------------------------------------------- */
+static int gpa_read_n(u8 addr, u8 count, u8 *out)
+{
+	u8 cmd[4];
+	int i, j;
+
+	cmd[0] = 0xb6; cmd[1] = 0x00; cmd[2] = addr; cmd[3] = count;
+
+	/* 12 pre-advances: 5×0, addr, 5×0, count */
+	for (i = 0; i < 5; i++) gpa_bzt12(0);
+	gpa_bzt12(addr);
+	for (i = 0; i < 5; i++) gpa_bzt12(0);
+	gpa_bzt12(count);
+
+	if (stgNV2AC_sync_read_cmd(cmd, gpa_rxbuf))
+		return -EIO;
+
+	for (i = 0; i < (int)count; i++) {
+		u8 raw = gpa_rxbuf[i];
+		if (addr > 0xaf && gpa_mode == 2) {
+			out[i] = raw ^ gpa_cs[0];
+			gpa_bzt12(out[i]);
+		} else {
+			gpa_bzt12(raw);
+			out[i] = raw;
+		}
+		for (j = 0; j < 5; j++) gpa_bzt12(0);
+	}
+	return 0;
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_mac — compute 8-byte MAC from three 8-byte inputs.
+ * RE from OA_322.ko fFfFfFfFfFfF11.
+ * Resets gpa_cs to zero before computation (synchronized cipher reset).
+ * buf1: random bytes, buf2: challenge (or zeros), buf3: chip_B.
+ * -------------------------------------------------------------------------- */
+static void gpa_mac(const u8 *buf1, const u8 *buf2, const u8 *buf3, u8 *out8)
+{
+	int k, j;
+
+	memset(gpa_cs, 0, sizeof(gpa_cs));
+
+	/* 8 rounds: rounds 0-3 pair consecutive bytes of buf3, rounds 4-7 of buf2 */
+	for (k = 0; k < 8; k++) {
+		const u8 *bp = (k < 4) ? (buf3 + k * 2) : (buf2 + (k - 4) * 2);
+		for (j = 0; j < 3; j++) gpa_bzt12(bp[0]);
+		for (j = 0; j < 3; j++) gpa_bzt12(bp[1]);
+		gpa_bzt12(buf1[k]);
+	}
+
+	/* Extract 8 output bytes from cs[0] after 6 + 7k zero-advances */
+	for (j = 0; j < 6; j++) gpa_bzt12(0);
+	out8[0] = gpa_cs[0];
+	for (k = 1; k < 8; k++) {
+		for (j = 0; j < 7; j++) gpa_bzt12(0);
+		out8[k] = gpa_cs[0];
+	}
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_send_proof — send 8-byte MAC proof to chip and check acceptance.
+ * RE from OA_322.ko bzzzzzzzzzzzt16 (nm 0x4f3fe0).
+ * cmd1_byte: 0x00 for first proof, 0x10 for second.
+ * Returns 0 if chip accepted (addr 0x50 reads 0xFF), -1 otherwise.
+ * Does NOT touch gpa_cs.
+ * -------------------------------------------------------------------------- */
+static int gpa_send_proof(u8 cmd1_byte, const u8 *rand8, const u8 *mac8)
+{
+	u8 cmd[20];
+	u8 rsp[4];
+
+	cmd[0] = 0xb8; cmd[1] = cmd1_byte; cmd[2] = 0x00; cmd[3] = 0x10;
+	memcpy(cmd + 4,  rand8, 8);
+	memcpy(cmd + 12, mac8,  8);
+	stgNV2AC_sync_cmd(cmd, 20);
+
+	/* addr 0x50 == 0xFF means chip accepted */
+	rsp[0] = 0xb2; rsp[1] = 0x00; rsp[2] = 0x50; rsp[3] = 0x01;
+	stgNV2AC_sync_read_cmd(rsp, gpa_rxbuf);
+	return (gpa_rxbuf[0] == 0xFF) ? 0 : -1;
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_setup — run the full GPA authentication handshake with the Atmel chip.
+ * RE from OA_322.ko SetupAtmelForAuthorizations (nm 0x207a50).
+ * On success: gpa_mode = 2 (or 1); subsequent gpa_read_zone calls decrypt.
+ * Returns 0 on success, -EIO if chip rejects both MAC proofs.
+ * -------------------------------------------------------------------------- */
+static int gpa_setup(void)
+{
+	u8 nonce[7], challenge[8], chip_B[8], rand_buf[8], mac_out[8];
+	static const u8 zeros8[8] = {0};
+	u8 cmd[4];
+	int ret;
+
+	gpa_mode = 0;
+	memset(gpa_cs, 0, sizeof(gpa_cs));
+
+	/* Read 7-byte nonce from addr 0x19 (cipher advances from zero state) */
+	ret = gpa_read_n(0x19, 7, nonce);
+	if (ret) return ret;
+
+	/* Send init command {0xb8,0,0,0}; read addr 0x50 (result ignored) */
+	cmd[0] = 0xb8; cmd[1] = 0x00; cmd[2] = 0x00; cmd[3] = 0x00;
+	stgNV2AC_sync_cmd(cmd, 4);
+	{
+		u8 tmp[4] = {0xb2, 0x00, 0x50, 0x01};
+		stgNV2AC_sync_read_cmd(tmp, gpa_rxbuf);
+	}
+
+	/* Send activate command {0xb4,0x03,0,0} */
+	cmd[0] = 0xb4; cmd[1] = 0x03; cmd[2] = 0x00; cmd[3] = 0x00;
+	stgNV2AC_sync_cmd(cmd, 4);
+
+	/* Compute 8-byte challenge from nonce */
+	gpa_challenge(nonce, 0, challenge);
+
+	/* Read chip's 8-byte response from addr 0x50 */
+	ret = gpa_read_n(0x50, 8, chip_B);
+	if (ret) return ret;
+
+	/* First MAC proof */
+	get_random_bytes(rand_buf, 8);
+	gpa_mac(rand_buf, challenge, chip_B, mac_out);
+	if (gpa_send_proof(0x00, rand_buf, mac_out) == 0)
+		gpa_mode = 1;
+
+	/* Second MAC proof */
+	get_random_bytes(rand_buf, 8);
+	gpa_mac(rand_buf, zeros8, chip_B, mac_out);
+	if (gpa_send_proof(0x10, rand_buf, mac_out) == 0)
+		gpa_mode = 2;
+
+	pr_info("oa_authgen: gpa_setup mode=%d\n", (int)gpa_mode);
+	return (gpa_mode > 0) ? 0 : -EIO;
+}
+
+/* --------------------------------------------------------------------------
+ * gpa_read_zone — authenticated read of `count` bytes from chip addr.
+ * RE from OA_322.ko fFfFfFfFfFfF13 (nm 0x4f4850).
+ * mode==0: raw read (non-deterministic without prior gpa_setup).
+ * mode==1: cipher-synchronized, no XOR decryption.
+ * mode==2: cipher-synchronized, XOR-decrypt each byte with cs[0].
+ * -------------------------------------------------------------------------- */
+static int gpa_read_zone(u8 addr, u8 count, u8 *out)
+{
+	u8 cmd[4];
+	int i, j;
+
+	if (gpa_mode == 0) {
+		cmd[0] = 0xb2; cmd[1] = 0x00; cmd[2] = addr; cmd[3] = count;
+		if (stgNV2AC_sync_read_cmd(cmd, gpa_rxbuf))
+			return -EIO;
+		memcpy(out, gpa_rxbuf, count);
+		return 0;
+	}
+
+	cmd[0] = 0xb6; cmd[1] = 0x00; cmd[2] = addr; cmd[3] = count;
+
+	for (i = 0; i < 5; i++) gpa_bzt12(0);
+	gpa_bzt12(addr);
+	for (i = 0; i < 5; i++) gpa_bzt12(0);
+	gpa_bzt12(count);
+
+	if (stgNV2AC_sync_read_cmd(cmd, gpa_rxbuf))
+		return -EIO;
+
+	for (i = 0; i < (int)count; i++) {
+		u8 raw = gpa_rxbuf[i];
+		if (gpa_mode == 2) {
+			out[i] = raw ^ gpa_cs[0];
+			gpa_bzt12(out[i]);
+		} else {
+			gpa_bzt12(raw);
+			out[i] = raw;
+		}
+		for (j = 0; j < 5; j++) gpa_bzt12(0);
+	}
+	return 0;
+}
+
 /* --------------------------------------------------------------------------
  * Chip authentication via OA.ko's SetupAtmelForAuthorizations.
  *
@@ -717,13 +1124,12 @@ typedef int (*decode_bytes_fn_t)(char *out_buf, const char *auth_str);
 
 static int authenticate_chip(void)
 {
-	setup_atmel_fn_t fn;
-	if (!setup_atmel_addr) {
-		pr_warning("oa_authgen: setup_atmel_addr not set; pass at insmod\n");
-		return -ENOSYS;
+	if (setup_atmel_addr) {
+		setup_atmel_fn_t fn = (setup_atmel_fn_t)setup_atmel_addr;
+		return fn();
 	}
-	fn = (setup_atmel_fn_t)setup_atmel_addr;
-	return fn();
+	/* No OA.ko address: run native GPA implementation (works without OA.ko) */
+	return gpa_setup();
 }
 
 /*
@@ -737,15 +1143,8 @@ static int read_chip_zone(u8 addr, u8 *buf)
 		chip_read_fn_t fn = (chip_read_fn_t)chip_read_addr;
 		return fn(addr, 8, buf);
 	}
-	/* Fallback: raw DMA read (works before SetupAtmelForAuthorizations) */
-	{
-		struct nv2ac_cmd cmd;
-		memset(&cmd, 0, sizeof(cmd));
-		cmd.opcode = 0xb2;
-		cmd.count  = 8;
-		cmd.addr   = addr;
-		return stgNV2AC_sync_read_cmd(&cmd, buf);
-	}
+	/* No OA.ko address: use native GPA authenticated read */
+	return gpa_read_zone(addr, 8, buf);
 }
 
 /* --------------------------------------------------------------------------
@@ -1119,11 +1518,9 @@ static int __init oa_authgen_init(void)
 {
 	memset(g_result, 0, sizeof(g_result));
 
-	/* Call SetupAtmelForAuthorizations so chip reads via fFfFfFfFfFfF13
-	 * are stable even after soft reboots (chip wedge). On a clean boot
-	 * OA.ko has already called it; calling it again is safe. */
-	if (setup_atmel_addr)
-		authenticate_chip();
+	/* Run chip authentication (SetupAtmelForAuthorizations or native GPA).
+	 * Required to get deterministic reads from encrypted zones — always. */
+	authenticate_chip();
 
 	g_pde = proc_create(".oaauth", 0666, NULL, &oaauth_fops);
 	if (!g_pde) {

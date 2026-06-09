@@ -49,7 +49,7 @@ hardware-integration board. It:
 ## Crypto
 
 This module *implements* the bottom half of the GPA cipher and the NV2AC handshake.
-The reverse-engineering of GPA was done largely against `GetPubIdMod.ko` (smaller and
+The studying of GPA was done largely against `GetPubIdMod.ko` (smaller and
 self-contained) — see [`GetPubIdMod.ko.md`](GetPubIdMod.ko.md).
 
 ---

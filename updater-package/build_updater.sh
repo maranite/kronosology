@@ -28,7 +28,7 @@ BUILDER="$HERE/../update-builder/update_builder.py"
 
 echo "[build] cleaning staging $STAGING"
 rm -rf "$STAGING"
-mkdir -p "$STAGING"
+mkdir -p "$STAGING" "$STAGING/mnt"
 
 # ---------------------------------------------------------------------------
 # pretar.sh = kronos_patcher.sh with an UpdateOS-context banner prepended.

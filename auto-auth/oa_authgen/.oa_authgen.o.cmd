@@ -480,6 +480,8 @@ deps_/mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.o := \
     $(wildcard include/config/x86/wp/works/ok.h) \
     $(wildcard include/config/x86/intel/usercopy.h) \
   /tmp/linux-kronos/arch/x86/include/asm/uaccess_32.h \
+  include/linux/random.h \
+  include/linux/irqnr.h \
 
 /mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.o: $(deps_/mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.o)
 

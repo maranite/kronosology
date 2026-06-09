@@ -77,7 +77,7 @@ Add-up of expected costs (very rough, assuming a healthy chip):
 Out of scope for this analysis. The bulk is `CSTGEngine::Initialize` loading PRELOAD
 banks (programs/combis/drum kits/wave sequences/effect presets), KARMA data, and
 warming up the audio driver. None of this is touched by loadoa or loadmod and we
-haven't reverse-engineered Eva's startup well enough to suggest optimisations there.
+haven't studied Eva's startup well enough to suggest optimisations there.
 
 The headline: **optimising loadoa can save at most ~5–8 seconds. The Eva-internal
 startup is the real cost**.
@@ -257,7 +257,7 @@ boot-to-playable-synth.
   module loader is single-threaded internally, and OA.ko (the largest, slowest
   module) has to wait for almost everything else to load anyway.
 - **Trying to reduce Eva's own startup time** — much bigger potential payoff (~30 s)
-  but completely out of scope without reverse-engineering Eva's bank loader, audio
+  but completely out of scope without studying Eva's bank loader, audio
   engine init, KARMA setup, etc.
 
 ### The "go fast" path
@@ -265,7 +265,7 @@ boot-to-playable-synth.
 If you genuinely want a fast-booting Kronos, **the highest-payoff direction is
 Eva-internal**: profile Eva's PRELOAD bank loading, identify which banks are
 expensive, and either lazy-load them or pre-cache parsed forms on `/korg/rw`. That's
-a much larger reverse-engineering project than the boot-chain work.
+a much larger studying project than the boot-chain work.
 
 For boot-chain alone, the recipe is:
 

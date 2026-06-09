@@ -100,5 +100,5 @@ If the chip wedge has set in, no software fix helps until you power-cycle for â‰
 ## Background
 
 The patches are explained in detail under [../docs/workflow/deploying_patches.md](../docs/workflow/deploying_patches.md)
-(why each one is needed and how it was discovered). The reverse-engineering writeups for
+(why each one is needed and how it was discovered). The studying writeups for
 each binary touched live under [../docs/modules/](../docs/modules/).

@@ -46,9 +46,16 @@ assert len(ALPHA) == 32
 _REMAP = {'B': '8', 'O': '0', 'I': '1', 'S': '5'}
 
 def _b32_encode_5(chunk: bytes) -> str:
-    """Encode exactly 5 bytes as 8 base32 characters."""
+    """Encode exactly 5 bytes as 8 base32 characters.
+
+    OA.ko's DecodeBytesFromAscii reconstructs bytes in a custom LE order:
+      out[0]=(val>>8), out[1]=(val>>16), out[2]=(val>>24), out[3]=(val>>32), out[4]=val&0xFF
+    So to produce a val that decodes back correctly, we must build:
+      val = (b[3]<<32) | (b[2]<<24) | (b[1]<<16) | (b[0]<<8) | b[4]
+    """
     assert len(chunk) == 5
-    val = int.from_bytes(chunk, 'big')  # 40-bit integer
+    b = chunk
+    val = (b[3] << 32) | (b[2] << 24) | (b[1] << 16) | (b[0] << 8) | b[4]
     chars = []
     for _ in range(8):
         chars.append(ALPHA[val & 0x1F])
@@ -61,14 +68,20 @@ def base32_encode(data: bytes) -> str:
     return _b32_encode_5(data[0:5]) + _b32_encode_5(data[5:10]) + _b32_encode_5(data[10:15])
 
 def _b32_decode_5(s: str) -> bytes:
-    """Decode 8 base32 characters to exactly 5 bytes."""
+    """Decode 8 base32 characters to exactly 5 bytes (inverse of _b32_encode_5)."""
     assert len(s) == 8
     val = 0
     for c in s:
         c = _REMAP.get(c.upper(), c.upper())
         idx = ALPHA.index(c)
         val = (val << 5) | idx
-    return val.to_bytes(5, 'big')
+    # Reverse the LE byte-order encoding used in _b32_encode_5
+    b0 = (val >> 8) & 0xFF
+    b1 = (val >> 16) & 0xFF
+    b2 = (val >> 24) & 0xFF
+    b3 = (val >> 32) & 0xFF
+    b4 = val & 0xFF
+    return bytes([b0, b1, b2, b3, b4])
 
 def base32_decode(s: str) -> bytes:
     """Decode 24 base32 chars → 15 bytes."""
@@ -76,21 +89,20 @@ def base32_decode(s: str) -> bytes:
     return _b32_decode_5(s[0:8]) + _b32_decode_5(s[8:16]) + _b32_decode_5(s[16:24])
 
 # ---------------------------------------------------------------------------
-# Blowfish-CFB-8
+# Blowfish-CFB-64
 
-def blowfish_cfb8_encrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
-    """Encrypt data byte-by-byte in CFB-8 mode using Blowfish.
+def blowfish_cfb64_encrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
+    """Encrypt in Blowfish CFB-64 mode (8-byte block feedback).
 
-    key: 4–56 bytes (we use 24)
-    iv:  8 bytes (1 Blowfish block = 64 bits)
+    key: chip[0:16] (16 bytes)
+    iv:  chip[16:24] (8 bytes = 1 Blowfish block)
     """
-    # pycryptodome's Blowfish supports CFB mode but with segment_size in bits.
-    # CFB-8 = segment_size=8.
-    cipher = Blowfish.new(key, Blowfish.MODE_CFB, iv=iv, segment_size=8)
+    # pycryptodome CFB segment_size is in bits; CFB-64 = 64-bit feedback = segment_size=64
+    cipher = Blowfish.new(key, Blowfish.MODE_CFB, iv=iv, segment_size=64)
     return cipher.encrypt(data)
 
-def blowfish_cfb8_decrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
-    cipher = Blowfish.new(key, Blowfish.MODE_CFB, iv=iv, segment_size=8)
+def blowfish_cfb64_decrypt(key: bytes, iv: bytes, data: bytes) -> bytes:
+    cipher = Blowfish.new(key, Blowfish.MODE_CFB, iv=iv, segment_size=64)
     return cipher.decrypt(data)
 
 # ---------------------------------------------------------------------------
@@ -123,9 +135,10 @@ def generate_auth_string(chip_secret: bytes,
     plaintext = plain_12 + fp
     assert len(plaintext) == 15
 
-    # Step 4: Blowfish-CFB-8 encrypt
+    # Step 4: Blowfish-CFB-64 encrypt (key=chip[0:16], IV=chip[16:24])
+    key = chip_secret[0:16]
     iv = chip_secret[16:24]
-    ciphertext = blowfish_cfb8_encrypt(chip_secret, iv, plaintext)
+    ciphertext = blowfish_cfb64_encrypt(key, iv, plaintext)
     assert len(ciphertext) == 15
 
     # Step 5: Custom base32 encode
@@ -148,8 +161,9 @@ def verify_auth_string(auth_str: str,
     except (ValueError, AssertionError):
         return False
 
+    key = chip_secret[0:16]
     iv = chip_secret[16:24]
-    pt = blowfish_cfb8_decrypt(chip_secret, iv, ct)
+    pt = blowfish_cfb64_decrypt(key, iv, ct)
 
     salt      = pt[0:8]
     opt_id_pt = pt[8:12].decode('ascii', errors='replace')

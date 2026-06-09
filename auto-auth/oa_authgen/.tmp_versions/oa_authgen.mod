@@ -1,2 +1,0 @@
-/mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.ko
-/mnt/source/kronosology/auto-auth/oa_authgen/oa_authgen.o

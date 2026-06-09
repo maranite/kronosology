@@ -138,7 +138,7 @@ sh /korg/rw/kronos_patcher_backup/../../kronos_patcher.sh --revert
 ## What this is NOT
 
 - This is not a Korg-endorsed update. The signature is valid only because we
-  reverse-engineered the same key the rooting tarball already uses; it does not
+  studied the same key the rooting tarball already uses; it does not
   imply any cooperation with Korg.
 - This does not redistribute any Korg binary. It ships only the byte-patcher; the
   binaries themselves come from the user's own Kronos at install time.

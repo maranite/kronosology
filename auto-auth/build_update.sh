@@ -115,7 +115,7 @@ done
 # ── Staging ──────────────────────────────────────────────────────────────────
 echo "[build] cleaning staging $STAGING"
 rm -rf "$STAGING"
-mkdir -p "$STAGING"
+mkdir -p "$STAGING" "$STAGING/mnt"
 
 # ── pretar.sh ────────────────────────────────────────────────────────────────
 cat > "$STAGING/pretar.sh" << 'PRETAR_EOF'
@@ -199,10 +199,23 @@ authorised=0
 skipped=0
 
 "$DUM" "Authorising EX libraries..."
+echo "set 0" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
+
+# Count first so progress bar is evenly distributed
+_auth_total=0
+for opt_file in "$OPTIONS"/S*; do
+    [ -f "$opt_file" ] || continue
+    _uid=$(awk -F',' 'NR==4{ gsub(/[[:space:]]/, "", $2); print $2; exit }' \
+           "$opt_file" 2>/dev/null)
+    [ -z "$_uid" ] || [ "$_uid" = "0" ] && continue
+    _auth_total=$(( _auth_total + 1 ))
+done
+_progress_step=$(( _auth_total > 0 ? 100 / _auth_total : 100 ))
+_progress=0
 
 for opt_file in "$OPTIONS"/S*; do
     [ -f "$opt_file" ] || continue
-    opt_id=$(basename "$opt_file")
+    opt_id="${opt_file##*/}"
 
     uid=$(awk -F',' 'NR==4{ gsub(/[[:space:]]/, "", $2); print $2; exit }' \
           "$opt_file" 2>/dev/null)
@@ -225,8 +238,12 @@ for opt_file in "$OPTIONS"/S*; do
     else
         echo "auto-auth: WARNING: GEN:$opt_id failed"
     fi
+
+    _progress=$(( _progress + _progress_step ))
+    echo "set $_progress" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 done
 
+echo "set 100" > /proc/OmapNKS4ProgressBar 2>/dev/null || true
 echo "auto-auth: done — authorised=$authorised skipped=$skipped"
 "$DUM" "auto-auth complete: ${authorised} EX libraries authorised"
 echo "auto-auth: NOTE: patched loadmod/loadoa/OA installed — power-cycle to activate"

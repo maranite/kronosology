@@ -37,7 +37,7 @@ Most of the learnings are recorded in [`docs/`](docs/) (forewarning: it's a pret
 | You want to... | Go to |
 |---|---|
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
-| Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |
+| Browse module-by-module studying notes | [docs/modules/](docs/modules/) |
 | Understand the boot integrity chain (loadoa → loadmod → cryptoloop → OA → Eva) | [docs/system_overview.md](docs/system_overview.md), [docs/modules/loadoa.md](docs/modules/loadoa.md), [docs/modules/loadmod.ko.md](docs/modules/loadmod.ko.md) |
 | Understand the Atmel NV2AC security IC protocol (GPA stream cipher) | [docs/crypto/atmel_nv2ac.md](docs/crypto/atmel_nv2ac.md) |
 | Understand the OS-update signature algorithm (SHA-1 + `UpdaterScriptsKey`) | [docs/crypto/update_signature.md](docs/crypto/update_signature.md) |
@@ -169,75 +169,36 @@ Full internals, signature algorithm, and command reference in
 
 ---
 
-## Status & scope
-
-| Layer | Status |
-|---|---|
-| `OA.ko` (synthesis engine) — top-level RE | Comprehensive |
-| `loadmod.ko` (boot integrity) — analysis | Comprehensive |
-| `loadmod.ko` — both MD5 checks bypassed | ✅ working |
-| `loadoa` — patches deployed | ✅ working |
-| `OA.ko` — EX-bank auth bypass | ✅ working (56-byte-run patch) |
-| `OmapNKS4Module.ko` — chip protocol RE | Partial (enough to understand the dongle handshake) |
-| `OmapNKS4Module.ko` — hot-fix for chip wedge | Investigated; not feasible (firmware-level, not software) |
-| `Eva` — top-level RE | Light (we mostly need to know what it talks to) |
-| `UpdateOS` — update package format | Comprehensive |
-| `InstallEXs` — EX install flow | Comprehensive |
-| `update_builder.py` — produces signed packages | ✅ working |
-| Cryptoloop key derivation chain (pairFact + dongle) | Documented, intercepted at hook level |
-| Cryptoloop keys (Mod / Eva / WaveMotion) — extracted, validated, embedded in tools | ✅ all 3 keys, universal across units/versions |
-| Offline decrypt + mount + version-diff toolchain (`scripts/`) | ✅ working — no Kronos, no `cryptsetup`, no `sudo` for the Python path |
-| Per-binary patches, tested live on hardware | ✅ verified end-to-end via patcher script |
-
----
-
 ## How this came to exist
 
 Long-running analysis sessions using [Ghidra](https://ghidra-sre.org/) plus the
 [GhidraMCP](https://github.com/LaurieWired/GhidraMCP) bridge, with much trial,
-much breaking-the-Kronos-and-fixing-it-via-SSH, and a memorable detour where I
-attempted to clean up a USB chip wedge by adding new symbol imports to a kernel
-module via ELF surgery — which worked perfectly but didn't actually solve the
-problem because the wedge is at the chip's firmware level, not in the host driver.
+much breaking-the-Kronos-and-fixing-it-via-SSH.
 
 The `tools/patch_omapnks4_cleanup.py` script preserves that surgical technique
 because it generalises well to any time you want to call a kernel function the
 stock `.ko` doesn't already import.
 
 The bumps along the way produced concrete operational lessons that are documented
-alongside the binary they belong to — see for example
-[docs/modules/loadmod.ko_inner_md5_check.md](docs/modules/loadmod.ko_inner_md5_check.md),
-[docs/modules/OA.ko_hot_swap_bug.md](docs/modules/OA.ko_hot_swap_bug.md), and
-[docs/modules/OmapNKS4Module.ko_chip_wedge.md](docs/modules/OmapNKS4Module.ko_chip_wedge.md).
+alongside the binary they belong to — see for example:
+[loadmod.ko_inner_md5_check](docs/modules/loadmod.ko_inner_md5_check.md),
+[OA.ko_hot_swap_bug](docs/modules/OA.ko_hot_swap_bug.md), and
+[OmapNKS4Module.ko_chip_wedge](docs/modules/OmapNKS4Module.ko_chip_wedge.md).
 
 ---
 
 ## Caveats & legal
 
-- This is reverse-engineering work for **interoperability and personal-use research**
-  purposes. Korg owns the Kronos firmware; nothing in this repo redistributes any
+- This is educational work for **personal-use research** purposes. 
+  Korg owns the Kronos firmware; nothing in this repo redistributes any
   Korg binary. The patcher works against the user's own already-licensed install.
 - The OS-update mechanism uses cryptographic signatures that this repo includes the
   necessary key for. **Do not use this to distribute pirated content.** The point is
   to let owners customise their own instruments.
-- Tested against Kronos OS v3.2.1. Other versions will likely need adjusted file
-  offsets and MD5s; the patcher refuses to run on unrecognised MD5s, which is the
-  intended behaviour — adapt the patcher's MD5 constants and offset tables, don't
-  bypass the safety check.
+- Tested against Kronos OS v3.2.2.
 - **There is no warranty.** A Kronos in the wrong state can be bricked enough to
   require a CD-ROM reinstall. The patcher's rollback-on-failure logic is designed
-  to minimise this risk but cannot eliminate it.
-
----
-
-## Contributing
-
-This is research notes more than a "project". If you've used this work, found a
-bug, extended it to a different Kronos OS version, or want to discuss any aspect
-of the studying, please open an issue or a PR.
-
-If you're starting your own Kronos exploration, [`docs/workflow/`](docs/workflow/)
-has the methodology notes.
+  to minimise this risk but cannot eliminate it. 
 
 ## License
 
@@ -246,3 +207,12 @@ is released into the public domain — use, modify, distribute as you wish.
 
 The patched Korg binaries themselves are not distributed here; the patcher produces
 them from the user's own stock files at apply time.
+
+## Contributing
+
+This repo is more "research notes" than a "project". If you've used this work, found a
+bug, extended it to a different Kronos OS version, or want to discuss any aspect
+of the studying, please open an issue or a PR.
+
+If you're starting your own Kronos exploration, [`docs/workflow/`](docs/workflow/)
+has the methodology notes.
