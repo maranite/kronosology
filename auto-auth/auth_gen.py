@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Korg Kronos EX authorisation string generator — host-side reference implementation.
+Korg Kronos EX authorisation string generator — offline reference implementation.
 
 Implements the same algorithm as OA.ko::ParseAuth / VerifyAuthorizationString
 and the proposed oa_authgen.ko kernel module.  Use this to:

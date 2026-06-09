@@ -10,23 +10,32 @@ several intensive weeks of studying: a corpus of analysis notes, a working
 tool to install patched binaries on a stock unit, and a builder for custom Korg-format
 OS update packages.
 
-Most of the learnings are recorded in [`docs/`](docs/) (forewarning: it's a pretty dry read!).
+Most visitors will only be interrested in the below modification scripts, 
+which presently are only available to run on Linux. If you have a PC, consider installing 
+Windows Subsystem for Linux (WSL) to be able to use these scripts. 
 
+| You want to... | Go to | Risks Kronos not booting? |
+|---|---|---|
+| **Authorize All Installed EXs Options** (on any factory firmware version) | [auto-auth/](auto-auth/) | No |
+| **Install or Remove EXs banks via SSH** | [InstallEXs](docs/modules/InstallEXs.md) | No |
+| **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/) | Yes |
+| **Patch a stock Kronos via SSH** (you have root access) | [patcher/](patcher/) | Yes |
+| **Build your own custom OS-update package** | [update-builder/](update-builder/) | Yes |
+| **Decrypt the encrypted Mod / Eva / WaveMotion images offline** | [scripts/](scripts/) | No |
+| **Diff the encrypted volumes between 2 firmware update versions** | [scripts/](scripts/) — `diff_kronos_versions.sh` | No |
 
-The two executable parts are [`patcher/`](patcher/README.md) and [`update-builder/`](update-builder/README.md).
+If you have root + SSH access, you can generally still log in and recover if an update goes wrong, so you are strongly encouraged to consider making this preparation before using any of the riskier scripts. 
+
+If you choose to patch your kronos firmware via USB with no SSH to fall back on, DO NOT cry for help if things go wrong. You've been warned!
 
 ---
 
 ## What this repo will do for you
 
+Most of the learnings are recorded in [`docs/`](docs/) (forewarning: it's a pretty dry read!).
+
 | You want to... | Go to |
 |---|---|
-| **Patch a stock Kronos via SSH** (you have root access — uprooting tarball etc.) | [patcher/](patcher/) |
-| **Patch a stock Kronos via USB stick** (no root needed — uses Korg's OS-update flow) | [updater-package/](updater-package/) |
-| **Build your own custom OS-update package** | [update-builder/](update-builder/) |
-| **Decrypt the encrypted Mod / Eva / WaveMotion images offline** | [scripts/](scripts/) |
-| **Diff the encrypted volumes between 2 firmware update versions** | [scripts/](scripts/) — `diff_kronos_versions.sh` |
-| **Install or Remove EXs banks via SSH** | [InstallEXs](docs/modules/InstallEXs.md) |
 | Understand the Kronos software architecture end-to-end | [docs/system_overview.md](docs/system_overview.md) |
 | Browse module-by-module reverse-engineering notes | [docs/modules/](docs/modules/) |
 | Understand the boot integrity chain (loadoa → loadmod → cryptoloop → OA → Eva) | [docs/system_overview.md](docs/system_overview.md), [docs/modules/loadoa.md](docs/modules/loadoa.md), [docs/modules/loadmod.ko.md](docs/modules/loadmod.ko.md) |
@@ -41,43 +50,6 @@ The two executable parts are [`patcher/`](patcher/README.md) and [`update-builde
 The full doc index, including the per-binary deep-dives and the workflow notes, is in
 [`docs/README.md`](docs/README.md).
 
----
-
-## Repository layout
-
-```
-kronosology/
-├── README.md                       this file
-├── docs/                           the reverse-engineering corpus
-│   ├── README.md                   doc index
-│   ├── system_overview.md          how the whole thing hangs together
-│   ├── modules/                    per-binary deep-dives (OA.ko, loadmod, loadoa, etc.)
-│   ├── crypto/                     auth-string algorithm, NV2AC protocol, update signature
-│   ├── interfaces/                 /proc/.oacmd, file formats
-│   ├── preload/                    on-disk preset memory formats
-│   └── workflow/                   Ghidra setup, patch deployment, analysis methodology
-├── patcher/                        live-Kronos patcher (for rooted Kronos via SSH)
-│   ├── README.md                   how to use it
-│   └── kronos_patcher.sh           the script (busybox-compatible)
-├── updater-package/                USB-stick installer for NON-rooted Kronos
-│   ├── README.md                   how to build + use
-│   ├── build_updater.sh            produces output/kronosology-installer/
-│   └── output/kronosology-installer/  (built by the build script)
-├── update-builder/                 OS-update package builder (low-level)
-│   ├── README.md                   internals + usage
-│   └── update_builder.py
-├── tools/                          reusable techniques
-│   ├── README.md
-│   └── patch_omapnks4_cleanup.py   demo of adding new symbol imports to a .ko
-└── scripts/                        offline crypto tools for the encrypted volumes
-    ├── README.md                   complete usage + how the encryption works
-    ├── decrypt_kronos_img.py       AES-256-CBC + plain IV decryptor (Mod/Eva/WaveMotion), pure Python
-    ├── mount_kronos_img.sh         cryptsetup mount helper (alternative to Python path)
-    ├── diff_kronos_versions.sh     end-to-end version diff across encrypted volumes
-    └── getloopkey.s                i386 asm — on-device LOOP_GET_STATUS64 probe (key recovery)
-```
-
----
 
 ## Patching a stock Kronos
 

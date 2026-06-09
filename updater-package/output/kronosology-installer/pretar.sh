@@ -158,8 +158,8 @@ esac
 # Detect already-patched state
 ALREADY_PATCHED=0
 if [ "$(md5_of $SBIN_LOADMOD)" = "$MD5_LOADMOD_PATCHED" ] \
-&& [ "$(md5_of $SBIN_LOADOA)"    = "$MD5_LOADOA_PATCHED" ] \
-&& [ "$(md5_of $SBIN_OA)"     = "$MD5_OA_PATCHED" ]; then
+&& [ "$(md5_of $SBIN_LOADOA)"  = "$MD5_LOADOA_PATCHED" ] \
+&& [ "$(md5_of $SBIN_OA)"      = "$MD5_OA_PATCHED" ]; then
     ALREADY_PATCHED=1
 fi
 

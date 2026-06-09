@@ -462,13 +462,17 @@ static void blowfish_cfb64_encrypt(const u8 *key, unsigned int key_len,
 				   const u8 *plaintext, u8 *ciphertext,
 				   unsigned int len)
 {
-	struct bf_ctx ctx;
+	struct bf_ctx *ctx;
 	u8 sr[8];
 	u8 ks[8];
 	u32 block_in[2], block_out[2];
 	unsigned int i;
 
-	bf_setkey_ctx(&ctx, key, key_len);
+	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return;
+
+	bf_setkey_ctx(ctx, key, key_len);
 	memcpy(sr, iv_8, 8);
 
 	for (i = 0; i < len; i++) {
@@ -477,7 +481,7 @@ static void blowfish_cfb64_encrypt(const u8 *key, unsigned int key_len,
 				      (u32)sr[2] <<  8 | (u32)sr[3];
 			block_in[1] = (u32)sr[4] << 24 | (u32)sr[5] << 16 |
 				      (u32)sr[6] <<  8 | (u32)sr[7];
-			bf_encrypt_block(&ctx, block_out, block_in);
+			bf_encrypt_block(ctx, block_out, block_in);
 			ks[0] = (u8)(block_out[0] >> 24); ks[1] = (u8)(block_out[0] >> 16);
 			ks[2] = (u8)(block_out[0] >>  8); ks[3] = (u8)(block_out[0]);
 			ks[4] = (u8)(block_out[1] >> 24); ks[5] = (u8)(block_out[1] >> 16);
@@ -487,9 +491,10 @@ static void blowfish_cfb64_encrypt(const u8 *key, unsigned int key_len,
 		sr[i % 8] = ciphertext[i];  /* CFB-64: feedback is ciphertext */
 	}
 
-	memset(&ctx, 0, sizeof(ctx));
-	memset(ks,  0, sizeof(ks));
-	memset(sr,  0, sizeof(sr));
+	memset(ctx, 0, sizeof(*ctx));
+	kfree(ctx);
+	memset(ks, 0, sizeof(ks));
+	memset(sr, 0, sizeof(sr));
 }
 
 /* --------------------------------------------------------------------------
