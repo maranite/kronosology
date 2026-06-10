@@ -1,5 +1,4 @@
 # auto-auth — Automatic EXs Authorisation for Korg Kronos
-
 Authorises all installed EX libraries without writing anything to the Kronos
 internal disk. It generates device-specific authorization strings for [EXs options](https://korg.shop/sound-libraries/kronos-nautilus.html) that will be accepted by unmodified units, so future Korg OS updates keep working.
 
@@ -9,8 +8,23 @@ unloads itself.  Nothing else changes.
 
 Best for: a stock Kronos that has EX libraries already installed and just needs the auth strings populated.
 
-## Usage
+## Published EXs Option download URLs
+- [EXs12 SGX-1 Austrian Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs12/K2_EXs12.zip)
+- [EXs21 SGX-2 Italian F Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs21/K2_EXs21.zip)
+- [EXs22 SGX-2 Italian F Piano LE](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs22/K2_EXs22.zip)
+- [EXs23 2 Church Pianos](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs23/K2_EXs23.zip)
 
+- [EXs59 Stage Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs59/K2_EXs59.zip)
+- [EXs60 Electric Grand](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs60/K2_EXs60.zip)
+- [EXs67 Upright Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs67/EXs67.zip)
+
+- [EXs147 Acousticsamples C7 Grand Close](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs147/K2_EXs147.zip)
+- [EXs148 Acousticsamples C7 Grand Player](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs148/K2_EXs148.zip">)
+- [EXs150 Acousticsamples B-Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs150/K2_EXs150.zip)
+- [EXs157 MKS-EP](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs157/K2_EXs157.zip)
+- [EXs165 Modern Grand](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs165/EXs165.zip)
+
+## Usage
 Run the builder to create the required output directory:
 
 ```bash
@@ -38,7 +52,6 @@ sync
 Then insert into the Kronos, trigger **Global → OS Update**.  
 Voiala!.. all options will show as authorized.
 
-
 ## How it works
 
 The zero-footprint USB mode bypasses OA.ko entirely and writes directly to
@@ -49,3 +62,5 @@ The zero-footprint USB mode bypasses OA.ko entirely and writes directly to
 After using the USB authoriser, **power-cycle** the Kronos (full power-off ≥ 60 s,
 then on). See
 [`../docs/modules/OmapNKS4Module.ko_chip_wedge.md`](../docs/modules/OmapNKS4Module.ko_chip_wedge.md).
+
+
