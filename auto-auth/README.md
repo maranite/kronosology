@@ -19,7 +19,7 @@ Best for: a stock Kronos that has EX libraries already installed and just needs 
 - [EXs67 Upright Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs67/EXs67.zip)
 
 - [EXs147 Acousticsamples C7 Grand Close](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs147/K2_EXs147.zip)
-- [EXs148 Acousticsamples C7 Grand Player](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs148/K2_EXs148.zip">)
+- [EXs148 Acousticsamples C7 Grand Player](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs148/K2_EXs148.zip>)
 - [EXs150 Acousticsamples B-Piano](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs150/K2_EXs150.zip)
 - [EXs157 MKS-EP](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs157/K2_EXs157.zip)
 - [EXs165 Modern Grand](https://storage.korg.com/korgms/sound_libraries/Kronos_Nautilus/EXs165/EXs165.zip)
