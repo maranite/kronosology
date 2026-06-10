@@ -26,4 +26,3 @@ The binary requires only `GLIBC_2.0`, making it compatible with the Kronos's
 older glibc.  Compiler flags `-fno-stack-protector -D_FORTIFY_SOURCE=0 -no-pie`
 and a `--wrap=__libc_start_main` shim in `glibc_compat.c` prevent modern
 toolchain defaults from pulling in newer symbol versions.
-

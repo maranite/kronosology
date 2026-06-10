@@ -21,8 +21,7 @@ Linux (or WSL on Windows).
 | You want to... | Go to | Risks Kronos not booting? |
 |---|---|---|
 | **Authorize all EX libraries on a stock Kronos** (USB, no rooting required) | [`auto-auth/`](auto-auth/) | No |
-| **Intercept EX installs so auth is automatic forever** (SSH + `install.sh`) | [`auto-auth/`](auto-auth/) | No |
-| **Patch a stock Kronos** — full offline patcher, no live access during build | [`offline-patcher/`](offline-patcher/) | Yes |
+| **Patch a stock Kronos** — removes EX auth checks, auto-auth on every install | [`offline-patcher/`](offline-patcher/) | Yes |
 
 > **If you are using the offline patcher for the first time,** set up SSH root
 > access before patching so you can recover if anything goes wrong.  See

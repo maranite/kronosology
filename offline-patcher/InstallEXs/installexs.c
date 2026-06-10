@@ -273,24 +273,18 @@ static void real_main(int argc, char **argv, char **envp)
 
     /* ── 0. Ensure oa_authgen.ko is loaded ──
      * Check for /proc/.oaauth; if absent the module isn't loaded.
-     * Fork /bin/sh to insmod it with the OA.ko symbol addresses from
-     * /proc/kallsyms — same logic as the boot-time OA.rc snippet. */
+     * Fork /bin/sh to insmod it 
+     */
     {
         long fd = do_open(OAAUTH, O_RDONLY);
         if (fd < 0) {
             /* /proc/.oaauth absent — attempt to load the module */
             static const char load_cmd[] =
                 "[ -f /sbin/oa_authgen.ko ] || exit 0;"
-                " S=$(grep ' SetupAtmelForAuthorizations' /proc/kallsyms 2>/dev/null"
-                "  | cut -d' ' -f1);"
-                " R=$(grep ' fFfFfFfFfFfF13' /proc/kallsyms 2>/dev/null"
-                "  | grep '\\[OA\\]' | cut -d' ' -f1);"
-                " if [ -n \"$S\" ] && [ -n \"$R\" ];"
-                " then /sbin/insmod /sbin/oa_authgen.ko"
-                "  setup_atmel_addr=0x${S} chip_read_addr=0x${R};"
-                " else /sbin/insmod /sbin/oa_authgen.ko;"
-                " fi";
+                "/sbin/insmod /sbin/oa_authgen.ko;";
+            
             static const char sh_path[] = "/bin/sh";
+            
             char *const sh_av[] = {
                 (char *)sh_path, (char *)"-c", (char *)load_cmd, (void *)0
             };
@@ -332,7 +326,7 @@ static void real_main(int argc, char **argv, char **envp)
             log_err("execve " REAL " failed");
             do_exit(127);
         }
-
+        else
         {
             int status = 0;
             long ret;

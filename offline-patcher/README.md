@@ -4,13 +4,24 @@ Patches a Korg Kronos entirely on the host machine — no live Kronos access
 required during the build step.  Produces a signed Korg UpdateOS USB package
 containing the patched binaries pre-embedded in the tar payload.
 
-What it patches:
+The package is **self-contained and stock-system compatible**: no prior rooting,
+SSH access, or manual module installation is required.
+
+What it patches / installs:
 - **OA.ko** — removes the EX-bank authorization requirement (11 patch sites)
 - **loadmod.ko** — bypasses the MD5 integrity chain so patched files boot cleanly
-- **loadoa** — redirects binary paths from `/korg/Mod/` to `/sbin/` so the
-  patched copies are loaded instead of the originals from the encrypted image
-
-Stock-system compatible: no prior rooting or SSH access required.
+- **loadoa** — redirects `/korg/Mod/OA.ko`, `/korg/Mod/KorgUsbAudioDriver.ko`, and
+  `/korg/Eva/Eva` to `/sbin/` equivalents so patched copies are used at boot
+- **`/sbin/Eva`** — shell wrapper: insmod's `oa_authgen.ko` at boot, then exec's the
+  real Eva binary.  This is how `oa_authgen.ko` is loaded on every boot — no
+  init script changes required
+- **Eva.elf** — patched Eva binary: intercepts the front-panel Authorise button to
+  auto-generate auth strings instead of showing the manual-entry dialog
+  _(skipped if `Eva.img` is absent; the wrapper still loads `oa_authgen.ko`)_
+- **oa_authgen.ko** — kernel module that exposes `/proc/.oaauth`; included in the
+  package and deployed to `/sbin/`; loaded at every boot by the Eva wrapper
+- **InstallEXs** — replaces `/sbin/InstallEXs` with a wrapper that auto-generates
+  and saves the auth string whenever an EX is installed from the front panel
 
 ---
 
@@ -21,9 +32,12 @@ pip install cryptography
 ```
 
 A Korg Kronos OS update folder (the directory that contains `mnt/`, which
-contains `korg/ro/Mod.img`, `korg/ro/loadoa`, `korg/ro/loadmod.ko`).
+contains `korg/ro/Mod.img`, `korg/ro/Eva.img`, `sbin/loadoa`, `sbin/loadmod.ko`).
 Download from Korg's site and unzip; the folder is typically named
 `KRONOS_Update_3_2_2/` or similar.
+
+`Eva.img` is optional — if absent, the Eva patch is skipped and a warning is
+printed.  All other patches still apply.
 
 ---
 
@@ -46,10 +60,38 @@ Output directory (default: `offline-patcher/output/kronosology-offline-patched/`
 ```
 output/kronosology-offline-patched/
 ├── install.info           ← signed package metadata
-├── kronosology.tar.gz     ← payload: patched sbin/OA.ko, sbin/loadmod.ko, sbin/loadoa,
-│                             sbin/KorgUsbAudioDriver.ko (stock copy at new path)
-├── pretar.sh              ← pre-flight: verify stock MD5s, back up originals
-└── posttar.sh             ← post-install: set permissions, log results
+├── kronosology.tar.gz     ← payload:
+│                               sbin/OA.ko                  (patched, from Mod.img)
+│                               sbin/loadmod.ko             (patched)
+│                               sbin/loadoa                 (patched — 3 path redirects)
+│                               sbin/KorgUsbAudioDriver.ko  (stock, from Mod.img)
+│                               sbin/Eva                    (wrapper script — loads oa_authgen.ko)
+│                               sbin/Eva.elf                (patched binary; if Eva.img available)
+│                               sbin/oa_authgen.ko          (kernel module; if pre-built)
+│                               sbin/InstallEXs             (our wrapper; if built)
+├── pretar.sh              ← backs up originals; renames InstallEXs → InstallEXs.real
+├── posttar.sh             ← one-shot auth for existing EXs; writes version marker
+└── README.txt
+```
+
+---
+
+## Building InstallEXs
+
+`patch_firmware_offline.py` will attempt `make` automatically if
+`InstallEXs/InstallEXs` is absent.  To build it manually:
+
+```bash
+sudo apt install gcc-multilib    # needs 32-bit compiler support
+cd offline-patcher/InstallEXs
+make
+# → InstallEXs  (i386 ELF, stripped, ~10 KB)
+```
+
+The `cryptography` Python package is the only other prerequisite:
+
+```bash
+pip install cryptography
 ```
 
 ---
@@ -94,10 +136,35 @@ an ET_REL (relocatable) object with a stable `.text` base.  The patches:
 offsets from each.  This bypasses both MD5 check stages so the integrity chain
 passes even with modified files.
 
-**loadoa** patches are two string replacements: `/korg/Mod/OA.ko` → `/sbin/OA.ko`
-and `/korg/Mod/KorgUsbAudioDriver.ko` → `/sbin/KorgUsbAudioDriver.ko`.  This
-redirects the loader to the patched copies extracted to `/sbin/` by the UpdateOS
-tar payload.
+**loadoa** patches are three null-padded string replacements (same byte length,
+always safe):
+- `/korg/Mod/OA.ko` → `/sbin/OA.ko` — loads patched OA from `/sbin/`
+- `/korg/Mod/KorgUsbAudioDriver.ko` → `/sbin/KorgUsbAudioDriver.ko`
+- `/korg/Eva/Eva` → `/sbin/Eva` — executes `/sbin/Eva` (our wrapper) at startup
+
+**`/sbin/Eva` wrapper** is a small shell script deployed by the tar:
+```sh
+#!/bin/sh
+insmod /sbin/oa_authgen.ko 2>/dev/null || true
+exec /sbin/Eva.elf "$@"      # or /korg/Eva/Eva if Eva.img was absent
+```
+loadoa exec's `/sbin/Eva` as its final startup step, after `OmapNKS4Module.ko`
+is already loaded — which is exactly when `oa_authgen.ko` (which depends on
+`OmapNKS4Module.ko` exports) can safely be insmod'd.  No init script changes
+are required.
+
+**Eva.elf** is patched with a 168-byte code cave written into a 206-byte zero
+region in `.rodata`.  When the front-panel Authorise button is pressed, instead
+of opening the `CAuthKeyboard` dialog for manual code entry, the cave:
+1. Calls `GetProductOptionFileName` to get the option file name (e.g. `S023`)
+2. Opens `/proc/.oaauth` (exposed by `oa_authgen.ko`)
+3. Writes `GEN:S023` to generate the device-specific auth string
+4. Reads back the 24-character result
+5. Calls `SendCommandAuthorizeOption` to submit it to OA.ko
+
+If `Eva.img` was absent, `Eva.elf` is not deployed and the wrapper exec's the
+stock Eva from the cryptoloop mount instead.  The `oa_authgen.ko` loading still
+happens, so the `InstallEXs` wrapper works regardless.
 
 ### Signing
 
@@ -109,13 +176,20 @@ section.  Full algorithm: [`../docs/crypto/update_signature.md`](../docs/crypto/
 
 ## Compatibility
 
-Tested against Kronos OS 3.2.1 and 3.2.2.  The `--verify` flag checks all
-patch sites against known stock MD5s and exits non-zero if anything is
-unexpected — run it against a new firmware version before committing to a build.
+Patch strategies are version-agnostic where possible:
+- **OA.ko** — section-relative offsets; same for any ET_REL with stable section layout
+- **loadmod.ko** — `.symtab` symbol lookup with byte-pattern fallback
+- **loadoa** — fixed-length string replacement; works on any version containing those paths
+- **Eva** — VMA-absolute constants verified against 3.2.1 and 3.2.2
 
-Known stock MD5s are embedded in the script for both 3.2.1 and 3.2.2.  Adding
-a new version requires extracting the stock binaries, computing their MD5s, and
-adding an entry to `KNOWN_STOCK_MD5` in `patch_firmware_offline.py`.
+The script reports the detected firmware version from known stock MD5s and
+**proceeds on unrecognised versions with a warning** (rather than refusing).
+Run `--verify` first against an unfamiliar firmware version to check that all
+patch sites match before committing to a build.
+
+To add a new firmware version to the known-MD5 table, extract the stock
+binaries, compute their MD5s, and add an entry to `KNOWN_STOCK_MD5` in
+`patch_firmware_offline.py`.
 
 ---
 
