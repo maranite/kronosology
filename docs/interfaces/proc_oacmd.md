@@ -66,7 +66,7 @@ case 'A','U':
 1. Calls `VerifyAuthorizationString` which:
    - Reads 24 bytes from chip addresses `0x10`/`0x18`/`0x20`
    - Base32-decodes the 24-char auth string → 15 ciphertext bytes
-   - Blowfish-CFB-8 decrypts using the chip secret as key
+   - Blowfish-CFB-64 decrypts using `chip_secret[0:16]` as key, `chip_secret[16:24]` as IV
    - Verifies the MD5 fingerprint against the named option file
 2. If valid: iterates `CSTGInstalledEXProducts` looking for an EX whose 4-byte option ID
    matches the decrypted plaintext bytes `[8..11]`

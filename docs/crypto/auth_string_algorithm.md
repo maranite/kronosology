@@ -6,11 +6,12 @@ algorithm is what makes it possible to install any EX, on any Kronos, with a sto
 (unpatched) `OA.ko`.
 
 **studied from** `OA.ko::VerifyAuthorizationString` (0x207de0), `ParseAuth`
-(0x207890), `ParseAuths` (0x207c50), `moancjsd82` (0x4f5f00, the Blowfish-CFB-8 codec),
+(0x207890), `ParseAuths` (0x207c50), `moancjsd82` (0x4f5f00, the Blowfish-CFB-64 codec),
 `DecodeBytesFromAscii` (0x4f39c0), `VerifyAndSaveAuthString` (0x48290),
 `ProcessOACmd` (0xa0c0), `oa_cmd_write` (0x9f20).
 
-**Verified end-to-end** by a Python reference implementation at `/tmp/auth_algo.py` —
+**Verified end-to-end** by the Python reference implementation at
+[`../../auto-auth/auth_gen.py`](../../auto-auth/auth_gen.py) —
 synthetic auth string generates, decodes, and round-trip-verifies.
 
 ---
@@ -48,9 +49,9 @@ plaintext_15  =  salt_8  ||  option_id_4  ||  fingerprint_3
 
   where fingerprint_3 = MD5(plaintext[0..11] || option_file_bytes)[3], [7], [11]
 
-ciphertext_15 = Blowfish_CFB8_encrypt(
-                    key  = chip_secret_24,
-                    iv   = chip_secret_24[16:24],
+ciphertext_15 = Blowfish_CFB64_encrypt(
+                    key  = chip_secret_24[0:16],   # 16 bytes only
+                    iv   = chip_secret_24[16:24],  # 8 bytes
                     data = plaintext_15)
 
 auth_string_24 = custom_base32_encode(ciphertext_15)
@@ -65,10 +66,10 @@ auth_string_24 = custom_base32_encode(ciphertext_15)
    Take bytes `[3]`, `[7]`, `[11]` of the 16-byte digest. This is the truncated
    fingerprint that ties the auth string to a specific option file's content.
 3. **Assemble the 15-byte plaintext.** `plaintext_15 = plain_12 || fingerprint_3`.
-4. **Blowfish-CFB-8 encrypt.** Key = the 24 chip-secret bytes (standard Blowfish key
-   schedule with cycled key extension — OA.ko uses the bog-standard Blowfish P-array
-   constants, digits of π, stored at Ghidra address `0x678d60`). IV = the last 8 bytes
-   of the key (`chip_secret_24[16:24]`). Mode = byte-level CFB.
+4. **Blowfish-CFB-64 encrypt.** Key = the first 16 bytes of the chip secret
+   (`chip_secret_24[0:16]`).  IV = the last 8 bytes (`chip_secret_24[16:24]`, one
+   Blowfish block).  Mode = CFB with 64-bit (8-byte) feedback blocks — not byte-level
+   CFB-8.  OA.ko uses the standard Blowfish P-array (digits of π, Ghidra `0x678d60`).
 5. **Base32 encode.** Custom alphabet `0123456789ACDEFGHJKLMNPQRTUVWXYZ`. Encode the
    15 ciphertext bytes as 24 base32 chars (8 chars per 5-byte chunk × 3 chunks).
    When *decoding*, the chars `B/O/I/S` are accepted and remapped to `8/0/1/5` (visual
@@ -77,9 +78,9 @@ auth_string_24 = custom_base32_encode(ciphertext_15)
 
 ### Reference implementation
 
-See `/tmp/auth_algo.py` (Python, depends on `pycryptodome` for Blowfish-ECB). The
-implementation is ~150 lines and is verified by encoding-then-decoding a synthetic
-input.
+See [`../../auto-auth/auth_gen.py`](../../auto-auth/auth_gen.py) (Python, depends on
+`pycryptodome` for Blowfish-CFB).  Supports `gen`, `verify`, and `selftest` subcommands.
+Run `python3 auth_gen.py selftest` to round-trip verify on any host.
 
 ---
 
@@ -89,10 +90,11 @@ input.
 
 ```
 for each non-empty line:
-    ct = custom_base32_decode(line)                    # 15 bytes
-    chip_secret = nv2ac_read_data(0x10, 0x18, 0x20)    # 24 bytes from chip
-    pt = Blowfish_CFB8_decrypt(chip_secret, ct,
-                               iv = chip_secret[16:24])
+    ct = custom_base32_decode(line)                         # 15 bytes
+    chip_secret = nv2ac_read_data(0x10, 0x18, 0x20)         # 24 bytes from chip
+    pt = Blowfish_CFB64_decrypt(key = chip_secret[0:16],
+                                iv  = chip_secret[16:24],
+                                ct  = ct)
     if len(pt) != 15: reject
     salt, option_id, fp_claimed = pt[0:8], pt[8:12], pt[12:15]
     path = "/korg/rw/Options/" + option_id
@@ -128,39 +130,21 @@ No Korg server, no per-customer key, no online activation.
 
 ---
 
-## Userspace access options <a name="userspace-access-options"></a>
+## Userspace access — implemented via `oa_authgen.ko` ✅
 
 `OA.ko::nv2ac_read_data` is kernel-only. No stock `/proc` file exposes the 24 secret
-bytes to userspace. To compute an auth string in userspace, one of:
+bytes to userspace.  The solution is **`oa_authgen.ko`**, a kernel module built and
+deployed at [`../../auto-auth/oa_authgen/`](../../auto-auth/oa_authgen/).
 
-### (A) Tiny helper `.ko` module (recommended)
+`oa_authgen.ko`:
+- Imports `stgNV2AC_sync_cmd` / `stgNV2AC_sync_read_cmd` from `OmapNKS4Module.ko`
+- Implements the full **GPA (Group Authentication Protocol)** natively in C,
+  reverse-engineered from `OA_322.ko` — no dependency on `OA.ko`
+- Reads the 24-byte chip secret via authenticated zone reads
+- Exposes `/proc/.oaauth` (see [command reference](../../auto-auth/README.md#procauthcommandreference))
 
-A new ~100-LOC kernel module — call it `oa_authgen.ko` — that:
-
-- Imports the already-exported `stgNV2AC_sync_read_cmd` (from `OmapNKS4Module.ko`)
-- Reads the 24 secret bytes
-- Exposes `/proc/.oaauth`: writing `"GEN:Sxxx"` returns the freshly-generated auth string
-  for option file `Sxxx`; OR writing nothing and reading returns the raw 24-byte secret
-
-```
-/* sketch of oa_authgen.ko */
-static ssize_t oaauth_write(struct file *f, const char __user *buf,
-                            size_t n, loff_t *o) {
-    char cmd[32]; copy_from_user(cmd, buf, min(n, 32));
-    if (strncmp(cmd, "GEN:", 4) == 0) {
-        u8 secret[24];
-        stgNV2AC_sync_read_cmd(0x10, 8, secret+0);
-        stgNV2AC_sync_read_cmd(0x18, 8, secret+8);
-        stgNV2AC_sync_read_cmd(0x20, 8, secret+16);
-        /* read option file, compute MD5, Blowfish-CFB-8, base32 encode */
-        compute_auth_string(secret, &cmd[4], result_buf);
-        /* stash result_buf for next read() */
-    }
-    return n;
-}
-```
-
-Patched `InstallEXs` then does:
+The `InstallEXs` C wrapper (at [`../../auto-auth/wrapper_c/`](../../auto-auth/wrapper_c/))
+consumes it:
 
 ```c
 fd = open("/proc/.oaauth", O_RDWR);
@@ -170,21 +154,10 @@ close(fd);
 
 fd = open("/proc/.oacmd", O_WRONLY);
 char cmd[32]; snprintf(cmd, 32, "AU:%s", authstring);
-write(fd, cmd, 3+24);
+write(fd, cmd, 3 + 24);
 close(fd);
 /* stock OA.ko's VerifyAndSaveAuthString does the rest */
 ```
-
-### (B) Userspace re-implementation of the NV2AC + GPA cipher
-
-Possible (GPA is fully RE'd — see [`atmel_nv2ac.md`](atmel_nv2ac.md)), but requires
-root + `iopl()` and is substantial code. Not recommended when option (A) is so much
-simpler.
-
-### (C) Patch `OA.ko` to add a `GS:` (get-secret) command
-
-Defeats the goal of leaving `OA.ko` stock so future OS updates keep working. Mentioned
-only for completeness.
 
 ---
 

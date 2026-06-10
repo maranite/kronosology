@@ -22,12 +22,13 @@ FT_LIBS   := $(shell freetype-config --libs 2>/dev/null || \
                      pkg-config --libs freetype2 2>/dev/null || \
                      echo -lfreetype)
 
-CFLAGS  := -std=gnu99 $(M32) -fno-pie -O2 -Wall -Wextra -Wno-unused-result \
+CFLAGS  := -std=gnu99 $(M32) -fno-pie -fno-stack-protector -U_FORTIFY_SOURCE \
+           -D_FORTIFY_SOURCE=0 -O2 -Wall -Wextra -Wno-unused-result \
            $(FT_CFLAGS)
-LDFLAGS := $(M32) -fno-pie $(FT_LIBS) -lm
+LDFLAGS := $(M32) -no-pie -fno-pie -Wl,--wrap=__libc_start_main $(FT_LIBS) -lm
 
 TARGET := DisplayUpdaterMessage
-SRC    := kronosology_updater_msg.c
+SRC    := kronosology_updater_msg.c glibc_compat.c
 
 all: $(TARGET)
 

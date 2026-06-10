@@ -94,21 +94,25 @@ Crypto imports from libc/libcrypto: `EVP_DigestInit`, `EVP_DigestUpdate`, `EVP_D
 
 ---
 
-## Planned patch: make InstallEXs produce the auth string
+## InstallEXs auto-auth wrapper — IMPLEMENTED ✅
 
-The full plan is in [`../crypto/auth_string_algorithm.md`](../crypto/auth_string_algorithm.md).
-Two artifacts:
+See [`../../auto-auth/`](../../auto-auth/) for the full implementation.
 
-1. **`oa_authgen.ko`** — small companion kernel module (~100 LOC) that calls
-   `stgNV2AC_sync_read_cmd` (exported by `OmapNKS4Module.ko`) to read the 24-byte
-   per-device chip secret. Exposes `/proc/.oaauth`: a write of `"GEN:Sxxx"` returns
-   the freshly-generated 24-char auth string for that option file.
-2. **Patched / rewritten `InstallEXs`** — after `CopyOptionFile`, opens `/proc/.oaauth`,
-   writes `GEN:Sxxx`, reads back the auth string, then writes `"AU:<authstring>"` to
-   `/proc/.oacmd`. Stock `OA.ko` validates and appends to `AuthorizationStrings`.
+Two artifacts, both built and deployed:
 
-End state: any EX installs cleanly on any Kronos, producing a legitimate auth string,
-with the stock `OA.ko` unchanged (so future Korg OS updates still work).
+1. **`oa_authgen.ko`** — kernel module (~24 KB built) that implements the full GPA
+   (Group Authentication Protocol) natively in C, reverse-engineered from OA_322.ko.
+   Reads the 24-byte per-device chip secret via `stgNV2AC_sync_read_cmd` (exported by
+   `OmapNKS4Module.ko`). Exposes `/proc/.oaauth`: write `"GEN:Sxxx"` to generate the
+   auth string for that option file. No dependency on OA.ko — works during UpdateOS.
+2. **`InstallEXs` C wrapper** — compiled no-stdlib i386 binary that replaces
+   `/sbin/InstallEXs`. After running the real `InstallEXs.real`, it opens
+   `/proc/.oaauth`, writes `GEN:Sxxx`, reads back the 24-char auth string, then writes
+   `"AU:<authstring>"` to `/proc/.oacmd`. Stock OA.ko validates and appends to
+   `AuthorizationStrings`.
+
+Result: any EX installs cleanly on any Kronos, producing a legitimate auth string
+accepted by stock, unmodified OA.ko — future Korg OS updates keep working.
 
 ---
 

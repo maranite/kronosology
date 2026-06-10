@@ -59,19 +59,9 @@ fi
 if grep -q oa_authgen /proc/modules 2>/dev/null; then
     echo "oa_authgen.ko already loaded — skipping insmod"
 else
-    cp "$KO" /sbin/oa_authgen.ko
-    # Pass OA.ko function addresses for authenticated chip reads.
-    # After SetupAtmelForAuthorizations the chip uses an encrypted session;
-    # fFfFfFfFfFfF13 handles per-read cipher sync internally.
-    SETUP_ADDR=$(grep ' SetupAtmelForAuthorizations' /proc/kallsyms 2>/dev/null | cut -d' ' -f1)
-    READ_ADDR=$(grep ' fFfFfFfFfFfF13' /proc/kallsyms 2>/dev/null | grep '\[OA\]' | cut -d' ' -f1)
-    if [ -n "$SETUP_ADDR" ] && [ -n "$READ_ADDR" ]; then
-        /sbin/insmod /sbin/oa_authgen.ko setup_atmel_addr=0x${SETUP_ADDR} chip_read_addr=0x${READ_ADDR}
-        echo "oa_authgen.ko loaded (setup=0x${SETUP_ADDR} read=0x${READ_ADDR})"
-    else
-        /sbin/insmod /sbin/oa_authgen.ko
-        echo "oa_authgen.ko loaded (OA.ko addresses not found in kallsyms)"
-    fi
+    cp "$KO" /sbin/oa_authgen.ko  
+    /sbin/insmod /sbin/oa_authgen.ko
+    echo "oa_authgen.ko loaded (OA.ko addresses not found in kallsyms)"
 fi
 
 if [ ! -e /proc/.oaauth ]; then
@@ -90,21 +80,3 @@ fi
 cp "$WRAPPER" /sbin/InstallEXs
 chmod +x /sbin/InstallEXs
 echo "Installed wrapper at /sbin/InstallEXs"
-
-# ── 3. Quick smoke test ───────────────────────────────────────────────────────
-echo ""
-echo "Smoke test: writing dummy GEN command to /proc/.oaauth ..."
-printf 'GEN:S000' > /proc/.oaauth 2>/dev/null && {
-    result=$(cat /proc/.oaauth 2>/dev/null)
-    if [ -n "$result" ]; then
-        echo "  Got auth string (${#result} chars): $result"
-        echo "  NOTE: S000 probably doesn't exist — this tests the pipe, not the result"
-    else
-        echo "  /proc/.oaauth returned empty (option file S000 may not exist — that is OK)"
-    fi
-} || echo "  GEN write failed (chip may not be responding — test after full boot)"
-
-echo ""
-echo "auto-auth installation complete."
-echo "To make oa_authgen.ko load at boot, add to /etc/rc.local or equivalent:"
-echo "  insmod /sbin/oa_authgen.ko"

@@ -40,7 +40,7 @@ remain authoritative for their topics and are linked from here.
 
 | Topic | Doc |
 |---|---|
-| EX authorisation-string algorithm (base32 + Blowfish-CFB-8 + MD5 + chip secret) | [crypto/auth_string_algorithm.md](crypto/auth_string_algorithm.md) |
+| EX authorisation-string algorithm (base32 + Blowfish-CFB-64 + MD5 + chip secret) | [crypto/auth_string_algorithm.md](crypto/auth_string_algorithm.md) |
 | OS-update script signature (SHA-1 + 16-byte `UpdaterScriptsKey`) | [crypto/update_signature.md](crypto/update_signature.md) |
 | Atmel NV2AC chip protocol & GPA stream cipher | [crypto/atmel_nv2ac.md](crypto/atmel_nv2ac.md) |
 | **Cryptoloop keys (Mod/Eva/WaveMotion) — full chain + recovered keys** | [crypto/cryptoloop_keys.md](crypto/cryptoloop_keys.md) |

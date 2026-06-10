@@ -395,7 +395,7 @@ without the chip secret.
 
 ## Related
 
-- [`auth_string_algorithm.md`](auth_string_algorithm.md) — the encoding/decoding of an auth string (base32-ish + Blowfish-CFB-8 + MD5)
+- [`auth_string_algorithm.md`](auth_string_algorithm.md) — the encoding/decoding of an auth string (base32 + Blowfish-CFB-64 + MD5)
 - [`atmel_nv2ac.md`](atmel_nv2ac.md) — chip protocol + GPA stream cipher
 - [`../modules/OA.ko_auth.md`](../modules/OA.ko_auth.md) — patch deployment reference (which sites to break to bypass auth)
 - [`../interfaces/proc_oacmd.md`](../interfaces/proc_oacmd.md) — the `/proc/.oacmd` dispatcher that ProcessOACmd implements

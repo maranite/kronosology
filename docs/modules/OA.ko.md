@@ -158,7 +158,7 @@ OA.ko contains its own copies of (so that loadable-module independence is preser
 |---|---|---|
 | MD5 | `md5_init`/`md5_append`/`md5_finish` @ `0x4f57d0`/`0x4f5800`/`0x4f5900` | Used by `ParseAuth` for option-file fingerprinting |
 | Blowfish ECB | `BlowfishEncryptBlock` @ `0x4f5b30` | Standard, P/S tables at `0x678d60` |
-| Blowfish CFB-8 | `moancjsd82` @ `0x4f5f00` | Used for auth-string ciphertext |
+| Blowfish CFB-64 | `moancjsd82` @ `0x4f5f00` | Auth-string ciphertext; key=chip[0:16], IV=chip[16:24] |
 | Custom base32 | `DecodeBytesFromAscii` @ `0x4f39c0` | Alphabet `0123456789ACDEFGHJKLMNPQRTUVWXYZ`, remap `B/O/I/S → 8/0/1/5` |
 | NV2AC chip I/O | `nv2ac_read_data` @ `0x4f4840` | Wraps `stgNV2AC_sync_read_cmd` exported from `OmapNKS4Module.ko` |
 | Atmel auth crypto | `atmel_auth_compute_c1` @ `0x4f61c0`, `atmel_auth_set_params` @ `0x4f61a0` | Per-device challenge-response |

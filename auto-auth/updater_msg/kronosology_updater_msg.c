@@ -51,9 +51,10 @@
 #include FT_FREETYPE_H
 
 /* ── OmapNKS4 ioctl numbers ─────────────────────────────────────────────── */
-#define OMAPNKS4_SET_PAL     0x40047209u  /* _IOW('r', 9,  4 bytes) one entry  */
-#define OMAPNKS4_FILL_RECT   0x40107208u  /* _IOW('r', 8, 16 bytes) hw fill    */
-#define OMAPNKS4_GET_VERSION 0x4004720eu  /* _IOWR('r',14, 4 bytes) 0 or 1     */
+#define OMAPNKS4_SET_PAL       0x40047209u  /* _IOW('r', 9,  4 bytes) one entry  */
+#define OMAPNKS4_FILL_RECT     0x40107208u  /* _IOW('r', 8, 16 bytes) hw fill    */
+#define OMAPNKS4_GET_VERSION   0x4004720eu  /* _IOWR('r',14, 4 bytes) 0 or 1     */
+#define OMAPNKS4_XAXIS_BYTES   0x40047206u  /* _IOW('r', 6,  4 bytes) scanline w */
 
 /* Passed to OMAPNKS4_FILL_RECT */
 struct omapnks4_rect {
@@ -317,6 +318,12 @@ static int fb_connect(void)
         fprintf(stderr, "DisplayUpdaterMessage: mmap failed\n");
         g_fb = NULL;
         close(g_fd); g_fd = -1; return -1;
+    }
+
+    /* Set scanline stride to screen width (matches Korg's ConnectOmapFB) */
+    {
+        uint32_t xbytes = g_w;
+        ioctl(g_fd, (int)OMAPNKS4_XAXIS_BYTES, &xbytes);
     }
 
     /* Enable and clear the front-panel display */
