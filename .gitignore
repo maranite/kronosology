@@ -5,3 +5,6 @@
 
 # compiled host binary (regenerable via make)
 /loadoa/loadoa
+
+# OA coverage manifest (regenerable from Ghidra)
+reconstructed/OA/manifest/*.csv
