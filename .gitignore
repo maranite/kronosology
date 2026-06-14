@@ -2,3 +2,6 @@
 **/*.ko
 **/*.o
 ! auto-auth/oa_authgen/oa_authgen.ko
+
+# compiled host binary (regenerable via make)
+/loadoa/loadoa
