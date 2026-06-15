@@ -8,3 +8,7 @@
 
 # OA coverage manifest (regenerable from Ghidra)
 reconstructed/OA/manifest/*.csv
+
+# OA host verification binaries (regenerable via cc)
+reconstructed/OA/verify/test_*
+!reconstructed/OA/verify/test_*.c
