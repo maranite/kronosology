@@ -16,7 +16,8 @@ TARGET_CXXFLAGS := -m32 -mregparm=3 -fno-exceptions -fno-rtti -ffreestanding -fn
 HOST_CC         ?= cc
 HOST_CFLAGS     := -Wall -Wextra -O2 -Iinclude
 
-SRC := src/auth/klm_manager.cpp
+SRC := src/auth/klm_manager.cpp \
+       src/auth/products.cpp
 OBJ := $(SRC:.cpp=.o)
 
 TESTS := verify/test_klm_auth

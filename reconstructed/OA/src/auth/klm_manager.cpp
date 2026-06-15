@@ -10,6 +10,7 @@
 
 #include "auth.h"
 #include "oa_internal.h"   /* CSTGGlobal/VoiceModelManager/EffectManager singletons, rdtsc */
+#include "oa_heap.h"       /* oa_heap_base(), oa_heap_region() */
 
 struct CSTGKLMManager *CSTGKLMManager::sInstance;
 
@@ -45,21 +46,10 @@ static inline void stamp_object(void *obj, int idSlot, int setSlot, int recomput
 	setAuth(obj);
 }
 
-/*
- * The multisample-bank manager is a sub-object of the STG global region owned by
- * CSTGHeapManager.  The binary derives its address as:
- *     base = (heap != sentinel) ? *(heap+0x38) + *(heap+0x1e8498) : 0
- *     bankmgr = base + 0x60524
- * Kept as an accessor so the heap-internal offsets stay local to CSTGHeapManager's own
- * reconstruction rather than leaking into the auth layer.
- */
+/* The multisample-bank manager sits at a fixed offset inside the heap-managed region. */
 static inline struct CSTGMultisampleBankManager *klm_bank_manager(void)
 {
-	char *heap = (char *)CSTGHeapManager::sInstance;
-	unsigned int base = 0;
-	if (heap != 0)		/* binary guards via a -0x2c sentinel == null heap */
-		base = *(unsigned int *)(heap + 0x38) + *(unsigned int *)(heap + 0x1e8498);
-	return (struct CSTGMultisampleBankManager *)(base + 0x60524);
+	return (struct CSTGMultisampleBankManager *)(oa_heap_base() + 0x60524);
 }
 
 /*
@@ -80,33 +70,13 @@ static void build_legacy_builtin_uuid(unsigned char uuid[16], unsigned char inde
 	uuid[15] = index;
 }
 
-/*
- * A product's authorization-entry table lives in the heap-managed region, located by the
- * product's slot index (auth header +0x9a, < 100000).  The binary derives the base as
- *     base = *(heap + 0x24 + idx*0x14) + *(heap + 0x1e8498)
- * and each entry is 0x98 bytes.  Returns 0 for an out-of-range index.
- */
-static inline char *klm_product_auth_table(unsigned int productIndex)
-{
-	char *heap = (char *)CSTGHeapManager::sInstance;
-	if (productIndex >= 100000)
-		return 0;
-	return (char *)(*(unsigned int *)(heap + 0x24 + productIndex * 0x14) +
-			*(unsigned int *)(heap + 0x1e8498));
-}
-
-/* Authorization-entry layout (0x98 bytes) inside a product's table. */
+/* Authorization-entry layout (0x98 bytes) inside a product's entry table. */
 #define AE_STRIDE   0x98
 #define AE_TYPE     0	/* int[0]  : 0=voice model, 1=effect, 2=multisample bank, else skip */
 #define AE_ID       2	/* int[2]  : VM/FX id, or UUID dword 0 for a bank                    */
 #define AE_UUID1    3	/* int[3]  : UUID dword 1                                            */
 #define AE_UUID2    4	/* int[4]  : UUID dword 2                                            */
 #define AE_UUID3    5	/* int[5]  : UUID dword 3 (byte-15 LSB masked off before hashing)   */
-
-/* Product auth-header fields (at product->pAuthHeader). */
-#define PH_EXTRA    0x04	/* dwExtra stamped onto each bank                             */
-#define PH_COUNT    0x98	/* uint16 entry count                                        */
-#define PH_INDEX    0x9a	/* uint32 product slot index (< 100000)                      */
 
 CSTGKLMManager::CSTGKLMManager(void)
 {
@@ -288,12 +258,12 @@ void CSTGKLMManager::AuthorizeBuiltins(void)
  */
 int CSTGKLMManager::AuthorizeProduct(struct CSTGEXProductInfo *product)
 {
-	const char *hdr = (const char *)product->pAuthHeader;	/* product +0x04 */
-	char *table = klm_product_auth_table(*(const unsigned int *)(hdr + PH_INDEX));
-	unsigned int count = *(const unsigned short *)(hdr + PH_COUNT);
+	/* the product's authorization fields are inline in the record (no header pointer) */
+	char *table = oa_heap_region(product->tableIndex);	/* product +0x9e */
+	unsigned int count = product->count;			/* product +0x9c */
 	if (count == 0)
 		return 1;
-	unsigned int extra = *(const unsigned int *)(hdr + PH_EXTRA);
+	unsigned int extra = product->dwExtra;			/* product +0x08 */
 
 	for (unsigned int i = 0; i < count; i++) {
 		int *e = (int *)(table + i * AE_STRIDE);

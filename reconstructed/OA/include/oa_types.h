@@ -57,11 +57,36 @@ struct CSTGPatch {
 	bool  IsUsingAnyUnauthorizedMultisamples();	/* vtable +0x104 */
 };
 
-/* An installed EX product; pAuthHeader (+0x04) points at the product's authorization
- * header (entry count @+0x98, slot index @+0x9a, dwExtra @+0x04). */
-struct CSTGEXProductInfo {
-	void *_pad00;			/* +0x00 */
-	void *pAuthHeader;		/* +0x04 */
+/*
+ * An installed EX product record (0xa4 = 164-byte stride; alignment 1 — the binary reads
+ * its fields with unaligned loads, so the struct is packed).  All authorization fields are
+ * INLINE in the record (there is no separate header pointer): dwExtra @+0x08, entry count
+ * @+0x9c, the heap slot of this product's authorization-entry table @+0x9e, and the
+ * "authorized" flag @+0xa2.  The 4-char code @+0x00 is what AuthorizeProductByFilename
+ * matches on.
+ */
+struct __attribute__((__packed__)) CSTGEXProductInfo {
+	unsigned char  code[4];		/* +0x00 4-char product code            */
+	unsigned char  _pad04[4];	/* +0x04                                */
+	unsigned int   dwExtra;		/* +0x08 stamped onto authorized banks  */
+	unsigned char  _pad0c[0x90];	/* +0x0c .. +0x9b                       */
+	unsigned short count;		/* +0x9c number of authorization entries*/
+	unsigned int   tableIndex;	/* +0x9e heap slot of the entry table   */
+	unsigned char  authorized;	/* +0xa2 set to 1 once authorized       */
+	unsigned char  _pada3;		/* +0xa3 (pad to 0xa4 stride)           */
+};
+
+/*
+ * The installed-products registry (lives at heapbase+0x14).  count @+0x00, and the heap
+ * slot of the contiguous CSTGEXProductInfo array @+0x04.
+ */
+struct CSTGInstalledEXProducts {
+	unsigned short count;		/* +0x00 */
+	unsigned char  _pad02[2];	/* +0x02 */
+	unsigned int   slotIndex;	/* +0x04 heap slot of the product array */
+
+	/* find the product whose 4-char code matches, stamp + AuthorizeProduct it */
+	unsigned int AuthorizeProductByFilename(const char *code4);
 };
 
 /*

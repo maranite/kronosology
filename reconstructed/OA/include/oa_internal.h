@@ -26,4 +26,7 @@ static inline unsigned long long rdtsc(void)
 /* Offset of a voice model's "extra" authorization word (vm[1].+0x4 in the decompile). */
 #define VM_EXTRA_OFF 0x104
 
+/* Provided by the kernel/STG runtime. */
+extern "C" oa_size_t strlen(const char *s);
+
 #endif /* OA_INTERNAL_H */
