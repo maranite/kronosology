@@ -17,7 +17,8 @@ HOST_CC         ?= cc
 HOST_CFLAGS     := -Wall -Wextra -O2 -Iinclude
 
 SRC := src/auth/klm_manager.cpp \
-       src/auth/products.cpp
+       src/auth/products.cpp \
+       src/auth/atmel_setup.cpp
 OBJ := $(SRC:.cpp=.o)
 
 TESTS := verify/test_klm_auth
