@@ -29,6 +29,57 @@ static inline unsigned int vcall(const void *obj, int slot)
 	return ((unsigned int (*)(const void *))vtbl[slot / 4])(obj);
 }
 
+/*
+ * Stamp an object through its own virtual SET_AUTH, mirroring the binary's call dance:
+ *   obj->vtbl[recompute]();  setAuth = obj->vtbl[set];  obj->vtbl[getId]();  setAuth();
+ * The object's SET_AUTH writes the stamp; by construction (and as IsAuthorized* checks)
+ * that stamp equals oa_auth_value(getId(), extra, dwBootKey) for this boot.
+ */
+static inline void stamp_object(void *obj, int idSlot, int setSlot, int recomputeSlot,
+				unsigned int /*bootKey*/)
+{
+	void *const *vtbl = *(void *const *const *)obj;
+	((void (*)(void *))vtbl[recomputeSlot / 4])(obj);
+	void (*setAuth)(void *) = (void (*)(void *))vtbl[setSlot / 4];
+	((unsigned int (*)(const void *))vtbl[idSlot / 4])(obj);	/* primes the id used by setAuth */
+	setAuth(obj);
+}
+
+/*
+ * The multisample-bank manager is a sub-object of the STG global region owned by
+ * CSTGHeapManager.  The binary derives its address as:
+ *     base = (heap != sentinel) ? *(heap+0x38) + *(heap+0x1e8498) : 0
+ *     bankmgr = base + 0x60524
+ * Kept as an accessor so the heap-internal offsets stay local to CSTGHeapManager's own
+ * reconstruction rather than leaking into the auth layer.
+ */
+static inline struct CSTGMultisampleBankManager *klm_bank_manager(void)
+{
+	char *heap = (char *)CSTGHeapManager::sInstance;
+	unsigned int base = 0;
+	if (heap != 0)		/* binary guards via a -0x2c sentinel == null heap */
+		base = *(unsigned int *)(heap + 0x38) + *(unsigned int *)(heap + 0x1e8498);
+	return (struct CSTGMultisampleBankManager *)(base + 0x60524);
+}
+
+/*
+ * Legacy builtin ROM-bank UUID template (16 bytes), recovered from .data:
+ *   "KORG"  (sLegacyBankPrefix @ 0x60fb28)
+ *   00 00 00 00 00 00 00 00
+ *   "MS"   (@ 0x60fb34)
+ *   00
+ *   <index>   filled per-bank with 0,2,4,...,0x14
+ */
+static void build_legacy_builtin_uuid(unsigned char uuid[16], unsigned char index)
+{
+	static const unsigned char tmpl[16] = {
+		'K','O','R','G', 0,0,0,0, 0,0,0,0, 'M','S', 0, 0
+	};
+	for (int i = 0; i < 16; i++)
+		uuid[i] = tmpl[i];
+	uuid[15] = index;
+}
+
 CSTGKLMManager::CSTGKLMManager(void)
 {
 	new (&kleg) CSTGKLEG();
@@ -115,6 +166,88 @@ int CSTGKLMManager::AuthorizeEffect(unsigned int idx)
 		return 0;
 	stamp_object(fx, FX_GET_ID, FX_SET_AUTH, FX_RECOMPUTE, dwBootKey);
 	return 1;
+}
+
+/*
+ * Authorize the multisample bank named by uuid.  Looks the bank up by UUID (preferring the
+ * direct table, then a legacy-RAM alias), then writes extra@+0x71 and the stamp@+0x6d =
+ * oa_auth_value(fnv1a16(uuid), extra, dwBootKey) — the exact value IsAuthorizedMultisample-
+ * Bank later recomputes.  Returns 0 if no such bank is loaded.
+ */
+int CSTGKLMManager::AuthorizeMultisampleBank(unsigned int extra,
+					     const struct CSTGMultisampleBankUUID *uuid)
+{
+	struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+	void *bank = CSTGMultisampleBankManager::AccessBank(mgr, uuid);
+	if (!bank)
+		bank = CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(mgr, uuid);
+	if (!bank)
+		return 0;
+
+	unsigned char *b = (unsigned char *)bank;
+	*(unsigned int *)(b + 0x71) = extra;
+	*(unsigned int *)(b + 0x6d) =
+		oa_auth_value(oa_fnv1a16((const unsigned char *)uuid), extra, dwBootKey);
+	return 1;
+}
+
+/*
+ * AuthorizeBuiltins: the startup bulk-authorizer.  In three passes it stamps everything that
+ * ships in-box, so factory content always verifies on this boot:
+ *   1. every loaded voice model whose slot flag (+0x104) is clear and whose id < 10;
+ *   2. every effect algorithm whose +0x08 flag is clear and whose id < 0xc6;
+ *   3. the 11 legacy ROM multisample banks (UUID = "KORG"+8x00+"MS"+00+{0,2,...,0x14}).
+ * Passes 1 and 2 are AuthorizeVoiceModel/AuthorizeEffect inlined over the manager tables.
+ */
+void CSTGKLMManager::AuthorizeBuiltins(void)
+{
+	/* 1. voice models: iterate the load list @+0x30, stamp the canonical slot @+8+id*4 */
+	char *vmm = (char *)CSTGVoiceModelManager::sInstance;
+	unsigned int vmCount = *(unsigned short *)(vmm + 0x58);
+	for (unsigned int i = 0; i < vmCount; i++) {
+		int *vm = ((int **)(vmm + 0x30))[i];
+		if (vm[0x41] != 0)			/* +0x104 in-use/locked flag */
+			continue;
+		unsigned int id = vcall(vm, VM_GET_ID);
+		if (id >= 10)
+			continue;
+		void *obj = ((void **)(vmm + 8))[id];
+		if (obj)
+			stamp_object(obj, VM_GET_ID, VM_SET_AUTH, VM_RECOMPUTE, dwBootKey);
+	}
+
+	/* 2. effects: iterate the load list @+0, stamp the canonical slot @+0x804+id*4
+	 *    (the binary loop is rotated by the optimizer; semantics are this clean form) */
+	char *fxm = (char *)CSTGEffectManager::sInstance;
+	unsigned int fxCount = *(unsigned int *)(fxm + 0x800);
+	for (unsigned int i = 0; i < fxCount; i++) {
+		int *fx = ((int **)fxm)[i];
+		if (fx[2] != 0)				/* +0x08 in-use/locked flag */
+			continue;
+		unsigned int id = vcall(fx, FX_GET_ID);
+		if (id >= 0xc6)
+			continue;
+		void *obj = ((void **)(fxm + 0x804))[id];
+		if (obj)
+			stamp_object(obj, FX_GET_ID, FX_SET_AUTH, FX_RECOMPUTE, dwBootKey);
+	}
+
+	/* 3. the 11 legacy builtin ROM banks (index byte steps by 2: 0,2,...,0x14) */
+	struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+	for (unsigned int n = 0; n < 11; n++) {
+		unsigned char uuid[16];
+		build_legacy_builtin_uuid(uuid, (unsigned char)(n * 2));
+		void *bank = CSTGMultisampleBankManager::AccessBank(
+			mgr, (const struct CSTGMultisampleBankUUID *)uuid);
+		if (!bank)
+			bank = CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(
+				mgr, (const struct CSTGMultisampleBankUUID *)uuid);
+		if (!bank)
+			continue;
+		unsigned char *b = (unsigned char *)bank;
+		*(unsigned int *)(b + 0x71) = 0;	/* builtins carry extra = 0 */
+		*(unsigned int *)(b + 0x6d) = oa_auth_value(oa_fnv1a16(uuid), 0, dwBootKey);
+	}
 }
 
 /*

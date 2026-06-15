@@ -27,6 +27,8 @@
 #include "oa_types.h"     /* CSTGKLEG, CSTGVoiceModel, CSTGEffectAlgorithm, CSTGMultisampleBank, CSTGPatch */
 #include "oa_authmath.h"  /* oa_fnv1a16(), oa_auth_value() — the verifiable core */
 
+struct CSTGMultisampleBankUUID;	/* 16-byte bank identity (hashed by oa_fnv1a16) */
+
 /* ------------------------------------------------------------------------- *
  *  CSTGKLMManager  (36 bytes, singleton sInstance)
  * ------------------------------------------------------------------------- */
@@ -42,8 +44,10 @@ struct CSTGKLMManager {
 	/* authorize: stamp the object at index idx with its auth value */
 	int  AuthorizeVoiceModel(unsigned int idx);
 	int  AuthorizeEffect(unsigned int idx);
-	int  AuthorizeMultisampleBank(unsigned int idx, const struct CSTGMultisampleBank *bank);
+	/* stamp the bank named by uuid with auth_value(fnv1a16(uuid), extra, bootKey) */
+	int  AuthorizeMultisampleBank(unsigned int extra, const struct CSTGMultisampleBankUUID *uuid);
 	int  AuthorizeProduct(struct CSTGEXProductInfo *product);
+	/* stamp every loaded voice model + effect + the 11 legacy builtin ROM banks */
 	void AuthorizeBuiltins(void);
 
 	/* verify: recompute and compare */

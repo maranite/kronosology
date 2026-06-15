@@ -142,6 +142,29 @@ static void test_auth_roundtrip(void)
 	CHECK_FALSE("bank verify wrong boot",  verify(bstamp, hash, extra, bootKey2));
 }
 
+static void test_legacy_builtin_bank(void)
+{
+	/*
+	 * Pass 3 of AuthorizeBuiltins: the 11 legacy ROM banks share the template
+	 * "KORG" + 8x00 + "MS" + 00 + <index>, index stepping 0,2,...,0x14.  Authorized with
+	 * extra=0.  We anchor the hash+stamp of bank #0 and confirm the round-trip.
+	 */
+	const unsigned int bootKey = 0x9e3779b1u;
+	unsigned char uuid[16] = { 'K','O','R','G', 0,0,0,0, 0,0,0,0, 'M','S', 0, 0 };
+
+	printf("[4] legacy builtin ROM bank (extra=0)\n");
+	uuid[15] = 0x00;	/* bank #0 */
+	unsigned int h0 = oa_fnv1a16(uuid);
+	CHECK_EQ("fnv1a16(\"KORG..MS\\0\\0\")", h0, 0x1c4e7f2au);	/* golden */
+	unsigned int s0 = authorize(h0, 0u, bootKey);
+	CHECK_TRUE ("builtin#0 verify",  verify(s0, h0, 0u, bootKey));
+
+	uuid[15] = 0x14;	/* bank #10 (last) */
+	unsigned int h10 = oa_fnv1a16(uuid);
+	CHECK_TRUE ("index byte changes hash", h10 != h0);
+	CHECK_TRUE ("builtin#10 verify", verify(authorize(h10, 0u, bootKey), h10, 0u, bootKey));
+}
+
 int main(void)
 {
 	printf("OA KLM auth known-answer test\n");
@@ -149,6 +172,7 @@ int main(void)
 	test_fnv_core_against_standard();
 	test_korg_basis();
 	test_auth_roundtrip();
+	test_legacy_builtin_bank();
 	printf("=============================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);
