@@ -43,12 +43,12 @@ static inline void secure_zero(unsigned char *p, unsigned int n)
 
 int SetupAtmelForAuthorizations(void)
 {
-	unsigned char chipConfig[11];	/* config zone (7 bytes used)      */
-	unsigned char iv[8];		/* chip IV / public nonce          */
-	unsigned char challenge[8];	/* per-round random challenge (c1) */
-	unsigned char gpaRandKey[8];	/* GPA key from the modexp         */
-	unsigned char c2Session[8];	/* derived cipher session key      */
-	unsigned char c3Session[8];	/* derived encrypt session key     */
+	unsigned char chipConfig[11];	/* config zone (7 bytes used)            */
+	unsigned char gpaRandKey[8];	/* GPA key, written by cm_ComputeChallenge*/
+	unsigned char challenge[8];	/* per-round random challenge (c1)       */
+	unsigned char c2Session[8];	/* derived cipher session key            */
+	unsigned char iv[8];		/* chip IV / public nonce                */
+	unsigned char c3Session[8];	/* derived encrypt session key           */
 	int rc;
 
 	if (cm_ReadUserZone(0x19, 7, chipConfig) != 0) {
@@ -57,7 +57,7 @@ int SetupAtmelForAuthorizations(void)
 		goto wipe;
 	}
 
-	nv2ac_io_request();
+	nv2ac_dispatch_cmd();
 
 	if (cm_SetUserZone(0) != 0) {
 		rc = -2;
@@ -65,7 +65,7 @@ int SetupAtmelForAuthorizations(void)
 	}
 
 	cm_SetChallengeParams(GPA_P, GPA_Q, GPA_G);
-	if (cm_ComputeChallenge() != 0) {
+	if (cm_ComputeChallenge(chipConfig, 0, gpaRandKey) != 0) {
 		rc = -2;
 		goto wipe;
 	}
@@ -75,18 +75,18 @@ int SetupAtmelForAuthorizations(void)
 		goto wipe;
 	}
 
-	/* Round 1 — cipher authentication. */
-	cm_GetRandomBytes(challenge);
+	/* Round 1 — cipher authentication (chip auth zone 0x00). */
+	cm_GetRandomBytes(challenge, 8);
 	cm_AuthenEncryptMAC(challenge, gpaRandKey, iv, c2Session, c3Session);
-	if (nv2ac_enable_cipher() != 0) {
+	if (nv2ac_enable_cipher(0, challenge, c2Session) != 0) {
 		rc = -3;
 		goto wipe;
 	}
 
-	/* Round 2 — encrypt authentication, chained on the round-1 c3 session key. */
-	cm_GetRandomBytes(challenge);
+	/* Round 2 — encrypt authentication (zone 0x10), chained on the round-1 c3 key. */
+	cm_GetRandomBytes(challenge, 8);
 	cm_AuthenEncryptMAC(challenge, c3Session, iv, c2Session, c3Session);
-	if (nv2ac_enable_encrypt() != 0) {
+	if (nv2ac_enable_encrypt(0, challenge, c2Session) != 0) {
 		rc = -4;
 		goto wipe;
 	}
@@ -94,11 +94,12 @@ int SetupAtmelForAuthorizations(void)
 	rc = 0;
 
 wipe:
-	secure_zero(chipConfig, sizeof chipConfig);
-	secure_zero(iv,         sizeof iv);
-	secure_zero(challenge,  sizeof challenge);
+	/* The binary scrubs the five 8-byte key buffers (plus its internal GMP scratch); the
+	 * config zone is left intact. */
 	secure_zero(gpaRandKey, sizeof gpaRandKey);
+	secure_zero(challenge,  sizeof challenge);
 	secure_zero(c2Session,  sizeof c2Session);
+	secure_zero(iv,         sizeof iv);
 	secure_zero(c3Session,  sizeof c3Session);
 	return rc;
 }
