@@ -165,6 +165,30 @@ static void test_legacy_builtin_bank(void)
 	CHECK_TRUE ("builtin#10 verify", verify(authorize(h10, 0u, bootKey), h10, 0u, bootKey));
 }
 
+static void test_product_bank_normalization(void)
+{
+	/*
+	 * AuthorizeProduct masks the bank UUID's dword3 with 0xfeffffff (clears byte-15 LSB)
+	 * before lookup+hash, so a bank's RAM-alias (LSB set) and ROM (LSB clear) forms
+	 * authorize identically.  Verify two UUIDs differing only in that bit hash the same
+	 * once masked, and differently when not (proving the bit is otherwise significant).
+	 * Target and host are both little-endian x86, so the byte<->dword layout matches.
+	 */
+	unsigned char a[16], b[16];
+	int i;
+	for (i = 0; i < 16; i++)
+		a[i] = b[i] = (unsigned char)(0x30 + i);
+	a[15] = 0x80;	/* RAM-alias flag clear */
+	b[15] = 0x81;	/* RAM-alias flag set (byte-15 LSB) */
+
+	printf("[5] product-path UUID normalization (& 0xfeffffff)\n");
+	CHECK_TRUE("unmasked hashes differ", oa_fnv1a16(a) != oa_fnv1a16(b));
+
+	*(unsigned int *)(a + 12) &= 0xfeffffffu;
+	*(unsigned int *)(b + 12) &= 0xfeffffffu;
+	CHECK_EQ("masked hashes match", oa_fnv1a16(a), oa_fnv1a16(b));
+}
+
 int main(void)
 {
 	printf("OA KLM auth known-answer test\n");
@@ -173,6 +197,7 @@ int main(void)
 	test_korg_basis();
 	test_auth_roundtrip();
 	test_legacy_builtin_bank();
+	test_product_bank_normalization();
 	printf("=============================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

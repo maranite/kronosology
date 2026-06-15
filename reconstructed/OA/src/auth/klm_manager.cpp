@@ -80,6 +80,34 @@ static void build_legacy_builtin_uuid(unsigned char uuid[16], unsigned char inde
 	uuid[15] = index;
 }
 
+/*
+ * A product's authorization-entry table lives in the heap-managed region, located by the
+ * product's slot index (auth header +0x9a, < 100000).  The binary derives the base as
+ *     base = *(heap + 0x24 + idx*0x14) + *(heap + 0x1e8498)
+ * and each entry is 0x98 bytes.  Returns 0 for an out-of-range index.
+ */
+static inline char *klm_product_auth_table(unsigned int productIndex)
+{
+	char *heap = (char *)CSTGHeapManager::sInstance;
+	if (productIndex >= 100000)
+		return 0;
+	return (char *)(*(unsigned int *)(heap + 0x24 + productIndex * 0x14) +
+			*(unsigned int *)(heap + 0x1e8498));
+}
+
+/* Authorization-entry layout (0x98 bytes) inside a product's table. */
+#define AE_STRIDE   0x98
+#define AE_TYPE     0	/* int[0]  : 0=voice model, 1=effect, 2=multisample bank, else skip */
+#define AE_ID       2	/* int[2]  : VM/FX id, or UUID dword 0 for a bank                    */
+#define AE_UUID1    3	/* int[3]  : UUID dword 1                                            */
+#define AE_UUID2    4	/* int[4]  : UUID dword 2                                            */
+#define AE_UUID3    5	/* int[5]  : UUID dword 3 (byte-15 LSB masked off before hashing)   */
+
+/* Product auth-header fields (at product->pAuthHeader). */
+#define PH_EXTRA    0x04	/* dwExtra stamped onto each bank                             */
+#define PH_COUNT    0x98	/* uint16 entry count                                        */
+#define PH_INDEX    0x9a	/* uint32 product slot index (< 100000)                      */
+
 CSTGKLMManager::CSTGKLMManager(void)
 {
 	new (&kleg) CSTGKLEG();
@@ -248,6 +276,75 @@ void CSTGKLMManager::AuthorizeBuiltins(void)
 		*(unsigned int *)(b + 0x71) = 0;	/* builtins carry extra = 0 */
 		*(unsigned int *)(b + 0x6d) = oa_auth_value(oa_fnv1a16(uuid), 0, dwBootKey);
 	}
+}
+
+/*
+ * AuthorizeProduct: authorize every content item declared by an installed EX product.
+ * The product carries a table of authorization entries (one per voice model / effect /
+ * multisample bank it ships); each entry is stamped with the same arithmetic as the
+ * single-item Authorize* methods, using the product's own dwExtra for banks.  It is
+ * all-or-nothing: the first entry whose id is out of range or whose object/bank is not
+ * loaded makes the whole product fail (returns 0).  An empty table trivially succeeds.
+ */
+int CSTGKLMManager::AuthorizeProduct(struct CSTGEXProductInfo *product)
+{
+	const char *hdr = (const char *)product->pAuthHeader;	/* product +0x04 */
+	char *table = klm_product_auth_table(*(const unsigned int *)(hdr + PH_INDEX));
+	unsigned int count = *(const unsigned short *)(hdr + PH_COUNT);
+	if (count == 0)
+		return 1;
+	unsigned int extra = *(const unsigned int *)(hdr + PH_EXTRA);
+
+	for (unsigned int i = 0; i < count; i++) {
+		int *e = (int *)(table + i * AE_STRIDE);
+		switch (e[AE_TYPE]) {
+		case 0: {					/* voice model */
+			unsigned int id = (unsigned int)e[AE_ID];
+			if (id >= 10)
+				return 0;
+			void *vm = ((void **)((char *)CSTGVoiceModelManager::sInstance + 8))[id];
+			if (!vm)
+				return 0;
+			stamp_object(vm, VM_GET_ID, VM_SET_AUTH, VM_RECOMPUTE, dwBootKey);
+			break;
+		}
+		case 1: {					/* effect algorithm */
+			unsigned int id = (unsigned int)e[AE_ID];
+			if (id >= 0xc6)
+				return 0;
+			void *fx = ((void **)((char *)CSTGEffectManager::sInstance + 0x804))[id];
+			if (!fx)
+				return 0;
+			stamp_object(fx, FX_GET_ID, FX_SET_AUTH, FX_RECOMPUTE, dwBootKey);
+			break;
+		}
+		case 2: {					/* multisample bank */
+			unsigned char uuid[16];
+			*(unsigned int *)(uuid + 0)  = (unsigned int)e[AE_ID];
+			*(unsigned int *)(uuid + 4)  = (unsigned int)e[AE_UUID1];
+			*(unsigned int *)(uuid + 8)  = (unsigned int)e[AE_UUID2];
+			/* normalize the RAM-alias/ROM flag (byte-15 LSB) so both forms hash alike */
+			*(unsigned int *)(uuid + 12) = (unsigned int)e[AE_UUID3] & 0xfeffffffu;
+
+			struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+			void *bank = CSTGMultisampleBankManager::AccessBank(
+				mgr, (const struct CSTGMultisampleBankUUID *)uuid);
+			if (!bank)
+				bank = CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(
+					mgr, (const struct CSTGMultisampleBankUUID *)uuid);
+			if (!bank)
+				return 0;
+			unsigned char *b = (unsigned char *)bank;
+			*(unsigned int *)(b + 0x71) = extra;
+			*(unsigned int *)(b + 0x6d) =
+				oa_auth_value(oa_fnv1a16(uuid), extra, dwBootKey);
+			break;
+		}
+		default:
+			break;				/* unknown entry type: ignored */
+		}
+	}
+	return 1;
 }
 
 /*
