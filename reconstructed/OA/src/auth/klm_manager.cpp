@@ -46,12 +46,6 @@ static inline void stamp_object(void *obj, int idSlot, int setSlot, int recomput
 	setAuth(obj);
 }
 
-/* The multisample-bank manager sits at a fixed offset inside the heap-managed region. */
-static inline struct CSTGMultisampleBankManager *klm_bank_manager(void)
-{
-	return (struct CSTGMultisampleBankManager *)(oa_heap_base() + 0x60524);
-}
-
 /*
  * Legacy builtin ROM-bank UUID template (16 bytes), recovered from .data:
  *   "KORG"  (sLegacyBankPrefix @ 0x60fb28)
@@ -175,7 +169,7 @@ int CSTGKLMManager::AuthorizeEffect(unsigned int idx)
 int CSTGKLMManager::AuthorizeMultisampleBank(unsigned int extra,
 					     const struct CSTGMultisampleBankUUID *uuid)
 {
-	struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+	struct CSTGMultisampleBankManager *mgr = oa_multisample_bank_manager();
 	void *bank = CSTGMultisampleBankManager::AccessBank(mgr, uuid);
 	if (!bank)
 		bank = CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(mgr, uuid);
@@ -231,7 +225,7 @@ void CSTGKLMManager::AuthorizeBuiltins(void)
 	}
 
 	/* 3. the 11 legacy builtin ROM banks (index byte steps by 2: 0,2,...,0x14) */
-	struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+	struct CSTGMultisampleBankManager *mgr = oa_multisample_bank_manager();
 	for (unsigned int n = 0; n < 11; n++) {
 		unsigned char uuid[16];
 		build_legacy_builtin_uuid(uuid, (unsigned char)(n * 2));
@@ -296,7 +290,7 @@ int CSTGKLMManager::AuthorizeProduct(struct CSTGEXProductInfo *product)
 			/* normalize the RAM-alias/ROM flag (byte-15 LSB) so both forms hash alike */
 			*(unsigned int *)(uuid + 12) = (unsigned int)e[AE_UUID3] & 0xfeffffffu;
 
-			struct CSTGMultisampleBankManager *mgr = klm_bank_manager();
+			struct CSTGMultisampleBankManager *mgr = oa_multisample_bank_manager();
 			void *bank = CSTGMultisampleBankManager::AccessBank(
 				mgr, (const struct CSTGMultisampleBankUUID *)uuid);
 			if (!bank)
