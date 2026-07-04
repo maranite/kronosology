@@ -43,6 +43,7 @@
 #include "oa_engine_init.h"	/* for CSTGPerformance::IsCurrentlyActive(), sec 10.144 */
 #include "oa_bank_memory.h"
 #include "oa_internal.h"
+#include "oa_new_delete.h"	/* for __kmalloc/OA_GFP_KERNEL, sec 10.148 (CSTGCDWorker_InitializeBuffer) */
 
 CSTGDiskCostManager     *CSTGDiskCostManager::sInstance;
 CSTGSamplingDaemon      *CSTGSamplingDaemon::sInstance;
@@ -390,10 +391,29 @@ CSTGVoiceModelManager::~CSTGVoiceModelManager()
 
 CEmergencyStealer::CEmergencyStealer()
 {
-	/* Real constructor not reconstructed in this pass -- declared/defined
-	 * here only so CLoadBalancer's embedded sub-object and construction
-	 * order compile and behave correctly (see oa_engine.h). */
+	/* Real constructor's OWN full body (`.text+0x5d5b0`, 134 bytes) is
+	 * NOT reconstructed in this pass -- it goes on to compute several
+	 * further float-derived fields from CCostProfile::sInstance/
+	 * CSTGCPUInfo::sInstance (a genuinely larger task). This one
+	 * statement is, however, independently confirmed real (sec 10.148,
+	 * cross-checked directly against the real ctor while reconstructing
+	 * the sibling destructor below): the ctor's very first instruction
+	 * is exactly `CEmergencyStealer::sInstance = this`. */
 	CEmergencyStealer::sInstance = this;
+}
+
+/*
+ * CEmergencyStealer::~CEmergencyStealer() (`.text+0x5d640`, 11 bytes,
+ * sec 10.148): confirmed real and complete -- `CEmergencyStealer::
+ * sInstance = 0;` unconditionally (same "no self-check before nuking
+ * the singleton" quirk already confirmed for CSTGVoiceAllocator's/
+ * CSTGMessageProcessor's own destructors, sec 10.147), nothing else.
+ * Called explicitly, non-virtually, from CLoadBalancer::~CLoadBalancer()
+ * (engine_startup_bits2.cpp) on its embedded `emergencyStealer` member.
+ */
+CEmergencyStealer::~CEmergencyStealer()
+{
+	CEmergencyStealer::sInstance = 0;
 }
 
 CLoadBalancer::CLoadBalancer()
@@ -712,6 +732,25 @@ CSTGMessageProcessor::~CSTGMessageProcessor()
 }
 
 /*
+ * CEffectorDatabase::~CEffectorDatabase() (`.text+0x3d5ff0`, 21 bytes,
+ * sec 10.148): the destructor `~CSTGMessageProcessor()` above already
+ * calls directly (non-virtually -- confirmed via the real disassembly's
+ * own plain `call`, no vtable load). Confirmed real: `delete[]` a single
+ * confirmed pointer field at `+0x0` if non-null (`operator delete[]
+ * (nullptr)` is a standard-mandated no-op regardless, but the real
+ * disassembly does perform the null check first, not unconditionally --
+ * preserved as found). This class's own constructor/`Register()`/etc.
+ * are NOT reconstructed in this pass -- `+0x0`'s own element type isn't
+ * independently confirmed beyond "some `new[]`-allocated array".
+ */
+CEffectorDatabase::~CEffectorDatabase()
+{
+	void *arr = (void *)(unsigned long)*(unsigned int *)this;
+	if (arr)
+		operator delete[](arr);
+}
+
+/*
  * A batch of small `Initialize()`/`ProcessCommands()` bodies for classes
  * whose constructors already live in this file (sec 10.144, 2026-07-04),
  * picked directly from the unresolved-symbol/stub sweep. Every allocation
@@ -783,12 +822,31 @@ void CSTGFileCloser::Initialize()
  * implicitly as its sole regparm argument and returning a value this
  * function stores verbatim), then `fieldAt(0x234)=0x81`, then
  * `fieldAt(0x228)=AllocAligned(0x408,0x10)`. `CSTGCDWorker_InitializeBuffer`
- * itself is a newly-discovered, confirmed-real, deliberately deferred
- * extern (own body not reconstructed in this pass; three real siblings,
- * `_CleanupBuffer`/`_OpenCD`/`_ReadCD`, also confirmed via the symbol table
- * but not yet referenced from any reconstructed call site).
+ * itself is real now too (sec 10.148, `.text+0x11b7a0`, 30 bytes):
+ * `worker` is confirmed NEVER read (the real disassembly loads its own
+ * literal size/flags immediates and never touches the incoming EAX --
+ * kept as an unused parameter here only so this call site's own
+ * `this`-in-EAX regparm slot matches the real ABI byte-for-byte, not
+ * because the real function does anything with it). Real body:
+ * `sSCSIReadBuffer = __kmalloc(0xa00, 0xd1)`, returned verbatim (the
+ * caller above stores it into `fieldAt(0x20)`). `sSCSIReadBuffer` is a
+ * genuine, already-named real symbol (confirmed via its own `.bss` local
+ * -- `b sSCSIReadBuffer` -- at the real store instruction's relocation
+ * target), not independently referenced by any other reconstructed
+ * function in this pass. `0xd1` = `OA_GFP_KERNEL(0xd0) | __GFP_DMA(0x1)`
+ * -- this era's kernel `__GFP_DMA` flag -- consistent with a CD-ROM SCSI
+ * controller's own DMA-capable buffer requirement. Three real siblings
+ * (`_CleanupBuffer`/`_OpenCD`/`_ReadCD`) confirmed via the symbol table
+ * but not yet referenced from any reconstructed call site.
  */
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *worker);
+static void *sSCSIReadBuffer;
+
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *worker)
+{
+	(void)worker;
+	sSCSIReadBuffer = __kmalloc(0xa00, OA_GFP_KERNEL | 0x1);
+	return ToU32(sSCSIReadBuffer);
+}
 
 void CSTGCDWorker::Initialize()
 {

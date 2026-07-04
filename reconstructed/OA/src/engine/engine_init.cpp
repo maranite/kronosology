@@ -96,6 +96,18 @@ static void ConstructRecordEvent(unsigned char *p)
 
 static void ConstructRecordBuffer(unsigned char *p) { new (p) CSTGRecordBuffer(); }
 
+/* CSTGRecordBuffer::CSTGRecordBuffer() (`.text+0xd6dc0`, 21 bytes)
+ * reconstructed real (sec 10.148): zeroes the two confirmed dwords at
+ * +0x3004/+0x3008 -- see oa_engine_init.h's own header comment for the
+ * full real-vs-previously-assumed-size correction this discovery forced
+ * (the `BuildArrayManager` call below now passes the corrected real
+ * `CSTGRECORDBUFFER_SIZE` (0x301c) stride, not the old, wrong 0x38). */
+CSTGRecordBuffer::CSTGRecordBuffer()
+{
+	field3004 = 0;
+	field3008 = 0;
+}
+
 /* Raw indirect vtable dispatch, matching CCostProfile's own established
  * treatment (oa_setup_global_resources.h) -- used for the two confirmed
  * calls whose target's exact vtable layout isn't independently pinned
@@ -234,12 +246,14 @@ void CSTGEngine::Initialize()
 	 * own header comment for the shared algorithm). Confirmed counts:
 	 * 4000 CSTGPlaybackEvent (104 bytes each, id field at +0x4), 200
 	 * CSTGRecordEvent (56 bytes each, id field at +0x4), 96
-	 * CSTGRecordBuffer (56 bytes each, id field at +0x0). */
+	 * CSTGRecordBuffer (CORRECTED sec 10.148: 0x301c/12316 bytes each,
+	 * NOT 56 -- see oa_engine_init.h's own header comment; id field at
+	 * +0x0). */
 	BuildArrayManager(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 4000, 0x68, 0x4,
 			   ConstructPlaybackEvent);
 	BuildArrayManager(TSTGArrayManager<CSTGRecordEvent>::sInstance, 200, 0x38, 0x4,
 			   ConstructRecordEvent);
-	BuildArrayManager(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 96, 0x38, 0x0,
+	BuildArrayManager(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 96, CSTGRECORDBUFFER_SIZE, 0x0,
 			   ConstructRecordBuffer);
 
 	CSTGHDRManager::sInstance->Initialize();

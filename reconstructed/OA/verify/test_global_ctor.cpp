@@ -50,7 +50,9 @@ CSTGAudioManager::~CSTGAudioManager() { }
  * test_global.cpp's own identical addition. */
 extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
 extern "C" void rtwrap_free(void *) { }
-CEffectorDatabase::~CEffectorDatabase() { }
+/* CEffectorDatabase::~CEffectorDatabase() is now real too (sec 10.148,
+ * see managers.cpp) -- link-satisfying only, nothing in this file
+ * constructs one. */
 /* CSTGAudioInput's own 9 UpdateXXX methods + ctor are now reconstructed
  * for real (sec 10.80, see src/engine/global.cpp) -- no mock needed for
  * CSTGAudioInput itself any more (section [1] below now verifies real
@@ -112,8 +114,10 @@ void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *) { }
 void CSTGVoiceAllocator::StealVoiceList(void *) { }
 /* Link-satisfying mocks for sec 10.144's new CSTGHDRManager::ProcessCommands()/
  * CSTGCDWorker::Initialize() bodies -- not exercised by anything in this
- * file, only needed so managers.cpp links cleanly. */
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+ * file, only needed so managers.cpp links cleanly. Sec 10.148:
+ * CSTGCDWorker_InitializeBuffer() is now real (managers.cpp) and calls
+ * __kmalloc directly -- link-satisfying mock only. */
+extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
 void CSTGHDRManager::ProcessPlaybackCommands() { }
 void CSTGHDRManager::ProcessRecordCommands() { }
 void CSTGHDRManager::ProcessSamplerCommands() { }

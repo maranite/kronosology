@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <new>
+#include <sys/mman.h>
 #include "oa_engine.h"
 
 /* Real kernel-only APIs (RTAI mutex wrappers) and a not-yet-reconstructed
@@ -34,9 +35,10 @@ void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
  * comment above). */
 extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
 extern "C" void rtwrap_free(void *) { }
-/* Sec 10.147: ~CSTGMessageProcessor() is now real and calls this if its
- * own +0x64 field is non-null -- link-satisfying only, same reasoning. */
-CEffectorDatabase::~CEffectorDatabase() { }
+/* Sec 10.147/10.148: ~CSTGMessageProcessor() calls the now-real
+ * ~CEffectorDatabase() (managers.cpp) -- test [22] below exercises it
+ * directly (this file never constructs one via ~CSTGMessageProcessor()
+ * itself, see test [21]'s own header comment). */
 
 /* Link-satisfying mocks for sec 10.144's new small `Initialize()`/
  * `ProcessCommands()` bodies -- this file doesn't link global.cpp, so
@@ -44,7 +46,21 @@ CEffectorDatabase::~CEffectorDatabase() { }
  * null "no active manager" default is fine: nothing in this file
  * exercises CSTGPerformance::IsCurrentlyActive()). */
 unsigned char *ResolveActivePerformanceVarsManagerRaw() { return 0; }
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+/* Sec 10.148: CSTGCDWorker_InitializeBuffer() is now real (managers.cpp)
+ * and calls __kmalloc directly -- test [23] below calls it and checks
+ * the real (size, flags) arguments plus the returned pointer. */
+static int g_kmallocCalls;
+static unsigned long g_lastKmallocSize;
+static unsigned int g_lastKmallocFlags;
+static void *g_lastKmallocReturn;
+extern "C" void *__kmalloc(unsigned long size, unsigned int flags)
+{
+	g_kmallocCalls++;
+	g_lastKmallocSize = size;
+	g_lastKmallocFlags = flags;
+	g_lastKmallocReturn = malloc(size);
+	return g_lastKmallocReturn;
+}
 void CSTGHDRManager::ProcessPlaybackCommands() { }
 void CSTGHDRManager::ProcessRecordCommands() { }
 void CSTGHDRManager::ProcessSamplerCommands() { }
@@ -105,6 +121,30 @@ static unsigned char *poison_and_construct(T **outObj)
 	*outObj = new (buf) T();
 	return buf;
 }
+
+/* Counting override of the GLOBAL operator delete[] -- a pure spy, used
+ * by test [22] below to confirm ~CEffectorDatabase()'s real conditional
+ * `operator delete[]` call actually fires/doesn't fire. Deliberately
+ * does NOT call the real `free()`: every other `delete[]` in this file
+ * (poison_and_construct's own buffers, etc.) now leaks instead of
+ * freeing, which is harmless in this short-lived test binary (the OS
+ * reclaims everything on exit) and avoids a real crash class this test
+ * hit directly while being written -- `arr` in test [22] is deliberately
+ * a `mmap32()`-backed buffer (a real 32-bit-range address, matching the
+ * real target's packed 32-bit pointer fields, this project's established
+ * pattern e.g. test_engine_init.cpp), but `arr`'s own allocator is
+ * `mmap`, not `malloc` -- calling glibc's `free()` on an `mmap`-backed
+ * pointer is its own separate undefined behavior. A pure counting spy
+ * sidesteps both hazards at once. */
+static int g_deleteArrayCalls;
+static void *g_lastDeletedArrayPtr;
+void operator delete[](void *p) noexcept
+{
+	g_deleteArrayCalls++;
+	g_lastDeletedArrayPtr = p;
+}
+
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *worker);
 
 int main(void)
 {
@@ -554,6 +594,45 @@ int main(void)
 		 "MINIMUM size (a lower bound, not asserted exact -- see oa_engine.h)",
 		 sizeof(CSTGMessageProcessor), 0x1040);
 	delete[] mpBuf;
+
+	printf("[22] CEffectorDatabase::~CEffectorDatabase() (sec 10.148)\n");
+	{
+		/* `+0x0` is a packed 32-bit field on the real target -- `arr`
+		 * must itself live in the low 32 bits of the address space, or
+		 * the real function's own `(void*)(unsigned long)*(unsigned
+		 * int*)this` truncate-then-reinflate round-trip (faithful to
+		 * the real target, sec 10.148) recovers a bogus, unrelated
+		 * 64-bit address on this host and crashes -- same mmap32()
+		 * pattern already established elsewhere (e.g.
+		 * test_engine_init.cpp's bankBuf). */
+		int callsBefore = g_deleteArrayCalls;
+		unsigned char *arr = (unsigned char *)mmap(0, 16, PROT_READ | PROT_WRITE,
+							    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char cedb[4];
+		*(unsigned int *)cedb = (unsigned int)(unsigned long)arr;
+		((CEffectorDatabase *)cedb)->~CEffectorDatabase();
+		check_eq("non-null +0x0: operator delete[] called once",
+			 (unsigned int)(g_deleteArrayCalls == callsBefore + 1), 1);
+		check_eq("non-null +0x0: operator delete[] called on the real pointer",
+			 (unsigned int)(g_lastDeletedArrayPtr == arr), 1);
+
+		callsBefore = g_deleteArrayCalls;
+		*(unsigned int *)cedb = 0;
+		((CEffectorDatabase *)cedb)->~CEffectorDatabase();
+		check_eq("null +0x0: operator delete[] NOT called",
+			 (unsigned int)(g_deleteArrayCalls == callsBefore), 1);
+	}
+
+	printf("\n[23] CSTGCDWorker_InitializeBuffer() (sec 10.148)\n");
+	{
+		unsigned int ret = CSTGCDWorker_InitializeBuffer((void *)0x12345678u);
+		check_eq("__kmalloc called once", (unsigned int)(g_kmallocCalls == 1), 1);
+		check_eq("__kmalloc size == 0xa00", (unsigned int)g_lastKmallocSize, 0xa00);
+		check_eq("__kmalloc flags == 0xd1 (OA_GFP_KERNEL|__GFP_DMA)",
+			 g_lastKmallocFlags, 0xd1);
+		check_eq("return value == the __kmalloc'd pointer, truncated to 32 bits",
+			 ret, (unsigned int)(unsigned long)g_lastKmallocReturn);
+	}
 
 	printf("=====================================================\n");
 	if (g_fail) {

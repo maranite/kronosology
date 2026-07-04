@@ -700,9 +700,19 @@ public:
  * real, non-virtual (no vtable indirection at the call site) `D1`
  * destructor mangles/links correctly from CSTGMessageProcessor's own
  * destructor. */
+/*
+ * CEffectorDatabase::~CEffectorDatabase() (`.text+0x3d5ff0`, 21 bytes,
+ * sec 10.148): confirmed real -- `if (fieldAt(0)) operator delete[]
+ * (fieldAt(0));`. `+0x0` is a packed 32-bit pointer on the real target
+ * (this class's own storage is a plain byte array, not a native pointer
+ * member -- same host/target-width-safe idiom as CSTGMessageProcessor's
+ * own destructor just above), element type not independently confirmed.
+ * The class's own ctor/`Register()`/etc. remain NOT reconstructed.
+ */
 class CEffectorDatabase {
 public:
 	~CEffectorDatabase();
+	unsigned char _unrecovered[4];	/* +0x0, confirmed real packed pointer */
 };
 
 /*

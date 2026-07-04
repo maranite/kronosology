@@ -27,8 +27,11 @@
 
 /* Real kernel-only APIs and a not-yet-reconstructed static method, mocked
  * only so CSTGVoiceModelManager's constructor (used by test [1]) links on
- * the host -- see test_managers.cpp for the same treatment in more detail. */
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+ * the host -- see test_managers.cpp for the same treatment in more detail.
+ * Sec 10.148: CSTGCDWorker_InitializeBuffer() is now real (managers.cpp)
+ * and calls __kmalloc directly -- link-satisfying mock only, this file
+ * never calls CSTGCDWorker::Initialize() itself. */
+extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" void *rtwrap_malloc(unsigned int size) { return malloc(size); }
 extern "C" void rtwrap_pthread_mutex_init(void *, void *) { }
@@ -220,16 +223,15 @@ void CSTGVoiceAllocator::StealAllVoices() { }
  * used to appear. */
 CLoadBalancer::~CLoadBalancer()                  { log_call("~CLoadBalancer"); }
 void CLoadBalancer::BalanceStaticLoad() { }
-/* CEmergencyStealer's own destructor is now declared (sec 10.59) --
- * still not reconstructed, but any CLoadBalancer destruction (even
- * this mock's) implicitly chains into it, so it needs a link-time
- * body here too. */
-CEmergencyStealer::~CEmergencyStealer()          { }
-/* CEffectorDatabase's own confirmed-real, deliberately deferred dtor
- * (sec 10.147) -- link-satisfying only, msgProc's own +0x64 is zeroed
- * below so the real ~CSTGMessageProcessor() never actually calls this
- * in this test. */
-CEffectorDatabase::~CEffectorDatabase()          { }
+/* CEmergencyStealer::~CEmergencyStealer() is now real (sec 10.148, see
+ * managers.cpp) -- any CLoadBalancer destruction (even this mock's)
+ * implicitly chains into it via its embedded `emergencyStealer` member;
+ * the real body just clears CEmergencyStealer::sInstance, an untracked
+ * side effect that doesn't touch this test's own call-order log. */
+/* CEffectorDatabase::~CEffectorDatabase() is also now real (sec 10.148,
+ * see managers.cpp) -- msgProc's own +0x64 is zeroed below so the real
+ * ~CSTGMessageProcessor() never actually calls it in this test, only
+ * links it. */
 /* CSTGGlobal::RunVoiceModelFeedback() is now REAL (sec 10.55, see
  * global.cpp) -- with the zeroed CSTGGlobal buffer scenario [3] below
  * allocates, its list head at +0x29c9900 is empty, so it produces no

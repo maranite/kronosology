@@ -84,7 +84,9 @@ CSTGAudioManager::~CSTGAudioManager() { }
  * call -- see the msgProc/voiceAlloc declarations throughout this file). */
 extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
 extern "C" void rtwrap_free(void *) { }
-CEffectorDatabase::~CEffectorDatabase() { }
+/* CEffectorDatabase::~CEffectorDatabase() is now real too (sec 10.148,
+ * see managers.cpp) -- link-satisfying only, nothing in this file
+ * constructs one. */
 
 /* Mocks for CSTGAudioInput's own confirmed-real, deliberately deferred
  * dependencies (sec 10.80). */
@@ -291,8 +293,10 @@ void CSTGVoiceAllocator::StealVoiceList(void *) { g_stealVoiceListCalls++; }
 /* Link-satisfying mocks for sec 10.144's new CSTGHDRManager::ProcessCommands()/
  * CSTGCDWorker::Initialize() bodies -- not exercised by anything in this
  * file, only needed so managers.cpp (linked here for CSTGGlobal's own
- * manager-constructor tests) links cleanly. */
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+ * manager-constructor tests) links cleanly. Sec 10.148:
+ * CSTGCDWorker_InitializeBuffer() is now real (managers.cpp) and calls
+ * __kmalloc directly -- link-satisfying mock only. */
+extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
 void CSTGHDRManager::ProcessPlaybackCommands() { }
 void CSTGHDRManager::ProcessRecordCommands() { }
 void CSTGHDRManager::ProcessSamplerCommands() { }

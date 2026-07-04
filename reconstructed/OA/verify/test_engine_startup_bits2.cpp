@@ -33,7 +33,10 @@ void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
  * `ProcessCommands()` bodies -- this file doesn't link global.cpp, so
  * ResolveActivePerformanceVarsManagerRaw() needs its own stub here. */
 unsigned char *ResolveActivePerformanceVarsManagerRaw() { return 0; }
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+/* Sec 10.148: CSTGCDWorker_InitializeBuffer() is now real (managers.cpp)
+ * and calls __kmalloc directly -- link-satisfying mock only, this file
+ * never calls CSTGCDWorker::Initialize() itself. */
+extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
 void CSTGHDRManager::ProcessPlaybackCommands() { }
 void CSTGHDRManager::ProcessRecordCommands() { }
 void CSTGHDRManager::ProcessSamplerCommands() { }
@@ -49,7 +52,9 @@ CSTGAudioManager::~CSTGAudioManager() { }
  * test_global.cpp's own identical addition. */
 extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
 extern "C" void rtwrap_free(void *) { }
-CEffectorDatabase::~CEffectorDatabase() { }
+/* CEffectorDatabase::~CEffectorDatabase() is now real too (sec 10.148,
+ * see managers.cpp) -- link-satisfying only, nothing in this file
+ * constructs one. */
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) { g_mutexattrCalls++; }
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
 
@@ -64,7 +69,10 @@ void CSTGLFOBase::InitializeQuad(STGLFOSubRateParams *) { g_lfoQuadCalls++; }
 void CSTGStepSeqBase::InitializeQuad(STGStepSeqSubRateParams *) { g_stepSeqQuadCalls++; }
 static int g_pushMsgCalls;
 extern "C" void PushUnsolicitedMessage(void *) { g_pushMsgCalls++; }
-CEmergencyStealer::~CEmergencyStealer() { }
+/* CEmergencyStealer::~CEmergencyStealer() is now real (sec 10.148, see
+ * managers.cpp) -- test [2] below now checks its real side effect
+ * (CEmergencyStealer::sInstance cleared) directly, via CLoadBalancer's
+ * own embedded `emergencyStealer` member. */
 unsigned char *STGAPIFrontPanelStatus::sInstance;
 static unsigned int g_onlineCpus = 2, g_khz = 1500000;
 extern "C" unsigned int stg_num_online_cpus(void) { return g_onlineCpus; }
@@ -120,6 +128,8 @@ int main(void)
 	memset(lbBuf, 0xcc, sizeof(lbBuf));
 	CLoadBalancer *lb = new (lbBuf) CLoadBalancer();
 	check_eq("sInstance == this", (long)(CLoadBalancer::sInstance == lb), 1);
+	check_eq("embedded CEmergencyStealer::sInstance == &lb->emergencyStealer (real ctor, sec 10.148)",
+		 (long)(CEmergencyStealer::sInstance == &lb->emergencyStealer), 1);
 	lb->Initialize();
 	check_eq("status[0x1091] == cpuInfo->cpuCount",
 		 statusBuf[0x1091], (long)cpu->cpuCount);
@@ -134,6 +144,8 @@ int main(void)
 	printf("\n[2] CLoadBalancer::~CLoadBalancer()\n");
 	lb->~CLoadBalancer();
 	check_eq("sInstance cleared", (long)(CLoadBalancer::sInstance == 0), 1);
+	check_eq("embedded CEmergencyStealer::sInstance also cleared (real dtor, sec 10.148)",
+		 (long)(CEmergencyStealer::sInstance == 0), 1);
 
 	printf("\n[3] CPowerOffTimer::Initialize() -- panel type 1 (in-table, small value: <=1800s)\n");
 	statusBuf[0x5] = 1;	/* table[1] = 3600 -- wait, use type 0 for a <=1800 case */

@@ -79,10 +79,8 @@ void CSTGHDRFileReader::ProcessCommands() {}
 void CSTGHDRFileWriter::ProcessCommands() {}
 void CSTGStreamingFileReader::Initialize(unsigned long) {}
 void CSTGStreamingFileReader::ProcessCommands() {}
-/* CSTGCDWorker_InitializeBuffer confirmed real, deliberately deferred
- * extern (a plain C-linkage function, not a class method), called by
- * the now-real CSTGCDWorker::Initialize() -- sec 10.144. */
-extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+/* CSTGCDWorker_InitializeBuffer is real now, sec 10.148 -- see
+ * managers.cpp (right after CSTGCDWorker::Initialize(), sec 10.144). */
 void CSTGCDWorker::ProcessCommands() {}
 void CSTGSamplingDaemon::ProcessCommands() {}
 void CSTGMidiPortManager::Initialize() {}
@@ -106,13 +104,11 @@ void CSTGPCMPrecacheManager::AfterProcess() {}
 void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
 
 /* ---- Remaining engine/manager/model stubs, batch 2 ---- */
-CEmergencyStealer::~CEmergencyStealer() {}
-/* CEffectorDatabase::~CEffectorDatabase() -- confirmed real, deliberately
- * deferred (sec 10.147: called for real by the now-real
- * CSTGMessageProcessor::~CSTGMessageProcessor(), see managers.cpp/
- * oa_engine.h; the class's own ctor/Register()/etc. are NOT
- * reconstructed, own body far out of scope for this pass). */
-CEffectorDatabase::~CEffectorDatabase() {}
+/* CEmergencyStealer::~CEmergencyStealer() is real now, sec 10.148 -- see
+ * managers.cpp (right after CEmergencyStealer::CEmergencyStealer()). */
+/* CEffectorDatabase::~CEffectorDatabase() is real now, sec 10.148 -- see
+ * managers.cpp. Its own ctor/Register()/etc. are still NOT reconstructed,
+ * own body far out of scope for this pass. */
 /* CSTGASK::Initialize() is real now, sec 10.145 (see
  * setup_global_resources.cpp) -- a pure forward to SKMain_Initialize(),
  * confirmed real, deliberately deferred (own body substantially larger,
@@ -135,7 +131,18 @@ void USTGAliasBankTypes::ConvertCombiBankToMidiBank(int, char &, char &) {}
 /* Sec 10.99's own confirmed-real, deliberately deferred externs. */
 void USTGAliasBankTypes::ConvertMidiBankToCombiBank(char, char, int &) {}
 void USTGAliasBankTypes::ConvertMidiBankToAliasProgramBank(char, char, int &) {}
-bool SKSTGGate_ShouldSyncExternalClock() { return false; }
+/* SKSTGGate_ShouldSyncExternalClock() is real now, sec 10.148 -- see
+ * src/engine/sk_stg_gate.cpp (a genuinely new class, CTimerManager,
+ * declared minimally/opaquely there -- most of its own dozen-plus
+ * methods are NOT reconstructed in this pass). CTimerManager::
+ * ShouldSyncExternalClock() itself is a real symbol DEFINED INSIDE
+ * OA_real.ko (`.text+0x347210`, a `T` symbol, confirmed via nm -- NOT an
+ * external kernel/other-module dependency), so it needs the same
+ * trivial link-satisfying stub body as any other confirmed-real,
+ * deliberately-deferred OA-internal symbol (matching SKMain_Initialize
+ * just above), not a genuinely external dependency left permanently
+ * unresolved. */
+bool CTimerManager::ShouldSyncExternalClock() { return false; }
 /* CSTGParamsOwner::ValidateParamChange (sec 10.92) -- confirmed real,
  * deliberately deferred; see src/engine/global.cpp for the real
  * callers now reconstructed. */
@@ -202,7 +209,10 @@ CSTGProgramSlot::CSTGProgramSlot() {}
  * HasActiveVoices() reconstructed for real, sec 10.142 -- see
  * src/engine/global.cpp. */
 void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
-CSTGRecordBuffer::CSTGRecordBuffer() {}
+/* CSTGRecordBuffer::CSTGRecordBuffer() is real now, sec 10.148 -- see
+ * src/engine/engine_init.cpp (also corrects a real bug that promotion
+ * uncovered: this class's true size is 0x301c bytes, not the 0x38 this
+ * project had assumed before its ctor was ever disassembled). */
 CSTGSamplingInterface::CSTGSamplingInterface() {}
 CSTGSequence::CSTGSequence() {}
 CSTGSlotVoiceData::CSTGSlotVoiceData() {}
@@ -233,7 +243,9 @@ void CSTGPerformanceVars::SetIsDying() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
 CSTGStreamingEventManager::CSTGStreamingEventManager() {}
 void CSTGStreamingEventManager::Initialize(unsigned short, unsigned long) {}
-CSTGVectorEGBase::CSTGVectorEGBase() {}
+/* CSTGVectorEGBase::CSTGVectorEGBase() is real now, sec 10.148 -- see
+ * src/engine/vector_eg_ctors.cpp (also corrects a real speculative claim
+ * in oa_engine_init.h's own header comment, sec 10.66 -- see there). */
 void CSTGVoiceAllocator::StealAllVoices() {}
 /* CSTGWaveSeqData::Initialize()/CSetListBank::Initialize() reconstructed
  * for real, sec 10.84 -- see src/engine/global.cpp. */
@@ -242,8 +254,8 @@ void CSTGWaveSeqGenerator::Init() {}
 CSTGWaveSequence::CSTGWaveSequence() {}
 CSetList::CSetList() {}
 void CSetList::Activate() {}
-CStartupFile::CStartupFile(const char *) {}
-CStartupFile::~CStartupFile() {}
+/* CStartupFile::CStartupFile(const char*)/~CStartupFile() are real now,
+ * sec 10.148 -- see src/engine/startup_file.cpp. */
 /* USTGAliasBankTypes::InitializeAliasBanks() reconstructed for real,
  * sec 10.85 -- see src/engine/global.cpp. */
 
@@ -265,6 +277,12 @@ extern "C" unsigned char _ZTV17CSTGVectorEGXOnly[12];
 unsigned char _ZTV17CSTGVectorEGXOnly[12];
 extern "C" unsigned char _ZTV14CSTGVectorEGXY[12];
 unsigned char _ZTV14CSTGVectorEGXY[12];
+/* _ZTV16CSTGVectorEGBase -- needed now that CSTGVectorEGBase::
+ * CSTGVectorEGBase() is real (sec 10.148, vector_eg_ctors.cpp) and
+ * references it directly, same placeholder treatment as its three
+ * derived siblings just above. */
+extern "C" unsigned char _ZTV16CSTGVectorEGBase[12];
+unsigned char _ZTV16CSTGVectorEGBase[12];
 unsigned char _ZTV15CSTGRecordEvent[40];
 
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,

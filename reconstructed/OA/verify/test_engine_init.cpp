@@ -235,8 +235,14 @@ CSTGPlaybackEvent::CSTGPlaybackEvent() { g_playbackEventCtorCalls++; }
 static int g_audioEventCtorCalls;
 CSTGAudioEvent::CSTGAudioEvent() { g_audioEventCtorCalls++; }
 unsigned char _ZTV15CSTGRecordEvent[16];
-static int g_recordBufferCtorCalls;
-CSTGRecordBuffer::CSTGRecordBuffer() { g_recordBufferCtorCalls++; }
+/* CSTGRecordBuffer::CSTGRecordBuffer() is now real (sec 10.148, see
+ * engine_init.cpp) -- no mock here any more. This ALSO corrects a real
+ * bug this promotion uncovered: the true per-instance size is
+ * CSTGRECORDBUFFER_SIZE (0x301c bytes), not the 56 (0x38) bytes this
+ * project had assumed while the ctor was still an empty stub -- see
+ * oa_engine_init.h's own header comment on CSTGRecordBuffer for the
+ * full story. Test [2] below now checks the real ctor's own zeroed
+ * fields directly instead of a call counter. */
 
 /* ---- mocks: CSTGEngine's own other methods (not exercised here) ---- */
 CSTGEngine::CSTGEngine() {}
@@ -340,11 +346,21 @@ int main(void)
 
 	check_eq("RecordBuffer count == 96", TSTGArrayManager<CSTGRecordBuffer>::sInstance->count, 96);
 	check_eq("RecordBuffer modulus == 97", TSTGArrayManager<CSTGRecordBuffer>::sInstance->modulus, 97);
-	check_eq("RecordBuffer ctor called 96 times", g_recordBufferCtorCalls, 96);
 	check_eq("RecordBuffer index[0] id (at +0x0) == 0",
 		 *(unsigned short *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 0) + 0), 0);
 	check_eq("RecordBuffer index[95] id (at +0x0) == 95",
 		 *(unsigned short *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 95) + 0), 95);
+	check_eq("sizeof(CSTGRecordBuffer) matches the corrected real 0x301c-byte size "
+		 "(sec 10.148 -- was wrongly assumed 0x38 before this ctor was ever disassembled)",
+		 (unsigned int)sizeof(CSTGRecordBuffer), CSTGRECORDBUFFER_SIZE);
+	check_eq("RecordBuffer[0]'s real ctor zeroed +0x3004",
+		 *(unsigned int *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 0) + 0x3004), 0);
+	check_eq("RecordBuffer[0]'s real ctor zeroed +0x3008",
+		 *(unsigned int *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 0) + 0x3008), 0);
+	check_eq("RecordBuffer[95]'s real ctor zeroed +0x3004",
+		 *(unsigned int *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 95) + 0x3004), 0);
+	check_eq("RecordBuffer[95]'s real ctor zeroed +0x3008",
+		 *(unsigned int *)(IndexElem(TSTGArrayManager<CSTGRecordBuffer>::sInstance, 95) + 0x3008), 0);
 
 	printf("\n[3] CSTGMidiPortManager struct-init field writes\n");
 	check_eq("+0xc == 0xffffffff", (long)(unsigned int)(*(unsigned int *)((unsigned char *)CSTGMidiPortManager::sInstance + 0xc)), (long)(unsigned int)0xffffffff);

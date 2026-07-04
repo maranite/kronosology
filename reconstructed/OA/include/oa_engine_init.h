@@ -128,13 +128,24 @@ struct CSTGWaveSeqManager {
  * calls `CSTGVectorEGBase::CSTGVectorEGBase()` FIRST, before setting
  * its own derived vtable pointer -- the standard confirmed pattern
  * for real inheritance in this codebase (matching CCostProfile :
- * public CStartupFile, sec 10.60). Declared here as an opaque base
- * with a confirmed-real, deliberately deferred constructor -- its own
- * body sets at least one confirmed-real flags byte at derived-object-
- * relative +0x6e (CSTGVectorEGXY's own constructor does `and
- * BYTE PTR [this+0x6e],0xfd`, clearing one bit of whatever the base
- * ctor already wrote there -- proof the base ctor touches that byte,
- * not independently reconstructed which bits/values in this pass).
+ * public CStartupFile, sec 10.60).
+ *
+ * CORRECTS sec 10.66's own speculation (sec 10.148): that earlier pass,
+ * without having disassembled this constructor yet, guessed it must be
+ * the one setting the flags byte at derived-object-relative +0x6e that
+ * CSTGVectorEGXY's own constructor partially clears (`and
+ * BYTE PTR [this+0x6e],0xfd`). Directly disassembling the real, now-
+ * reconstructed base ctor (`.text+0x7f820`, 22 bytes, both C1Ev/C2Ev
+ * folded to the same address) proves it does NOT touch +0x6e at all --
+ * it only writes the base vtable pointer (`*this = &_ZTV16CSTGVectorEGBase
+ * [2]`, standard "+8 to skip offset-to-top/RTTI" convention, immediately
+ * overwritten by each derived ctor's own vtable pointer right after),
+ * `*(byte*)(this+0xc) = 0`, `*(byte*)(this+0xf) = 0`, and
+ * `*(dword*)(this+8) = 0`. CSTGVectorEGXY's own AND-mask is therefore
+ * clearing a bit in whatever uninitialized memory preceded construction
+ * (this class is placed into pre-allocated CSTGBankMemory storage, sec
+ * 10.64), not a value the base ctor set -- test_vector_eg_ctors.cpp's
+ * own poison-then-construct mock updated to match (sec 10.148).
  */
 struct CSTGVectorEGBase {
 	CSTGVectorEGBase();
@@ -527,6 +538,31 @@ struct CSTGMIDIClockSync {
 };
 
 /*
+ * CTimerManager -- a genuinely new, entirely separate class discovered
+ * while reconstructing `SKSTGGate_ShouldSyncExternalClock()` (sec
+ * 10.148, src/engine/sk_stg_gate.cpp): a real MIDI-clock-sync engine
+ * with well over a dozen of its own methods (CTimerManager/
+ * ~CTimerManager, Process/Idle/ResetClock/CheckAndSendMIDIClock/
+ * UpdateCurrentTime/ProcessWhenSyncInternal/ProcessWhenSyncExternal/
+ * ShouldSyncExternalClock/GetInternalTempo/GetTimeUsFromLastClock/
+ * GetTimeUsTillNextClock/GetTimeUsTillCurrentClock/
+ * AdvanceClockForWaveSequence -- confirmed via the symbol table only).
+ * Declared here as a minimal opaque stand-in with just the one method
+ * this pass's caller needs -- NOT the same class as the already-
+ * reconstructed CSTGMIDIClockSync just above (confirmed separate
+ * mangled namespace, separate `sInstance`/`ms_poInstance` symbols).
+ */
+struct CTimerManager {
+	static CTimerManager *ms_poInstance;
+	bool ShouldSyncExternalClock();
+};
+
+/* Also declared in oa_global.h (sec 10.98) -- same real, non-`extern
+ * "C"` mangled global function, matching signature; a harmless
+ * redeclaration where both headers happen to be included together. */
+bool SKSTGGate_ShouldSyncExternalClock();
+
+/*
  * CSTGKLMManager is a fully separate, already-complete Stage 1 class
  * (see auth.h/src/auth/klm_manager.cpp) -- NOT re-declared by including
  * auth.h here, since auth.h pulls in oa_types.h, which has this
@@ -695,10 +731,36 @@ struct CSTGRecordEvent : public CSTGAudioEvent {
  * CSTGAudioDriverInterfaceKorgUsb's own constructor). */
 extern "C" unsigned char _ZTV15CSTGRecordEvent[];
 
+/*
+ * CSTGRecordBuffer -- CORRECTS a real, previously-undetected bug in this
+ * project's own earlier reconstruction (sec 10.148): this struct and the
+ * `BuildArrayManager(..., 96, 0x38, 0x0, ConstructRecordBuffer)` call in
+ * engine_init.cpp both claimed a 56-byte (0x38) per-instance size before
+ * `CSTGRecordBuffer::CSTGRecordBuffer()` itself had ever been
+ * disassembled (it was a deliberately-deferred empty stub until then).
+ * Directly disassembling the real ctor (`.text+0xd6dc0`, 21 bytes: `mov
+ * dword ptr [this+0x3004], 0` / `mov dword ptr [this+0x3008], 0`, no
+ * relocations) proves the object is at least 0x300c bytes -- and the real
+ * `CSTGEngine::Initialize()` call site confirms the exact real allocation
+ * is `CSTGBankMemory::AllocAligned(0x301c, 0x10)` per instance (a literal
+ * `mov eax, 0x301c` immediately before the ctor call, not 0x38). The old
+ * 0x38 stride would have made every one of the 96 real ctor calls write
+ * ~12KB past the end of its own tiny allocation, corrupting whatever
+ * CSTGBankMemory carved out next -- masked until now purely because the
+ * ctor itself was an empty stub that never actually performed the writes.
+ * Layout: a confirmed-real 0x3004-byte leading buffer (contents/purpose
+ * NOT recovered -- presumably raw recorded-sample storage, never written
+ * by this ctor), two ctor-zeroed dwords at +0x3004/+0x3008, and 0x10
+ * trailing bytes (+0x300c..+0x301c) the ctor also never touches.
+ */
 struct CSTGRecordBuffer {
 	CSTGRecordBuffer();
-	unsigned char _unrecovered[0x38];
+	unsigned char _unrecovered[0x3004];	/* +0x0, raw buffer, never touched by the ctor */
+	unsigned int field3004;			/* +0x3004, confirmed real, ctor-zeroed */
+	unsigned int field3008;			/* +0x3008, confirmed real, ctor-zeroed */
+	unsigned char _tail[0x10];		/* +0x300c, confirmed real, never touched by the ctor */
 };
+#define CSTGRECORDBUFFER_SIZE 0x301c
 
 /* TSTGArrayManager<T> -- see file header. All 3 confirmed instantiations
  * (CSTGPlaybackEvent/CSTGRecordEvent/CSTGRecordBuffer) share this exact

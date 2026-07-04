@@ -52,6 +52,7 @@
 extern "C" unsigned char _ZTV17CSTGVectorEGXOnly[];
 extern "C" unsigned char _ZTV14CSTGVectorEGXY[];
 extern "C" unsigned char _ZTV14CSTGVectorEGCC[];
+extern "C" unsigned char _ZTV16CSTGVectorEGBase[];
 
 /* Host/target pointer-width fix (this project's established pattern,
  * e.g. vector_manager_init.cpp): the real target's pointer fields are
@@ -59,11 +60,36 @@ extern "C" unsigned char _ZTV14CSTGVectorEGCC[];
  * pointer write here would overlap and corrupt the adjacent field. */
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 
+/*
+ * CSTGVectorEGBase::CSTGVectorEGBase() is real now too (sec 10.148,
+ * `.text+0x7f820`, 22 bytes, C1Ev/C2Ev folded to the same address --
+ * see oa_engine_init.h's own header comment for the full correction
+ * this forced to sec 10.66's own earlier speculation about +0x6e).
+ * Confirmed real body: base vtable pointer (standard Itanium "+8"
+ * convention, immediately overwritten by each derived ctor's own
+ * vtable pointer right after -- same real double-write pattern already
+ * confirmed for CCostProfile : public CStartupFile, sec 10.60), then
+ * `*(byte*)(this+0xc) = 0`, `*(byte*)(this+0xf) = 0`, and
+ * `*(dword*)(this+8) = 0`. Uses the same raw-pointer-cast convention as
+ * its three derived siblings below (this base class declares no C++
+ * virtual functions of its own in this reconstruction, so there's no
+ * compiler-managed vtable to rely on here either).
+ */
+CSTGVectorEGBase::CSTGVectorEGBase()
+{
+	unsigned char *p = reinterpret_cast<unsigned char *>(this);
+
+	*(unsigned char **)p = _ZTV16CSTGVectorEGBase + 8;
+	*(unsigned int *)(p + 0x8) = 0;
+	p[0xc] = 0;
+	p[0xf] = 0;
+}
+
 CSTGVectorEGXOnly::CSTGVectorEGXOnly()
 {
-	/* CSTGVectorEGBase::CSTGVectorEGBase() -- confirmed real, deferred,
-	 * runs implicitly as this class's own base subobject construction
-	 * (standard C++, no explicit call needed here). */
+	/* CSTGVectorEGBase::CSTGVectorEGBase() (just above) runs implicitly
+	 * as this class's own base subobject construction (standard C++, no
+	 * explicit call needed here). */
 	unsigned char *p = reinterpret_cast<unsigned char *>(this);
 
 	/* Derived vtable pointer, standard Itanium "+8 to skip offset-to-

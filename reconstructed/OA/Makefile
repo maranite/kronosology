@@ -55,6 +55,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/engine_init.o \
            src/engine/managers.o \
            src/engine/cost_profile.o \
+           src/engine/startup_file.o \
+           src/engine/sk_stg_gate.o \
            src/engine/lfo_stepseq_quad.o \
            src/engine/wave_seq_manager.o \
            src/engine/midi_dispatcher.o \
@@ -176,6 +178,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/engine_init.cpp \
        src/engine/managers.cpp \
        src/engine/cost_profile.cpp \
+       src/engine/startup_file.cpp \
+       src/engine/sk_stg_gate.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/midi_dispatcher.cpp \
@@ -223,7 +227,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_midi_dispatcher verify/test_vector_manager verify/test_vector_manager_init \
          verify/test_vector_eg_ctors verify/test_midi_queue_writer \
          verify/test_waveseq_setlist_init verify/test_alias_bank_init \
-         verify/test_smoother_init verify/test_push_unsolicited_message
+         verify/test_smoother_init verify/test_push_unsolicited_message \
+         verify/test_startup_file verify/test_sk_stg_gate
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -316,6 +321,12 @@ verify/test_engine_startup_bits2: verify/test_engine_startup_bits2.cpp src/engin
 
 verify/test_cost_profile: verify/test_cost_profile.cpp src/engine/cost_profile.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_cost_profile.cpp src/engine/cost_profile.cpp -o $@
+
+verify/test_startup_file: verify/test_startup_file.cpp src/engine/startup_file.cpp include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_startup_file.cpp src/engine/startup_file.cpp -o $@
+
+verify/test_sk_stg_gate: verify/test_sk_stg_gate.cpp src/engine/sk_stg_gate.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_sk_stg_gate.cpp src/engine/sk_stg_gate.cpp -o $@
 
 verify/test_lfo_stepseq_quad: verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp include/oa_engine.h include/oa_engine_init.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp -o $@

@@ -6,12 +6,19 @@
  * Verifies: derived vtable pointer set to the confirmed real symbol+8,
  * the shared +0x3c/+0x40/+0x44/+0x48 field convention across all three
  * types, EGCC's four STGVJSAssignInfo pointer writes and four 0x8000
- * centered defaults, and EGXY's confirmed partial-bit-clear on a byte
- * the (mocked) base constructor already set.
+ * centered defaults, and EGXY's confirmed partial-bit-clear behavior at
+ * +0x6e -- a byte the REAL base constructor does NOT touch at all (sec
+ * 10.148 corrected sec 10.66's own earlier speculation on this exact
+ * point, see oa_engine_init.h's own header comment on CSTGVectorEGBase);
+ * this test poisons that byte itself (simulating "whatever uninitialized
+ * memory looked like before", since these objects are placed into
+ * pre-allocated CSTGBankMemory storage on the real target) rather than
+ * relying on a base-constructor mock to set it.
  */
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include "oa_engine_init.h"
 
 static int g_fail;
@@ -25,18 +32,12 @@ static void check_eq(const char *label, unsigned long got, unsigned long want)
 	g_fail++;
 }
 
-/* Mock base ctor: poisons the object first (simulating "whatever real
- * memory looked like before"), then sets a confirmed-real flags byte at
- * +0x6e with BOTH bit 1 and other bits set, so EGXY's own AND-mask can be
- * verified to clear only bit 1. */
-CSTGVectorEGBase::CSTGVectorEGBase()
-{
-	memset(this, 0xaa, sizeof(CSTGVectorEGXY) > sizeof(CSTGVectorEGCC)
-				    ? (sizeof(CSTGVectorEGXY) > sizeof(CSTGVectorEGXOnly)
-					       ? sizeof(CSTGVectorEGXY)
-					       : sizeof(CSTGVectorEGXOnly))
-				    : sizeof(CSTGVectorEGCC));
-}
+/* CSTGVectorEGBase::CSTGVectorEGBase() is now real (sec 10.148, see
+ * vector_eg_ctors.cpp) -- no mock here any more, just its own real
+ * vtable placeholder (same treatment as the three derived classes'
+ * own, just below). */
+extern "C" unsigned char _ZTV16CSTGVectorEGBase[16];
+unsigned char _ZTV16CSTGVectorEGBase[16];
 
 extern "C" unsigned char STGVJSAssignInfo[4];
 unsigned char STGVJSAssignInfo[4];
@@ -77,7 +78,15 @@ int main(void)
 
 	printf("\n[2] CSTGVectorEGXY\n");
 	{
-		CSTGVectorEGXY *obj = new CSTGVectorEGXY();
+		/* Poison the raw storage BEFORE construction (simulating
+		 * "whatever uninitialized memory looked like before" -- the
+		 * real base ctor does NOT touch +0x6e at all, confirmed sec
+		 * 10.148) so the AND-mask's own real effect (clear bit 1 only,
+		 * leave the rest alone) is verifiable regardless of what value
+		 * happened to precede it. */
+		unsigned char raw[sizeof(CSTGVectorEGXY)];
+		memset(raw, 0xaa, sizeof(raw));
+		CSTGVectorEGXY *obj = new (raw) CSTGVectorEGXY();
 		unsigned char *p = reinterpret_cast<unsigned char *>(obj);
 		check_eq("self-pointer at +0x44", *(unsigned int *)(p + 0x44), (unsigned long)(unsigned int)(unsigned long)p);
 		check_eq("list node next (+0x3c) == 0", *(unsigned int *)(p + 0x3c), 0);
@@ -87,9 +96,9 @@ int main(void)
 		check_eq("+0x60 == 0", *(unsigned int *)(p + 0x60), 0);
 		check_eq("+0x64 == 0", *(unsigned int *)(p + 0x64), 0);
 		check_eq("+0x6d == 0", p[0x6d], 0);
-		check_eq("+0x6e bit 1 cleared, other bits (base-set 0xaa) preserved", p[0x6e], 0xaa & 0xfd);
+		check_eq("+0x6e bit 1 cleared, other bits (poisoned 0xaa) preserved", p[0x6e], 0xaa & 0xfd);
 		check_eq("vtable ptr nonzero (real symbol+8)", *(unsigned long *)p != 0, 1);
-		delete obj;
+		obj->~CSTGVectorEGXY();
 	}
 
 	printf("\n[3] CSTGVectorEGCC\n");
