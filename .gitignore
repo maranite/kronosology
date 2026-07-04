@@ -3,12 +3,32 @@
 **/*.o
 ! auto-auth/oa_authgen/oa_authgen.ko
 
+# Kbuild-generated artifacts from `make ko` (real cross-compile builds,
+# e.g. reconstructed/OA/, AT88VirtualChip/, KorgUsbAudioVirtualDriver/)
+**/.tmp_versions/
+**/Module.symvers
+**/modules.order
+**/*.mod.c
+**/*.o.d
+**/.*.cmd
+
+# host-compiled object files (named .hostobj, not .o, specifically to avoid
+# the host/Kbuild object-path collision bug fixed in sec 10.143 -- since the
+# rename moved them out from under the existing **/*.o rule above, they need
+# their own line or they leak back into git untracked.
+**/*.hostobj
+
 # compiled host binary (regenerable via make)
 /loadoa/loadoa
 
 # OA coverage manifest (regenerable from Ghidra)
 reconstructed/OA/manifest/*.csv
 
-# OA host verification binaries (regenerable via cc)
-reconstructed/OA/verify/test_*
-!reconstructed/OA/verify/test_*.c
+# host verification binaries (regenerable via cc/g++) -- ignore the
+# extension-less compiled binary, but not its .c/.cpp source (the !.c-only
+# exception here previously silently excluded every .cpp KAT test from git).
+# Applies to every reconstructed subsystem's verify/ dir, not just OA's.
+reconstructed/*/verify/test_*
+!reconstructed/*/verify/test_*.c
+!reconstructed/*/verify/test_*.cpp
+!reconstructed/*/verify/test_*.py
