@@ -104,6 +104,13 @@ void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, c
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
 void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *) { }
 void CSTGVoiceAllocator::StealVoiceList(void *) { }
+/* Link-satisfying mocks for sec 10.144's new CSTGHDRManager::ProcessCommands()/
+ * CSTGCDWorker::Initialize() bodies -- not exercised by anything in this
+ * file, only needed so managers.cpp links cleanly. */
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+void CSTGHDRManager::ProcessPlaybackCommands() { }
+void CSTGHDRManager::ProcessRecordCommands() { }
+void CSTGHDRManager::ProcessSamplerCommands() { }
 void CSTGSlotVoiceData::RunVoiceModelStaticFront(unsigned int) { }
 void CSTGSlotVoiceData::RunVoiceModelStaticBack(unsigned int) { }
 void CSTGSlotVoiceData::GetTotalStaticCosts(unsigned long *, unsigned long *) const { }
@@ -146,7 +153,10 @@ CSTGSlotVoiceData::CSTGSlotVoiceData() { g_slotVoiceDataCalls++; }
 void CSTGSlotVoiceData::RunVoiceModelFeedback() { }
 void CSTGSlotVoiceData::Initialize(unsigned short) { }
 void CSTGSlotVoiceData::UpdateGlobalTune(float) { }
-bool CSTGPerformance::IsCurrentlyActive() const { return false; }
+/* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144, see
+ * managers.cpp) -- CSTGPerformanceVarsManager::sInstance is never set up
+ * in this file, so the real implementation naturally resolves to null
+ * and returns false, matching this mock's old unconditional behavior. */
 void CSTGMidiDispatcher::HandleController(unsigned char, unsigned char, unsigned char, int, int) { }
 void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) { }
 void CSTGMidiQueueWriter::Write(const unsigned char *, unsigned int, bool) { }

@@ -279,6 +279,15 @@ void CSTGSlotVoiceData::GetTotalStaticCosts(unsigned long *out1, unsigned long *
 static int g_stealVoiceListCalls;
 void CSTGVoiceAllocator::StealVoiceList(void *) { g_stealVoiceListCalls++; }
 
+/* Link-satisfying mocks for sec 10.144's new CSTGHDRManager::ProcessCommands()/
+ * CSTGCDWorker::Initialize() bodies -- not exercised by anything in this
+ * file, only needed so managers.cpp (linked here for CSTGGlobal's own
+ * manager-constructor tests) links cleanly. */
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
+void CSTGHDRManager::ProcessPlaybackCommands() { }
+void CSTGHDRManager::ProcessRecordCommands() { }
+void CSTGHDRManager::ProcessSamplerCommands() { }
+
 /* CSTGProgramSlot's own confirmed-real, deliberately deferred
  * dependencies (sec 10.81). IsActive()/AccessActiveSlotVoiceData()/
  * HasActiveSlotVoiceData()/HasActiveVoices() are reconstructed for
@@ -460,13 +469,15 @@ void CSTGSlotVoiceData::UpdateGlobalTune(float tune)
 	g_lastUpdateGlobalTuneThis = this;
 	g_lastUpdateGlobalTuneValue = tune;
 }
-static bool g_isCurrentlyActiveReturn;
-static const void *g_lastIsCurrentlyActiveThis;
-bool CSTGPerformance::IsCurrentlyActive() const
-{
-	g_lastIsCurrentlyActiveThis = this;
-	return g_isCurrentlyActiveReturn;
-}
+/* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144, see
+ * managers.cpp) -- exercised via real CSTGPerformanceVarsManager::
+ * sInstance/+0x23d1/+0x23d4 backing state in section [26] below, not
+ * mocked. g_lastIsCurrentlyActiveThis is still tracked, but now by
+ * observing which address IsCurrentlyActive() was actually invoked on
+ * via a thin, test-only wrapper is unnecessary -- the real function
+ * has no side effect to hook, so instead each check below sets up the
+ * real "active" address it expects THIS call to resolve to and lets
+ * the real gate logic decide whether to dispatch. */
 static int g_handleControllerCalls;
 static void *g_lastHandleControllerThis;
 static unsigned char g_lastHandleControllerArg1, g_lastHandleControllerArg2, g_lastHandleControllerArg3;
@@ -1782,6 +1793,25 @@ int main(void)
 		unsigned char *midiDisp = mmap32(0x10);
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp;
 
+		/* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144):
+		 * resolves the active CSTGPerformanceVarsManager via the same
+		 * sInstance[8]-selector idiom used throughout this file, then
+		 * checks mgr->fieldAt(0x23d1)==2 && mgr->fieldAt(0x23d4)==this.
+		 * Wire up a real manager buffer so each case below can control
+		 * exactly which address reads as "currently active", the same
+		 * role g_isCurrentlyActiveReturn/g_lastIsCurrentlyActiveThis
+		 * used to play as test-only overrides. */
+		unsigned char *perfVarsMgr26 = mmap32(0x23e0);
+		memset(perfVarsMgr26, 0, 0x23e0);
+		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) =
+			(unsigned int)(unsigned long)perfVarsMgr26;
+		CSTGPerformanceVarsManager::sInstance[8] = 0;
+#define SET_ACTIVE(addr) do { \
+		perfVarsMgr26[0x23d1] = 2; \
+		*(unsigned int *)(perfVarsMgr26 + 0x23d4) = (unsigned int)(unsigned long)(addr); \
+	} while (0)
+#define SET_INACTIVE() (perfVarsMgr26[0x23d1] = 0)
+
 		struct {
 			const char *label;
 			void (CSTGGlobal::*fn)(CSTGMessageContext &, STGConvertedParam &);
@@ -1807,14 +1837,12 @@ int main(void)
 			*(int *)(buf + 0x684) = 0;
 			*(int *)(buf + 0x698) = 5;  /* program index */
 			*(int *)(buf + 0x68c) = 2;  /* program bank */
-			g_isCurrentlyActiveReturn = true;
+			SET_ACTIVE(buf + (5 * 0xcec + 2 * 0x67603 + 0x132e4d0 + 3));
 			buf[0x6b9] = 3; /* MIDI channel */
 			param.value = 0x22;
 			(g->*c.fn)(ctx, param);
-			check_eq("  ...IsCurrentlyActive() called on the mode-0 program address",
-				 (unsigned int)(g_lastIsCurrentlyActiveThis ==
-						 buf + (5 * 0xcec + 2 * 0x67603 + 0x132e4d0 + 3)), 1);
-			check_eq("  ...HandleController fires when active", (unsigned int)g_handleControllerCalls, 1);
+			check_eq("  ...HandleController fires when the mode-0 program address reads active",
+				 (unsigned int)g_handleControllerCalls, 1);
 			check_eq("  ...arg1 == channel", (unsigned int)g_lastHandleControllerArg1, 3u);
 			check_eq("  ...arg2 == selector (0x22)", (unsigned int)g_lastHandleControllerArg2, 0x22u);
 			check_eq("  ...arg3 == literal 0x40", (unsigned int)g_lastHandleControllerArg3, 0x40u);
@@ -1824,41 +1852,47 @@ int main(void)
 			printf("  -- mode 0, progIdx == 0xfffe sentinel -> fixed special address --\n");
 			g_handleControllerCalls = 0;
 			*(int *)(buf + 0x698) = 0xfffe;
+			SET_ACTIVE(buf + 0x2976e33);
 			(g->*c.fn)(ctx, param);
-			check_eq("  ...resolves to the fixed sentinel address",
-				 (unsigned int)(g_lastIsCurrentlyActiveThis == buf + 0x2976e33), 1);
+			check_eq("  ...resolves to the fixed sentinel address (fires only because "
+				 "THAT exact address was armed active)",
+				 (unsigned int)g_handleControllerCalls, 1);
 
 			printf("  -- mode 1 (Combi) --\n");
 			g_handleControllerCalls = 0;
 			*(int *)(buf + 0x684) = 1;
 			*(int *)(buf + 0x69c) = 7;  /* combi index */
 			*(int *)(buf + 0x690) = 1;  /* combi bank */
+			SET_ACTIVE(buf + (7 * 0x19e7 + 1 * 0xcf381 + 0x1c77f10 + 6));
 			(g->*c.fn)(ctx, param);
 			check_eq("  ...resolves to the mode-1 combi address",
-				 (unsigned int)(g_lastIsCurrentlyActiveThis ==
-						 buf + (7 * 0x19e7 + 1 * 0xcf381 + 0x1c77f10 + 6)), 1);
+				 (unsigned int)g_handleControllerCalls, 1);
 
 			printf("  -- mode 2 (Sequence) --\n");
 			g_handleControllerCalls = 0;
 			*(int *)(buf + 0x684) = 2;
 			*(int *)(buf + 0x6a0) = 11; /* sequence index */
+			SET_ACTIVE(buf + (11 * 0x1cad + 0x27cd024));
 			(g->*c.fn)(ctx, param);
 			check_eq("  ...resolves to the mode-2 sequence address",
-				 (unsigned int)(g_lastIsCurrentlyActiveThis == buf + (11 * 0x1cad + 0x27cd024)), 1);
+				 (unsigned int)g_handleControllerCalls, 1);
 
 			printf("  -- gating: not active -> no dispatch; negative selector -> no dispatch --\n");
 			g_handleControllerCalls = 0;
-			g_isCurrentlyActiveReturn = false;
+			SET_INACTIVE();
 			(g->*c.fn)(ctx, param);
 			check_eq("  ...IsCurrentlyActive()==false suppresses the MIDI send",
 				 (unsigned int)g_handleControllerCalls, 0);
 
-			g_isCurrentlyActiveReturn = true;
+			SET_ACTIVE(buf + (11 * 0x1cad + 0x27cd024)); /* still mode 2 from above */
 			param.value = 0x80; /* negative as a signed byte */
 			(g->*c.fn)(ctx, param);
 			check_eq("  ...negative selector suppresses the MIDI send",
 				 (unsigned int)g_handleControllerCalls, 0);
 		}
+#undef SET_ACTIVE
+#undef SET_INACTIVE
+		munmap(perfVarsMgr26, 0x23e0);
 
 		munmap(midiDisp, 0x10);
 	}

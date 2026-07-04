@@ -28,6 +28,7 @@
 /* Real kernel-only APIs and a not-yet-reconstructed static method, mocked
  * only so CSTGVoiceModelManager's constructor (used by test [1]) links on
  * the host -- see test_managers.cpp for the same treatment in more detail. */
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" void *rtwrap_malloc(unsigned int size) { return malloc(size); }
 extern "C" void rtwrap_pthread_mutex_init(void *, void *) { }
@@ -86,7 +87,11 @@ void CSTGEffectManager::RunEffects()             { log_call("CSTGEffectManager::
 void CSTGAudioBusManager::MixPerformanceOutputs(){ log_call("MixPerformanceOutputs"); }
 void CSTGAudioBusManager::LRBusIndivMirror()     { log_call("LRBusIndivMirror"); }
 void CSTGHDRManager::ProcessHDRRecord()          { log_call("ProcessHDRRecord"); }
-void CSTGHDRManager::ProcessCommands()           { log_call("HDRManager::ProcessCommands"); }
+/* ProcessCommands() is real now (sec 10.144, see managers.cpp) -- calls
+ * these three confirmed-real, still-deferred siblings in order. */
+void CSTGHDRManager::ProcessPlaybackCommands()   { log_call("HDRManager::ProcessPlaybackCommands"); }
+void CSTGHDRManager::ProcessRecordCommands()     { log_call("HDRManager::ProcessRecordCommands"); }
+void CSTGHDRManager::ProcessSamplerCommands()    { log_call("HDRManager::ProcessSamplerCommands"); }
 void CSTGMonitorMixer::RunMonitors()             { log_call("RunMonitors"); }
 void CSTGFileOpener::ProcessCommands()           { log_call("FileOpener::ProcessCommands"); }
 void CSTGFileCloser::ProcessCommands()           { log_call("FileCloser::ProcessCommands"); }
@@ -161,7 +166,10 @@ void CSTGControllerInfo::SetPerfSwitch(int, bool) { }
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) { }
 CSTGMidiDispatcher *CSTGMidiDispatcher::sInstance;
 void CSTGSlotVoiceData::UpdateGlobalTune(float) { }
-bool CSTGPerformance::IsCurrentlyActive() const { return false; }
+/* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144, see
+ * managers.cpp) -- CSTGPerformanceVarsManager::sInstance is never set up
+ * in this file, so the real implementation naturally resolves to null
+ * and returns false, matching this mock's old unconditional behavior. */
 void CSTGMidiDispatcher::HandleController(unsigned char, unsigned char, unsigned char, int, int) { }
 void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) { }
 void CSTGMidiQueueWriter::Write(const unsigned char *, unsigned int, bool) { }
@@ -327,7 +335,8 @@ int main(void)
 	CSTGSamplingDaemon sd; CSTGSamplingDaemon::sInstance = &sd;
 	engine->RunFileDaemonSynchronization();
 	check_log("RunFileDaemonSynchronization",
-		  "HDRManager::ProcessCommands;FileOpener::ProcessCommands;"
+		  "HDRManager::ProcessPlaybackCommands;HDRManager::ProcessRecordCommands;"
+		  "HDRManager::ProcessSamplerCommands;FileOpener::ProcessCommands;"
 		  "HDRFileReader::ProcessCommands;HDRFileWriter::ProcessCommands;"
 		  "FileCloser::ProcessCommands;StreamingFileReader::ProcessCommands;"
 		  "CDWorker::ProcessCommands;SamplingDaemon::ProcessCommands;");

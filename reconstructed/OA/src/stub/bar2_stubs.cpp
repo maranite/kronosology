@@ -61,23 +61,28 @@ CSTGVoiceModelManager::~CSTGVoiceModelManager() {}
 void CSTGEffectManager::Initialize() {}
 void CSTGEffectManager::RunEffects() {}
 void CSTGHDRManager::Initialize() {}
-void CSTGHDRManager::ProcessCommands() {}
+/* ProcessCommands()/Initialize() (CSTGMonitorMixer/CSTGHDRFileWriter/
+ * CSTGSamplingDaemon/CSTGFileCloser/CSTGCDWorker) are real now, sec
+ * 10.144 -- see managers.cpp. ProcessCommands() calls three still-
+ * deferred siblings, stubbed below. */
+void CSTGHDRManager::ProcessPlaybackCommands() {}
+void CSTGHDRManager::ProcessRecordCommands() {}
+void CSTGHDRManager::ProcessSamplerCommands() {}
 void CSTGHDRManager::ProcessHDRRecord() {}
-void CSTGMonitorMixer::Initialize() {}
 void CSTGMonitorMixer::RunMonitors() {}
 void CSTGFileOpener::Initialize() {}
 void CSTGFileOpener::ProcessCommands() {}
-void CSTGFileCloser::Initialize() {}
 void CSTGFileCloser::ProcessCommands() {}
 void CSTGHDRFileReader::Initialize() {}
 void CSTGHDRFileReader::ProcessCommands() {}
-void CSTGHDRFileWriter::Initialize() {}
 void CSTGHDRFileWriter::ProcessCommands() {}
 void CSTGStreamingFileReader::Initialize(unsigned long) {}
 void CSTGStreamingFileReader::ProcessCommands() {}
-void CSTGCDWorker::Initialize() {}
+/* CSTGCDWorker_InitializeBuffer confirmed real, deliberately deferred
+ * extern (a plain C-linkage function, not a class method), called by
+ * the now-real CSTGCDWorker::Initialize() -- sec 10.144. */
+extern "C" unsigned int CSTGCDWorker_InitializeBuffer(void *) { return 0; }
 void CSTGCDWorker::ProcessCommands() {}
-void CSTGSamplingDaemon::Initialize() {}
 void CSTGSamplingDaemon::ProcessCommands() {}
 void CSTGMidiPortManager::Initialize() {}
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
@@ -94,7 +99,8 @@ void *CSTGAudioManager::AudioManagerThreadRoutine(void *) { return 0; }
 void *CSTGAudioThread::AudioTickLoopRoutine(void *) { return 0; }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() {}
 void CSTGMultisampleBankManager::Initialize() {}
-void CSTGPCMPrecacheManager::Initialize() {}
+/* CSTGPCMPrecacheManager::Initialize() is real now, sec 10.144 -- see
+ * setup_global_resources.cpp. */
 void CSTGPCMPrecacheManager::AfterProcess() {}
 void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
 
@@ -170,8 +176,8 @@ unsigned int CSTGMidiQueue::GetNumWritableBytes() const { return 0; }
  * those tests don't link, matching this project's per-unit file
  * convention). */
 /* placeholder-removed-below -- see
- * src/engine/global.cpp. */
-bool CSTGPerformance::IsCurrentlyActive() const { return false; }
+ * src/engine/global.cpp. CSTGPerformance::IsCurrentlyActive() is real
+ * now too, sec 10.144 -- see managers.cpp. */
 void CSTGPerformanceVarsManager::Initialize() {}
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
 CSTGPlaybackEvent::CSTGPlaybackEvent() {}
