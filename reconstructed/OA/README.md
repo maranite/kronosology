@@ -64,6 +64,17 @@ the wrong-flags host objects. Fixed by giving the host check a distinct
 `KorgUsbAudioVirtualDriver`'s Makefiles so the two build modes can no longer
 collide. All 37 `OA` host suites pass; `OA.ko` rebuilds with 32 unresolved
 symbols, 0 GOT relocations, byte-exact module header, in either build order now.
+**Sec 10.144 (same day)**: reconstructed 8 more small manager methods from the
+`bar2_stubs.cpp` sweep (`CSTGMonitorMixer`/`CSTGHDRFileWriter`/
+`CSTGSamplingDaemon`/`CSTGFileCloser`/`CSTGCDWorker`'s own `Initialize()`s,
+`CSTGHDRManager::ProcessCommands()`, `CSTGPerformance::IsCurrentlyActive()`,
+`CSTGPCMPrecacheManager::Initialize()`), plus one real signature bug fixed
+(`CSTGPCMPrecacheManager::Initialize()` was declared `void` but the real
+disassembly returns `bool true` unconditionally — its one caller just
+discards it, hence the miss). Promoted every affected test file's own
+pre-existing mocks to real backing state or plain link stubs as appropriate.
+All 37 host suites still pass; `OA.ko` still 32 unresolved symbols, 0 GOT
+relocations, byte-exact module header.
 
 ### Stage-1 auth cluster
 
