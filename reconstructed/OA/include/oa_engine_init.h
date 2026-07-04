@@ -544,6 +544,77 @@ struct CSTGKLMManager {
 	static CSTGKLMManager *sInstance;
 };
 
+/*
+ * Sec 10.147 addendum -- all ten Model ctors fully disassembled and
+ * confirmed (picked up during a "smallest first" sweep of
+ * bar2_stubs.cpp, since each is only 0x3a-0x50/58-80 bytes), but
+ * DELIBERATELY NOT PROMOTED to real bodies in that pass, despite the
+ * small byte count: unlike this same pass's three destructors (see
+ * oa_engine.h/managers.cpp), these carry disproportionate STRUCTURAL
+ * cost relative to their code size, the same class of judgment call
+ * already flagged for `WriteSTGMidiOutQueue` (sec 10.145).
+ *
+ * Confirmed shape, all ten (`.text+0x1c7a90`/`0x1abd10`/`0x1b1280`/
+ * `0x1b8440`/`0x1cac10`/`0x1d4f10`/`0x1df8e0`/`0x1e8780`/`0x1f57a0`/
+ * `0x1faa80` for Off/PCM/AnalogSync/Organ/Plucked/MS20/Polysix/VPM/
+ * Piano/EP respectively):
+ *   1. `EDX = N` (a per-class integer 0..9, in exactly this
+ *      enumeration order) then a call to `CSTGVoiceModel::
+ *      CSTGVoiceModel(eSTGVoiceModelType)` -- confirmed via its own
+ *      real mangled relocation, `_ZN14CSTGVoiceModelC2E
+ *      18eSTGVoiceModelType` -- a base-object-constructor (C2) call,
+ *      i.e. `CSTGVoiceModel` is a genuine base class of all ten,
+ *      confirmed real but its own full internal layout is NOT
+ *      independently reconstructed anywhere in this project yet (only
+ *      that it owns offsets `+0x00` (vtable ptr) through at least
+ *      `+0x104`/`+0xe1`/`+0xe2`, since every derived ctor below writes
+ *      those same three offsets as base-class state, not as its own
+ *      newly-added fields).
+ *   2. The derived class's OWN vtable pointer overwrite at `+0x00`
+ *      (confirmed via relocation to be `_ZTVnnCSTGxxxModel+8`, not the
+ *      literal small integer objdump's plain disassembly shows --
+ *      the same "check the relocation before trusting the literal"
+ *      catch already made repeatedly elsewhere in this project).
+ *   3. `+0x104 = 0` (a plain literal zero, confirmed, all ten).
+ *   4. `CSTGxxxModel::sInstance = this`.
+ *   5. A per-class flag write at `+0xe1` (a byte) -- CONFIRMED
+ *      genuinely per-class, not uniform: Off/PCM/AnalogSync/Polysix use
+ *      `OR` (0x3f/0x7f/0x57/0xd7 respectively -- implying the base
+ *      ctor already left meaningful bits there); Organ/MS20/Piano/EP
+ *      use a plain `MOV` (0xc1/0xd7/0xd1/0xd1); Plucked/VPM read the
+ *      byte first, mask off the low 7 bits (`AND 0xffffff80`), OR in
+ *      `0x77`, and ALSO separately `OR +0xe2` with `0x1` -- Organ/MS20/
+ *      EP also touch `+0xe2` (Organ: none; MS20: `OR 0x1`; EP: `OR
+ *      0x2`) while the rest never touch `+0xe2` at all. Real per-bit
+ *      meaning not determined -- plausibly per-model synthesis-engine
+ *      capability flags, given the name and how each model gets its
+ *      own distinct bit pattern, but not confirmed.
+ *   6. `PCMModel`'s own `CSTGPCMModelPatch::HasWaveSeqInOscZone()
+ *      const`, `AnalogSyncModel`/`OrganModel`'s own `QuickRelease
+ *      (CSTGVoice&)`, and several other per-model `xxxModelPatch`
+ *      sibling methods sit immediately after each ctor in the real
+ *      binary (confirmed via their own symbol names) -- none examined
+ *      or reconstructed in this pass, out of scope.
+ *
+ * Reconstructing these ten for real would require: (a) a genuine
+ * `CSTGVoiceModel` base class in THIS header ecosystem (oa_engine.h/
+ * oa_global.h, not oa_types.h's own already-different `CSTGVoiceModel`
+ * struct used by quad_list.cpp -- the two are deliberately never
+ * included together, per this file's own top-of-file ODR note) with an
+ * own not-yet-reconstructed base ctor forward (an `eSTGVoiceModelType`
+ * enum tag purely for correct mangling, real enumerator names not
+ * evidenced); (b) ten `_ZTVnnCSTGxxxModel[]` zero-initialized byte-array
+ * vtable stand-ins, matching the established "extern C byte-array
+ * trick" (sec 10.58/10.60/10.66, already used for `_ZTV16CSTGAudioManager`
+ * etc. in bar2_stubs.cpp) rather than real derived-class virtual
+ * functions, since neither base's nor any derived class's real vtable
+ * slot layout is independently confirmed; (c) ten distinct per-class
+ * flag-byte writes (not shareable via one helper, per point 5 above).
+ * All doable, but a clearly SEPARATE, larger task from "reconstruct the
+ * next handful of small stubs" -- left fully documented here (so a
+ * future pass doesn't need to re-disassemble any of it) rather than
+ * rushed or silently skipped.
+ */
 struct CSTGOffModel { CSTGOffModel(); };
 struct CSTGPCMModel { CSTGPCMModel(); };
 struct CSTGAnalogSyncModel { CSTGAnalogSyncModel(); };

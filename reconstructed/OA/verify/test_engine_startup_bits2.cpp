@@ -44,6 +44,12 @@ static int g_condInitCalls;
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { g_condInitCalls++; }
 CSTGAudioManager::~CSTGAudioManager() { }
+/* Sec 10.147: ~CSTGVoiceAllocator()/~CSTGMessageProcessor() are now real
+ * (see managers.cpp) -- link-satisfying only, same reasoning as
+ * test_global.cpp's own identical addition. */
+extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
+extern "C" void rtwrap_free(void *) { }
+CEffectorDatabase::~CEffectorDatabase() { }
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) { g_mutexattrCalls++; }
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
 

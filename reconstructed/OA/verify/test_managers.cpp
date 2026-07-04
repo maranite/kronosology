@@ -27,6 +27,17 @@ extern "C" void *rtwrap_malloc(unsigned int size) { return malloc(size); }
 extern "C" void rtwrap_pthread_mutex_init(void *, void *) { g_mutexInitCalls++; }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
 
+/* Sec 10.147: ~CSTGVoiceAllocator() is now real and calls these two --
+ * link-satisfying only (this file's own tests never invoke a typed
+ * `delete`/destructor on any of these classes, matching every other
+ * test here's `delete[]`-on-raw-buffer convention, see its own class
+ * comment above). */
+extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
+extern "C" void rtwrap_free(void *) { }
+/* Sec 10.147: ~CSTGMessageProcessor() is now real and calls this if its
+ * own +0x64 field is non-null -- link-satisfying only, same reasoning. */
+CEffectorDatabase::~CEffectorDatabase() { }
+
 /* Link-satisfying mocks for sec 10.144's new small `Initialize()`/
  * `ProcessCommands()` bodies -- this file doesn't link global.cpp, so
  * ResolveActivePerformanceVarsManagerRaw() needs its own stub here (a

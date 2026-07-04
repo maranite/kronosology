@@ -80,6 +80,26 @@ public:
  * call idiom (e.g. `NotifySoloChange`, sec 10.107) since these array
  * entries' own real class isn't otherwise typed/modeled.
  */
+/*
+ * ~CSTGVoiceModelManager() (sec 10.147, `.text+0x1a99e0`, 72 bytes)
+ * confirmed: walks the SAME `+0x30` array/`+0x58` count pair as
+ * ProcessSubRate/ProcessAudioRate above, but dispatches vtable slot
+ * `+0x4/4 == 1` on each non-null entry, taking no extra argument besides
+ * the entry itself (a destructor-shaped call, plausibly each entry's own
+ * `D0`/deleting-destructor slot -- not confirmed, no further evidence
+ * traced). A REAL, CONFIRMED difference from ProcessSubRate/
+ * ProcessAudioRate's own re-read-every-iteration count: here `count` is
+ * loaded ONCE before the loop, then refreshed from `this` again only
+ * immediately after a non-null entry's virtual call returns -- on a
+ * null-entry iteration (skipped call) the PREVIOUS iteration's register
+ * value is reused unchanged. A genuine register-vs-memory quirk, kept
+ * faithful via an explicit local variable refreshed only on that one
+ * path, not simplified into a from-memory-every-time loop condition.
+ * Also, unlike ProcessSubRate/ProcessAudioRate (which dereference every
+ * entry unconditionally), the destructor DOES null-check each entry
+ * before dispatching -- both facts confirmed directly from the
+ * disassembly, not assumed to be uniform across all three methods.
+ */
 class CSTGVoiceModelManager {
 public:
 	static CSTGVoiceModelManager *sInstance;
@@ -669,6 +689,39 @@ public:
  * as a lower bound, not asserted as exact, unlike this project's usual
  * "sizeof matches exactly" claims for smaller classes).
  */
+
+/* Confirmed real class (mangled name from `_ZN17CEffectorDatabaseD1Ev`,
+ * seen at `CSTGMessageProcessor::~CSTGMessageProcessor()`'s own real
+ * call site, sec 10.147) -- own constructor/Register()/etc. NOT
+ * reconstructed in this pass (see CSTGMessageProcessor's own ctor
+ * comment above: `_Znwj` + `CEffectorDatabase::CEffectorDatabase(int,
+ * CEffector*)`, seeded with `g_oNoEffect`, then 198
+ * `CEffectorDatabase::Register()` calls). Declared here ONLY so its
+ * real, non-virtual (no vtable indirection at the call site) `D1`
+ * destructor mangles/links correctly from CSTGMessageProcessor's own
+ * destructor. */
+class CEffectorDatabase {
+public:
+	~CEffectorDatabase();
+};
+
+/*
+ * ~CSTGMessageProcessor() (sec 10.147, `.text+0xed290`, 71 bytes)
+ * confirmed: `sInstance = 0` (unconditional -- same "no self-check"
+ * quirk already confirmed for `CSTGVoiceAllocator::
+ * ~CSTGVoiceAllocator()`, see that class's own comment below), then, if
+ * the ctor's own confirmed `+0x64` `CEffectorDatabase*` is non-null,
+ * calls its real non-virtual destructor (a direct `call` to the mangled
+ * `D1` symbol, no vtable load -- confirmed by the disassembly itself)
+ * followed by `operator delete`; finally, UNCONDITIONALLY (no null
+ * check, unlike `+0x64` -- `operator delete(nullptr)` is a standard-
+ * mandated no-op, so this is safe either way, but the asymmetry itself
+ * is a confirmed real fact worth preserving, not normalized away)
+ * deletes a second confirmed real pointer at `+0x68` whose own type
+ * isn't determined (no destructor call precedes its delete, unlike
+ * `+0x64` -- plausibly a raw buffer rather than a class instance with a
+ * nontrivial destructor).
+ */
 class CSTGMessageProcessor {
 public:
 	static CSTGMessageProcessor *sInstance;
@@ -942,6 +995,17 @@ public:
  * real object) -- every byte up to the mutex field is accounted for by
  * an explicit member or an explicitly-labeled unrecovered gap, even
  * though two of those regions' internal contents aren't reconstructed.
+ */
+/*
+ * ~CSTGVoiceAllocator() (sec 10.147, `.text+0x4c8e0`, 54 bytes)
+ * confirmed: `sInstance = 0` (a plain unconditional store to the
+ * static's own address -- NOT gated on `this == sInstance`, a genuine,
+ * faithfully-preserved quirk: destroying any instance nukes the
+ * singleton pointer even if it wasn't the current one), then
+ * `rtwrap_pthread_mutex_destroy`+`rtwrap_free` on the ctor's own
+ * confirmed `requirementsMutex` handle -- the exact allocate/init
+ * (ctor) vs destroy/free (dtor) counterpart already established for
+ * `CPowerOffTimer` (see that class's own comment).
  */
 class CSTGVoiceAllocator {
 public:

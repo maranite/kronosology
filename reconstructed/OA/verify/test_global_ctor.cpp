@@ -45,6 +45,12 @@ extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
 CSTGAudioManager::~CSTGAudioManager() { }
+/* Sec 10.147: ~CSTGVoiceAllocator()/~CSTGMessageProcessor() are now real
+ * (see managers.cpp) -- link-satisfying only, same reasoning as
+ * test_global.cpp's own identical addition. */
+extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
+extern "C" void rtwrap_free(void *) { }
+CEffectorDatabase::~CEffectorDatabase() { }
 /* CSTGAudioInput's own 9 UpdateXXX methods + ctor are now reconstructed
  * for real (sec 10.80, see src/engine/global.cpp) -- no mock needed for
  * CSTGAudioInput itself any more (section [1] below now verifies real

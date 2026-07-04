@@ -57,7 +57,8 @@ CSTGEPModel::CSTGEPModel() {}
 void CSTGPianoModel::RescanPianoTypes() {}
 
 /* ---- Engine subsystem managers (engine.cpp, sec 10.13/10.58) ---- */
-CSTGVoiceModelManager::~CSTGVoiceModelManager() {}
+/* CSTGVoiceModelManager::~CSTGVoiceModelManager() is real now, sec
+ * 10.147 -- see managers.cpp. */
 void CSTGEffectManager::Initialize() {}
 void CSTGEffectManager::RunEffects() {}
 void CSTGHDRManager::Initialize() {}
@@ -89,8 +90,8 @@ CSTGMidiPortManager::~CSTGMidiPortManager() {}
 void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) {}
 void CSTGMidiPortManager::NotifyNKS4TestMode() {}
 void CSTGVoiceAllocator::Initialize() {}
-CSTGVoiceAllocator::~CSTGVoiceAllocator() {}
-CSTGMessageProcessor::~CSTGMessageProcessor() {}
+/* CSTGVoiceAllocator::~CSTGVoiceAllocator()/CSTGMessageProcessor::
+ * ~CSTGMessageProcessor() are real now, sec 10.147 -- see managers.cpp. */
 void CSTGAudioBusManager::MixPerformanceOutputs() {}
 void CSTGAudioBusManager::LRBusIndivMirror() {}
 CSTGAudioEvent::CSTGAudioEvent() {}
@@ -106,6 +107,12 @@ void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
 
 /* ---- Remaining engine/manager/model stubs, batch 2 ---- */
 CEmergencyStealer::~CEmergencyStealer() {}
+/* CEffectorDatabase::~CEffectorDatabase() -- confirmed real, deliberately
+ * deferred (sec 10.147: called for real by the now-real
+ * CSTGMessageProcessor::~CSTGMessageProcessor(), see managers.cpp/
+ * oa_engine.h; the class's own ctor/Register()/etc. are NOT
+ * reconstructed, own body far out of scope for this pass). */
+CEffectorDatabase::~CEffectorDatabase() {}
 /* CSTGASK::Initialize() is real now, sec 10.145 (see
  * setup_global_resources.cpp) -- a pure forward to SKMain_Initialize(),
  * confirmed real, deliberately deferred (own body substantially larger,

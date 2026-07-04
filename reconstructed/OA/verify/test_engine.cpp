@@ -64,6 +64,14 @@ static void VoiceModelSubRateTrap(void *, unsigned int tick)
 { char b[32]; sprintf(b, "ProcessSubRate(%u)", tick); log_call(b); }
 static void VoiceModelAudioRateTrap(void *, unsigned int tick)
 { char b[32]; sprintf(b, "ProcessAudioRate(%u)", tick); log_call(b); }
+/* ~CSTGVoiceModelManager() is now real (sec 10.147, see managers.cpp):
+ * it walks the same +0x30 array/+0x58 count as ProcessSubRate/
+ * ProcessAudioRate above, but dispatches vtable slot +0x4/4 == 1 on each
+ * non-null entry -- test [5] below reuses test [1]'s single populated
+ * fake-vtable entry, so that entry's own vtable needs a trap installed
+ * at slot 1 too. */
+static void VoiceModelDtorEntryTrap(void *)
+{ log_call("VoiceModelManager::entryDtor"); }
 
 static void check_log(const char *label, const char *expected)
 {
@@ -82,7 +90,9 @@ static void check_log(const char *label, const char *expected)
 /* ProcessSubRate/ProcessAudioRate are now real (sec 10.137, see
  * managers.cpp) -- test [1] below gives vmm a real populated array
  * entry with a fake vtable trapping these two slots instead. */
-CSTGVoiceModelManager::~CSTGVoiceModelManager() { log_call("~CSTGVoiceModelManager"); }
+/* ~CSTGVoiceModelManager() is now real (sec 10.147, see managers.cpp) --
+ * no mock body here any more, see the VoiceModelDtorEntryTrap comment
+ * above for how test [5]'s reused vmm object drives it safely. */
 void CSTGEffectManager::RunEffects()             { log_call("CSTGEffectManager::RunEffects"); }
 void CSTGAudioBusManager::MixPerformanceOutputs(){ log_call("MixPerformanceOutputs"); }
 void CSTGAudioBusManager::LRBusIndivMirror()     { log_call("LRBusIndivMirror"); }
@@ -102,7 +112,11 @@ void CSTGCDWorker::ProcessCommands()             { log_call("CDWorker::ProcessCo
 void CSTGSamplingDaemon::ProcessCommands()       { log_call("SamplingDaemon::ProcessCommands"); }
 CSTGMidiPortManager::~CSTGMidiPortManager()      { log_call("~CSTGMidiPortManager"); }
 void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) { }
-CSTGMessageProcessor::~CSTGMessageProcessor()    { log_call("~CSTGMessageProcessor"); }
+/* ~CSTGMessageProcessor() is now real (sec 10.147, see managers.cpp) --
+ * no mock body here any more. Its own confirmed +0x64/+0x68 pointer
+ * fields are zeroed by test [5] before the real destructor runs (see
+ * that test), so the real body's null checks make it a genuine, silent
+ * no-op there -- no log_call to expect. */
 /* CSTGAudioDriverInterface::~CSTGAudioDriverInterface() is now defined in
  * managers.cpp (empty -- pure virtual destructors still need a body).
  * MockAudioDriverInterface's destructor below logs for this test; C++
@@ -198,7 +212,12 @@ void CSTGVectorManager::OnUpdateGlobalMidiChannel(unsigned char channel)
 /* CSTGHeldKeyList::Reset()/CSTGEffectRackVars::UpdateDModRoutings() are
  * now real (sec 10.82/10.135, see global.cpp). */
 void CSTGVoiceAllocator::StealAllVoices() { }
-CSTGVoiceAllocator::~CSTGVoiceAllocator()        { log_call("~CSTGVoiceAllocator"); }
+/* ~CSTGVoiceAllocator() is now real (sec 10.147, see managers.cpp) -- no
+ * mock body here any more. It calls the SAME rtwrap_pthread_mutex_destroy/
+ * rtwrap_free mocks below (already used by CPowerOffTimer's teardown in
+ * ~CSTGEngine), so test [5]'s expected log now shows a SECOND
+ * "rtwrap_pthread_mutex_destroy;rtwrap_free;" pair where "~CSTGVoiceAllocator"
+ * used to appear. */
 CLoadBalancer::~CLoadBalancer()                  { log_call("~CLoadBalancer"); }
 void CLoadBalancer::BalanceStaticLoad() { }
 /* CEmergencyStealer's own destructor is now declared (sec 10.59) --
@@ -206,6 +225,11 @@ void CLoadBalancer::BalanceStaticLoad() { }
  * this mock's) implicitly chains into it, so it needs a link-time
  * body here too. */
 CEmergencyStealer::~CEmergencyStealer()          { }
+/* CEffectorDatabase's own confirmed-real, deliberately deferred dtor
+ * (sec 10.147) -- link-satisfying only, msgProc's own +0x64 is zeroed
+ * below so the real ~CSTGMessageProcessor() never actually calls this
+ * in this test. */
+CEffectorDatabase::~CEffectorDatabase()          { }
 /* CSTGGlobal::RunVoiceModelFeedback() is now REAL (sec 10.55, see
  * global.cpp) -- with the zeroed CSTGGlobal buffer scenario [3] below
  * allocates, its list head at +0x29c9900 is empty, so it produces no
@@ -276,6 +300,9 @@ int main(void)
 		vmmFakeVtable[i] = 0;
 	vmmFakeVtable[0x48 / 4] = (void *)VoiceModelSubRateTrap;
 	vmmFakeVtable[0x4c / 4] = (void *)VoiceModelAudioRateTrap;
+	/* Slot 1 (offset +4) is what the now-real ~CSTGVoiceModelManager()
+	 * dispatches (sec 10.147) -- test [5] reuses this same vmm/entry. */
+	vmmFakeVtable[4 / 4] = (void *)VoiceModelDtorEntryTrap;
 	vmmFakeItem[0] = vmmFakeVtable;
 	*(void **)(vmmRaw + 0x30) = vmmFakeItem;
 	*(short *)(vmmRaw + 0x58) = 1;
@@ -350,7 +377,14 @@ int main(void)
 	memset(potBuf, 0, 0x20);
 	*(void **)(potBuf + 0x18) = (void *)0x1234;	/* fake mutex pointer */
 	CPowerOffTimer::sInstance = (CPowerOffTimer *)potBuf;
-	CSTGMessageProcessor msgProc; CSTGMessageProcessor::sInstance = &msgProc;
+	CSTGMessageProcessor msgProc;
+	/* The real ctor only sets sInstance (sec 10.147) -- +0x64/+0x68
+	 * (the ctor's own confirmed-but-not-reconstructed CEffectorDatabase*
+	 * and second pointer) are otherwise uninitialized stack bytes here;
+	 * zero them so the now-real destructor's null checks make it a
+	 * genuine, safe no-op rather than dereferencing stack garbage. */
+	memset((void *)&msgProc, 0, sizeof(msgProc));
+	CSTGMessageProcessor::sInstance = &msgProc;
 	MockAudioDriverInterface *adi = new MockAudioDriverInterface();
 	CSTGAudioDriverInterface::sInstance = adi;
 	CSTGAudioManager *am = new CSTGAudioManager();
@@ -363,10 +397,19 @@ int main(void)
 	CSTGEngine *heapEngine = new CSTGEngine();
 	g_log[0] = '\0';	/* clear the constructor's own log noise (none expected, but be safe) */
 	delete heapEngine;
+	/* ~CSTGVoiceModelManager()/~CSTGMessageProcessor()/~CSTGVoiceAllocator()
+	 * are now real (sec 10.147): the first fires the reused vmm entry's
+	 * own trapped vtable slot 1 ("VoiceModelManager::entryDtor" in place
+	 * of the old flat "~CSTGVoiceModelManager" mock log); the second is a
+	 * genuine silent no-op against msgProc's zeroed +0x64/+0x68 fields (no
+	 * log entry at all, since none of its real logic calls log_call); the
+	 * third calls the SAME rtwrap_pthread_mutex_destroy/rtwrap_free mocks
+	 * CPowerOffTimer's own teardown already uses, so that pair now shows up
+	 * a second time in place of the old flat "~CSTGVoiceAllocator" mock log. */
 	check_log("~CSTGEngine",
 		  "~CSTGMidiPortManager;rtwrap_pthread_mutex_destroy;rtwrap_free;"
-		  "~CSTGVoiceModelManager;~CSTGMessageProcessor;~CSTGAudioDriverInterface;"
-		  "~CSTGAudioManager;~CSTGVoiceAllocator;~CLoadBalancer;");
+		  "VoiceModelManager::entryDtor;~CSTGAudioDriverInterface;"
+		  "~CSTGAudioManager;rtwrap_pthread_mutex_destroy;rtwrap_free;~CLoadBalancer;");
 
 	free(globalBuf);
 

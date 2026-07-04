@@ -76,6 +76,15 @@ extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
 CSTGAudioManager::~CSTGAudioManager() { }
+/* Sec 10.147: ~CSTGVoiceAllocator()/~CSTGMessageProcessor() are now real
+ * (see managers.cpp) -- link-satisfying only, same reasoning as the
+ * other manager mocks above (this file's own CSTGMessageProcessor::
+ * sInstance/CSTGVoiceAllocator::sInstance usages are raw mmap32()
+ * buffers cast to the pointer type, never a typed `delete`/destructor
+ * call -- see the msgProc/voiceAlloc declarations throughout this file). */
+extern "C" void rtwrap_pthread_mutex_destroy(void *) { }
+extern "C" void rtwrap_free(void *) { }
+CEffectorDatabase::~CEffectorDatabase() { }
 
 /* Mocks for CSTGAudioInput's own confirmed-real, deliberately deferred
  * dependencies (sec 10.80). */

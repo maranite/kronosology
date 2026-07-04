@@ -366,6 +366,28 @@ void CSTGVoiceModelManager::ProcessSubRate(unsigned int tick)
 	}
 }
 
+/*
+ * ~CSTGVoiceModelManager() (sec 10.147): see oa_engine.h for the full
+ * confirmed shape, including the register-vs-memory `count` quirk this
+ * reproduces via an explicit local variable refreshed only after a
+ * non-null entry's virtual call.
+ */
+CSTGVoiceModelManager::~CSTGVoiceModelManager()
+{
+	unsigned char *p = (unsigned char *)this;
+	typedef void (*VtableSlot4Fn)(void *);
+	unsigned short count = *(unsigned short *)(p + 0x58);
+
+	for (unsigned short i = 0; i < count; i++) {
+		void *item = *(void **)(p + 0x30 + i * 4);
+		if (item) {
+			void **vtable = *(void ***)item;
+			((VtableSlot4Fn)vtable[4 / 4])(item);
+			count = *(unsigned short *)(p + 0x58);
+		}
+	}
+}
+
 CEmergencyStealer::CEmergencyStealer()
 {
 	/* Real constructor not reconstructed in this pass -- declared/defined
@@ -560,6 +582,26 @@ CSTGVoiceAllocator::CSTGVoiceAllocator()
 	CSTGVoiceAllocator::sInstance = this;
 }
 
+/* Real kernel-side RTAI mutex teardown wrappers, confirmed via
+ * relocation -- same treatment as the other rtwrap_* externs in this
+ * file (and the identical pair already declared in engine.cpp for
+ * CPowerOffTimer's own destructor). */
+extern "C" void rtwrap_pthread_mutex_destroy(void *mutex);
+extern "C" void rtwrap_free(void *ptr);
+
+/*
+ * ~CSTGVoiceAllocator() (sec 10.147): see oa_engine.h for the full
+ * confirmed shape (unconditional `sInstance = 0`, then
+ * destroy+free of the ctor's own `requirementsMutex`).
+ */
+CSTGVoiceAllocator::~CSTGVoiceAllocator()
+{
+	CSTGVoiceAllocator::sInstance = 0;
+	void *mutex = (void *)(unsigned long)requirementsMutex;
+	rtwrap_pthread_mutex_destroy(mutex);
+	rtwrap_free(mutex);
+}
+
 CSTGAudioManager::CSTGAudioManager()
 {
 	/* +0xa48..+0xa5c (target-relative, i.e. right after the vtable
@@ -639,6 +681,34 @@ CSTGMessageProcessor::CSTGMessageProcessor()
 	 *     comparatively modest.
 	 * See oa_engine.h's class comment for the full ground-truthing.
 	 */
+}
+
+/*
+ * ~CSTGMessageProcessor() (sec 10.147): see oa_engine.h's class comment
+ * (just above CSTGMessageProcessor's own declaration) for the full
+ * confirmed shape and the CEffectorDatabase forward-declaration note.
+ */
+CSTGMessageProcessor::~CSTGMessageProcessor()
+{
+	CSTGMessageProcessor::sInstance = 0;
+
+	/* Both fields are packed 32-bit pointers on the real 32-bit target
+	 * (this class's own storage is a plain byte array, not native
+	 * pointer members) -- read as `unsigned int` and round-tripped
+	 * through `(unsigned long)`, the same host/target-width-safe idiom
+	 * established sec 10.142/10.143, not a native `void**`/`T**` load
+	 * (which would read 8 bytes on this project's 64-bit host verify
+	 * build instead of the real target's 4). */
+	unsigned char *p = (unsigned char *)this;
+	CEffectorDatabase *effectorDb =
+		(CEffectorDatabase *)(unsigned long)*(unsigned int *)(p + 0x64);
+	if (effectorDb) {
+		effectorDb->~CEffectorDatabase();
+		operator delete(effectorDb);
+	}
+
+	void *tail = (void *)(unsigned long)*(unsigned int *)(p + 0x68);
+	operator delete(tail);
 }
 
 /*
