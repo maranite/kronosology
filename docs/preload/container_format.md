@@ -81,20 +81,56 @@ reasons. Specific endian-ness per record type is documented in each family's MD 
 
 ---
 
-## Validation observations
+## Checksums (CORRECTED 2026-06-24)
+
+**Previous documentation incorrectly stated there are no checksums.** There ARE two
+embedded checksum bytes in the header. Writing record data without updating them causes
+Eva to load corrupt state (confirmed: patching `GLBL.BIN` without checksum update killed
+all networking on a live Kronos, requiring a PCG reload to recover).
+
+### Checksum fields
+
+| Offset | Field | Algorithm |
+|---|---|---|
+| `0x0F` | **Data checksum** | `sum(all_record_bytes) & 0xFF` |
+| `0x13` | **File checksum** | `sum(all_file_bytes excluding offsets 0x0F and 0x13) & 0xFF` |
+
+Both are simple unsigned byte sums modulo 256.
+
+### Safe patching procedure
+
+To modify a single byte in the record data:
+
+1. Read the old value at the target offset
+2. Compute `delta = (new_value - old_value) & 0xFF`
+3. Update offset `0x0F`: `header[0x0F] = (header[0x0F] + delta) & 0xFF`
+4. Update offset `0x13`: `header[0x13] = (header[0x13] + delta) & 0xFF`
+5. Write the data byte and both checksum bytes
+6. `sync` the filesystem
+
+### Verification (from two known-good `GLBL.BIN` dumps)
+
+```
+GLBL_exclusive_on.bin:   header[0x0F]=0x9D  sum(record_data)=0x9D  MATCH
+GLBL_exclusive_off.bin:  header[0x0F]=0x7D  sum(record_data)=0x7D  MATCH
+
+GLBL_exclusive_on.bin:   header[0x13]=0xA9  sum(file excl 0x0F,0x13)=0xA9  MATCH
+GLBL_exclusive_off.bin:  header[0x13]=0x89  sum(file excl 0x0F,0x13)=0x89  MATCH
+```
+
+---
+
+## Loader observations
 
 The Kronos's loader (`CKorgPreloadFile::Load`) does the following on every preload file:
 
 1. Open the file at `/korg/rw/PRELOAD/<name>.BIN`
 2. Read the 20-byte header
 3. Validate the magic (rejects file if not the expected 4 chars)
-4. Read `record_count × record_size` bytes
-5. Optionally byte-swap fields it knows are big-endian
-6. Wire records into the in-memory `CSTG…Bank` object
-
-There is **no checksum or CRC** in the standard P-magic header. Korg relies on the
-filesystem (ext2 on `/korg/rw`) for integrity, plus per-record byte swaps that would
-explode visibly if the data were corrupted.
+4. **Validate checksums at offsets `0x0F` and `0x13`** (see above)
+5. Read `record_count * record_size` bytes
+6. Optionally byte-swap fields it knows are big-endian
+7. Wire records into the in-memory `CSTG...Bank` object
 
 ---
 

@@ -66,6 +66,29 @@ future OS would require a layout migration or a separate file.
 
 ---
 
+## MIDI Filter flags (confirmed 2026-06-24)
+
+The MIDI filter byte is at **record offset 24578, file offset 24598 (0x6016)**.
+
+| Bit | Flag | Default |
+|---|---|---|
+| 0 | Program Change Enable | OFF |
+| 1 | Bank Change Enable | OFF |
+| 2 | Combi Change Enable | OFF |
+| 3 | Aftertouch Enable | OFF |
+| 4 | Control Change Enable | OFF |
+| 5 | **SysEx Enable (Exclusive)** | OFF |
+| 6 | Start/Stop Out Enable | OFF |
+
+To enable all MIDI filters: set byte at file offset 24598 to `0x3F` (bits 0–5)
+or `0x7F` (all 7 bits). **Must also update both header checksums** — see
+[container_format.md](container_format.md) for the algorithm.
+
+Confirmed by binary diff of two `GLBL.BIN` files captured with Exclusive ON vs OFF:
+only file offset 24598 changed in the record data (0x20 vs 0x00, bit 5).
+
+---
+
 ## Things you can extract directly from the file
 
 You can `dd` out specific bytes if you know the offset. For example:
