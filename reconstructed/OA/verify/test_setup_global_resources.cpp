@@ -85,7 +85,10 @@ void CSTGSampleRateMonitor::Initialize() { g_sampleRateMonitorInitCalls++; }
 
 static int g_askInitCalls;
 static void *g_askArg;
-void CSTGASK::Initialize(void *arg) { g_askInitCalls++; g_askArg = arg; }
+/* CSTGASK::Initialize() is real now (sec 10.145) -- a pure forward to
+ * SKMain_Initialize(), mocked here instead (same observable effect: one
+ * call, same argument, since the real Initialize() does nothing else). */
+extern "C" void SKMain_Initialize(void *arg) { g_askInitCalls++; g_askArg = arg; }
 
 static int g_multisampleInitCalls;
 void CSTGMultisampleBankManager::Initialize() { g_multisampleInitCalls++; }

@@ -338,3 +338,12 @@ bool CSTGPCMPrecacheManager::Initialize()
 	base[0x29] = 0;
 	return true;
 }
+
+/*
+ * CSTGASK::Initialize(void*) (sec 10.145): see
+ * oa_setup_global_resources.h for the full confirmed shape.
+ */
+void CSTGASK::Initialize(void *arg)
+{
+	SKMain_Initialize(arg);
+}

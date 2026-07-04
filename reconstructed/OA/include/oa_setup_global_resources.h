@@ -307,11 +307,22 @@ struct CSTGSampleRateMonitor {
 	 * unshifted value. */
 };
 
+/*
+ * CSTGASK::Initialize(void*) (sec 10.145, `.text+0x340bd0`, 15 bytes)
+ * confirmed: a pure tail-call forward to `SKMain_Initialize(void*)`
+ * (`.text+0x340be0`, a plain C-linkage function, confirmed via its own
+ * unmangled `T` symbol) with the same argument, no other work. `SKMain_
+ * Initialize` itself is substantially larger (multiple further calls)
+ * and confirmed-real, deliberately deferred -- own body not
+ * reconstructed in this pass.
+ */
 struct CSTGASK {
 	void Initialize(void *arg);
 };
 
 extern "C" {
+
+void SKMain_Initialize(void *arg);
 
 /*
  * The following are all confirmed-real (via relocation) not-yet-

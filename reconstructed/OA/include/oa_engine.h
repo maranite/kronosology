@@ -548,12 +548,31 @@ public:
 				 * and substantial (buffer clears, table-driven
 				 * lookups), body not reconstructed in this pass. */
 
-	/* WriteSTGMidiOutQueue(const unsigned char*, unsigned int) (sec
-	 * 10.73, confirmed via relocation from CSTGGlobal::UpdateMFX/IFX/
-	 * TFXDisable, all three calling it identically with a real
-	 * 3-byte MIDI Control Change message: `{0xB0|channel, ccNumber,
-	 * value}`) confirmed real, deliberately deferred extern -- own
-	 * body not reconstructed in this pass. */
+	/*
+	 * WriteSTGMidiOutQueue(const unsigned char*, unsigned int) (sec
+	 * 10.73/10.145, `.text+0xf57d0`, 53 bytes) confirmed via relocation
+	 * from CSTGGlobal::UpdateMFX/IFX/TFXDisable, all three calling it
+	 * identically with a real 3-byte MIDI Control Change message:
+	 * `{0xB0|channel, ccNumber, value}`. Body fully confirmed by
+	 * disassembly (sec 10.145): no-op if `CSTGGlobal::sInstance->
+	 * fieldAt(0x6ac)` (a confirmed real gate byte) is nonzero; otherwise
+	 * forwards to the already-reconstructed `CSTGMidiQueueWriter::
+	 * Write(data, length, false)` (sec 10.83) on an embedded
+	 * `CSTGMidiQueueWriter` at `this->fieldAt(0x138)` -- `data`/`length`
+	 * pass through untouched from this method's own regparm(3)
+	 * `edx`/`ecx`. A genuine REFINEMENT of this class's own "no
+	 * per-instance state" conclusion above (drawn from the destructor
+	 * alone): the destructor simply doesn't happen to touch this
+	 * embedded `+0x138` sub-object, a confirmed real gap, not a
+	 * contradiction. **Deliberately NOT promoted to a real body in this
+	 * pass**: `test_global.cpp` already has two SEPARATE, independent
+	 * mocks/counters for this method and for `CSTGMidiQueueWriter::
+	 * Write` (~30 assertions across the file), and this method calling
+	 * through to that one for real would require rewiring every one of
+	 * them onto a single counter -- correctly out of scope for a
+	 * same-pass "small function batch," left as its own dedicated future
+	 * task rather than rushed.
+	 */
 	void WriteSTGMidiOutQueue(const unsigned char *data, unsigned int length);
 
 	/* NotifyNKS4TestMode() (.text+0xf5390, 115 bytes -- confirmed via

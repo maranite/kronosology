@@ -106,7 +106,11 @@ void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
 
 /* ---- Remaining engine/manager/model stubs, batch 2 ---- */
 CEmergencyStealer::~CEmergencyStealer() {}
-void CSTGASK::Initialize(void *) {}
+/* CSTGASK::Initialize() is real now, sec 10.145 (see
+ * setup_global_resources.cpp) -- a pure forward to SKMain_Initialize(),
+ * confirmed real, deliberately deferred (own body substantially larger,
+ * not reconstructed in this pass). */
+extern "C" void SKMain_Initialize(void *) {}
 /* CSTGAudioInput's own ctor + 9 UpdateXXX methods reconstructed for
  * real, sec 10.80 -- see src/engine/global.cpp. */
 void CSTGAudioInputMixerBase::SetHDRBus(unsigned int, int) {}
