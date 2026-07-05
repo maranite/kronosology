@@ -779,22 +779,29 @@ struct USTGAliasBankTypes {
 
 	/* ConvertAliasPgmBankToMidiBank/ConvertCombiBankToMidiBank (sec
 	 * 10.98, confirmed via relocation from CSTGGlobal::
-	 * SendPerfChangeToMidiOut) confirmed real, deliberately deferred
-	 * externs -- own bodies not reconstructed. Both called with the
-	 * bank id as an eax-passed "static this" (the same instance-less
-	 * calling idiom already confirmed for `TranslateAudioInputParamId`,
-	 * sec 10.90), not a real object pointer. */
+	 * SendPerfChangeToMidiOut) -- reconstructed for real, sec 10.152,
+	 * see src/engine/alias_bank_convert.cpp (a dedicated TU, matching
+	 * alias_bank_init.cpp's own precedent -- test_engine.cpp/
+	 * test_global.cpp/test_global_ctor.cpp all keep their own
+	 * pre-existing call-counter mocks for these, untouched). Both
+	 * called with the bank id as an eax-passed "static this" (the same
+	 * instance-less calling idiom already confirmed for
+	 * `TranslateAudioInputParamId`, sec 10.90), not a real object
+	 * pointer. */
 	static void ConvertAliasPgmBankToMidiBank(int bankId, char &out1, char &out2);
 	static void ConvertCombiBankToMidiBank(int bankId, char &out1, char &out2);
 
 	/* ConvertMidiBankToCombiBank/ConvertMidiBankToAliasProgramBank (sec
 	 * 10.99, confirmed via relocation from CSTGGlobal::
 	 * HandleMidiBankAndPerformanceChange) -- the inverse direction of
-	 * the two conversions above, confirmed real, deliberately deferred
-	 * externs. Both called the same instance-less "static this" way,
-	 * with the two `char` MIDI bank bytes SIGN-EXTENDED before the call
-	 * (confirmed via the real `movsx` instructions, not zero-extended
-	 * like every other byte parameter in this cluster). */
+	 * the two conversions above, reconstructed for real, sec 10.152,
+	 * see src/engine/alias_bank_convert.cpp. Both called the same
+	 * instance-less "static this" way, with the two `char` MIDI bank
+	 * bytes SIGN-EXTENDED before the call (confirmed via the real
+	 * `movsx` instructions, not zero-extended like every other byte
+	 * parameter in this cluster) -- irrelevant to the reconstructed
+	 * body itself, which only ever compares against small positive
+	 * byte constants. */
 	static void ConvertMidiBankToCombiBank(char midiBankMsb, char midiBankLsb, int &outBankId);
 	static void ConvertMidiBankToAliasProgramBank(char midiBankMsb, char midiBankLsb, int &outBankId);
 

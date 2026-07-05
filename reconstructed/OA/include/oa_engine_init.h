@@ -66,16 +66,15 @@ static inline void CallVtableSlot2(void *obj)
  * CSTGWaveSeqGenerator -- confirmed real (sec 10.62), embedded 200x as
  * a plain array inside CSTGWaveSeqManager (+0x0..+0xe0ff, 0x120/288
  * bytes each). Its own constructor (`.text+0x819a0`, 193 bytes) and
- * `Init()` method (called once per generator from CSTGWaveSeqManager::
- * Initialize()) are confirmed real, deliberately deferred externs --
- * out of scope for this pass, matching the "declare the shape, defer
- * the body" treatment used throughout this project (e.g.
- * CSTGPlaybackEvent). Its own +0x0/+0x4/+0xc fields ARE touched
- * directly by CSTGWaveSeqManager::Initialize() (a real intrusive
- * doubly-linked list node: next/prev/owner, the same 3-field
- * convention already confirmed for CSTGHeapHandleEntry, sec 10.59) --
- * manipulated via raw offset arithmetic rather than named members,
- * since the rest of the class's layout isn't independently recovered.
+ * `Init()` method (`.text+0x81a70`, 261 bytes, called once per
+ * generator from CSTGWaveSeqManager::Initialize()) are reconstructed
+ * for real, sec 10.152 -- see src/engine/waveseq_generator.cpp. Its
+ * own +0x0/+0x4/+0xc fields ARE ALSO touched directly by
+ * CSTGWaveSeqManager::Initialize() (a real intrusive doubly-linked
+ * list node: next/prev/owner, the same 3-field convention already
+ * confirmed for CSTGHeapHandleEntry, sec 10.59) -- manipulated via raw
+ * offset arithmetic rather than named members there too, since the
+ * rest of the class's layout isn't independently recovered.
  */
 struct CSTGWaveSeqGenerator {
 	CSTGWaveSeqGenerator();
@@ -88,6 +87,16 @@ struct CSTGWaveSeqGenerator {
 	 * (CSTGSampleRateMonitor::Initialize(), sec 10.57;
 	 * CSTGPerformanceVarsManager::Initialize(), sec 10.55). */
 	static void **sMutex;
+	/* Confirmed real (`_ZN20CSTGWaveSeqGenerator9sDummyAMSE`, sec
+	 * 10.152): a single shared static object whose ADDRESS (never
+	 * dereferenced anywhere in Init()) is stored into FIVE of this
+	 * class's own per-instance pointer fields (+0xc8/+0xcc/+0xd0/
+	 * +0xf8/+0xfc, confirmed via five independent relocations to the
+	 * same symbol), evidently a "no modulation source assigned"
+	 * placeholder -- own real size/layout not independently confirmed
+	 * since nothing in this pass ever reads through it, so left as a
+	 * minimal opaque placeholder. */
+	static unsigned char sDummyAMS[4];
 	unsigned char _unrecovered[0x120];
 };
 

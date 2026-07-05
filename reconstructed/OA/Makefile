@@ -65,6 +65,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_input_mixer.o \
            src/engine/waveseq_setlist_init.o \
            src/engine/alias_bank_init.o \
+           src/engine/alias_bank_convert.o \
+           src/engine/waveseq_generator.o \
            src/engine/smoother_init.o \
            src/engine/controller_rt_data_init.o \
            src/engine/vector_manager.o \
@@ -184,6 +186,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/sk_stg_gate.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
+       src/engine/waveseq_generator.cpp \
+       src/engine/alias_bank_convert.cpp \
        src/engine/midi_dispatcher.cpp \
        src/engine/vector_manager.cpp \
        src/engine/vector_manager_init.cpp \
@@ -232,7 +236,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_waveseq_setlist_init verify/test_alias_bank_init \
          verify/test_smoother_init verify/test_push_unsolicited_message \
          verify/test_startup_file verify/test_sk_stg_gate \
-         verify/test_audio_input_mixer
+         verify/test_audio_input_mixer \
+         verify/test_alias_bank_convert verify/test_waveseq_generator
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -355,6 +360,12 @@ verify/test_waveseq_setlist_init: verify/test_waveseq_setlist_init.cpp src/engin
 
 verify/test_alias_bank_init: verify/test_alias_bank_init.cpp src/engine/alias_bank_init.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_alias_bank_init.cpp src/engine/alias_bank_init.cpp -o $@
+
+verify/test_alias_bank_convert: verify/test_alias_bank_convert.cpp src/engine/alias_bank_convert.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_alias_bank_convert.cpp src/engine/alias_bank_convert.cpp -o $@
+
+verify/test_waveseq_generator: verify/test_waveseq_generator.cpp src/engine/waveseq_generator.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_waveseq_generator.cpp src/engine/waveseq_generator.cpp -o $@
 
 verify/test_smoother_init: verify/test_smoother_init.cpp src/engine/smoother_init.cpp src/mem/bank_memory.cpp include/oa_engine_init.h include/oa_bank_memory.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_init.cpp src/engine/smoother_init.cpp src/mem/bank_memory.cpp -o $@

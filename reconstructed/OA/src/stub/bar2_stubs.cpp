@@ -150,11 +150,9 @@ void CSTGAudioInput::UseSettings() {}
 /* SendPerfChangeToMidiOut is now real, sec 10.98 -- see
  * src/engine/global.cpp. Its own confirmed-real, deliberately deferred
  * dependencies still need link-satisfying mocks here. */
-void USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank(int, char &, char &) {}
-void USTGAliasBankTypes::ConvertCombiBankToMidiBank(int, char &, char &) {}
-/* Sec 10.99's own confirmed-real, deliberately deferred externs. */
-void USTGAliasBankTypes::ConvertMidiBankToCombiBank(char, char, int &) {}
-void USTGAliasBankTypes::ConvertMidiBankToAliasProgramBank(char, char, int &) {}
+/* USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank/ConvertCombiBankToMidiBank/
+ * ConvertMidiBankToCombiBank/ConvertMidiBankToAliasProgramBank are all real
+ * now, sec 10.152 -- see src/engine/alias_bank_convert.cpp. */
 /* SKSTGGate_ShouldSyncExternalClock() is real now, sec 10.148 -- see
  * src/engine/sk_stg_gate.cpp (a genuinely new class, CTimerManager,
  * declared minimally/opaquely there -- most of its own dozen-plus
@@ -288,8 +286,8 @@ void CSTGStreamingEventManager::Initialize(unsigned short, unsigned long) {}
 void CSTGVoiceAllocator::StealAllVoices() {}
 /* CSTGWaveSeqData::Initialize()/CSetListBank::Initialize() reconstructed
  * for real, sec 10.84 -- see src/engine/global.cpp. */
-CSTGWaveSeqGenerator::CSTGWaveSeqGenerator() {}
-void CSTGWaveSeqGenerator::Init() {}
+/* CSTGWaveSeqGenerator::CSTGWaveSeqGenerator()/Init() are real now, sec
+ * 10.152 -- see src/engine/waveseq_generator.cpp. */
 CSTGWaveSequence::CSTGWaveSequence() {}
 CSetList::CSetList() {}
 void CSetList::Activate() {}
