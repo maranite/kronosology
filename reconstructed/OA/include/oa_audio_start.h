@@ -42,12 +42,21 @@
  * see oa_cpu_affinity.h (MASTER_REFERENCE.md sec 10.52). */
 #include "oa_cpu_affinity.h"
 
-/* Thread entry-point functions -- ONLY ever used as function-pointer
- * VALUES here (passed to CreateRealTimeWithCPUAffinity, never called
- * directly), so their own bodies are irrelevant to this reconstruction;
- * declared solely so their real mangled names/addresses are available. */
+/*
+ * Thread entry-point function -- used as a function-pointer VALUE here
+ * (passed to CreateRealTimeWithCPUAffinity), but ALSO genuinely real and
+ * reconstructed now (sec 10.149, `.text+0x?` -- see src/init/
+ * audio_start.cpp): a tiny (17-byte) forwarding wrapper that ignores its
+ * own incoming `void *arg` entirely and tail-calls the no-arg overload
+ * below. The no-arg overload itself (`.text+0x5dfa0`, 141 bytes) is a
+ * substantial real-time audio tick loop (two `CSTGThreadBarrier::Wait()`
+ * barrier syncs plus two vtable dispatches through `this->fieldAt(0x28)`
+ * and `CSTGAudioManager::sInstance`) -- confirmed real, deliberately
+ * deferred, own body far out of scope for this pass (see bar2_stubs.cpp).
+ */
 struct CSTGAudioThread {
 	static void *AudioTickLoopRoutine(void *arg);
+	static void AudioTickLoopRoutine();
 };
 
 extern "C" {

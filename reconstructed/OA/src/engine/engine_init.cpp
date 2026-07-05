@@ -80,6 +80,29 @@ static void BuildArrayManager(TSTGArrayManager<T> *mgr, unsigned int count,
 	mgr->count = count;
 }
 
+/*
+ * CSTGAudioEvent::CSTGAudioEvent() (sec 10.149, `.text+0xd1830`, 76
+ * bytes) -- see oa_engine_init.h's own header comment for the full
+ * confirmed field list. A pure straight-line sequence of immediate
+ * stores, no calls/branches.
+ */
+CSTGAudioEvent::CSTGAudioEvent()
+{
+	vtablePtr32 = ToU32(_ZTV14CSTGAudioEvent + 8);
+	field8 = 0;
+	fieldC = 4;
+	field10 = 0;
+	field1c = 1;
+	field18 = 0;
+	field24 = 0;
+	field28 = 0;
+	field14 = 0;
+	field15 = 0;
+	field16 = 0;
+	field1d = 2;
+	sampleRate = 0xbb80;
+}
+
 static void ConstructPlaybackEvent(unsigned char *p) { new (p) CSTGPlaybackEvent(); }
 
 /* CSTGRecordEvent has no constructor symbol of its own -- see

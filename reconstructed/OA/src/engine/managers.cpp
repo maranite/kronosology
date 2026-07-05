@@ -622,6 +622,61 @@ CSTGVoiceAllocator::~CSTGVoiceAllocator()
 	rtwrap_free(mutex);
 }
 
+/* Real kernel-side RTAI mutex lock/unlock, confirmed via relocation --
+ * same rtwrap_* family as the destroy/free pair above. */
+extern "C" void rtwrap_pthread_mutex_lock(void *mutex);
+extern "C" void rtwrap_pthread_mutex_unlock(void *mutex);
+
+/*
+ * The confirmed real node shape EmergencyFreeVoiceList (and its own
+ * not-yet-reconstructed sibling StealVoiceList) walks: `next` at +0x0,
+ * `payload` (a `CSTGVoice*`) at +0x8. Declared with a native `next`
+ * pointer (not a packed 32-bit int) deliberately -- on BOTH the real
+ * 32-bit target and this project's 64-bit host verify build, a plain
+ * pointer-typed `next` member occupies enough room that `payload`
+ * still lands at +0x8, so there is no host/target width hazard here
+ * (unlike other packed-pointer fields elsewhere in this project, e.g.
+ * CSTGProgramSlot's family, sec 10.143) -- the two field offsets simply
+ * coincide regardless of pointer width. Nothing else in this project
+ * reads this exact node layout yet (only this function and its still-
+ * deferred StealVoiceList sibling ever will), so there's no cross-
+ * function byte-layout dependency to preserve either.
+ */
+struct STGVoiceListNode {
+	STGVoiceListNode *next;	/* +0x0 */
+	CSTGVoice *payload;	/* +0x8 */
+};
+
+/*
+ * CSTGVoiceAllocator::EmergencyFreeVoiceList(TLinkedList<TListLink<
+ * CSTGVoice>,CSTGVoice>*) (sec 10.149, `.text+0x53de0`, 84 bytes)
+ * confirmed: lock `requirementsMutex`, walk the list rooted at `*list`
+ * (a plain node-pointer head, NOT itself a `TLinkedList` object --
+ * `list` is the confirmed real caller-supplied ADDRESS of just the head
+ * field, e.g. `CSTGSlotVoiceData::EmergencyFreeAllVoices`'s own
+ * `this+0x44`/`this+0x50`), calling `FreeVoice()` on each node's
+ * payload (advancing to `next` BEFORE the call, confirmed via the real
+ * disassembly's own instruction order -- safe even if `FreeVoice`
+ * itself frees the node), then UNCONDITIONALLY calling
+ * `DoPendingMoveVoices()` once (even if the list was empty), then
+ * unlock.
+ */
+void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *list)
+{
+	void *mutex = (void *)(unsigned long)requirementsMutex;
+	rtwrap_pthread_mutex_lock(mutex);
+
+	STGVoiceListNode *node = *(STGVoiceListNode **)list;
+	while (node) {
+		STGVoiceListNode *next = node->next;
+		FreeVoice(node->payload);
+		node = next;
+	}
+
+	DoPendingMoveVoices();
+	rtwrap_pthread_mutex_unlock(mutex);
+}
+
 CSTGAudioManager::CSTGAudioManager()
 {
 	/* +0xa48..+0xa5c (target-relative, i.e. right after the vtable

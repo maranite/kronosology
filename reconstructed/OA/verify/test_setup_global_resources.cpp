@@ -90,11 +90,10 @@ static void *g_askArg;
  * call, same argument, since the real Initialize() does nothing else). */
 extern "C" void SKMain_Initialize(void *arg) { g_askInitCalls++; g_askArg = arg; }
 
-static int g_multisampleInitCalls;
-void CSTGMultisampleBankManager::Initialize() { g_multisampleInitCalls++; }
-/* CSTGPCMPrecacheManager::Initialize() is real now (sec 10.144) -- its
- * one confirmed real call site here uses a stack-local object with no
- * externally observable trace, so it's verified directly and
+/* CSTGMultisampleBankManager::Initialize()/CSTGPCMPrecacheManager::
+ * Initialize() are BOTH real now (sec 10.149/10.144) -- their one
+ * confirmed real call site here uses a stack-local object with no
+ * externally observable trace, so each is verified directly and
  * independently below (main()'s own final block) instead of via a call
  * counter proxy. */
 
@@ -179,7 +178,6 @@ int main(void)
 	g_forceAllocFail = 0;
 	g_engineInitCalls = g_frontPanelInitCalls = g_globalInitCalls = 0;
 	g_sampleRateMonitorInitCalls = g_askInitCalls = 0;
-	g_multisampleInitCalls = 0;
 	g_incProgressBarCalls = 0;
 	g_costProfileVtableTargetCalled = 0;
 	rc = setup_global_resources(0);
@@ -193,7 +191,6 @@ int main(void)
 	check_eq("panel calibration grid row0[120] untouched (0)", g_panelBuf[0x10b + 0x78], 0x00);
 	check_eq("panel installedRAM stored", *(unsigned int *)(g_panelBuf + 0xd30), (long)g_installedRAM);
 	check_eq("panel fixed constant", *(unsigned int *)(g_panelBuf + 0x29118), (long)0x473b8000);
-	check_eq("CSTGMultisampleBankManager::Initialize called", (long)g_multisampleInitCalls, 1);
 	check_eq("CSTGEngine::Initialize called", (long)g_engineInitCalls, 1);
 	check_eq("CSTGGlobal::Initialize called", (long)g_globalInitCalls, 1);
 	check_eq("CSTGFrontPanel::Initialize called", (long)g_frontPanelInitCalls, 1);
@@ -221,6 +218,23 @@ int main(void)
 		check_eq("+0x28 zeroed", pcmBuf[0x28], 0);
 		check_eq("+0x29 zeroed", pcmBuf[0x29], 0);
 		check_eq("+0x8 untouched (confirmed gap, still poisoned)", pcmBuf[0x8], 0xcc);
+	}
+
+	printf("\n[direct] CSTGMultisampleBankManager::Initialize() (sec 10.149)\n");
+	{
+		unsigned char msBuf[0xa020];
+		memset(msBuf, 0xcc, sizeof(msBuf));
+		CSTGMultisampleBankManager *ms = (CSTGMultisampleBankManager *)msBuf;
+		ms->Initialize();
+		check_eq("+0xa000 zeroed", *(unsigned int *)(msBuf + 0xa000), 0u);
+		check_eq("+0xa004 zeroed", *(unsigned int *)(msBuf + 0xa004), 0u);
+		check_eq("+0xa008 zeroed", *(unsigned int *)(msBuf + 0xa008), 0u);
+		check_eq("+0xa00c zeroed", *(unsigned int *)(msBuf + 0xa00c), 0u);
+		check_eq("+0xa010 zeroed", *(unsigned int *)(msBuf + 0xa010), 0u);
+		check_eq("+0xa014 == 0xffffffff (unset sentinel)", *(unsigned int *)(msBuf + 0xa014), 0xffffffffu);
+		check_eq("+0xa018 zeroed", *(unsigned int *)(msBuf + 0xa018), 0u);
+		check_eq("+0xa01c zeroed", *(unsigned int *)(msBuf + 0xa01c), 0u);
+		check_eq("+0x0 untouched (confirmed gap, still poisoned)", msBuf[0x0], 0xcc);
 	}
 
 	printf(g_fail ? "\nRESULT: %d check(s) FAILED\n" : "\nRESULT: all checks passed\n", g_fail);

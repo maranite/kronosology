@@ -884,9 +884,24 @@ public:
 	 * reconstruction. */
 	char StartAudioEngine();
 
-	/* Thread entry points -- ONLY ever used as function-pointer VALUES
-	 * (passed to CSTGThread::CreateRealTimeWithCPUAffinity, never
-	 * called directly), own bodies not reconstructed. */
+	/*
+	 * Thread entry points -- used as function-pointer VALUES (passed to
+	 * CSTGThread::CreateRealTimeWithCPUAffinity), but ALSO genuinely
+	 * real and reconstructed now (sec 10.149 -- see src/init/
+	 * audio_start.cpp):
+	 *   ASKThreadRoutine(void*) (.text+0x67100, 59 bytes) -- casts the
+	 *     incoming void* back to `this`, then while `fieldAt(0xa65)`
+	 *     ("running", already confirmed via StartAudioEngine) is
+	 *     nonzero: rtwrap_whoami(); rtwrap_task_suspend(); SKMain_Run();
+	 *     -- a confirmed real busy-loop dispatching into the ASK
+	 *     synthesis-kernel's own real-time step function each pass.
+	 *   AudioManagerThreadRoutine(void*) (.text+0x670b0, 67 bytes) --
+	 *     sets MXCSR to 0x9fc0 (DAZ+FTZ, masked exceptions -- standard
+	 *     audio-thread FP control), unconditionally sets `fieldAt(0xd)
+	 *     = 1`, then while `fieldAt(0xa65)` is nonzero: dispatches this
+	 *     object's own vtable slot 2 (`.text` offset +0x8, confirmed via
+	 *     `call *0x8(%edx)`) once per iteration.
+	 */
 	static void *ASKThreadRoutine(void *arg);
 	static void *AudioManagerThreadRoutine(void *arg);
 
@@ -1017,6 +1032,12 @@ public:
  * (ctor) vs destroy/free (dtor) counterpart already established for
  * `CPowerOffTimer` (see that class's own comment).
  */
+/* Opaque forward decl -- CSTGVoice is a large, separately-reconstructed
+ * synthesis-voice class not otherwise touched in this pass; only ever
+ * needed here as a pointer target (EmergencyFreeVoiceList/FreeVoice's
+ * own confirmed parameter type). */
+class CSTGVoice;
+
 class CSTGVoiceAllocator {
 public:
 	static CSTGVoiceAllocator *sInstance;
@@ -1030,11 +1051,13 @@ public:
 	void StealAllVoices();
 
 	/*
-	 * EmergencyFreeVoiceList(TLinkedList<TListLink<CSTGVoice>>*) (sec
-	 * 10.138, confirmed via relocation from CSTGSlotVoiceData::
+	 * EmergencyFreeVoiceList(TLinkedList<TListLink<CSTGVoice>,CSTGVoice>*)
+	 * (sec 10.138, confirmed via relocation from CSTGSlotVoiceData::
 	 * EmergencyFreeAllVoices, called twice there on `this+0x44`/
-	 * `this+0x50`) confirmed real, deliberately deferred extern -- own
-	 * body not reconstructed in this pass. Real parameter type not
+	 * `this+0x50`) reconstructed for real, sec 10.149 (`.text+0x53de0`,
+	 * 84 bytes) -- see managers.cpp for the full confirmed shape (a
+	 * mutex-guarded walk of the list, `FreeVoice()` per node, then an
+	 * unconditional `DoPendingMoveVoices()`). Real parameter type not
 	 * modeled -- represented as `void*` per this project's established
 	 * convention for not-fully-modeled template types.
 	 */
@@ -1045,9 +1068,20 @@ public:
 	 * confirmed via relocation from CSTGSlotVoiceData::Steal, called
 	 * twice there on `this+0x44`/`this+0x50`, the same shape as
 	 * `EmergencyFreeVoiceList` above) confirmed real, deliberately
-	 * deferred extern -- own body not reconstructed in this pass.
+	 * deferred extern -- own body not reconstructed in this pass
+	 * (`.text+0x4bcb0`, 957 bytes -- substantially larger than
+	 * EmergencyFreeVoiceList's own 84, out of scope for this batch).
 	 */
 	void StealVoiceList(void *list);
+
+	/*
+	 * FreeVoice(CSTGVoice*) (`.text+0x50cf0`) and DoPendingMoveVoices()
+	 * (`.text+0x52940`) -- confirmed real, deliberately deferred
+	 * siblings newly discovered while reconstructing EmergencyFreeVoiceList
+	 * above (sec 10.149); own bodies not reconstructed in this pass.
+	 */
+	void FreeVoice(CSTGVoice *voice);
+	void DoPendingMoveVoices();
 
 	unsigned char selfRefNodes[50][0x2c];		/* +0x0000..+0x0898, confirmed self-ref pattern */
 	unsigned char _unrecovered_gap1[0x320];	/* +0x0898..+0x0bb8, confirmed untouched */

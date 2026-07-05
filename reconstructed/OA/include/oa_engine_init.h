@@ -705,9 +705,39 @@ struct CSTGPlaybackEvent {
 	unsigned char _unrecovered[0x68];
 };
 
+/*
+ * CSTGAudioEvent::CSTGAudioEvent() (sec 10.149, `.text+0xd1830`, C1Ev/
+ * C2Ev folded to one address, 76 bytes) fully reconstructed: writes the
+ * confirmed 32-bit vtable-pointer field then 11 further confirmed
+ * scalars, all direct immediate stores (no calls, no branches). Named
+ * per-field rather than left as an opaque blob since every byte up to
+ * +0x2c is now confirmed; +0x2c..+0x38 remains an explicitly-labeled
+ * unrecovered tail (CSTGRecordEvent's own 56-byte/0x38 element stride,
+ * confirmed via engine_init.cpp's BuildArrayManager call, leaves this
+ * much room past the ctor's own last write). `sampleRate`'s value
+ * (0xbb80 = 48000) is the only field whose semantic role is reasonably
+ * inferable from its value alone; the rest are confirmed-value-only,
+ * not confirmed-semantics (fieldN naming, not a guess at meaning).
+ */
 struct CSTGAudioEvent {
 	CSTGAudioEvent();
-	unsigned char _unrecovered[0x38];
+	unsigned int  vtablePtr32;	/* +0x0, packed 32-bit vtable pointer (see ctor) */
+	unsigned char _gap4[4];		/* +0x4..+0x7, not touched by ctor */
+	unsigned int  field8;		/* +0x8, confirmed zeroed */
+	unsigned int  fieldC;		/* +0xc, confirmed real value 4 */
+	unsigned int  field10;		/* +0x10, confirmed zeroed */
+	unsigned char field14;		/* +0x14, confirmed zeroed */
+	unsigned char field15;		/* +0x15, confirmed zeroed */
+	unsigned char field16;		/* +0x16, confirmed zeroed */
+	unsigned char _gap17;		/* +0x17, not touched by ctor */
+	unsigned int  field18;		/* +0x18, confirmed zeroed */
+	unsigned char field1c;		/* +0x1c, confirmed real value 1 */
+	unsigned char field1d;		/* +0x1d, confirmed real value 2 */
+	unsigned char _gap1e[2];	/* +0x1e..+0x1f, not touched by ctor */
+	unsigned int  sampleRate;	/* +0x20, confirmed real value 0xbb80 (48000) */
+	unsigned int  field24;		/* +0x24, confirmed zeroed */
+	unsigned int  field28;		/* +0x28, confirmed zeroed */
+	unsigned char _unrecovered_tail[0x38 - 0x2c]; /* +0x2c..+0x38, confirmed to exist, not reconstructed */
 };
 
 /*
@@ -730,6 +760,9 @@ struct CSTGRecordEvent : public CSTGAudioEvent {
  * convention already established elsewhere in this project, e.g.
  * CSTGAudioDriverInterfaceKorgUsb's own constructor). */
 extern "C" unsigned char _ZTV15CSTGRecordEvent[];
+/* CSTGAudioEvent's own real vtable symbol, same treatment (40 confirmed
+ * bytes, per readelf, matching _ZTV15CSTGRecordEvent's own size). */
+extern "C" unsigned char _ZTV14CSTGAudioEvent[];
 
 /*
  * CSTGRecordBuffer -- CORRECTS a real, previously-undetected bug in this

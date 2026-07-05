@@ -82,6 +82,16 @@ extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
 extern "C" void rtwrap_free(void *) {}
 extern "C" void rtwrap_pthread_mutex_init(void *, void *) {}
 extern "C" void rtwrap_pthread_mutex_destroy(void *) {}
+/* rtwrap_pthread_mutex_lock/_unlock -- confirmed real (plain, unmangled
+ * `T` symbols in OA_real.ko, same rtwrap_* family), newly needed by
+ * sec 10.149's real CSTGVoiceAllocator::EmergencyFreeVoiceList(). */
+extern "C" void rtwrap_pthread_mutex_lock(void *) {}
+extern "C" void rtwrap_pthread_mutex_unlock(void *) {}
+/* rtwrap_whoami/rtwrap_task_suspend -- confirmed real (plain, unmangled
+ * `T` symbols), newly needed by sec 10.149's real
+ * CSTGAudioManager::ASKThreadRoutine(void*) (src/init/audio_start.cpp). */
+extern "C" void rtwrap_whoami(void) {}
+extern "C" void rtwrap_task_suspend(void) {}
 extern "C" void rtwrap_pthread_mutexattr_init(void *) {}
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) {}
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) {}

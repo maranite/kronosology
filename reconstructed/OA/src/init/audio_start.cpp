@@ -122,6 +122,99 @@ extern "C" int CSTGAudioManager_StartAudioEngine(void)
 	return CSTGAudioManager::sInstance->StartAudioEngine();
 }
 
+/*
+ * The three real thread-entry-point bodies (sec 10.149) -- confirmed via
+ * a full objdump disassembly of each. All three are only ever taken as
+ * function-pointer VALUES above (StartAudioEngine's own
+ * CreateRealTimeWithCPUAffinity calls), never invoked directly from this
+ * reconstruction's own C++ call graph.
+ */
+
+/* Plain C-linkage forward declarations for the three confirmed-real,
+ * deliberately deferred siblings these bodies call into (see
+ * bar2_stubs.cpp/bar2_stubs_c.cpp for their trivial no-op definitions).
+ * SKMain_Run is declared WITHOUT extern "C" to match the plain-C-linkage
+ * CHOICE already made for its own definition (an internal-consistency
+ * convention, not a claim about the real binary's own mangling -- see
+ * bar2_stubs.cpp's own comment on this). */
+extern "C" void rtwrap_whoami(void);
+extern "C" void rtwrap_task_suspend(void);
+extern "C" void SKMain_Run(void);
+
+/*
+ * CSTGAudioThread::AudioTickLoopRoutine(void*) (`.text+0x5dfa0`
+ * COMDAT section named after the mangled `EPv` symbol, 17 bytes)
+ * confirmed: a pure forwarding wrapper that IGNORES its own incoming
+ * `void *arg` entirely (never reads it) and tail-calls the no-arg
+ * overload, discarding ITS return value too (`xor eax,eax` after the
+ * call -- always returns NULL regardless of what the no-arg overload
+ * itself would have returned).
+ */
+void *CSTGAudioThread::AudioTickLoopRoutine(void *)
+{
+	CSTGAudioThread::AudioTickLoopRoutine();
+	return 0;
+}
+
+/*
+ * CSTGAudioManager::ASKThreadRoutine(void*) (`.text+0x67100`, 59
+ * bytes) confirmed: casts the incoming `void *arg` back to `this`
+ * (regparm(3) `this` in eax at entry, but the real code re-derives it
+ * from the explicit `void *arg` register instead -- both are the same
+ * value at a thread-entry call, modeled here via the `arg` parameter
+ * directly), then `while (fieldAt(0xa65))` ("running", confirmed via
+ * StartAudioEngine's own +0xa65 field above): rtwrap_whoami();
+ * rtwrap_task_suspend(); SKMain_Run(); -- a real per-tick synthesis-
+ * kernel dispatch loop, gated on the SAME running flag
+ * StartAudioEngine sets to 1 and CSTGAudioManager_StopAudioEngine's
+ * own vtable-slot-1 target presumably clears (not independently
+ * confirmed in this pass).
+ */
+void *CSTGAudioManager::ASKThreadRoutine(void *arg)
+{
+	unsigned char *self = (unsigned char *)arg;
+	while (self[0xa65]) {
+		rtwrap_whoami();
+		rtwrap_task_suspend();
+		SKMain_Run();
+	}
+	return 0;
+}
+
+/*
+ * CSTGAudioManager::AudioManagerThreadRoutine(void*) (`.text+0x670b0`,
+ * 67 bytes) confirmed: sets MXCSR to 0x9fc0 (DAZ+FTZ, all exceptions
+ * masked -- standard real-time audio-thread FP control word),
+ * UNCONDITIONALLY sets `fieldAt(0xd) = 1` (confirmed real quirk: this
+ * write happens regardless of whether the loop below ever runs even
+ * once -- the condition test that gates the loop is evaluated from the
+ * SAME `fieldAt(0xa65)` read that happened just before this write, not
+ * re-read after), then while that flag is nonzero: dispatches this
+ * object's own vtable slot 2 (raw indirect call through `*(void***)self`
+ * offset +0x8, confirmed via `call *0x8(%edx)` -- NOT this
+ * reconstruction's own C++ virtual mechanism, whose layout isn't
+ * independently confirmed to match beyond a couple of slots, same
+ * convention as StartAudioEngine's own raw vtable dispatches above).
+ */
+void *CSTGAudioManager::AudioManagerThreadRoutine(void *arg)
+{
+	unsigned char *self = (unsigned char *)arg;
+
+	unsigned int mxcsr = 0x9fc0;
+	asm volatile("ldmxcsr %0" : : "m"(mxcsr));
+
+	bool running = self[0xa65] != 0;
+	self[0xd] = 1;
+
+	while (running) {
+		typedef void (*Fn)(void *);
+		Fn fn = ((Fn *)(*(void ***)self))[2];
+		fn(self);
+		running = self[0xa65] != 0;
+	}
+	return 0;
+}
+
 extern "C" void CSTGAudioManager_StopAudioEngine(void)
 {
 	typedef void (*StopFn)(void *);

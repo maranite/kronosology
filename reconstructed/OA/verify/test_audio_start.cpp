@@ -50,9 +50,20 @@ char CSTGThread::CreateRealTimeWithCPUAffinity(void *(*entryFn)(void *), int pri
 
 } /* extern "C" */
 
-void *CSTGAudioThread::AudioTickLoopRoutine(void *) { return 0; }
-void *CSTGAudioManager::ASKThreadRoutine(void *) { return 0; }
-void *CSTGAudioManager::AudioManagerThreadRoutine(void *) { return 0; }
+/*
+ * ASKThreadRoutine(void*)/AudioManagerThreadRoutine(void*)/
+ * AudioTickLoopRoutine(void*) are all real now (sec 10.149, see
+ * audio_start.cpp) -- but this test never actually CALLS any of them
+ * (CreateRealTimeWithCPUAffinity above only ever records the entry-fn
+ * POINTER VALUE, matching the real StartAudioEngine's own usage, sec
+ * 10.37/10.52), so no test behavior changes here. This file links
+ * audio_start.cpp directly (not bar2_stubs.cpp), so their own new
+ * confirmed-real, deliberately-deferred dependencies still need
+ * trivial link-satisfying mocks: */
+extern "C" void rtwrap_whoami(void) {}
+extern "C" void rtwrap_task_suspend(void) {}
+extern "C" void SKMain_Run(void) {}
+void CSTGAudioThread::AudioTickLoopRoutine() {}
 
 CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
 CSTGAudioDriverInterface::~CSTGAudioDriverInterface() {}

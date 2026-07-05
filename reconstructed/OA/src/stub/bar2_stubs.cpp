@@ -92,13 +92,28 @@ void CSTGVoiceAllocator::Initialize() {}
  * ~CSTGMessageProcessor() are real now, sec 10.147 -- see managers.cpp. */
 void CSTGAudioBusManager::MixPerformanceOutputs() {}
 void CSTGAudioBusManager::LRBusIndivMirror() {}
-CSTGAudioEvent::CSTGAudioEvent() {}
-void *CSTGAudioManager::ASKThreadRoutine(void *) { return 0; }
-void *CSTGAudioManager::AudioManagerThreadRoutine(void *) { return 0; }
-void *CSTGAudioThread::AudioTickLoopRoutine(void *) { return 0; }
+/* CSTGAudioEvent::CSTGAudioEvent() is real now, sec 10.149 -- see
+ * engine_init.cpp. */
+/* CSTGAudioManager::ASKThreadRoutine(void*)/AudioManagerThreadRoutine(void*)
+ * and CSTGAudioThread::AudioTickLoopRoutine(void*) are real now, sec
+ * 10.149 -- see src/init/audio_start.cpp. AudioTickLoopRoutine(void*)
+ * itself forwards into a new no-arg overload, confirmed real but
+ * deliberately deferred (own body, .text+0x5dfa0, 141 bytes,
+ * substantially larger -- see oa_audio_start.h's own header comment). */
+void CSTGAudioThread::AudioTickLoopRoutine() {}
+/* SKMain_Run() -- confirmed real (`_Z10SKMain_Runv`, .text+0x340ca0),
+ * called from the now-real ASKThreadRoutine(void*) above. Declared
+ * plain `extern "C"` matching the SAME-family SKMain_Initialize's own
+ * already-established convention (sec 10.145) -- an internal-
+ * consistency choice for THIS reconstruction's own linkage, not a claim
+ * that the real binary's own SKMain_Run happens to be un-mangled (it
+ * isn't: the real symbol is `_Z10SKMain_Runv`, a plain C++ free
+ * function -- irrelevant here since this project never links against
+ * OA_real.ko directly, only needs its own call sites to agree). */
+extern "C" void SKMain_Run() {}
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() {}
-void CSTGMultisampleBankManager::Initialize() {}
-/* CSTGPCMPrecacheManager::Initialize() is real now, sec 10.144 -- see
+/* CSTGMultisampleBankManager::Initialize()/CSTGPCMPrecacheManager::
+ * Initialize() are both real now, sec 10.149/10.144 -- see
  * setup_global_resources.cpp. */
 void CSTGPCMPrecacheManager::AfterProcess() {}
 void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
@@ -222,7 +237,12 @@ void CSTGSlotVoiceData::UpdateGlobalTune(float) {}
 /* Sec 10.92's own confirmed-real, deliberately deferred externs.
  * EmergencyFreeAllVoices is now real (sec 10.138). */
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) {}
-void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *) {}
+/* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is real now, sec
+ * 10.149 -- see managers.cpp. Its own two newly-discovered confirmed-
+ * real, deliberately deferred siblings (own bodies not reconstructed
+ * in this pass): */
+void CSTGVoiceAllocator::FreeVoice(CSTGVoice *) {}
+void CSTGVoiceAllocator::DoPendingMoveVoices() {}
 /* Sec 10.93's own confirmed-real, deliberately deferred externs. */
 void CSTGSlotVoiceData::RunVoiceModelStaticFront(unsigned int) {}
 void CSTGSlotVoiceData::RunVoiceModelStaticBack(unsigned int) {}
@@ -284,6 +304,10 @@ unsigned char _ZTV14CSTGVectorEGXY[12];
 extern "C" unsigned char _ZTV16CSTGVectorEGBase[12];
 unsigned char _ZTV16CSTGVectorEGBase[12];
 unsigned char _ZTV15CSTGRecordEvent[40];
+/* _ZTV14CSTGAudioEvent -- needed now that CSTGAudioEvent::CSTGAudioEvent()
+ * is real (sec 10.149, engine_init.cpp) and references it directly, same
+ * 40-byte confirmed size (readelf) as its own derived sibling above. */
+unsigned char _ZTV14CSTGAudioEvent[40];
 
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,
  * already set by setup_global_resources.cpp; definition (storage) not

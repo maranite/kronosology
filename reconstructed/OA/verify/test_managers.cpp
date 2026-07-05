@@ -83,6 +83,24 @@ CSTGAudioManager::~CSTGAudioManager() { }
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) { g_mutexattrCalls++; }
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
 
+/* CSTGVoiceAllocator::EmergencyFreeVoiceList() is real now (sec 10.149,
+ * see managers.cpp) -- its own confirmed-real, deliberately deferred
+ * dependencies (FreeVoice/DoPendingMoveVoices) plus the rtwrap_*
+ * mutex lock/unlock pair are mocked here with counters so test [24]
+ * below can confirm each real step actually ran. */
+static int g_mutexLockCalls, g_mutexUnlockCalls;
+extern "C" void rtwrap_pthread_mutex_lock(void *) { g_mutexLockCalls++; }
+extern "C" void rtwrap_pthread_mutex_unlock(void *) { g_mutexUnlockCalls++; }
+static int g_freeVoiceCalls;
+static void *g_lastFreeVoiceArg;
+void CSTGVoiceAllocator::FreeVoice(CSTGVoice *voice)
+{
+	g_freeVoiceCalls++;
+	g_lastFreeVoiceArg = (void *)voice;
+}
+static int g_doPendingMoveVoicesCalls;
+void CSTGVoiceAllocator::DoPendingMoveVoices() { g_doPendingMoveVoicesCalls++; }
+
 /* STGAPILR2IndivToPhysBusId's own real content is now homed directly in
  * managers.cpp (sec 10.132), linked into this binary directly -- no
  * local mock needed. gAllPlusHeadroom/gAllMinusHeadroom are poisoned to

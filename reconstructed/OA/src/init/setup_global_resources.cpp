@@ -321,6 +321,45 @@ void cleanup_global_resources(void)
 }
 
 /*
+ * CSTGMultisampleBankManager::Initialize() (sec 10.149, `.text+0x3cd00`,
+ * 78 bytes) confirmed: resets 8 confirmed dwords -- a `CSTGMultisampleBankUUID`-
+ * shaped 4-dword group at +0xa000..+0xa00c (matching the exact same 4
+ * fields the real binary's own sibling `SetSamplingSessionID(UUID
+ * const&)` copies FROM a caller-supplied UUID, confirmed via a
+ * neighboring disassembly of that sibling), then +0xa010 (zeroed),
+ * +0xa014 (the confirmed real 0xffffffff "unset" sentinel value already
+ * seen elsewhere in this project, e.g. CSTGMidiPortManager's own +0xc/
+ * +0x70/+0xd4), +0xa018/+0xa01c (zeroed). No calls, no branches.
+ *
+ * Same known, ALREADY-DOCUMENTED tradeoff as CSTGPCMPrecacheManager::
+ * Initialize() just below (see this file's own real call site above,
+ * `init_global_resources()` step 7): `CSTGMultisampleBankManager
+ * multisampleMgr; multisampleMgr.Initialize();` is a throwaway stack
+ * local whose real, fixed heap-arena address is `oa_multisample_bank_
+ * manager()` (oa_heap.h, `oa_heap_base()+0x60524`) -- this reconstruction
+ * keeps using the dummy stack `this` at that one call site (matching
+ * this project's pre-existing, explicitly-flagged decision not to
+ * refactor the CSTGGlobal/CSTGMultisampleBankManager declaration-
+ * ecosystem conflict in this pass), so this call still writes past a
+ * technically-1-byte empty-class stack object there -- exactly as
+ * already tolerated for CSTGPCMPrecacheManager's own promotion (sec
+ * 10.144). The real body itself is verified directly, on a properly-
+ * sized buffer, in test_setup_global_resources.cpp instead.
+ */
+void CSTGMultisampleBankManager::Initialize()
+{
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0xa010) = 0;
+	*(unsigned int *)(base + 0xa000) = 0;
+	*(unsigned int *)(base + 0xa014) = 0xffffffff;
+	*(unsigned int *)(base + 0xa018) = 0;
+	*(unsigned int *)(base + 0xa01c) = 0;
+	*(unsigned int *)(base + 0xa004) = 0;
+	*(unsigned int *)(base + 0xa008) = 0;
+	*(unsigned int *)(base + 0xa00c) = 0;
+}
+
+/*
  * CSTGPCMPrecacheManager::Initialize() (sec 10.144): see
  * oa_setup_global_resources.h for the full confirmed shape.
  */

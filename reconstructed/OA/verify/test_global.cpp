@@ -251,14 +251,28 @@ static bool g_lastFreeSlotVoiceDataFlag;
  * list -- this lets that one test simulate the same effect so the
  * real retry loop actually terminates instead of spinning forever. */
 static void (*g_freeSlotVoiceDataHook)(void *self);
-/* EmergencyFreeAllVoices is now real (sec 10.138) -- its own
- * dependency, EmergencyFreeVoiceList, is mocked with call tracking
- * instead (CSTGVoiceAllocator::sInstance may be a dangling pointer by
- * the time these tests run, but that's safe here since the mock never
- * dereferences its own `this`, matching this class's OTHER methods'
- * treatment throughout this file). */
-static int g_emergencyFreeVoiceListCalls;
-void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *) { g_emergencyFreeVoiceListCalls++; }
+/* EmergencyFreeAllVoices is now real (sec 10.138), and its own
+ * dependency EmergencyFreeVoiceList is now ALSO real (sec 10.149, see
+ * managers.cpp, linked directly into this binary) -- no mock of
+ * EmergencyFreeVoiceList itself here any more (a stale mock here would
+ * conflict with the real definition at link time). The real body's OWN
+ * confirmed-real, deliberately-deferred dependencies (FreeVoice/
+ * DoPendingMoveVoices) plus the rtwrap_pthread_mutex_lock/unlock pair it
+ * calls are mocked here with counters instead, so the existing
+ * assertions below can be rewritten to check the real body's own
+ * observable effects (DoPendingMoveVoices is called EXACTLY once per
+ * real EmergencyFreeVoiceList invocation, unconditionally, so it's the
+ * proxy for "EmergencyFreeVoiceList really ran N times" that
+ * g_emergencyFreeVoiceListCalls used to be under the old mock). */
+static int g_mutexLockCalls, g_mutexUnlockCalls;
+extern "C" void rtwrap_pthread_mutex_lock(void *) { g_mutexLockCalls++; }
+extern "C" void rtwrap_pthread_mutex_unlock(void *) { g_mutexUnlockCalls++; }
+static int g_freeVoiceCalls;
+static void *g_lastFreeVoiceArg;
+void CSTGVoiceAllocator::FreeVoice(CSTGVoice *voice)
+{ g_freeVoiceCalls++; g_lastFreeVoiceArg = (void *)voice; }
+static int g_doPendingMoveVoicesCalls;
+void CSTGVoiceAllocator::DoPendingMoveVoices() { g_doPendingMoveVoicesCalls++; }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool flag)
 {
 	g_freeSlotVoiceDataCalls++;
@@ -2782,19 +2796,28 @@ int main(void)
 		*(unsigned short *)(voice0 + 0x58) = 0;                    /* sum==0 -> free */
 		voice0[0x41] = 0;
 		*(unsigned int *)(buf + 0x29c9904) = (unsigned int)(unsigned long)node0;
-		g_emergencyFreeVoiceListCalls = 0;
+		g_doPendingMoveVoicesCalls = 0;
+		g_freeVoiceCalls = 0;
+		g_lastFreeVoiceArg = 0;
 		g_freeSlotVoiceDataCalls = 0;
 		g->EmergencyFreeDyingSlotVoiceData();
-		check_eq("sum==0 -> EmergencyFreeAllVoices called (2 EmergencyFreeVoiceList calls)", (unsigned int)g_emergencyFreeVoiceListCalls, 2u);
+		check_eq("sum==0 -> EmergencyFreeAllVoices called (2 real EmergencyFreeVoiceList invocations)",
+			 (unsigned int)g_doPendingMoveVoicesCalls, 2u);
+		check_eq("  ...first list's one node -> FreeVoice(voice0) called once",
+			 (unsigned int)g_freeVoiceCalls, 1u);
+		check_eq("  ...with the confirmed real payload pointer",
+			 (unsigned int)(unsigned long)g_lastFreeVoiceArg, (unsigned int)(unsigned long)voice0);
 		check_eq("sum==0 -> FreeSlotVoiceData ALSO called", (unsigned int)g_freeSlotVoiceDataCalls, 1u);
 		check_eq("  ...with flag true", (unsigned int)g_lastFreeSlotVoiceDataFlag, 1u);
 
 		*(unsigned short *)(voice0 + 0x4c) = 5;
 		voice0[0x41] = 1; /* sum!=0 AND byteAt(0x41)!=0 -> EmergencyFreeAllVoices only */
-		g_emergencyFreeVoiceListCalls = 0;
+		g_doPendingMoveVoicesCalls = 0;
+		g_freeVoiceCalls = 0;
 		g_freeSlotVoiceDataCalls = 0;
 		g->EmergencyFreeDyingSlotVoiceData();
-		check_eq("sum!=0 + flag set -> EmergencyFreeAllVoices called (2 EmergencyFreeVoiceList calls)", (unsigned int)g_emergencyFreeVoiceListCalls, 2u);
+		check_eq("sum!=0 + flag set -> EmergencyFreeAllVoices called (2 real EmergencyFreeVoiceList invocations)",
+			 (unsigned int)g_doPendingMoveVoicesCalls, 2u);
 		check_eq("  ...FreeSlotVoiceData NOT called", (unsigned int)g_freeSlotVoiceDataCalls, 0u);
 
 		munmap(node0, 0x10);
@@ -3592,10 +3615,11 @@ int main(void)
 			*(unsigned int *)(hookBase + 0x29c98fc) = 1;
 		};
 
-		g_emergencyFreeVoiceListCalls = 0;
+		g_doPendingMoveVoicesCalls = 0;
 		g_freeSlotVoiceDataCalls = 0;
 		got = g->GetFreeSlotVoiceData();
-		check_eq("stole a voice: EmergencyFreeAllVoices called (2 EmergencyFreeVoiceList calls)", (unsigned int)g_emergencyFreeVoiceListCalls, 2u);
+		check_eq("stole a voice: EmergencyFreeAllVoices called (2 real EmergencyFreeVoiceList invocations)",
+			 (unsigned int)g_doPendingMoveVoicesCalls, 2u);
 		check_eq("  ...FreeSlotVoiceData(true) ALSO called (sum==0)",
 			 (unsigned int)g_freeSlotVoiceDataCalls, 1u);
 		check_eq("  ...with flag true", (unsigned int)g_lastFreeSlotVoiceDataFlag, 1u);

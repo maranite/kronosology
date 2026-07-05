@@ -232,9 +232,14 @@ void CSTGCommonStepSeq::Initialize() { g_commonStepSeqInitCalls++; }
 /* ---- mocks: ring-buffer element classes ---- */
 static int g_playbackEventCtorCalls;
 CSTGPlaybackEvent::CSTGPlaybackEvent() { g_playbackEventCtorCalls++; }
-static int g_audioEventCtorCalls;
-CSTGAudioEvent::CSTGAudioEvent() { g_audioEventCtorCalls++; }
+/* CSTGAudioEvent::CSTGAudioEvent() is real now (sec 10.149, see
+ * engine_init.cpp, which this file links directly) -- no mock here any
+ * more; verified directly on two real constructed elements below
+ * instead of a call counter (see [2]'s own RecordEvent block). */
 unsigned char _ZTV15CSTGRecordEvent[16];
+/* CSTGAudioEvent's own real vtable placeholder, newly needed now that
+ * the real ctor above references it directly. */
+unsigned char _ZTV14CSTGAudioEvent[40];
 /* CSTGRecordBuffer::CSTGRecordBuffer() is now real (sec 10.148, see
  * engine_init.cpp) -- no mock here any more. This ALSO corrects a real
  * bug this promotion uncovered: the true per-instance size is
@@ -338,7 +343,22 @@ int main(void)
 
 	check_eq("RecordEvent count == 200", TSTGArrayManager<CSTGRecordEvent>::sInstance->count, 200);
 	check_eq("RecordEvent modulus == 201", TSTGArrayManager<CSTGRecordEvent>::sInstance->modulus, 201);
-	check_eq("CSTGAudioEvent ctor called 200 times (RecordEvent's real base)", g_audioEventCtorCalls, 200);
+	{
+		/* CSTGAudioEvent::CSTGAudioEvent() is real now (sec 10.149) --
+		 * check its own confirmed field writes directly on the first
+		 * and last of the 200 constructed elements, a strictly
+		 * stronger check than the old call counter (proves the real
+		 * ctor body actually ran on each, not just that some function
+		 * was invoked 200 times). */
+		CSTGAudioEvent *e0 = (CSTGAudioEvent *)IndexElem(TSTGArrayManager<CSTGRecordEvent>::sInstance, 0);
+		CSTGAudioEvent *e199 = (CSTGAudioEvent *)IndexElem(TSTGArrayManager<CSTGRecordEvent>::sInstance, 199);
+		check_eq("RecordEvent[0] base ctor fieldC == 4", (long)e0->fieldC, 4);
+		check_eq("RecordEvent[0] base ctor sampleRate == 48000", (long)e0->sampleRate, 0xbb80);
+		check_eq("RecordEvent[0] base ctor field1c == 1", (long)e0->field1c, 1);
+		check_eq("RecordEvent[0] base ctor field1d == 2", (long)e0->field1d, 2);
+		check_eq("RecordEvent[199] base ctor fieldC == 4", (long)e199->fieldC, 4);
+		check_eq("RecordEvent[199] base ctor sampleRate == 48000", (long)e199->sampleRate, 0xbb80);
+	}
 	check_eq("RecordEvent[0] vtable patched to _ZTV15CSTGRecordEvent+8",
 		 (long)(*(unsigned int *)IndexElem(TSTGArrayManager<CSTGRecordEvent>::sInstance, 0) ==
 			(unsigned int)(unsigned long)(_ZTV15CSTGRecordEvent + 8)),

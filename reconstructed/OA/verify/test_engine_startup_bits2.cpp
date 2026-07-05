@@ -57,6 +57,13 @@ extern "C" void rtwrap_free(void *) { }
  * constructs one. */
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) { g_mutexattrCalls++; }
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
+/* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is now real too (sec
+ * 10.149, see managers.cpp) -- link-satisfying only, nothing in this
+ * file invokes it. */
+extern "C" void rtwrap_pthread_mutex_lock(void *) { }
+extern "C" void rtwrap_pthread_mutex_unlock(void *) { }
+void CSTGVoiceAllocator::FreeVoice(CSTGVoice *) { }
+void CSTGVoiceAllocator::DoPendingMoveVoices() { }
 
 /* STGAPILR2IndivToPhysBusId's own real content is now homed directly in
  * managers.cpp (sec 10.132), linked into this binary directly. */

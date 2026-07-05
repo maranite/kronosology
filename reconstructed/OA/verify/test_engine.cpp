@@ -159,7 +159,15 @@ void CSTGChannelValues::Reset() { }
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) { }
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) { }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
-void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *) { }
+/* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is real now (sec
+ * 10.149, see managers.cpp, which this file links directly) -- no mock
+ * here any more. Its own new real dependencies need trivial link-
+ * satisfying mocks instead (not exercised by this file's own tests --
+ * see test_global.cpp/test_managers.cpp for real coverage). */
+extern "C" void rtwrap_pthread_mutex_lock(void *) { }
+extern "C" void rtwrap_pthread_mutex_unlock(void *) { }
+void CSTGVoiceAllocator::FreeVoice(CSTGVoice *) { }
+void CSTGVoiceAllocator::DoPendingMoveVoices() { }
 void CSTGSlotVoiceData::RunVoiceModelStaticFront(unsigned int) { }
 void CSTGSlotVoiceData::RunVoiceModelStaticBack(unsigned int) { }
 void CSTGSlotVoiceData::GetTotalStaticCosts(unsigned long *, unsigned long *) const { }
