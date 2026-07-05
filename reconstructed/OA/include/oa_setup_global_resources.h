@@ -100,11 +100,55 @@ struct CSTGPCMPrecacheManager {
 	 * presumably why the `void` guess was never caught before).
 	 */
 	bool Initialize();
-	/* AfterProcess()/Reset(bool,bool,unsigned long) (Bar 2, confirmed
-	 * real via the real binary's own symbol table, own bodies not
-	 * reconstructed) -- deliberately deferred externs. */
+	/* AfterProcess() (Bar 2, confirmed real via the real binary's own
+	 * symbol table, own body not reconstructed) -- deliberately deferred
+	 * extern. */
 	void AfterProcess();
-	void Reset(bool, bool, unsigned long);
+
+	/*
+	 * Reset(bool, bool, unsigned long) (sec 10.154, `.text+0x46b50`, 218
+	 * bytes) confirmed real: `fieldAt(0x0)`/`fieldAt(0x1)` (bytes) get the
+	 * two bool args; `fieldAt(0x8)` zeroed; the PREVIOUS element-array
+	 * pointer at `fieldAt(0x14)` is freed (matching whichever allocator
+	 * form originally produced it -- see below), `fieldAt(0x4)` (the
+	 * element count) is overwritten with the new `count` argument,
+	 * `fieldAt(0x14)` zeroed; if `count > 0` a fresh element array is
+	 * allocated and each 12-byte element's 3 dwords zeroed; finally
+	 * `fieldAt(0x18)`/`fieldAt(0xc)`/`fieldAt(0x10)` (dwords) and
+	 * `fieldAt(0x28)`/`fieldAt(0x29)` (bytes) are zeroed, and the function
+	 * returns `true` unconditionally (`mov eax,0x1` before `ret`) -- the
+	 * SAME "guessed void, really bool" mistake already caught and fixed
+	 * for `Initialize()` above applies here too (this project's own
+	 * `process_oacmd.cpp` -- the only real caller, "PC:" handler --
+	 * already discards the return value, same reason the wrong guess
+	 * went unnoticed).
+	 *
+	 * CONFIRMED REAL, COUNTERINTUITIVE ALLOCATOR-FORM QUIRK, preserved
+	 * bug-for-bug: when `count == 1` the element array is allocated via
+	 * SCALAR `operator new(0xc)` (not `operator new[]`), and correspondingly
+	 * freed via scalar `operator delete` rather than `operator delete[]`
+	 * -- the real binary tracks which allocator form was used via the
+	 * OLD `fieldAt(0x4)` count (read BEFORE it's overwritten with the new
+	 * `count`): `== 1` means the previous buffer was a scalar allocation
+	 * (`operator delete`), anything else (including 0, which never
+	 * allocated at all and is skipped via the `fieldAt(0x14) != 0` null
+	 * check) means `operator delete[]`. `count > 1` allocates via
+	 * `operator new[](count * 0xc)` as normal.
+	 *
+	 * NOTE on the real mangled name: OA_real.ko's own symbol is
+	 * `_ZN22CSTGPCMPrecacheManager5ResetEbbi` (bool,bool,INT) -- this
+	 * project's own pre-existing declaration here (and in
+	 * `process_oacmd.cpp`'s separate local declaration, and until this
+	 * pass `bar2_stubs.cpp`'s stub) all independently used `unsigned
+	 * long` for the third argument instead. Functionally identical under
+	 * `-mregparm=3` on this 32-bit target (both are 4-byte values passed
+	 * the same way) and internally self-consistent across every TU that
+	 * declares this class, so left as-is rather than churned across three
+	 * files for a purely cosmetic type-name difference with zero ABI
+	 * impact -- flagged here for whoever next consolidates these
+	 * declarations.
+	 */
+	bool Reset(bool, bool, unsigned long);
 };
 
 /* CSTGHeapManager -- real singleton, matches oa_types.h's own

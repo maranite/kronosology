@@ -512,9 +512,11 @@ struct CSTGSmoother {
 
 	/* CancelAllSmoothers() (sec 10.78, confirmed via relocation from
 	 * several UpdateXXX handlers -- already referenced by name in this
-	 * project's own comments since sec 10.33, now finally declared)
-	 * confirmed real, deliberately deferred extern -- own body not
-	 * reconstructed in this pass. */
+	 * project's own comments since sec 10.33) is real now, sec 10.154 --
+	 * see src/engine/smoother_cancel.cpp for the full confirmed shape
+	 * (unlinks and finalizes every entry on the real active-smoothers
+	 * list, pushing each onto the free list via the same push-front
+	 * template already confirmed real in Initialize() above). */
 	void CancelAllSmoothers();
 
 	/* FinalizeAllSmoothers() (sec 10.95, confirmed via relocation from

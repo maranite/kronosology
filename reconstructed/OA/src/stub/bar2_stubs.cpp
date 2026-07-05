@@ -121,7 +121,8 @@ void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() {}
  * Initialize() are both real now, sec 10.149/10.144 -- see
  * setup_global_resources.cpp. */
 void CSTGPCMPrecacheManager::AfterProcess() {}
-void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
+/* CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) is real now,
+ * sec 10.154 -- see src/init/setup_global_resources.cpp. */
 
 /* ---- Remaining engine/manager/model stubs, batch 2 ---- */
 /* CEmergencyStealer::~CEmergencyStealer() is real now, sec 10.148 -- see
@@ -279,7 +280,8 @@ void CSTGVoiceAllocator::StealVoiceList(void *) {}
  * scope for this pass). Initialize() reconstructed for real, sec
  * 10.86 -- see src/engine/smoother_init.cpp. */
 CSTGSmoother::CSTGSmoother() {}
-void CSTGSmoother::CancelAllSmoothers() {}
+/* CSTGSmoother::CancelAllSmoothers() is real now, sec 10.154 -- see
+ * src/engine/smoother_cancel.cpp. */
 /* Sec 10.95's own confirmed-real, deliberately deferred externs. */
 void CSTGSmoother::FinalizeAllSmoothers() {}
 void CSTGPerformanceVars::SetIsDying() {}

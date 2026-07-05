@@ -14,6 +14,7 @@
  */
 
 #include "oa_setup_global_resources.h"
+#include "oa_new_delete.h"	/* oa_size_t, for CSTGPCMPrecacheManager::Reset()'s new[]/delete[] use */
 
 /* No <cstring> here -- it conflicts with oa_internal.h's own `strlen`
  * declaration (different exception specifier), same reasoning
@@ -385,4 +386,62 @@ bool CSTGPCMPrecacheManager::Initialize()
 void CSTGASK::Initialize(void *arg)
 {
 	SKMain_Initialize(arg);
+}
+
+static unsigned char *PCMPrecacheFromU32(unsigned int v)
+{
+	return (unsigned char *)(unsigned long)v;
+}
+static unsigned int PCMPrecacheToU32(unsigned char *p)
+{
+	return (unsigned int)(unsigned long)p;
+}
+
+/*
+ * CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) (sec 10.154):
+ * see oa_setup_global_resources.h for the full confirmed shape, including
+ * the confirmed real "scalar new/delete for a single element, array
+ * new[]/delete[] otherwise" allocator-form quirk.
+ */
+bool CSTGPCMPrecacheManager::Reset(bool flagFromN3, bool flagFromN2, unsigned long count)
+{
+	unsigned char *base = (unsigned char *)this;
+
+	base[0x0] = flagFromN3;
+	base[0x1] = flagFromN2;
+	*(unsigned int *)(base + 0x8) = 0;
+
+	unsigned int oldCount = *(unsigned int *)(base + 0x4);
+	unsigned int oldPtr = *(unsigned int *)(base + 0x14);
+	if (oldPtr != 0) {
+		if (oldCount == 1)
+			operator delete(PCMPrecacheFromU32(oldPtr));
+		else
+			operator delete[](PCMPrecacheFromU32(oldPtr));
+	}
+
+	*(unsigned int *)(base + 0x4) = (unsigned int)count;
+	*(unsigned int *)(base + 0x14) = 0;
+
+	if ((long)count > 0) {
+		unsigned char *elems;
+		if (count == 1)
+			elems = (unsigned char *)operator new((oa_size_t)0xc);
+		else
+			elems = (unsigned char *)operator new[]((oa_size_t)(count * 0xc));
+		for (unsigned long i = 0; i < count; i++) {
+			unsigned char *e = elems + i * 0xc;
+			*(unsigned int *)(e + 0x0) = 0;
+			*(unsigned int *)(e + 0x4) = 0;
+			*(unsigned int *)(e + 0x8) = 0;
+		}
+		*(unsigned int *)(base + 0x14) = PCMPrecacheToU32(elems);
+	}
+
+	*(unsigned int *)(base + 0x18) = 0;
+	*(unsigned int *)(base + 0xc) = 0;
+	*(unsigned int *)(base + 0x10) = 0;
+	base[0x28] = 0;
+	base[0x29] = 0;
+	return true;
 }

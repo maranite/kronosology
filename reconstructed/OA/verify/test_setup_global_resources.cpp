@@ -220,6 +220,68 @@ int main(void)
 		check_eq("+0x8 untouched (confirmed gap, still poisoned)", pcmBuf[0x8], 0xcc);
 	}
 
+	printf("\n[direct] CSTGPCMPrecacheManager::Reset() (sec 10.154)\n");
+	{
+		unsigned char pcmBuf[0x2a];
+		memset(pcmBuf, 0xcc, sizeof(pcmBuf));
+		CSTGPCMPrecacheManager *pcm = (CSTGPCMPrecacheManager *)pcmBuf;
+		/* Establishes the real invariant a genuine caller relies on:
+		 * Initialize() (already confirmed real, sec 10.144) runs once
+		 * during setup_global_resources() before any Reset() call ever
+		 * happens on the real target, so +0x4/+0x14 start at a real 0,
+		 * not poisoned garbage a first Reset() would try to free(). */
+		pcm->Initialize();
+
+		/* [1] count == 0: no allocation (oldPtr/+0x14 was already 0). */
+		bool r0 = pcm->Reset(false, false, 0);
+		check_eq("[1] returns true", (unsigned int)r0, 1u);
+		check_eq("[1] +0x0 == 0 (flagFromN3=false)", pcmBuf[0x0], 0);
+		check_eq("[1] +0x1 == 0 (flagFromN2=false)", pcmBuf[0x1], 0);
+		check_eq("[1] +0x4 == 0 (count)", *(unsigned int *)(pcmBuf + 0x4), 0u);
+		check_eq("[1] +0x14 == 0 (count==0, nothing allocated)", *(unsigned int *)(pcmBuf + 0x14), 0u);
+		check_eq("[1] +0x18 zeroed", *(unsigned int *)(pcmBuf + 0x18), 0u);
+		check_eq("[1] +0xc zeroed", *(unsigned int *)(pcmBuf + 0xc), 0u);
+		check_eq("[1] +0x10 zeroed", *(unsigned int *)(pcmBuf + 0x10), 0u);
+		check_eq("[1] +0x28 zeroed", pcmBuf[0x28], 0);
+		check_eq("[1] +0x29 zeroed", pcmBuf[0x29], 0);
+		check_eq("[1] +0x8 zeroed", *(unsigned int *)(pcmBuf + 0x8), 0u);
+
+		/* [2] count == 3: real operator new[] path (count > 1). */
+		bool r1 = pcm->Reset(true, true, 3);
+		check_eq("[2] returns true", (unsigned int)r1, 1u);
+		check_eq("[2] +0x0 == 1 (flagFromN3=true)", pcmBuf[0x0], 1);
+		check_eq("[2] +0x1 == 1 (flagFromN2=true)", pcmBuf[0x1], 1);
+		check_eq("[2] +0x4 == 3 (count)", *(unsigned int *)(pcmBuf + 0x4), 3u);
+		unsigned int arrPtr = *(unsigned int *)(pcmBuf + 0x14);
+		check_eq("[2] +0x14 != 0 (array allocated)", arrPtr != 0, 1);
+		unsigned char *arr = (unsigned char *)(unsigned long)arrPtr;
+		for (int i = 0; i < 3; i++) {
+			check_eq("[2] elem[i] +0x0 zeroed", *(unsigned int *)(arr + i * 0xc + 0), 0u);
+			check_eq("[2] elem[i] +0x4 zeroed", *(unsigned int *)(arr + i * 0xc + 4), 0u);
+			check_eq("[2] elem[i] +0x8 zeroed", *(unsigned int *)(arr + i * 0xc + 8), 0u);
+		}
+
+		/* [3] count == 1: real SCALAR operator new path (the confirmed
+		 * "count==1" quirk) -- oldCount was 3 (!= 1), so this also
+		 * exercises the operator delete[] branch on the [2] array. */
+		bool r2 = pcm->Reset(false, false, 1);
+		check_eq("[3] returns true", (unsigned int)r2, 1u);
+		check_eq("[3] +0x4 == 1 (count)", *(unsigned int *)(pcmBuf + 0x4), 1u);
+		unsigned int scalarPtr = *(unsigned int *)(pcmBuf + 0x14);
+		check_eq("[3] +0x14 != 0 (scalar allocated)", scalarPtr != 0, 1);
+		unsigned char *one = (unsigned char *)(unsigned long)scalarPtr;
+		check_eq("[3] scalar elem +0x0 zeroed", *(unsigned int *)(one + 0), 0u);
+		check_eq("[3] scalar elem +0x4 zeroed", *(unsigned int *)(one + 4), 0u);
+		check_eq("[3] scalar elem +0x8 zeroed", *(unsigned int *)(one + 8), 0u);
+
+		/* [4] count == 0 again: oldCount was 1, exercising the SCALAR
+		 * operator delete branch (the other half of the allocator-form
+		 * quirk) on the [3] element. */
+		bool r3 = pcm->Reset(false, false, 0);
+		check_eq("[4] returns true", (unsigned int)r3, 1u);
+		check_eq("[4] +0x14 == 0 after freeing back to count 0", *(unsigned int *)(pcmBuf + 0x14), 0u);
+	}
+
 	printf("\n[direct] CSTGMultisampleBankManager::Initialize() (sec 10.149)\n");
 	{
 		unsigned char msBuf[0xa020];

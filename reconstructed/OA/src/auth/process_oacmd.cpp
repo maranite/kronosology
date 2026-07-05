@@ -168,8 +168,14 @@ struct CSTGPCMPrecacheManager {
 	 * n2-derived flag, n1), not the (n1,n2,n3) order they appear in the
 	 * command string. Reproduced exactly as confirmed, not "fixed" to the
 	 * more intuitive order.
+	 *
+	 * Real body now reconstructed (sec 10.154, see
+	 * src/init/setup_global_resources.cpp) -- also corrects the return
+	 * type the SAME way AfterProcess()'s own comment below already did:
+	 * confirmed `mov eax,0x1` before `ret`, so `bool`, not `void`. This
+	 * call site already discards the return value either way.
 	 */
-	void Reset(bool flagFromN3, bool flagFromN2, unsigned long n1);
+	bool Reset(bool flagFromN3, bool flagFromN2, unsigned long n1);
 	/* CORRECTED (2026-07-01): return type was guessed as void; "LA:*"'s
 	 * disassembly uses the return value ((result^1)&0xff), so it's bool. */
 	bool AfterProcess(void);
