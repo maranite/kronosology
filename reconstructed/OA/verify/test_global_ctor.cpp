@@ -168,7 +168,13 @@ CSTGSlotVoiceData::CSTGSlotVoiceData() { g_slotVoiceDataCalls++; }
  * test's own scenarios (see test_global.cpp for their dedicated
  * coverage). */
 void CSTGSlotVoiceData::RunVoiceModelFeedback() { }
-void CSTGSlotVoiceData::Initialize(unsigned short) { }
+/* CSTGSlotVoiceData::Initialize(unsigned short) is now real (sec
+ * 10.150, see global.cpp) -- no mock body here any more. Its own new
+ * dependencies still need trivial link-satisfying definitions (see
+ * test_engine.cpp's own identical comment for the full reasoning). */
+STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
+STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
+void CSTGChannelValues::Initialize() { }
 void CSTGSlotVoiceData::UpdateGlobalTune(float) { }
 /* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144, see
  * managers.cpp) -- CSTGPerformanceVarsManager::sInstance is never set up

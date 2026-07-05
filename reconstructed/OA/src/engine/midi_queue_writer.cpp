@@ -10,6 +10,16 @@
  * file convention (e.g. midi_dispatcher.cpp, heap_manager.cpp) -- with
  * its own dedicated host KAT (verify/test_midi_queue_writer.cpp)
  * exercising the real ring-buffer logic directly.
+ *
+ * CSTGMidiQueue::GetNumWritableBytes() (sec 10.150) shares the SAME
+ * ringCtl memory this file's own Write() operates on, but deliberately
+ * lives in its own SEPARATE file, midi_queue.cpp, NOT here: it needs to
+ * be linked into test_global.cpp (its own mock footprint there was tiny
+ * enough to promote), but Write() must NOT be (test_global.cpp keeps
+ * its own Write() mock, load-bearing for ~10 other assertions) -- one
+ * file per real/mocked split, matching this project's per-unit
+ * convention rather than one file trying to serve both link needs at
+ * once.
  */
 
 #include "oa_global.h"

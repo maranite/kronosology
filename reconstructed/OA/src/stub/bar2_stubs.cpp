@@ -130,11 +130,17 @@ void CSTGPCMPrecacheManager::Reset(bool, bool, unsigned long) {}
  * not reconstructed in this pass). */
 extern "C" void SKMain_Initialize(void *) {}
 /* CSTGAudioInput's own ctor + 9 UpdateXXX methods reconstructed for
- * real, sec 10.80 -- see src/engine/global.cpp. */
-void CSTGAudioInputMixerBase::SetHDRBus(unsigned int, int) {}
-void CSTGAudioInputMixerBase::SetFXCtrlBus(unsigned int, int) {}
-void CSTGAudioInputMixerBase::SetOutputBus(unsigned int, int) {}
-void CSTGAudioInputMixerBase::SetPan(unsigned int, float) {}
+ * real, sec 10.80 -- see src/engine/global.cpp. CSTGAudioInputMixerBase's
+ * own four setters (SetHDRBus/SetFXCtrlBus/SetOutputBus/SetPan) are now
+ * real too, sec 10.150 -- see src/engine/audio_input_mixer.cpp (its own
+ * dedicated translation unit; test_engine.cpp/test_global.cpp/
+ * test_global_ctor.cpp all keep their own pre-existing mocks for these,
+ * untouched, matching the CSTGMidiQueueWriter::Write precedent). Their
+ * own three newly-discovered confirmed-real, deliberately deferred
+ * dependencies: */
+void CSTGPan::CalculateMonoPanCoeffs(STGMonoPanCoeffs &, float, float) {}
+void CBusChangeStateMachine::StartBusChange(int, int, unsigned int) {}
+int CSTGBusInfo::GetSignalSelectionForBusType(int) { return 0; }
 void CSTGAudioInput::UseSettings() {}
 /* Sec 10.97's own confirmed-real, deliberately deferred externs.
  * CSetListSlot::Activate is now real (sec 10.141). */
@@ -199,7 +205,6 @@ CSTGLFOTables::CSTGLFOTables() {}
 CSTGMIDIClockSync::CSTGMIDIClockSync() {}
 void CSTGMidiDispatcher::HandleController(unsigned char, unsigned char, unsigned char, int, int) {}
 void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
-unsigned int CSTGMidiQueue::GetNumWritableBytes() const { return 0; }
 /* CSTGMidiQueue::AllocReader() reconstructed for real, sec 10.82 -- see
  * src/engine/global.cpp. CSTGMidiQueueWriter::Write() reconstructed
  * for real, sec 10.83 -- see src/engine/midi_queue_writer.cpp (its own
@@ -207,13 +212,21 @@ unsigned int CSTGMidiQueue::GetNumWritableBytes() const { return 0; }
  * mock for this symbol is load-bearing for ~10 other UpdateXXX
  * assertions there, so the real body deliberately lives somewhere
  * those tests don't link, matching this project's per-unit file
- * convention). */
+ * convention). CSTGMidiQueue::GetNumWritableBytes() is now real too,
+ * sec 10.150 -- see src/engine/midi_queue.cpp, a THIRD separate
+ * translation unit (shares the same ringCtl memory Write() uses, but
+ * kept apart from midi_queue_writer.cpp so it alone, not Write(), can
+ * be linked into test_global.cpp -- its own mock footprint there was
+ * tiny, never varied away from its 0 default anywhere in that file). */
 /* placeholder-removed-below -- see
  * src/engine/global.cpp. CSTGPerformance::IsCurrentlyActive() is real
  * now too, sec 10.144 -- see managers.cpp. */
 void CSTGPerformanceVarsManager::Initialize() {}
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
-CSTGPlaybackEvent::CSTGPlaybackEvent() {}
+/* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now, sec 10.150 -- see
+ * src/engine/engine_init.cpp. Needs its own confirmed 40-byte vtable
+ * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its
+ * siblings. */
 CSTGProgram::CSTGProgram() {}
 /* CSTGProgramSlot/CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's
  * ctors + Initialize()/OnUpdateGlobalMidiChannel/
@@ -231,7 +244,10 @@ void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
 CSTGSamplingInterface::CSTGSamplingInterface() {}
 CSTGSequence::CSTGSequence() {}
 CSTGSlotVoiceData::CSTGSlotVoiceData() {}
-void CSTGSlotVoiceData::Initialize(unsigned short) {}
+/* CSTGSlotVoiceData::Initialize(unsigned short) is real now, sec
+ * 10.150 -- see src/engine/global.cpp. Its own newly-discovered
+ * confirmed-real, deliberately deferred dependency: */
+void CSTGChannelValues::Initialize() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 void CSTGSlotVoiceData::UpdateGlobalTune(float) {}
 /* Sec 10.92's own confirmed-real, deliberately deferred externs.
@@ -308,6 +324,12 @@ unsigned char _ZTV15CSTGRecordEvent[40];
  * is real (sec 10.149, engine_init.cpp) and references it directly, same
  * 40-byte confirmed size (readelf) as its own derived sibling above. */
 unsigned char _ZTV14CSTGAudioEvent[40];
+/* _ZTV17CSTGPlaybackEvent -- needed now that CSTGPlaybackEvent::
+ * CSTGPlaybackEvent() is real (sec 10.150, engine_init.cpp) and
+ * references it directly, same confirmed 40-byte size (readelf,
+ * `vtable for CSTGPlaybackEvent`) as its CSTGAudioEvent/CSTGRecordEvent
+ * siblings above. */
+unsigned char _ZTV17CSTGPlaybackEvent[40];
 
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,
  * already set by setup_global_resources.cpp; definition (storage) not

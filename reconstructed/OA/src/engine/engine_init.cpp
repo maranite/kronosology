@@ -103,6 +103,43 @@ CSTGAudioEvent::CSTGAudioEvent()
 	sampleRate = 0xbb80;
 }
 
+/*
+ * CSTGPlaybackEvent::CSTGPlaybackEvent() (sec 10.150, `.text+0xd6c90`,
+ * C1Ev/C2Ev folded, 118 bytes) -- see oa_engine_init.h's own header
+ * comment for the full confirmed field list and why this is NOT
+ * modeled via C++ `: public CSTGAudioEvent` (the derived ctor's own
+ * field writes start 8 bytes before `sizeof(CSTGAudioEvent)`, a real
+ * overlap standard single inheritance can't express). Reproduces the
+ * real ctor's own instruction order exactly: base ctor (placement-
+ * constructed directly onto this object's own storage, which is at
+ * least 0x68 bytes -- `sizeof(CSTGAudioEvent)` is only 0x38), own
+ * vtable-pointer overwrite, then 13 further confirmed zero-stores.
+ */
+CSTGPlaybackEvent::CSTGPlaybackEvent()
+{
+	new (this) CSTGAudioEvent();
+	/* Confirmed real double-vtable-write: the derived ctor
+	 * unconditionally overwrites the base's own vtable pointer with
+	 * its own, same established pattern as ConstructRecordEvent below
+	 * and CCostProfile:CStartupFile (sec 10.13). */
+	*(unsigned int *)this = ToU32(_ZTV17CSTGPlaybackEvent + 8);
+
+	unsigned char *self = (unsigned char *)this;
+	*(unsigned int *)(self + 0x30) = 0;
+	*(unsigned int *)(self + 0x34) = 0;
+	*(unsigned int *)(self + 0x38) = 0;
+	*(unsigned int *)(self + 0x3c) = 0;
+	*(unsigned int *)(self + 0x40) = 0;
+	*(unsigned int *)(self + 0x44) = 0;
+	*(unsigned int *)(self + 0x48) = 0;
+	*(unsigned int *)(self + 0x50) = 0;
+	*(unsigned int *)(self + 0x54) = 0;
+	*(unsigned int *)(self + 0x58) = 0;
+	self[0x60] = 0;
+	self[0x61] = 0;
+	*(unsigned int *)(self + 0x64) = 0;
+}
+
 static void ConstructPlaybackEvent(unsigned char *p) { new (p) CSTGPlaybackEvent(); }
 
 /* CSTGRecordEvent has no constructor symbol of its own -- see

@@ -61,6 +61,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/wave_seq_manager.o \
            src/engine/midi_dispatcher.o \
            src/engine/midi_queue_writer.o \
+           src/engine/midi_queue.o \
+           src/engine/audio_input_mixer.o \
            src/engine/waveseq_setlist_init.o \
            src/engine/alias_bank_init.o \
            src/engine/smoother_init.o \
@@ -226,9 +228,11 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_cost_profile verify/test_lfo_stepseq_quad verify/test_wave_seq_manager \
          verify/test_midi_dispatcher verify/test_vector_manager verify/test_vector_manager_init \
          verify/test_vector_eg_ctors verify/test_midi_queue_writer \
+         verify/test_midi_queue \
          verify/test_waveseq_setlist_init verify/test_alias_bank_init \
          verify/test_smoother_init verify/test_push_unsolicited_message \
-         verify/test_startup_file verify/test_sk_stg_gate
+         verify/test_startup_file verify/test_sk_stg_gate \
+         verify/test_audio_input_mixer
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -271,8 +275,8 @@ verify/test_engine: verify/test_engine.cpp src/engine/engine.cpp src/engine/glob
 verify/test_managers: verify/test_managers.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_managers.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
 
-verify/test_global: verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp include/oa_global.h include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp -o $@
+verify/test_global: verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp -o $@
 
 verify/test_init_module: verify/test_init_module.cpp src/init/init_module.cpp include/oa_init.h include/oa_atmel.h include/oa_stgheap_init.h include/oa_shmemproc_init.h include/oa_keybed_init.h include/oa_comport.h include/oa_audio_start.h include/oa_rtfifo_init.h include/oa_cpu_affinity.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_module.cpp src/init/init_module.cpp -o $@
@@ -339,6 +343,12 @@ verify/test_midi_dispatcher: verify/test_midi_dispatcher.cpp src/engine/midi_dis
 
 verify/test_midi_queue_writer: verify/test_midi_queue_writer.cpp src/engine/midi_queue_writer.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_queue_writer.cpp src/engine/midi_queue_writer.cpp -o $@
+
+verify/test_midi_queue: verify/test_midi_queue.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_queue.cpp src/engine/midi_queue.cpp -o $@
+
+verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp -o $@
 
 verify/test_waveseq_setlist_init: verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp -o $@

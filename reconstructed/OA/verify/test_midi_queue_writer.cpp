@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_midi_queue_writer.cpp  -  host-side known-answer test for
- * CSTGMidiQueueWriter::Write() (sec 10.83).
+ * CSTGMidiQueueWriter::Write() (sec 10.83). See test_midi_queue.cpp for
+ * CSTGMidiQueue::GetNumWritableBytes() (sec 10.150), the same shared
+ * ringCtl memory but a separate translation unit (needed so
+ * GetNumWritableBytes() alone, not Write(), can be linked into
+ * test_global.cpp -- see midi_queue_writer.cpp's own header comment).
  */
 
 #include <cstdio>

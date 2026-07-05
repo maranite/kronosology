@@ -230,16 +230,20 @@ void CSTGCommonLFO::Initialize() { g_commonLfoInitCalls++; }
 void CSTGCommonStepSeq::Initialize() { g_commonStepSeqInitCalls++; }
 
 /* ---- mocks: ring-buffer element classes ---- */
-static int g_playbackEventCtorCalls;
-CSTGPlaybackEvent::CSTGPlaybackEvent() { g_playbackEventCtorCalls++; }
-/* CSTGAudioEvent::CSTGAudioEvent() is real now (sec 10.149, see
+/* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now (sec 10.150, see
  * engine_init.cpp, which this file links directly) -- no mock here any
  * more; verified directly on two real constructed elements below
- * instead of a call counter (see [2]'s own RecordEvent block). */
+ * instead of a call counter (see [2]'s own PlaybackEvent/RecordEvent
+ * blocks), same treatment CSTGAudioEvent's own ctor already got (sec
+ * 10.149). */
 unsigned char _ZTV15CSTGRecordEvent[16];
 /* CSTGAudioEvent's own real vtable placeholder, newly needed now that
  * the real ctor above references it directly. */
 unsigned char _ZTV14CSTGAudioEvent[40];
+/* CSTGPlaybackEvent's own real vtable placeholder (confirmed 40 bytes,
+ * readelf, `vtable for CSTGPlaybackEvent`), newly needed now that its
+ * own real ctor references it directly. */
+unsigned char _ZTV17CSTGPlaybackEvent[40];
 /* CSTGRecordBuffer::CSTGRecordBuffer() is now real (sec 10.148, see
  * engine_init.cpp) -- no mock here any more. This ALSO corrects a real
  * bug this promotion uncovered: the true per-instance size is
@@ -331,7 +335,6 @@ int main(void)
 
 	check_eq("PlaybackEvent count == 4000", TSTGArrayManager<CSTGPlaybackEvent>::sInstance->count, 4000);
 	check_eq("PlaybackEvent modulus == 4001", TSTGArrayManager<CSTGPlaybackEvent>::sInstance->modulus, 4001);
-	check_eq("PlaybackEvent ctor called 4000 times", g_playbackEventCtorCalls, 4000);
 	check_eq("PlaybackEvent index[0] id == 0",
 		 *(unsigned short *)(IndexElem(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 0) + 4), 0);
 	check_eq("PlaybackEvent index[3999] id == 3999",
@@ -340,6 +343,33 @@ int main(void)
 		 (long)(BucketElem(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 3999) ==
 			IndexElem(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 3999)),
 		 1);
+	{
+		/* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now (sec
+		 * 10.150) -- check its own confirmed field writes directly on
+		 * the first and last of the 4000 constructed elements, a
+		 * strictly stronger check than the old call counter (proves
+		 * the real ctor body actually ran on each, not just that some
+		 * function was invoked 4000 times). Checks BOTH the inherited
+		 * CSTGAudioEvent base-ctor fields (confirmed via the SAME
+		 * offsets as the RecordEvent block below) and the derived
+		 * ctor's own +0x30..+0x64 zero-stores and vtable-pointer
+		 * overwrite. */
+		unsigned char *pe0 = IndexElem(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 0);
+		unsigned char *pe3999 = IndexElem(TSTGArrayManager<CSTGPlaybackEvent>::sInstance, 3999);
+		CSTGAudioEvent *base0 = (CSTGAudioEvent *)pe0;
+		check_eq("PlaybackEvent[0] base ctor fieldC == 4", (long)base0->fieldC, 4);
+		check_eq("PlaybackEvent[0] base ctor sampleRate == 48000", (long)base0->sampleRate, 0xbb80);
+		check_eq("PlaybackEvent[0] vtable patched to _ZTV17CSTGPlaybackEvent+8",
+			 (long)(*(unsigned int *)pe0 ==
+				(unsigned int)(unsigned long)(_ZTV17CSTGPlaybackEvent + 8)),
+			 1);
+		check_eq("PlaybackEvent[0] derived ctor zeroed +0x30", *(unsigned int *)(pe0 + 0x30), 0);
+		check_eq("PlaybackEvent[0] derived ctor zeroed +0x58", *(unsigned int *)(pe0 + 0x58), 0);
+		check_eq("PlaybackEvent[0] derived ctor zeroed +0x60 (byte)", pe0[0x60], 0);
+		check_eq("PlaybackEvent[0] derived ctor zeroed +0x64", *(unsigned int *)(pe0 + 0x64), 0);
+		check_eq("PlaybackEvent[3999] base ctor fieldC == 4", (long)((CSTGAudioEvent *)pe3999)->fieldC, 4);
+		check_eq("PlaybackEvent[3999] derived ctor zeroed +0x64", *(unsigned int *)(pe3999 + 0x64), 0);
+	}
 
 	check_eq("RecordEvent count == 200", TSTGArrayManager<CSTGRecordEvent>::sInstance->count, 200);
 	check_eq("RecordEvent modulus == 201", TSTGArrayManager<CSTGRecordEvent>::sInstance->modulus, 201);

@@ -4363,3 +4363,36 @@ void CSTGSlotVoiceData::Steal()
 	CSTGVoiceAllocator::sInstance->StealVoiceList(self + 0x44);
 	CSTGVoiceAllocator::sInstance->StealVoiceList(self + 0x50);
 }
+
+/*
+ * CSTGSlotVoiceData::Initialize(unsigned short) (sec 10.150): see
+ * oa_global.h for the full confirmed shape (quad/lane decomposition,
+ * LFO/step-seq sub-rate-parameter pointer computation).
+ */
+void CSTGSlotVoiceData::Initialize(unsigned short slotIndex)
+{
+	unsigned char *self = (unsigned char *)this;
+	*(unsigned short *)self = slotIndex;
+
+	unsigned int quadIndex = (unsigned int)(unsigned short)slotIndex >> 2;
+	unsigned int subIndex = slotIndex & 3;
+
+	unsigned char *lfoPtr = (unsigned char *)CSTGCommonLFO::sSubRateParams
+				 + quadIndex * 0x250 + subIndex * 4;
+	unsigned char *stepSeqPtr = (unsigned char *)CSTGCommonStepSeq::sSubRateParams
+				     + quadIndex * 0x100 + subIndex * 4;
+
+	/* Packed 32-bit fields (confirmed real `mov %ecx,0x1480(%eax)`
+	 * dword stores, 4 bytes apart), NOT native pointer writes -- a
+	 * native 8-byte write here on this 64-bit host would stomp the
+	 * first 4 bytes of the ADJACENT +0x1484 field with its own upper
+	 * 32 bits, corrupting both fields; caught via a real test failure
+	 * (own dedicated [15] Initialize scenario in test_global.cpp)
+	 * before landing on this fix, not by re-reading the disassembly a
+	 * second time. Same class of hazard as CSTGAudioInputMixerBase's
+	 * own fields, sec 10.150. */
+	*(unsigned int *)(self + 0x1480) = ToU32(lfoPtr);
+	*(unsigned int *)(self + 0x1484) = ToU32(stepSeqPtr);
+
+	((CSTGChannelValues *)(self + 0x1488))->Initialize();
+}

@@ -271,14 +271,24 @@ struct CSTGMidiQueue {
 	unsigned char AllocReader();
 
 	/*
-	 * GetNumWritableBytes() const (confirmed real via a relocation from
-	 * CSTGGlobal::SubmitPerfChangeRequest, sec 10.116) is called
-	 * directly (non-virtual) on the SAME `CSTGMidiPortManager+0x208`
-	 * address `CSTGMidiQueueWriter::Write` is also called on --
-	 * modeled here as a separate opaque type reinterpreting the same
-	 * address, matching this project's established non-inheritance
-	 * convention, rather than asserting a real base-class relationship
-	 * between the two that hasn't been independently confirmed.
+	 * GetNumWritableBytes() const (sec 10.150, `.text+0x400a0`, 84
+	 * bytes) fully reconstructed (see midi_queue.cpp, a separate TU from
+	 * midi_queue_writer.cpp -- see that file's own header comment for
+	 * why). Confirmed via `CSTGGlobal::SubmitPerfChangeRequest`'s own
+	 * call site: `this`
+	 * is `*(CSTGMidiPortManager::sInstance + 0x208)` -- a DEREFERENCED
+	 * pointer read from that field (not its address), i.e. this
+	 * object's `this` IS the same `ringCtl` block `CSTGMidiQueueWriter::
+	 * Write`'s own `+0x0` field points to (see oa_global.h's
+	 * `CSTGMidiQueueWriter` comment for the confirmed shared field
+	 * layout: `+0x8` capacity mask, `+0xc` write cursor, `+0x10+i*4`
+	 * reader i's cursor, `+0x20` active reader count) -- modeled here
+	 * as a separate opaque type reinterpreting the SAME ringCtl memory,
+	 * matching this project's established non-inheritance convention.
+	 * Confirmed formula: `(mask+1) - max_i(writeCursor - readerCursor[i])`
+	 * for `i` in `[0, readerCount)` -- algebraically identical to
+	 * `Write()`'s own "free space" computation, just without the
+	 * subsequent copy.
 	 */
 	unsigned int GetNumWritableBytes() const;
 };
@@ -293,6 +303,15 @@ struct CSTGMidiQueue {
  * confirmed real, deliberately deferred methods are declared.
  */
 struct CSTGChannelValues {
+	/*
+	 * Initialize() (.text+0x26a50, 75 bytes, confirmed via relocation
+	 * from CSTGSlotVoiceData::Initialize -- see oa_global.h) confirmed
+	 * real, deliberately deferred extern -- own body not reconstructed
+	 * in this pass (a separate, substantially-sized real function --
+	 * `InitializeLongHand()`, 0x226 bytes, is a genuinely different,
+	 * separate real sibling, not this one).
+	 */
+	void Initialize();
 	void Reset();
 
 	/*
@@ -700,10 +719,34 @@ struct CSTGCommonStepSeq {
 struct CSTGLFOBase { static void InitializeQuad(STGLFOSubRateParams *quad); };
 struct CSTGStepSeqBase { static void InitializeQuad(STGStepSeqSubRateParams *quad); };
 
+/*
+ * CSTGPlaybackEvent::CSTGPlaybackEvent() (`.text+0xd6c90`, C1Ev/C2Ev
+ * folded, 118 bytes) fully reconstructed (see engine_init.cpp): calls
+ * `CSTGAudioEvent::CSTGAudioEvent()` as its real base-object ctor (a
+ * genuine derived-class relationship, confirmed via the real `C2Ev`
+ * relocation -- NOT modeled here via C++ inheritance, since the
+ * derived ctor's own field writes start at `+0x30`, INSIDE the base's
+ * own confirmed `+0x2c..+0x38` unrecovered tail, i.e. the two field
+ * ranges genuinely overlap by 8 bytes -- standard Itanium single
+ * inheritance can never place derived fields before `sizeof(Base)`, so
+ * plain `: public CSTGAudioEvent` would misrepresent the real layout;
+ * reproduced instead via the SAME placement-construct-then-patch-vtable
+ * technique already established for `CSTGRecordEvent`, matching the
+ * real ctor's own instruction order exactly: base ctor call, own
+ * vtable-pointer overwrite, then 13 further confirmed zero-stores at
+ * `+0x30/+0x34/+0x38/+0x3c/+0x40/+0x44/+0x48/+0x50/+0x54/+0x58/+0x60/
+ * +0x61/+0x64`). Total confirmed real size 0x68 (104 bytes), matching
+ * the pre-existing `_unrecovered[0x68]` declaration below exactly.
+ */
 struct CSTGPlaybackEvent {
 	CSTGPlaybackEvent();
 	unsigned char _unrecovered[0x68];
 };
+/* The real vtable symbol (40 confirmed bytes via readelf, `vtable for
+ * CSTGPlaybackEvent`, matching CSTGAudioEvent/CSTGRecordEvent's own
+ * vtable sizes) -- storage lives in bar2_stubs.cpp per this project's
+ * established "extern C byte-array trick". */
+extern "C" unsigned char _ZTV17CSTGPlaybackEvent[];
 
 /*
  * CSTGAudioEvent::CSTGAudioEvent() (sec 10.149, `.text+0xd1830`, C1Ev/

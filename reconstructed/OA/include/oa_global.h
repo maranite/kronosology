@@ -303,12 +303,33 @@ struct CSTGSlotVoiceData {
 	 * construction links against the real confirmed symbol. */
 	CSTGSlotVoiceData();
 
-	/* Confirmed real regparm(3) signature: this=eax, arg=edx (a plain
-	 * integer slot index, 0-31, confirmed via CSTGGlobal::Initialize's
-	 * own loop counter). Real parameter type not confirmed -- `unsigned
-	 * short` chosen only because the mangled name's `t` component
-	 * demands it (`_ZN17CSTGSlotVoiceData10InitializeEt`), not because
-	 * the semantic width was independently verified. */
+	/*
+	 * Initialize(unsigned short) (`.text+0xb3290`, 100 bytes) fully
+	 * reconstructed (see global.cpp): confirmed real regparm(3)
+	 * signature: this=eax, arg=edx (a plain integer slot index, 0-31,
+	 * confirmed via CSTGGlobal::Initialize's own loop counter). Real
+	 * parameter type not confirmed -- `unsigned short` chosen only
+	 * because the mangled name's `t` component demands it
+	 * (`_ZN17CSTGSlotVoiceData10InitializeEt`), not because the
+	 * semantic width was independently verified.
+	 *
+	 * Confirmed shape: stores `slotIndex` verbatim at `+0x0` (16-bit),
+	 * then decomposes it as `quadIndex = slotIndex >> 2` / `subIndex =
+	 * slotIndex & 3` (the SAME quad/lane decomposition already
+	 * established elsewhere in this project for the 4-wide SIMD "quad"
+	 * voice architecture, see oa_quad.h) and computes two pointers into
+	 * the shared LFO/step-sequencer sub-rate-parameter pools (`CSTGCommonLFO::
+	 * sSubRateParams + quadIndex*0x250 + subIndex*4` and
+	 * `CSTGCommonStepSeq::sSubRateParams + quadIndex*0x100 + subIndex*4`
+	 * -- the multiplier-by-4-after-add compiler pattern the real
+	 * disassembly uses is algebraically `quadIndex*stride +
+	 * subIndex*4`, confirmed by `0x94*4 == 0x250` and `0x40*4 == 0x100`,
+	 * exactly matching each pool's own already-confirmed per-quad
+	 * stride), stored at `+0x1480`/`+0x1484` respectively. Finally calls
+	 * `CSTGChannelValues::Initialize()` (newly discovered, confirmed
+	 * real, deliberately deferred extern) on an embedded sub-object at
+	 * `+0x1488`.
+	 */
 	void Initialize(unsigned short slotIndex);
 
 	/* Confirmed real (via relocation from CSTGGlobal::
@@ -878,11 +899,96 @@ struct CSTGSamplingInterface { CSTGSamplingInterface(); };
  */
 unsigned char *ResolveActivePerformanceVarsManagerRaw();
 
+/* Result pair from CSTGPan::CalculateMonoPanCoeffs -- confirmed real via
+ * CSTGAudioInputMixerBase::SetPan's own disassembly: two floats stored
+ * back-to-back at the per-bus mixer-state array's own `+0x0`/`+0x4`
+ * (see below). Real per-field semantics (e.g. "left"/"right" gain) not
+ * independently confirmed -- named only by position. */
+struct STGMonoPanCoeffs { float coeff0; float coeff4; };
+
+/* CSTGPan -- confirmed real helper (relocation from
+ * CSTGAudioInputMixerBase::SetPan, sec 10.150). Own body not
+ * reconstructed -- confirmed real, deliberately deferred extern. */
+struct CSTGPan {
+	static void CalculateMonoPanCoeffs(STGMonoPanCoeffs &out, float scale, float pan);
+};
+
+/* CBusChangeStateMachine -- confirmed real per-bus embedded state
+ * machine (sec 10.150): CSTGAudioInputMixerBase::SetOutputBus calls
+ * StartBusChange() as a genuine MEMBER method (not a free function) on
+ * an instance embedded in `this->fieldAt(0xc) + busIndex*0x10` (a
+ * separate array from the `+0x8` mixer-state array below). Confirmed
+ * regparm(3) call: this=eax, arg1(eSTGBusID)=edx (from
+ * `STGAPIOutToPhysBusId[value]`), arg2(eSTGBusType)=ecx (from
+ * `STGAPIOutToBusType[value]`), arg3(unsigned int)=stack, confirmed
+ * real constant `0x38`. Own body not reconstructed -- confirmed real,
+ * deliberately deferred extern. */
+struct CBusChangeStateMachine {
+	void StartBusChange(int busId, int busType, unsigned int arg3);
+};
+
+/* CSTGBusInfo -- confirmed real static-like helper (relocation from
+ * CSTGAudioInputMixerBase::SetHDRBus, sec 10.150). Own body not
+ * reconstructed -- confirmed real, deliberately deferred extern. */
+struct CSTGBusInfo {
+	static int GetSignalSelectionForBusType(int busType);
+};
+
+/*
+ * CSTGAudioInputMixerBase -- fully reconstructed (sec 10.150, see
+ * src/engine/audio_input_mixer.cpp), a separate translation unit from
+ * global.cpp (matching CSTGMidiQueueWriter's own established
+ * "own dedicated KAT, existing mocks elsewhere untouched" precedent,
+ * sec 10.83): test_engine.cpp/test_global.cpp/test_global_ctor.cpp all
+ * keep their own PRE-EXISTING call-counting mocks for these four
+ * methods (load-bearing for ~20 CSTGAudioInput-focused assertions each
+ * -- rewiring all of them onto the real bodies below is a separate,
+ * larger task, deliberately out of scope this pass); the real bodies
+ * are instead exercised directly by their own new
+ * verify/test_audio_input_mixer.cpp.
+ *
+ * Confirmed real layout (raw offset arithmetic, `this` always
+ * reinterpreted directly as the mixer object per the `CSTGAudioInput`
+ * comment above -- never separately allocated/sized in this
+ * reconstruction):
+ *   +0x00  vtable ptr (own real vtable; SetFXCtrlBus/SetHDRBus each
+ *          dispatch a RAW indirect call through slot 3, `call *0xc(%esi)`
+ *          -- not this project's own C++ virtual mechanism, matching the
+ *          established raw-vtable-dispatch convention, sec 10.149)
+ *   +0x08  mixerStateArray -- pointer to a per-bus, 0x90-byte-stride
+ *          array (confirmed via SetPan/SetFXCtrlBus/SetHDRBus all
+ *          computing `busIndex*9*16 == busIndex*0x90` identically):
+ *            +0x00/+0x04  pan coefficients (float pair, SetPan)
+ *            +0x50/+0x54/+0x58  HDR bus signal-selection state (SetHDRBus)
+ *            +0x68  FX-control bus routing result (SetFXCtrlBus)
+ *            +0x6c  HDR bus routing result (SetHDRBus)
+ *   +0x0c  busChangeArray -- pointer to a per-bus, 0x10-byte-stride
+ *          array of embedded CBusChangeStateMachine instances
+ *          (SetOutputBus only)
+ */
 class CSTGAudioInputMixerBase {
 public:
+	/*
+	 * All three pointer-shaped fields below are packed 32-bit values
+	 * (`unsigned int`), NOT native C++ pointer members -- matching this
+	 * project's established `CSTGMidiQueueWriter`-style convention
+	 * (ToU32/FromU32) for any class reinterpreted directly onto raw
+	 * target memory at fixed byte offsets. A native `void*`/`T*` member
+	 * here would be 8 bytes on this 64-bit host but 4 bytes on the real
+	 * 32-bit target, silently shifting every subsequent field's own
+	 * offset (`_gap4`/`mixerStateArray`/`busChangeArray` would all land
+	 * at the WRONG byte offsets on a 64-bit host) -- caught via a real
+	 * segfault in this class's own dedicated KAT before landing on this
+	 * fix, not by re-reading the disassembly a second time.
+	 */
+	unsigned int vtablePtr32;		/* +0x0 */
+	unsigned char _gap4[4];			/* +0x4, unrecovered */
+	unsigned int mixerStateArray32;		/* +0x8 */
+	unsigned int busChangeArray32;		/* +0xc */
+
 	/* Confirmed real (CSTGAudioInput::UpdateHDRBus/UpdateFXControlBus/
-	 * UpdateBusSelect/UpdatePan's own tail calls) -- own bodies not
-	 * reconstructed in this pass, a separate audio-engine class. */
+	 * UpdateBusSelect/UpdatePan's own tail calls). See the class-level
+	 * comment above for the full confirmed shape and file placement. */
 	void SetHDRBus(unsigned int busIndex, int value);
 	void SetFXCtrlBus(unsigned int busIndex, int value);
 	void SetOutputBus(unsigned int busIndex, int value);

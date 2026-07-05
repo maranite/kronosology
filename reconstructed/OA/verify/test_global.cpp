@@ -122,13 +122,26 @@ static int g_setTestModeCalls;
 static bool g_lastTestModeValue;
 extern "C" void COmapNKS4Driver_SetTestMode(int testMode)
 { g_setTestModeCalls++; g_lastTestModeValue = (testMode != 0); }
-static int g_numWritableBytesOverride = 0; /* real default: MIDI queue always
-	 * reports 0 writable bytes unless a test overrides it -- matches the
-	 * mock's own long-standing hardcoded behavior, so every existing
-	 * SubmitPerfChangeRequest call site below keeps taking the real
-	 * "congested -> queue into the pending slot" branch unless it
-	 * explicitly opts into the "not congested" dispatch path. */
-unsigned int CSTGMidiQueue::GetNumWritableBytes() const { return (unsigned int)g_numWritableBytesOverride; }
+/* CSTGMidiQueue::GetNumWritableBytes() is now real (sec 10.150, see
+ * src/engine/midi_queue_writer.cpp, added to this file's own Makefile
+ * link line) -- no mock here any more. Its old hardcoded "always 0
+ * writable bytes" behavior (never actually varied away from that
+ * default anywhere in this file) is now reproduced via a tiny SHARED
+ * fake ringCtl block (mask=0xffffffff, readerCount=0 -- makes the real
+ * `(mask+1)-worstBacklog` formula wrap to exactly 0) that every
+ * `midiPortMgr*` buffer below points its own `+0x208` field at, right
+ * after allocation -- see SetupFakeRingCtl() and each call site. */
+static unsigned char *g_fakeRingCtl;
+static void SetupFakeRingCtl(unsigned char *midiPortMgr)
+{
+	if (!g_fakeRingCtl) {
+		g_fakeRingCtl = mmap32(0x24);
+		*(unsigned int *)(g_fakeRingCtl + 0x8) = 0xffffffff; /* mask */
+		g_fakeRingCtl[0x20] = 0;                              /* readerCount */
+	}
+	*(unsigned int *)(midiPortMgr + 0x208) =
+		(unsigned int)(unsigned long)g_fakeRingCtl;
+}
 /* Reads back what the real (now-real) SubmitPerfChangeRequest queues
  * into the confirmed pending slot -- the same observation point every
  * existing call site below uses in place of the old mock's own
@@ -330,13 +343,25 @@ static int g_slotVoiceRunFeedbackCalls;
 void CSTGSlotVoiceData::RunVoiceModelFeedback() { g_slotVoiceRunFeedbackCalls++; }
 static int g_waveSeqInitCalls;
 void CSTGWaveSeqData::Initialize() { g_waveSeqInitCalls++; }
-static int g_slotVoiceInitCalls;
-static unsigned short g_lastSlotVoiceInitArg;
-void CSTGSlotVoiceData::Initialize(unsigned short slotIndex)
-{
-	g_slotVoiceInitCalls++;
-	g_lastSlotVoiceInitArg = slotIndex;
-}
+/* CSTGSlotVoiceData::Initialize(unsigned short) is now real (sec
+ * 10.150, see global.cpp) -- no mock body here any more, verified
+ * directly on real fields below instead of a call counter (see the
+ * [Initialize] scenario). Its own new dependency, CSTGChannelValues::
+ * Initialize(), is mocked with a counter (the real body is out of
+ * scope, own confirmed real signature only). The two CSTGCommonLFO/
+ * CSTGCommonStepSeq sub-rate-pool statics (normally defined in
+ * engine_startup_bits2.cpp, not linked into this file) are pointed at
+ * small mmap32'd buffers so the real ctor's own pointer arithmetic can
+ * be checked against a known base instead of an arbitrary/uninitialized
+ * one. */
+static int g_channelValuesInitCalls;
+void CSTGChannelValues::Initialize() { g_channelValuesInitCalls++; }
+/* Storage for the two statics above -- normally defined in
+ * engine_startup_bits2.cpp, which this file does NOT link; assigned to
+ * real mmap32'd buffers at the one call site that exercises them
+ * (the [Initialize] scenario). */
+STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
+STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own ctors +
  * Initialize() are now real (sec 10.81, see global.cpp) -- the [Initialize]
  * scenario below placement-constructs both embedded sub-objects for
@@ -980,7 +1005,18 @@ int main(void)
 		vtable[7] = (void *)slot7;
 		*(void ***)buf = vtable;
 
-		g_waveSeqInitCalls = g_slotVoiceInitCalls = 0;
+		g_waveSeqInitCalls = 0;
+		g_channelValuesInitCalls = 0;
+		/* CSTGSlotVoiceData::Initialize()'s own real body computes
+		 * pointers into these two shared pools -- point them at real
+		 * mmap32'd buffers (big enough for the largest confirmed real
+		 * quadIndex*stride offset this scenario reaches, slotIndex 31
+		 * -> quadIndex 7) so the real pointer arithmetic below can be
+		 * checked against a known base. */
+		unsigned char *lfoPoolBuf = mmap32(8 * 0x250);
+		unsigned char *stepSeqPoolBuf = mmap32(8 * 0x100);
+		CSTGCommonLFO::sSubRateParams = (STGLFOSubRateParams *)lfoPoolBuf;
+		CSTGCommonStepSeq::sSubRateParams = (STGStepSeqSubRateParams *)stepSeqPoolBuf;
 		g_perfVarsInitCalls = 0;
 		g_aliasBanksInitCalls = g_initPerformancesCalls = g_setListBankInitCalls = 0;
 		slot7Calls = 0;
@@ -1027,9 +1063,34 @@ int main(void)
 		check_eq("vtable slot 7 called once", (unsigned int)slot7Calls, 1);
 		check_eq("CSTGWaveSeqData::Initialize called once", (unsigned int)g_waveSeqInitCalls, 1);
 		check_eq("+0x67f bit 1 (0x2) set", buf[0x67f] & 0x2, 0x2);
-		check_eq("CSTGSlotVoiceData::Initialize called 32 times",
-			 (unsigned int)g_slotVoiceInitCalls, 0x20);
-		check_eq("last slot index was 31 (0x1f)", g_lastSlotVoiceInitArg, 0x1f);
+		/* CSTGSlotVoiceData::Initialize() is now real (sec 10.150) --
+		 * check its own confirmed real field writes on the LAST (31st)
+		 * of the 32 constructed slots directly, a strictly stronger
+		 * check than the old call counter (proves the real body
+		 * actually ran with the right slot index and computed the
+		 * right pool pointers, not just that some function was invoked
+		 * 32 times). Its own dependency, CSTGChannelValues::
+		 * Initialize(), IS still checked via a call counter (its own
+		 * real body is out of scope), now expecting 32 (once per
+		 * slot) instead of the old g_slotVoiceInitCalls counter. */
+		check_eq("CSTGChannelValues::Initialize called 32 times (once per slot)",
+			 (unsigned int)g_channelValuesInitCalls, 0x20);
+		{
+			unsigned char *lastSlot = buf + 0x2977cf0 + 31 * 0x28e0 + 0x4;
+			check_eq("slot[31]'s own +0x0 == slotIndex (31)",
+				 *(unsigned short *)lastSlot, 31);
+			unsigned char *expectLfo = lfoPoolBuf + 7 * 0x250 + 3 * 4; /* quad=7, sub=3 */
+			unsigned char *expectStepSeq = stepSeqPoolBuf + 7 * 0x100 + 3 * 4;
+			/* Packed 32-bit fields (see global.cpp's own comment on
+			 * this exact host/target width hazard) -- read back via
+			 * a 4-byte `unsigned int`, not a native pointer. */
+			unsigned int gotLfo = *(unsigned int *)(lastSlot + 0x1480);
+			unsigned int gotStepSeq = *(unsigned int *)(lastSlot + 0x1484);
+			check_eq("slot[31]'s +0x1480 == sSubRateParams + quadIndex*0x250 + subIndex*4",
+				 gotLfo, (unsigned int)(unsigned long)expectLfo);
+			check_eq("slot[31]'s +0x1484 == sSubRateParams + quadIndex*0x100 + subIndex*4",
+				 gotStepSeq, (unsigned int)(unsigned long)expectStepSeq);
+		}
 		check_eq("list head/tail set (non-null)",
 			 (unsigned int)(*(unsigned int *)(buf + 0x29c98f4) != 0 &&
 					 *(unsigned int *)(buf + 0x29c98f8) != 0), 1);
@@ -1545,8 +1606,9 @@ int main(void)
 		CSTGGlobal *g = (CSTGGlobal *)buf;
 		CSTGMessageContext ctx;
 		STGConvertedParam param;
-		unsigned char *midiPortMgr = mmap32(0x10);
+		unsigned char *midiPortMgr = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr;
+		SetupFakeRingCtl(midiPortMgr);
 
 		struct {
 			const char *label;
@@ -1940,6 +2002,7 @@ int main(void)
 							      * to +0x19da4/+0x1b758 */
 		CSTGMessageProcessor::sInstance = (CSTGMessageProcessor *)msgProc;
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr;
+		SetupFakeRingCtl(midiPortMgr);
 		CSTGSmoother::sInstance = (CSTGSmoother *)smoother;
 		CSTGVoiceAllocator::sInstance = (CSTGVoiceAllocator *)voiceAlloc;
 		CSTGControllerRTData::sInstance = (CSTGControllerRTData *)controllerRt;
@@ -2501,8 +2564,16 @@ int main(void)
 		check_eq("non-matching-tag slot untouched", slotB[0], 1);
 
 		printf("  -- SendFXDisableCCToMidiOut: standalone 3-byte MIDI CC send --\n");
-		unsigned char *midiPortMgr = mmap32(0x100);
+		/* Enlarged to 0x300 (from 0x100) and given a fake ringCtl at
+		 * +0x208 (sec 10.150): SubmitPerfChangeRequest below now
+		 * really dereferences fieldAt(0x208) via the now-real
+		 * GetNumWritableBytes(), so this buffer must be big enough to
+		 * hold that field and point it somewhere valid -- the old
+		 * mock never touched `this` at all, so this was previously
+		 * safe to under-allocate. */
+		unsigned char *midiPortMgr = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr;
+		SetupFakeRingCtl(midiPortMgr);
 		buf[0x6b8] = 3;
 		g->SendFXDisableCCToMidiOut(0x5e, false);
 		g->SendFXDisableCCToMidiOut(0x5e, true);
@@ -3083,6 +3154,7 @@ int main(void)
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp4;
 		unsigned char *midiPortMgr2 = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr2;
+		SetupFakeRingCtl(midiPortMgr2);
 		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) = 0;
 		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 4) = 0;
 		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 8) = 0;
@@ -3720,6 +3792,7 @@ int main(void)
 		CSTGControllerRTData::sInstance = (CSTGControllerRTData *)ctrlRT2;
 		unsigned char *midiPortMgr3 = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr3;
+		SetupFakeRingCtl(midiPortMgr3);
 		unsigned char *mgr3 = mmap32(0x24000);
 		memset(mgr3, 0, 0x24000);
 		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) = (unsigned int)(unsigned long)mgr3;
@@ -3921,6 +3994,7 @@ int main(void)
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp7;
 		unsigned char *midiPortMgr4 = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr4;
+		SetupFakeRingCtl(midiPortMgr4);
 		sXCmd = 0;
 
 		CSTGPerfChangeRequest req;
@@ -4006,6 +4080,7 @@ int main(void)
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp8;
 		unsigned char *midiPortMgr5 = mmap32(0x300);
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr5;
+		SetupFakeRingCtl(midiPortMgr5);
 		sXCmd = 0;
 
 		CSTGPerfChangeRequest *pendingSlot = (CSTGPerfChangeRequest *)(buf + 0x2975168);
@@ -4921,6 +4996,7 @@ int main(void)
 		CSTGControllerRTData::sInstance = (CSTGControllerRTData *)ctrlRT6;
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp13;
 		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr6;
+		SetupFakeRingCtl(midiPortMgr6);
 		CSTGMessageProcessor::sInstance = (CSTGMessageProcessor *)msgProc2;
 		CSTGVoiceAllocator::sInstance = (CSTGVoiceAllocator *)voiceAlloc;
 		/* ResetAllJumpCatch's own real body (sec 10.129) needs a valid

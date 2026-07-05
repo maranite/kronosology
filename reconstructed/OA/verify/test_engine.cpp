@@ -251,7 +251,17 @@ void CLoadBalancer::BalanceStaticLoad() { }
  * itself is never called by this test's own scenarios (that's
  * test_global.cpp's job) -- trivial no-op stubs, not exercised here. */
 void CSTGWaveSeqData::Initialize() {}
-void CSTGSlotVoiceData::Initialize(unsigned short) {}
+/* CSTGSlotVoiceData::Initialize(unsigned short) is now real (sec
+ * 10.150, see global.cpp) -- no mock body here any more (multiple
+ * definition otherwise). Its own new dependencies (the two
+ * CSTGCommonLFO/CSTGCommonStepSeq sub-rate-pool statics -- normally
+ * defined in engine_startup_bits2.cpp, NOT linked into this test -- and
+ * CSTGChannelValues::Initialize, normally a bar2_stubs.cpp deferred
+ * stub, also NOT linked here) still need trivial link-satisfying
+ * definitions, not exercised by this test's own scenarios. */
+STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
+STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
+void CSTGChannelValues::Initialize() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own
  * Initialize()/ctors are now real (sec 10.81, see global.cpp) -- their
