@@ -912,6 +912,66 @@ void CSTGCDWorker::Initialize()
 }
 
 /*
+ * CSTGHDRFileReader::Initialize() (`.text+0x11ba90`, 148 bytes, sec
+ * 10.151) confirmed: `fieldAt(0xc)=0xfa1`, `fieldAt(0)=AllocAligned
+ * (0x7d08,0x10)`, `fieldAt(0x10)=AllocAligned(0x8000,0x10)`, then zeroes
+ * 12 dwords from `+0x14` through `+0x40` inclusive -- matching this
+ * class's own confirmed `_unrecovered[68]` (`0x44`) total size exactly.
+ */
+void CSTGHDRFileReader::Initialize()
+{
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0xc) = 0xfa1;
+	*(unsigned int *)(base + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0x7d08, 0x10));
+	*(unsigned int *)(base + 0x10) = ToU32(CSTGBankMemory::AllocAligned(0x8000, 0x10));
+	*(unsigned int *)(base + 0x14) = 0;
+	*(unsigned int *)(base + 0x18) = 0;
+	*(unsigned int *)(base + 0x1c) = 0;
+	*(unsigned int *)(base + 0x20) = 0;
+	*(unsigned int *)(base + 0x24) = 0;
+	*(unsigned int *)(base + 0x28) = 0;
+	*(unsigned int *)(base + 0x2c) = 0;
+	*(unsigned int *)(base + 0x30) = 0;
+	*(unsigned int *)(base + 0x34) = 0;
+	*(unsigned int *)(base + 0x38) = 0;
+	*(unsigned int *)(base + 0x3c) = 0;
+	*(unsigned int *)(base + 0x40) = 0;
+}
+
+/*
+ * CSTGStreamingFileReader::Initialize(unsigned long) (`.text+0x11aa10`,
+ * 120 bytes, sec 10.151) confirmed: `fieldAt(0x10)=0x10000`,
+ * `fieldAt(0x14)=0x8000`, `fieldAt(0x18)=AllocAligned(0x10000,0x10)`,
+ * `fieldAt(0xc)=0x192`, `fieldAt(0)=AllocAligned(0x12d8,0x10)`, then
+ * zeroes 6 dwords from `+0x20` through `+0x34` inclusive -- matching
+ * this class's own confirmed `_unrecovered[56]` (`0x38`) total size
+ * exactly. **A real, faithfully-preserved quirk**: the incoming
+ * `unsigned long` parameter (this project's own header comment
+ * previously assumed, before ever disassembling the real body, that the
+ * confirmed real call-site value `0x8000` was passed straight through)
+ * is confirmed NEVER READ -- the real disassembly's very first
+ * instruction overwrites the incoming EDX with the literal `0x10`
+ * before anything else runs. Same class of "confirmed real, but the
+ * parameter is dead" quirk already established for
+ * `CSTGCDWorker_InitializeBuffer` (sec 10.148).
+ */
+void CSTGStreamingFileReader::Initialize(unsigned long /* confirmed real: never read */)
+{
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0x10) = 0x10000;
+	*(unsigned int *)(base + 0x14) = 0x8000;
+	*(unsigned int *)(base + 0x18) = ToU32(CSTGBankMemory::AllocAligned(0x10000, 0x10));
+	*(unsigned int *)(base + 0xc) = 0x192;
+	*(unsigned int *)(base + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0x12d8, 0x10));
+	*(unsigned int *)(base + 0x20) = 0;
+	*(unsigned int *)(base + 0x24) = 0;
+	*(unsigned int *)(base + 0x28) = 0;
+	*(unsigned int *)(base + 0x2c) = 0;
+	*(unsigned int *)(base + 0x30) = 0;
+	*(unsigned int *)(base + 0x34) = 0;
+}
+
+/*
  * CSTGHDRManager::ProcessCommands() (`.text+0xd5dd0`, 41 bytes) confirmed:
  * calls three confirmed-real siblings on `this`, in this exact order --
  * `ProcessPlaybackCommands()` (`.text+0xd5950`), `ProcessRecordCommands()`

@@ -347,19 +347,28 @@ void CSTGWaveSeqData::Initialize() { g_waveSeqInitCalls++; }
  * 10.150, see global.cpp) -- no mock body here any more, verified
  * directly on real fields below instead of a call counter (see the
  * [Initialize] scenario). Its own new dependency, CSTGChannelValues::
- * Initialize(), is mocked with a counter (the real body is out of
- * scope, own confirmed real signature only). The two CSTGCommonLFO/
- * CSTGCommonStepSeq sub-rate-pool statics (normally defined in
- * engine_startup_bits2.cpp, not linked into this file) are pointed at
- * small mmap32'd buffers so the real ctor's own pointer arithmetic can
- * be checked against a known base instead of an arbitrary/uninitialized
- * one. */
-static int g_channelValuesInitCalls;
-void CSTGChannelValues::Initialize() { g_channelValuesInitCalls++; }
-/* Storage for the two statics above -- normally defined in
- * engine_startup_bits2.cpp, which this file does NOT link; assigned to
- * real mmap32'd buffers at the one call site that exercises them
- * (the [Initialize] scenario). */
+ * Initialize(), is now real too (sec 10.151, see global.cpp) -- no mock
+ * body here any more either, verified directly on real fields below
+ * (see the [Initialize] scenario's own updated checks). Its own
+ * InitializeLongHand() dependency (normally bar2_stubs.cpp, not linked
+ * into this file) is mocked with a counter, since ITS OWN real body is
+ * out of scope -- the interesting confirmed behavior here is that it
+ * fires EXACTLY ONCE process-wide no matter how many times Initialize()
+ * itself is called. The two CSTGCommonLFO/CSTGCommonStepSeq sub-rate-pool
+ * statics (normally defined in engine_startup_bits2.cpp, not linked into
+ * this file) are pointed at small mmap32'd buffers so the real ctor's
+ * own pointer arithmetic can be checked against a known base instead of
+ * an arbitrary/uninitialized one. */
+static int g_initLongHandCalls;
+void CSTGChannelValues::InitializeLongHand() { g_initLongHandCalls++; }
+/* Storage for CSTGChannelValues::sTemplateReady/sTemplate (normally
+ * bar2_stubs.cpp, not linked into this file) and the two CSTGCommonLFO/
+ * CSTGCommonStepSeq statics above (normally engine_startup_bits2.cpp,
+ * also not linked here); the LFO/StepSeq pair is assigned to real
+ * mmap32'd buffers at the one call site that exercises them (the
+ * [Initialize] scenario). */
+unsigned char CSTGChannelValues::sTemplateReady;
+unsigned char CSTGChannelValues::sTemplate[0x92c];
 STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
 STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own ctors +
@@ -1006,7 +1015,18 @@ int main(void)
 		*(void ***)buf = vtable;
 
 		g_waveSeqInitCalls = 0;
-		g_channelValuesInitCalls = 0;
+		g_initLongHandCalls = 0;
+		CSTGChannelValues::sTemplateReady = 0;
+		for (unsigned int i = 0; i < sizeof(CSTGChannelValues::sTemplate); i++)
+			CSTGChannelValues::sTemplate[i] = 0;
+		/* Poison the LAST (31st) slot's own CSTGChannelValues sub-object
+		 * (self+0x1488, see below) so the real Initialize()'s own 0x92c-byte
+		 * copy from sTemplate can be verified directly, not inferred from a
+		 * call counter. */
+		unsigned char *lastSlotChannelValues =
+			buf + 0x2977cf0 + 31 * 0x28e0 + 0x4 + 0x1488;
+		for (unsigned int i = 0; i < sizeof(CSTGChannelValues::sTemplate); i++)
+			lastSlotChannelValues[i] = 0xAB;
 		/* CSTGSlotVoiceData::Initialize()'s own real body computes
 		 * pointers into these two shared pools -- point them at real
 		 * mmap32'd buffers (big enough for the largest confirmed real
@@ -1070,11 +1090,26 @@ int main(void)
 		 * actually ran with the right slot index and computed the
 		 * right pool pointers, not just that some function was invoked
 		 * 32 times). Its own dependency, CSTGChannelValues::
-		 * Initialize(), IS still checked via a call counter (its own
-		 * real body is out of scope), now expecting 32 (once per
-		 * slot) instead of the old g_slotVoiceInitCalls counter. */
-		check_eq("CSTGChannelValues::Initialize called 32 times (once per slot)",
-			 (unsigned int)g_channelValuesInitCalls, 0x20);
+		 * Initialize(), is real too now (sec 10.151) -- checked directly
+		 * on the last slot's own real field contents below, plus the
+		 * confirmed real "lazy, process-wide, exactly once" semantics of
+		 * its own InitializeLongHand() dependency (still out of scope,
+		 * mocked with a counter). */
+		check_eq("CSTGChannelValues::InitializeLongHand called exactly once "
+			 "(lazy, process-wide) despite 32 Initialize() calls",
+			 (unsigned int)g_initLongHandCalls, 1);
+		check_eq("CSTGChannelValues::sTemplateReady flipped true after the first Initialize()",
+			 (unsigned int)CSTGChannelValues::sTemplateReady, 1);
+		{
+			bool allZero = true;
+			for (unsigned int i = 0; i < sizeof(CSTGChannelValues::sTemplate); i++)
+				if (lastSlotChannelValues[i] != 0)
+					allZero = false;
+			check_eq("slot[31]'s own CSTGChannelValues sub-object (+0x1488) fully "
+				 "overwritten by sTemplate (all-zero, since the mocked "
+				 "InitializeLongHand leaves it so)",
+				 (unsigned int)allZero, 1);
+		}
 		{
 			unsigned char *lastSlot = buf + 0x2977cf0 + 31 * 0x28e0 + 0x4;
 			check_eq("slot[31]'s own +0x0 == slotIndex (31)",

@@ -171,10 +171,14 @@ void CSTGSlotVoiceData::RunVoiceModelFeedback() { }
 /* CSTGSlotVoiceData::Initialize(unsigned short) is now real (sec
  * 10.150, see global.cpp) -- no mock body here any more. Its own new
  * dependencies still need trivial link-satisfying definitions (see
- * test_engine.cpp's own identical comment for the full reasoning). */
+ * test_engine.cpp's own identical comment for the full reasoning).
+ * CSTGChannelValues::Initialize() is now real too (sec 10.151, see
+ * global.cpp) -- same treatment. */
 STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
 STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
-void CSTGChannelValues::Initialize() { }
+unsigned char CSTGChannelValues::sTemplateReady;
+unsigned char CSTGChannelValues::sTemplate[0x92c];
+void CSTGChannelValues::InitializeLongHand() { }
 void CSTGSlotVoiceData::UpdateGlobalTune(float) { }
 /* CSTGPerformance::IsCurrentlyActive() is real now (sec 10.144, see
  * managers.cpp) -- CSTGPerformanceVarsManager::sInstance is never set up

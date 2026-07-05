@@ -4309,6 +4309,32 @@ void CSTGChannelValues::SetPitchBend(const CSTGControllerValue &value, bool flag
 }
 
 /*
+ * CSTGChannelValues::Initialize() (.text+0x26a50, 75 bytes, sec 10.151)
+ * confirmed: lazily runs InitializeLongHand() on a hidden static
+ * template object EXACTLY ONCE process-wide (guarded by
+ * `sTemplateReady`), then unconditionally copies the resulting 0x92c-byte
+ * `sTemplate` over `this` on every call (including the first) -- the
+ * real body's own `rep movs DWORD PTR es:[edi],DWORD PTR ds:[esi]` with
+ * `ecx=0x24b` (587 dwords == 0x92c bytes), reproduced here as an
+ * explicit loop (no <cstring>/memcpy -- this project's own established
+ * convention, sec 10.56, avoids it on the freestanding -m32 Kbuild
+ * target). InitializeLongHand() itself (.text+0x26820, 550 bytes) is a
+ * confirmed real, deliberately deferred dependency -- see bar2_stubs.cpp.
+ */
+void CSTGChannelValues::Initialize()
+{
+	if (!CSTGChannelValues::sTemplateReady) {
+		((CSTGChannelValues *)CSTGChannelValues::sTemplate)->InitializeLongHand();
+		CSTGChannelValues::sTemplateReady = 1;
+	}
+
+	unsigned char *dst = (unsigned char *)this;
+	const unsigned char *src = CSTGChannelValues::sTemplate;
+	for (unsigned int i = 0; i < sizeof(CSTGChannelValues::sTemplate); i++)
+		dst[i] = src[i];
+}
+
+/*
  * CSTGControllerRTData::ResetAllJumpCatch() (sec 10.129): see
  * oa_global.h for the full confirmed shape.
  */

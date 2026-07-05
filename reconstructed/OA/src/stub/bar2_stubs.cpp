@@ -74,10 +74,14 @@ void CSTGMonitorMixer::RunMonitors() {}
 void CSTGFileOpener::Initialize() {}
 void CSTGFileOpener::ProcessCommands() {}
 void CSTGFileCloser::ProcessCommands() {}
-void CSTGHDRFileReader::Initialize() {}
+/* CSTGHDRFileReader::Initialize()/CSTGStreamingFileReader::Initialize()
+ * are real now too, sec 10.151 -- see managers.cpp. Their own
+ * ProcessCommands() siblings are still deferred (each dispatches
+ * through a further not-yet-recovered ring-buffer/vtable-callback
+ * pattern, same class of scope as CSTGHDRManager's own three still-
+ * deferred sub-methods above). */
 void CSTGHDRFileReader::ProcessCommands() {}
 void CSTGHDRFileWriter::ProcessCommands() {}
-void CSTGStreamingFileReader::Initialize(unsigned long) {}
 void CSTGStreamingFileReader::ProcessCommands() {}
 /* CSTGCDWorker_InitializeBuffer is real now, sec 10.148 -- see
  * managers.cpp (right after CSTGCDWorker::Initialize(), sec 10.144). */
@@ -137,10 +141,9 @@ extern "C" void SKMain_Initialize(void *) {}
  * test_global_ctor.cpp all keep their own pre-existing mocks for these,
  * untouched, matching the CSTGMidiQueueWriter::Write precedent). Their
  * own three newly-discovered confirmed-real, deliberately deferred
- * dependencies: */
-void CSTGPan::CalculateMonoPanCoeffs(STGMonoPanCoeffs &, float, float) {}
-void CBusChangeStateMachine::StartBusChange(int, int, unsigned int) {}
-int CSTGBusInfo::GetSignalSelectionForBusType(int) { return 0; }
+ * dependencies (CSTGPan::CalculateMonoPanCoeffs, CBusChangeStateMachine::
+ * StartBusChange, CSTGBusInfo::GetSignalSelectionForBusType) are all
+ * real now, sec 10.151 -- see src/engine/audio_input_mixer.cpp. */
 void CSTGAudioInput::UseSettings() {}
 /* Sec 10.97's own confirmed-real, deliberately deferred externs.
  * CSetListSlot::Activate is now real (sec 10.141). */
@@ -156,14 +159,9 @@ void USTGAliasBankTypes::ConvertMidiBankToAliasProgramBank(char, char, int &) {}
  * src/engine/sk_stg_gate.cpp (a genuinely new class, CTimerManager,
  * declared minimally/opaquely there -- most of its own dozen-plus
  * methods are NOT reconstructed in this pass). CTimerManager::
- * ShouldSyncExternalClock() itself is a real symbol DEFINED INSIDE
- * OA_real.ko (`.text+0x347210`, a `T` symbol, confirmed via nm -- NOT an
- * external kernel/other-module dependency), so it needs the same
- * trivial link-satisfying stub body as any other confirmed-real,
- * deliberately-deferred OA-internal symbol (matching SKMain_Initialize
- * just above), not a genuinely external dependency left permanently
- * unresolved. */
-bool CTimerManager::ShouldSyncExternalClock() { return false; }
+ * ShouldSyncExternalClock() itself is real now too, sec 10.151 -- see
+ * src/engine/sk_stg_gate.cpp (no stub body here any more, multiple
+ * definition otherwise). */
 /* CSTGParamsOwner::ValidateParamChange (sec 10.92) -- confirmed real,
  * deliberately deferred; see src/engine/global.cpp for the real
  * callers now reconstructed. */
@@ -245,9 +243,14 @@ CSTGSamplingInterface::CSTGSamplingInterface() {}
 CSTGSequence::CSTGSequence() {}
 CSTGSlotVoiceData::CSTGSlotVoiceData() {}
 /* CSTGSlotVoiceData::Initialize(unsigned short) is real now, sec
- * 10.150 -- see src/engine/global.cpp. Its own newly-discovered
- * confirmed-real, deliberately deferred dependency: */
-void CSTGChannelValues::Initialize() {}
+ * 10.150 -- see src/engine/global.cpp. Its own dependency,
+ * CSTGChannelValues::Initialize(), is real now too, sec 10.151 -- see
+ * src/engine/global.cpp. Its own storage and newly-discovered
+ * confirmed-real, deliberately deferred dependency (InitializeLongHand(),
+ * substantially larger, own body not reconstructed this pass): */
+unsigned char CSTGChannelValues::sTemplateReady;
+unsigned char CSTGChannelValues::sTemplate[0x92c];
+void CSTGChannelValues::InitializeLongHand() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 void CSTGSlotVoiceData::UpdateGlobalTune(float) {}
 /* Sec 10.92's own confirmed-real, deliberately deferred externs.

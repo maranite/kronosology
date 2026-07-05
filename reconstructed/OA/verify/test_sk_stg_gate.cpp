@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_sk_stg_gate.cpp  -  KAT for SKSTGGate_ShouldSyncExternalClock()
- * (see ../src/engine/sk_stg_gate.cpp).
+ * AND the real CTimerManager::ShouldSyncExternalClock() it forwards to
+ * (sec 10.151) (see ../src/engine/sk_stg_gate.cpp).
  *
- * Verifies: the real function forwards to CTimerManager::ms_poInstance
- * ->ShouldSyncExternalClock() and returns its result verbatim, for both
- * a true and a false result -- and, separately, that the confirmed real
- * "no null check" quirk is real: with ms_poInstance == 0, the call still
- * reaches CTimerManager::ShouldSyncExternalClock() with this == 0
- * (this mock's own body never dereferences `this`, matching the real
- * disassembly's own confirmed unchecked dispatch).
+ * Verifies: the real forwarding function passes ms_poInstance as `this`
+ * to CTimerManager::ShouldSyncExternalClock() -- but that function's own
+ * REAL body (no longer mocked) ignores `this` entirely and reads
+ * CKGBankManager::ms_poInstance instead, confirming the real "no null
+ * check on ms_poInstance" quirk is genuinely safe: dispatch with
+ * `this == 0` never actually touches `this`.
  */
 
 #include <cstdio>
@@ -26,44 +26,58 @@ static void check_eq(const char *label, long got, long want)
 	g_fail++;
 }
 
-static int g_calls;
-static const void *g_lastThis;
-static bool g_returnValue;
-bool CTimerManager::ShouldSyncExternalClock()
-{
-	g_calls++;
-	g_lastThis = this;
-	return g_returnValue;
-}
+/* Static storage (NOT a stack array -- the real +0x97c750 offset means
+ * this stand-in object needs to be just under 9.9MB). */
+static unsigned char bankMgr[0x97c760];
 
 int main(void)
 {
-	printf("SKSTGGate_ShouldSyncExternalClock() known-answer test\n");
+	printf("SKSTGGate_ShouldSyncExternalClock() / CTimerManager::ShouldSyncExternalClock() known-answer test\n");
 	printf("=========================================================\n");
+
+	for (unsigned int i = 0; i < sizeof(bankMgr); i++)
+		bankMgr[i] = 0;
+	CKGBankManager::ms_poInstance = bankMgr;
 
 	CTimerManager tm;
 	CTimerManager::ms_poInstance = &tm;
 
-	printf("[1] forwards this == ms_poInstance, returns true verbatim\n");
-	g_returnValue = true;
-	bool r1 = SKSTGGate_ShouldSyncExternalClock();
-	check_eq("call count", g_calls, 1);
-	check_eq("this == &tm", (long)(g_lastThis == &tm), 1);
-	check_eq("return value == true", r1, true);
+	printf("[1] mode 0 -> false\n");
+	*(int *)(bankMgr + 0x97c750) = 0;
+	check_eq("mode 0", SKSTGGate_ShouldSyncExternalClock(), false);
 
-	printf("\n[2] returns false verbatim\n");
-	g_returnValue = false;
-	bool r2 = SKSTGGate_ShouldSyncExternalClock();
-	check_eq("call count", g_calls, 2);
-	check_eq("return value == false", r2, false);
+	printf("\n[2] mode 1 -> true\n");
+	*(int *)(bankMgr + 0x97c750) = 1;
+	check_eq("mode 1", SKSTGGate_ShouldSyncExternalClock(), true);
 
-	printf("\n[3] confirmed real quirk: NO null check on ms_poInstance\n");
+	printf("\n[3] mode 3 -> true\n");
+	*(int *)(bankMgr + 0x97c750) = 3;
+	check_eq("mode 3", SKSTGGate_ShouldSyncExternalClock(), true);
+
+	printf("\n[4] mode 2 -> defers to byte at +8\n");
+	*(int *)(bankMgr + 0x97c750) = 2;
+	bankMgr[8] = 0;
+	check_eq("mode 2, +8==0 -> false", SKSTGGate_ShouldSyncExternalClock(), false);
+	bankMgr[8] = 1;
+	check_eq("mode 2, +8!=0 -> true", SKSTGGate_ShouldSyncExternalClock(), true);
+
+	printf("\n[5] mode 4 -> ALSO defers to byte at +8 (same as mode 2)\n");
+	*(int *)(bankMgr + 0x97c750) = 4;
+	bankMgr[8] = 0;
+	check_eq("mode 4, +8==0 -> false", SKSTGGate_ShouldSyncExternalClock(), false);
+	bankMgr[8] = 1;
+	check_eq("mode 4, +8!=0 -> true", SKSTGGate_ShouldSyncExternalClock(), true);
+
+	printf("\n[6] any other mode -> false\n");
+	*(int *)(bankMgr + 0x97c750) = 99;
+	check_eq("mode 99", SKSTGGate_ShouldSyncExternalClock(), false);
+
+	printf("\n[7] confirmed real quirk: NO null check on ms_poInstance, and it's "
+	       "genuinely safe -- `this` is never dereferenced\n");
 	CTimerManager::ms_poInstance = 0;
-	g_returnValue = true;
-	bool r3 = SKSTGGate_ShouldSyncExternalClock();
-	check_eq("call count (dispatch still happened with this == 0)", g_calls, 3);
-	check_eq("this == 0", (long)(g_lastThis == 0), 1);
-	check_eq("return value == true", r3, true);
+	*(int *)(bankMgr + 0x97c750) = 1;
+	bool r7 = SKSTGGate_ShouldSyncExternalClock();
+	check_eq("dispatch with this==0 still works (this is never read)", r7, true);
 
 	printf("=========================================================\n");
 	printf("RESULT: %s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");

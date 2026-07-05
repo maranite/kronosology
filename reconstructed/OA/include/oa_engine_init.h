@@ -304,14 +304,24 @@ struct CSTGMidiQueue {
  */
 struct CSTGChannelValues {
 	/*
-	 * Initialize() (.text+0x26a50, 75 bytes, confirmed via relocation
-	 * from CSTGSlotVoiceData::Initialize -- see oa_global.h) confirmed
-	 * real, deliberately deferred extern -- own body not reconstructed
-	 * in this pass (a separate, substantially-sized real function --
-	 * `InitializeLongHand()`, 0x226 bytes, is a genuinely different,
-	 * separate real sibling, not this one).
+	 * Initialize() (.text+0x26a50, 75 bytes) is now real (sec 10.151,
+	 * src/engine/global.cpp) confirmed: lazily runs InitializeLongHand()
+	 * on a hidden static template object EXACTLY ONCE process-wide
+	 * (guarded by `sTemplateReady`), then unconditionally copies the
+	 * resulting `sTemplate` -- confirmed real size `0x92c` bytes via
+	 * `readelf` (i.e. this IS this project's own first confirmed measure
+	 * of `sizeof(CSTGChannelValues)` itself, independent of -- and not
+	 * necessarily the same structure as -- the "0x92c-strided per-channel
+	 * block" this class was said to live inside of, above) -- verbatim
+	 * over `this` on every call, including the first.
+	 * `InitializeLongHand()` itself (.text+0x26820, 550 bytes) is a
+	 * confirmed-real, deliberately deferred dependency -- substantially
+	 * larger, own body not reconstructed this pass; see bar2_stubs.cpp.
 	 */
 	void Initialize();
+	void InitializeLongHand();
+	static unsigned char sTemplateReady;
+	static unsigned char sTemplate[0x92c];
 	void Reset();
 
 	/*
@@ -574,6 +584,27 @@ struct CSTGMIDIClockSync {
 struct CTimerManager {
 	static CTimerManager *ms_poInstance;
 	bool ShouldSyncExternalClock();
+};
+
+/*
+ * CKGBankManager -- a genuinely new, entirely separate class discovered
+ * while reconstructing CTimerManager::ShouldSyncExternalClock() itself
+ * (sec 10.151, src/engine/sk_stg_gate.cpp): a real, faithfully-preserved
+ * quirk -- despite being a (nominal) member method receiving `this` from
+ * its one real caller (SKSTGGate_ShouldSyncExternalClock(), which passes
+ * CTimerManager::ms_poInstance as `this`), the real disassembly IGNORES
+ * `this` entirely and instead reloads this totally different global,
+ * CKGBankManager::ms_poInstance (confirmed via its own real relocation,
+ * R_386_32 -> `_ZN14CKGBankManager13ms_poInstanceE`). Declared here as a
+ * minimal opaque stand-in (own class layout entirely out of scope) --
+ * the huge fixed byte offset ShouldSyncExternalClock() reads through it
+ * (`+0x97c750`, ~9.9MB) strongly suggests this pointer targets one of
+ * this project's already-known giant global aggregate structures
+ * (comparable in scale to CSTGGlobal's own multi-hundred-KB layout), not
+ * a normal small C++ object.
+ */
+struct CKGBankManager {
+	static unsigned char *ms_poInstance;
 };
 
 /* Also declared in oa_global.h (sec 10.98) -- same real, non-`extern

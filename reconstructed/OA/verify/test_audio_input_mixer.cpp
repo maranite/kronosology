@@ -27,46 +27,16 @@ static void check_eq(const char *label, unsigned int got, unsigned int want)
 		printf("        (wanted 0x%x)\n", want);
 }
 
-/* Real ground-truth dependencies (CSTGPan::CalculateMonoPanCoeffs,
- * CBusChangeStateMachine::StartBusChange, CSTGBusInfo::
- * GetSignalSelectionForBusType) are confirmed-real, deliberately
- * deferred externs (their own bodies not reconstructed anywhere in this
- * project yet) -- mocked here with call-tracking so the four setters'
- * OWN logic (table lookups, offset arithmetic, raw vtable dispatch,
- * branch selection) can be verified directly. */
-static int g_calcPanCalls;
-static float g_lastPanScale, g_lastPanValue;
-void CSTGPan::CalculateMonoPanCoeffs(STGMonoPanCoeffs &out, float scale, float pan)
-{
-	g_calcPanCalls++;
-	g_lastPanScale = scale;
-	g_lastPanValue = pan;
-	out.coeff0 = scale * 100.0f;
-	out.coeff4 = pan * 100.0f;
-}
-
-static int g_startBusChangeCalls;
-static void *g_lastStartBusChangeThis;
-static int g_lastBusId, g_lastBusType;
-static unsigned int g_lastArg3;
-void CBusChangeStateMachine::StartBusChange(int busId, int busType, unsigned int arg3)
-{
-	g_startBusChangeCalls++;
-	g_lastStartBusChangeThis = this;
-	g_lastBusId = busId;
-	g_lastBusType = busType;
-	g_lastArg3 = arg3;
-}
-
-static int g_signalSelectionReturn;
-static int g_getSignalSelectionCalls;
-static int g_lastSignalSelectionBusType;
-int CSTGBusInfo::GetSignalSelectionForBusType(int busType)
-{
-	g_getSignalSelectionCalls++;
-	g_lastSignalSelectionBusType = busType;
-	return g_signalSelectionReturn;
-}
+/* CSTGPan::CalculateMonoPanCoeffs, CBusChangeStateMachine::
+ * StartBusChange, and CSTGBusInfo::GetSignalSelectionForBusType are all
+ * real now (sec 10.151) -- no mocks here any more (multiple definition
+ * otherwise); their own logic is exercised directly through the four
+ * setters below. CSTGPerformanceVarsManager::sInstance's storage is
+ * normally defined in bar2_stubs.cpp, NOT linked into this test binary
+ * -- provide it here, matching this project's established per-test-file
+ * storage precedent (e.g. test_engine.cpp/test_global.cpp's own copies
+ * of the same static). */
+unsigned char CSTGPerformanceVarsManager::sInstance[12];
 
 /* Raw vtable-slot-3 target SetFXCtrlBus/SetHDRBus both dispatch through
  * (matching the project's established raw-vtable-dispatch convention,
@@ -119,17 +89,26 @@ int main(void)
 
 	CSTGAudioInputMixerBase *mixer = (CSTGAudioInputMixerBase *)mixerObj;
 
-	printf("[1] SetPan -- calls CalculateMonoPanCoeffs(out, 1.0f, value), "
+	printf("[1] SetPan -- calls the real CalculateMonoPanCoeffs(out, 1.0f, value), "
 	       "stores result at mixerStateArray[idx*0x90+0x0/+0x4]\n");
 	{
-		g_calcPanCalls = 0;
 		mixer->SetPan(2, 0.5f);
-		check_eq("CalculateMonoPanCoeffs called once", (unsigned int)g_calcPanCalls, 1);
-		check_eq("scale arg == 1.0f", (unsigned int)g_lastPanScale, 1);
-		check_eq("pan arg == value (0.5f)", (unsigned int)(g_lastPanValue == 0.5f), 1);
+		STGMonoPanCoeffs ref;
+		CSTGPan::CalculateMonoPanCoeffs(ref, 1.0f, 0.5f);
 		float *entry = (float *)(mixerStateArray + 2 * 0x90);
-		check_eq("coeff0 stored at +0x0", (unsigned int)(entry[0] == 100.0f), 1);
-		check_eq("coeff4 stored at +0x4", (unsigned int)(entry[1] == 50.0f), 1);
+		check_eq("coeff0 stored at +0x0 matches a direct call to the real function",
+			 (unsigned int)(entry[0] == ref.coeff0), 1);
+		check_eq("coeff4 stored at +0x4 matches a direct call to the real function",
+			 (unsigned int)(entry[1] == ref.coeff4), 1);
+		/* Center-pan (0.5) equal-power sanity check: both channels reduce
+		 * to scale*sqrt(2)/2 (~0.70710678f) and are equal to each other --
+		 * confirms this is a real continuous pan law, not an arbitrary
+		 * curve (see CSTGPan::CalculateMonoPanCoeffs's own header comment
+		 * in oa_global.h/audio_input_mixer.cpp). */
+		check_eq("center pan (0.5) ~= sqrt(2)/2 (equal power)",
+			 (unsigned int)(entry[0] > 0.7071f && entry[0] < 0.7072f), 1);
+		check_eq("coeff0 == coeff4 at center pan (symmetry)",
+			 (unsigned int)(entry[0] == entry[1]), 1);
 	}
 
 	printf("[2] SetFXCtrlBus -- raw vtable slot 3 dispatch with "
@@ -144,55 +123,77 @@ int main(void)
 		check_eq("result (78+0x1000) stored at +0x68", result, 78 + 0x1000);
 	}
 
-	printf("[3] SetOutputBus -- calls StartBusChange() as a genuine member "
-	       "method on busChangeArray[idx*0x10]\n");
+	printf("[3] SetOutputBus -- calls the real StartBusChange() as a genuine "
+	       "member method on busChangeArray[idx*0x10], confirmed 3-way "
+	       "epoch/early-out logic (sec 10.151)\n");
 	{
-		g_startBusChangeCalls = 0;
+		unsigned char *bcsm = busChangeArray + 3 * 0x10;
+		memset(bcsm, 0, 0x10);
+		CSTGPerformanceVarsManager::sInstance[8] = 0;
+
 		mixer->SetOutputBus(3, 0); /* STGAPIOutToPhysBusId[0]==48, STGAPIOutToBusType[0]==0 */
-		check_eq("StartBusChange called once", (unsigned int)g_startBusChangeCalls, 1);
-		check_eq("this == busChangeArray + 3*0x10",
-			 g_lastStartBusChangeThis == (busChangeArray + 3 * 0x10), 1);
-		check_eq("busId == STGAPIOutToPhysBusId[0] (48)", (unsigned int)g_lastBusId, 48);
-		check_eq("busType == STGAPIOutToBusType[0] (0)", (unsigned int)g_lastBusType, 0);
-		check_eq("arg3 == confirmed real constant 0x38", g_lastArg3, 0x38);
+		check_eq("first call: busId latched (+0xa==48)", bcsm[0xa], 48);
+		check_eq("first call: busType latched (+0xb==0)", bcsm[0xb], 0);
+		check_eq("first call: perf-vars epoch latched (+0xc==0)",
+			 *(unsigned int *)(bcsm + 0xc), 0);
+		check_eq("first call: +0x0 flag set (first-time init)",
+			 *(unsigned int *)(bcsm + 0x0), 1);
+		check_eq("first call: +0x4 == confirmed real constant 0x38, plus one",
+			 *(unsigned int *)(bcsm + 0x4), 0x39);
+
+		/* Same busId/busType/epoch -> confirmed real early-out: nothing
+		 * touched at all, not even a re-latch. */
+		*(unsigned int *)(bcsm + 0x4) = 0xDEADBEEF; /* poison, to prove untouched */
+		mixer->SetOutputBus(3, 0);
+		check_eq("unchanged busId/busType/epoch -> +0x4 left untouched (early-out)",
+			 *(unsigned int *)(bcsm + 0x4), 0xDEADBEEF);
+
+		/* Toggle the perf-vars slot-selector epoch -> re-latches +0xc,
+		 * but +0x0 is already non-zero, so +0x4's own "set once" value
+		 * stays untouched even though a re-latch happened. */
+		CSTGPerformanceVarsManager::sInstance[8] = 1;
+		mixer->SetOutputBus(3, 0);
+		check_eq("epoch changed -> +0xc re-latched to the new epoch (1)",
+			 *(unsigned int *)(bcsm + 0xc), 1);
+		check_eq("epoch changed -> +0x4 still untouched (set-once semantics)",
+			 *(unsigned int *)(bcsm + 0x4), 0xDEADBEEF);
+
+		CSTGPerformanceVarsManager::sInstance[8] = 0; /* restore for later scenarios */
 	}
 
 	printf("[4] SetHDRBus -- raw vtable slot 3 dispatch (result -> +0x6c), "
-	       "plus GetSignalSelectionForBusType 4-way branch (-> +0x50/+0x54/+0x58)\n");
+	       "plus the real GetSignalSelectionForBusType's 3-way branch "
+	       "(-> +0x50/+0x54/+0x58)\n");
 	{
 		g_vtableSlot3Calls = 0;
-		g_signalSelectionReturn = 1;
-		mixer->SetHDRBus(0, 0); /* STGAPIHDRPhysBusIds[0]==32, STGAPIHDRBusTypes[0]==0 */
+		mixer->SetHDRBus(0, 0); /* STGAPIHDRBusTypes[0]==0 -> selection 0 */
 		check_eq("vtable slot 3 called once", (unsigned int)g_vtableSlot3Calls, 1);
 		check_eq("table lookup value passed (32)", (unsigned int)g_lastVtableSlot3Arg, 32);
-		check_eq("GetSignalSelectionForBusType arg == STGAPIHDRBusTypes[0] (0)",
-			 (unsigned int)g_lastSignalSelectionBusType, 0);
 		unsigned int *entry = (unsigned int *)(mixerStateArray + 0 * 0x90);
 		check_eq("+0x6c == 32+0x1000 (routed result)", entry[0x6c / 4], 32 + 0x1000);
-		check_eq("signalSelection==1 -> +0x50==-1", entry[0x50 / 4], (unsigned int)-1);
-		check_eq("signalSelection==1 -> +0x54==0", entry[0x54 / 4], 0);
-		check_eq("signalSelection==1 -> +0x58==0", entry[0x58 / 4], 0);
+		check_eq("selection 0 (busType 0, default) -> +0x50==0", entry[0x50 / 4], 0);
+		check_eq("selection 0 (busType 0, default) -> +0x54==0", entry[0x54 / 4], 0);
+		check_eq("selection 0 (busType 0, default) -> +0x58==-1", entry[0x58 / 4], (unsigned int)-1);
 
-		g_signalSelectionReturn = 2;
-		mixer->SetHDRBus(1, 1);
+		mixer->SetHDRBus(1, 1); /* STGAPIHDRBusTypes[1]==3 -> selection 1 */
 		unsigned int *entry1 = (unsigned int *)(mixerStateArray + 1 * 0x90);
-		check_eq("signalSelection==2 -> +0x50==0", entry1[0x50 / 4], 0);
-		check_eq("signalSelection==2 -> +0x54==-1", entry1[0x54 / 4], (unsigned int)-1);
-		check_eq("signalSelection==2 -> +0x58==0", entry1[0x58 / 4], 0);
+		check_eq("selection 1 (busType 3) -> +0x50==-1", entry1[0x50 / 4], (unsigned int)-1);
+		check_eq("selection 1 (busType 3) -> +0x54==0", entry1[0x54 / 4], 0);
+		check_eq("selection 1 (busType 3) -> +0x58==0", entry1[0x58 / 4], 0);
 
-		g_signalSelectionReturn = 0;
-		mixer->SetHDRBus(2, 2);
+		mixer->SetHDRBus(2, 2); /* STGAPIHDRBusTypes[2]==4 -> selection 2 */
 		unsigned int *entry2 = (unsigned int *)(mixerStateArray + 2 * 0x90);
-		check_eq("signalSelection==0 -> +0x50==0", entry2[0x50 / 4], 0);
-		check_eq("signalSelection==0 -> +0x54==0", entry2[0x54 / 4], 0);
-		check_eq("signalSelection==0 -> +0x58==-1", entry2[0x58 / 4], (unsigned int)-1);
+		check_eq("selection 2 (busType 4) -> +0x50==0", entry2[0x50 / 4], 0);
+		check_eq("selection 2 (busType 4) -> +0x54==-1", entry2[0x54 / 4], (unsigned int)-1);
+		check_eq("selection 2 (busType 4) -> +0x58==0", entry2[0x58 / 4], 0);
 
-		g_signalSelectionReturn = 99; /* any other value */
-		mixer->SetHDRBus(3, 3);
-		unsigned int *entry3 = (unsigned int *)(mixerStateArray + 3 * 0x90);
-		check_eq("signalSelection==other -> +0x50==0", entry3[0x50 / 4], 0);
-		check_eq("signalSelection==other -> +0x54==0", entry3[0x54 / 4], 0);
-		check_eq("signalSelection==other -> +0x58==0", entry3[0x58 / 4], 0);
+		/* SetHDRBus's own 4th ("else") branch is confirmed DEAD CODE with
+		 * the real GetSignalSelectionForBusType wired in: that function
+		 * can only ever return 0, 1, or 2 (its own confirmed 2-entry
+		 * table plus a 0 default), so the "anything else" branch can
+		 * never be reached in practice -- not tested here for exactly
+		 * that reason (there is no real busType/value combination that
+		 * reaches it). */
 	}
 
 	printf("=========================================================\n");

@@ -255,13 +255,17 @@ void CSTGWaveSeqData::Initialize() {}
  * 10.150, see global.cpp) -- no mock body here any more (multiple
  * definition otherwise). Its own new dependencies (the two
  * CSTGCommonLFO/CSTGCommonStepSeq sub-rate-pool statics -- normally
- * defined in engine_startup_bits2.cpp, NOT linked into this test -- and
- * CSTGChannelValues::Initialize, normally a bar2_stubs.cpp deferred
- * stub, also NOT linked here) still need trivial link-satisfying
- * definitions, not exercised by this test's own scenarios. */
+ * defined in engine_startup_bits2.cpp, NOT linked into this test) still
+ * need trivial link-satisfying definitions, not exercised by this
+ * test's own scenarios. CSTGChannelValues::Initialize() is now real too
+ * (sec 10.151, see global.cpp) -- no mock body here any more either; its
+ * own storage/InitializeLongHand() dependency (normally bar2_stubs.cpp,
+ * not linked here) needs the same trivial link-satisfying treatment. */
 STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
 STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
-void CSTGChannelValues::Initialize() {}
+unsigned char CSTGChannelValues::sTemplateReady;
+unsigned char CSTGChannelValues::sTemplate[0x92c];
+void CSTGChannelValues::InitializeLongHand() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own
  * Initialize()/ctors are now real (sec 10.81, see global.cpp) -- their

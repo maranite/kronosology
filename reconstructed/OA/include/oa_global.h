@@ -906,9 +906,13 @@ unsigned char *ResolveActivePerformanceVarsManagerRaw();
  * independently confirmed -- named only by position. */
 struct STGMonoPanCoeffs { float coeff0; float coeff4; };
 
-/* CSTGPan -- confirmed real helper (relocation from
- * CSTGAudioInputMixerBase::SetPan, sec 10.150). Own body not
- * reconstructed -- confirmed real, deliberately deferred extern. */
+/*
+ * CSTGPan::CalculateMonoPanCoeffs(STGMonoPanCoeffs&, float, float)
+ * (sec 10.151, `.text+0x24e30`, 104 bytes) -- see
+ * src/engine/audio_input_mixer.cpp for the full confirmed x87 FPU
+ * derivation (a real equal-power-ish quadratic pan law, verified via
+ * its own center-pan sqrt(2)/2 continuity check).
+ */
 struct CSTGPan {
 	static void CalculateMonoPanCoeffs(STGMonoPanCoeffs &out, float scale, float pan);
 };
@@ -921,15 +925,25 @@ struct CSTGPan {
  * regparm(3) call: this=eax, arg1(eSTGBusID)=edx (from
  * `STGAPIOutToPhysBusId[value]`), arg2(eSTGBusType)=ecx (from
  * `STGAPIOutToBusType[value]`), arg3(unsigned int)=stack, confirmed
- * real constant `0x38`. Own body not reconstructed -- confirmed real,
- * deliberately deferred extern. */
+ * real constant `0x38`.
+ * StartBusChange() itself is now real (sec 10.151, `.text+0x462c0`, 67
+ * bytes) -- see src/engine/audio_input_mixer.cpp for the full confirmed
+ * 0x10-byte-stride field layout and its real dependency on
+ * `CSTGPerformanceVarsManager::sInstance[8]` (sec 10.71's own confirmed
+ * "active perf-vars slot selector" byte) as a cheap per-call epoch
+ * check.
+ */
 struct CBusChangeStateMachine {
 	void StartBusChange(int busId, int busType, unsigned int arg3);
 };
 
-/* CSTGBusInfo -- confirmed real static-like helper (relocation from
- * CSTGAudioInputMixerBase::SetHDRBus, sec 10.150). Own body not
- * reconstructed -- confirmed real, deliberately deferred extern. */
+/*
+ * CSTGBusInfo::GetSignalSelectionForBusType(int) (sec 10.151,
+ * `.text+0x258a0`, 24 bytes) confirmed: a plain 2-entry `{1, 2}` lookup
+ * table (raw `.rodata` ints, independently confirmed to carry NO
+ * relocation at that byte range) indexed by `busType - 3`; any busType
+ * outside {3, 4} returns 0. See src/engine/audio_input_mixer.cpp.
+ */
 struct CSTGBusInfo {
 	static int GetSignalSelectionForBusType(int busType);
 };

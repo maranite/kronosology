@@ -426,7 +426,7 @@ public:
 	static CSTGHDRFileReader *sInstance;
 	CSTGHDRFileReader();
 	void ProcessCommands();
-	void Initialize();	/* confirmed real, body not reconstructed, sec 10.58 */
+	void Initialize();	/* real now, sec 10.151 -- see managers.cpp */
 	unsigned char _unrecovered[68];	/* confirmed size; ctor touches +0x00..+0x10 */
 };
 
@@ -444,8 +444,13 @@ public:
 	static CSTGStreamingFileReader *sInstance;
 	CSTGStreamingFileReader();
 	void ProcessCommands();
-	/* Confirmed real arg (regparm edx): 0x8000 (32768) at this
-	 * project's own only confirmed call site. Body not reconstructed. */
+	/* CORRECTED (sec 10.151): a prior pass, before ever disassembling the
+	 * real body, assumed the confirmed real call-site value 0x8000 was
+	 * this argument passed straight through. Now that the real body is
+	 * disassembled (see managers.cpp), the incoming argument is
+	 * confirmed NEVER READ -- the parameter name is kept only for
+	 * documentation, matching CSTGCDWorker_InitializeBuffer's own
+	 * established "confirmed real, but dead" precedent (sec 10.148). */
 	void Initialize(unsigned long bufferSize);
 	unsigned char _unrecovered[56];	/* confirmed size; ctor touches +0x00..+0x1c */
 };
