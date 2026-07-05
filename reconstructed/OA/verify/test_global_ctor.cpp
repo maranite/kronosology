@@ -248,7 +248,16 @@ int main(void)
 	check_eq("CSTGControllerRTData", g_controllerRtCalls, 1);
 	check_eq("CSTGWaveSequence (598 confirmed)", g_waveSeqCalls, 598);
 	check_eq("CSTGProgram (23 banks x 128 + 1 standalone = 2945)", g_programCalls, 2945);
-	check_eq("CSTGCombi (14 banks x 128 = 1792)", g_combiCalls, 1792);
+	/* CSTGCombi (14 banks x 128 = 1792) DIRECT constructions, PLUS 201
+	 * MORE implicit base-ctor calls from CSTGSequence's own real
+	 * inheritance (sec 10.153: CSTGSequence : public CSTGCombi is now a
+	 * genuine C++ base class relationship, not just a flat opaque
+	 * class -- so every CSTGSequence construction, even this test
+	 * file's own trivial mock body below, unconditionally triggers
+	 * CSTGCombi's ctor first, per the Itanium ABI's own "base ctor
+	 * before derived body" rule). 1792 + 201 = 1993. */
+	check_eq("CSTGCombi (14 banks x 128 = 1792, + 201 implicit via CSTGSequence base)",
+		 g_combiCalls, 1993);
 	check_eq("CSTGSequence (200 array + 1 standalone = 201)", g_sequenceCalls, 201);
 	check_eq("CSetList (128 confirmed)", g_setListCalls, 128);
 	/* CSTGProgramModeProgramSlot/DrumTrackSlot's own ctors are now real

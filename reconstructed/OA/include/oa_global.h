@@ -392,6 +392,25 @@ struct CSTGSlotVoiceData {
 struct CSTGProgram;	/* forward decl, real definition further below */
 
 /*
+ * CSTGToneAdjust (sec 10.153, `.text+0xc76e0`, 247 bytes) -- confirmed
+ * real, embedded at `CSTGProgramSlot+0x7f` (see that class's own ctor
+ * below). Own vtable (`_ZTV14CSTGToneAdjust`) is confirmed installed but
+ * never DISPATCHED THROUGH by anything reconstructed in this pass
+ * (`SetSliderValue()`, the one method that calls through its slot 0, is
+ * NOT reconstructed) -- a zero-filled placeholder is safe, same
+ * treatment as this project's other not-yet-dispatched vtables. Ctor
+ * writes 33 confirmed zero bytes at +0x4..+0x24, then 16 confirmed zero
+ * WORDS at every odd 2-byte-stride offset from +0x45 to +0x67 -- a real,
+ * confirmed gap at +0x25..+0x44 (untouched), not a transcription
+ * omission. Declared opaque (no named fields) matching CSTGProgramSlot's
+ * own established convention -- only the ctor's own writes are modeled.
+ */
+extern "C" unsigned char _ZTV14CSTGToneAdjust[12];
+struct CSTGToneAdjust {
+	CSTGToneAdjust();
+};
+
+/*
  * CSTGProgramSlot (sec 10.81) -- confirmed real base class of BOTH
  * CSTGProgramModeProgramSlot and CSTGProgramModeDrumTrackSlot (each
  * derived ctor's own first instruction is a call to
@@ -408,7 +427,18 @@ struct CSTGProgram;	/* forward decl, real definition further below */
  * reconstructed OnUpdateGlobalMidiChannel/OnUpdateProgramDrumTrackMidiChannel)
  * but deliberately deferred externs -- own bodies not reconstructed in
  * this pass.
+ *
+ * CSTGProgramSlot::CSTGProgramSlot() itself (sec 10.153, `.text+0xabf80`,
+ * 219 bytes) is confirmed real now -- see program_slot_ctor.cpp. Installs
+ * this class's OWN real vtable (`_ZTV15CSTGProgramSlot`, zero-filled
+ * placeholder -- never dispatched by anything reconstructed here, only
+ * ever by the two derived ctors, which unconditionally OVERWRITE this
+ * field right afterward with `g_programSlotVtable[2]` -- a confirmed
+ * real, functionally-inert redundancy, not a conflict), zeroes ~30
+ * confirmed byte/dword fields, and placement-constructs an embedded
+ * `CSTGToneAdjust` sub-object at `this+0x7f` (see that class above).
  */
+extern "C" unsigned char _ZTV15CSTGProgramSlot[12];
 struct CSTGProgramSlot {
 	/* +0x0..+0x3, real class has a vtable (Initialize() dispatches
 	 * through slot 7 -- .text+0x1c/4 -- not independently named in
@@ -687,6 +717,14 @@ struct CSTGPerformanceVarsManager {
 	 * (sec 10.55/10.56's own "address of the singleton" call), meaning
 	 * `Initialize()` itself is what populates these three sub-fields,
 	 * not independently confirmed in this pass.
+	 *
+	 * `sInstance[9]` (sec 10.153, confirmed via `CSTGAudioBusManager::
+	 * LRBusIndivMirror()`'s own disassembly): a DIFFERENT single byte
+	 * from `sInstance[8]`'s "active perf-vars slot" toggle -- a 0/1
+	 * "current double-buffer half" selector for
+	 * `CSTGAudioBusManager::sEffectThreadBusSets`. Not confirmed who
+	 * writes it (out of scope for this pass); only that
+	 * LRBusIndivMirror() reads it.
 	 */
 	static unsigned char sInstance[12];
 	void Initialize();
@@ -1065,7 +1103,32 @@ struct CSTGDrumKitData { CSTGDrumKitData(); };
 struct CSTGWaveSequence { CSTGWaveSequence(); };
 struct CSTGProgram { CSTGProgram(); };
 struct CSTGCombi { CSTGCombi(); };
-struct CSTGSequence { CSTGSequence(); };
+/*
+ * CSTGSequence::CSTGSequence() (sec 10.153, `.text+0xcbfd0`, 546 bytes)
+ * confirmed real: calls the base `CSTGCombi::CSTGCombi()` first (Itanium
+ * "base ctor first" pattern, matching CSTGProgramSlot's own derived-ctor
+ * precedent -- `CSTGCombi` itself is STILL a deliberately-deferred no-op
+ * stub, sec 10.13, so this base call is currently inert, not a
+ * regression), installs its own vtable (`_ZTV12CSTGSequence`, zero-
+ * filled placeholder, never dispatched by anything reconstructed here),
+ * then a confirmed real 44-byte-stride (`0x2c`) array of 16 embedded
+ * "CSTGHDRTrack" sub-objects at `+0x19e7..+0x1c7b` (each: install its
+ * OWN vtable `_ZTV12CSTGHDRTrack`, zero 3 bytes at +0x4/+0x5/+0x6 -- the
+ * remaining 41 bytes of each 44-byte slot are a real, confirmed gap, not
+ * independently touched by this ctor), and finally ONE more slot at the
+ * SAME stride (`+0x1ca7`) holding a DIFFERENT vtable
+ * (`_ZTV21CSTGMetronomeSettings`) with only ONE zero byte (+0x4) --
+ * confirmed a real, deliberate variation (not a 17th CSTGHDRTrack), kept
+ * as a separate write rather than folded into the loop. All sub-objects
+ * modeled via raw offset writes (no named C++ sub-object types), matching
+ * CSTGSequence's/CSTGProgramSlot's own established "opaque, no named
+ * fields" convention -- none of these vtables are ever genuinely
+ * dispatched through by anything reconstructed in this pass.
+ */
+extern "C" unsigned char _ZTV12CSTGSequence[12];
+extern "C" unsigned char _ZTV12CSTGHDRTrack[12];
+extern "C" unsigned char _ZTV21CSTGMetronomeSettings[12];
+struct CSTGSequence : public CSTGCombi { CSTGSequence(); };
 /* Activate() (sec 10.102, confirmed via relocation from CSTGGlobal::
  * CompletePerformanceActivation) confirmed real, deliberately deferred
  * extern -- own body not reconstructed. A DIFFERENT object from

@@ -207,6 +207,25 @@ public:
 	float busGainScale;		/* +0x04, confirmed: 1500.0f */
 	int   physBusIdTableHead;	/* +0x08, confirmed: first dword of STGAPILR2IndivToPhysBusId;
 					 * also the field SetLRBusIndivAssign() overwrites */
+
+	/*
+	 * sGlobalBusSet/sEffectThreadBusSets (sec 10.153) -- two module-
+	 * global static arrays confirmed real via LRBusIndivMirror()'s own
+	 * relocations (see audio_bus_manager.cpp): 128-byte-per-bus slots.
+	 * sGlobalBusSet: 34 slots (0x1100 bytes total, confirmed size),
+	 * indexed directly by `physBusIdTableHead` for bus IDs 0..33.
+	 * sEffectThreadBusSets: a flat 240-slot array (0x7800 bytes total,
+	 * confirmed size) -- really 2 double-buffered halves of 120 slots
+	 * each, selected by `CSTGPerformanceVarsManager::sInstance[9]` (a
+	 * confirmed real "current buffer" selector byte, 0 or 1), used both
+	 * as the FIXED source (always slot 12 of the CURRENT half) and,
+	 * for bus IDs >= 34, as the destination (slot `busId-34` within the
+	 * current half). Real per-slot internal layout not independently
+	 * confirmed beyond "128 opaque bytes, bulk-copied via movaps" --
+	 * modeled as raw byte arrays, not a named struct.
+	 */
+	static unsigned char sGlobalBusSet[34 * 0x80];
+	static unsigned char sEffectThreadBusSets[240 * 0x80];
 };
 
 /*

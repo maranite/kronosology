@@ -107,7 +107,8 @@ void CSTGMidiDispatcher::Initialize() { g_midiDispatchInitCalls++; }
 
 MOCK_CTOR_ONLY(CSTGMessageProcessor)
 CSTGMessageProcessor::~CSTGMessageProcessor() {}
-MOCK_CTOR_ONLY(CSTGFrontPanelSmoothers)
+/* CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() is real now, sec
+ * 10.153 -- see src/engine/front_panel_smoothers.cpp. */
 MOCK_CTOR_ONLY(CSTGVoiceModelManager)
 CSTGVoiceModelManager::~CSTGVoiceModelManager() {}
 void CSTGVoiceModelManager::ProcessSubRate(unsigned int) {}
@@ -321,8 +322,33 @@ int main(void)
 	check_eq("CSTGMidiDispatcher ctor called once", g_CSTGMidiDispatcherCtorCalls, 1);
 	check_eq("CSTGMidiDispatcher::Initialize called once", g_midiDispatchInitCalls, 1);
 	check_eq("CSTGMessageProcessor ctor called once", g_CSTGMessageProcessorCtorCalls, 1);
-	check_eq("CSTGFrontPanelSmoothers ctor called once", g_CSTGFrontPanelSmoothersCtorCalls, 1);
 	check_eq("CSTGVoiceModelManager ctor called once", g_CSTGVoiceModelManagerCtorCalls, 1);
+
+	printf("\n[1b] CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() real ctor\n");
+	{
+		using FPS = CSTGFrontPanelSmoothers;
+		FPS *fps = FPS::sInstance;
+		auto FromU32b = [](unsigned int v) { return (unsigned char *)(unsigned long)v; };
+		check_eq("FrontPanelSmoothers sInstance set", fps != 0, true);
+		unsigned char *knobBuf = FromU32b(fps->knobSmootherBuf);
+		unsigned char *eqBuf = FromU32b(fps->eqSmootherBuf);
+		check_eq("FrontPanelSmoothers knobBuf non-null", knobBuf != 0, true);
+		check_eq("FrontPanelSmoothers eqBuf non-null", eqBuf != 0, true);
+		/* Element 4 (row 1, slice 0) of the knob buffer: confirmed
+		 * 4-way interleaved addressing, +0x50 == -1, +0x60/+0x70 == 0. */
+		unsigned char *e4 = knobBuf + (4 >> 2) * 0x80 + (4 & 3) * 4;
+		check_eq("knobBuf elem4 +0x00 == 0", *(unsigned int *)(e4 + 0x00), 0u);
+		check_eq("knobBuf elem4 +0x50 == -1", *(unsigned int *)(e4 + 0x50), 0xffffffffu);
+		check_eq("knobBuf elem4 +0x60 == 0", *(unsigned int *)(e4 + 0x60), 0u);
+		/* Element 4 of the EQ buffer: same shape, but no +0x60/+0x70
+		 * touch (confirmed real asymmetry -- verified by checking
+		 * that memory location is untouched/zero from the initial
+		 * full-buffer zero-fill, not by the interleaved loop). */
+		unsigned char *eq4 = eqBuf + (4 >> 2) * 0x80 + (4 & 3) * 4;
+		check_eq("eqBuf elem4 +0x00 == 0", *(unsigned int *)(eq4 + 0x00), 0u);
+		check_eq("eqBuf elem4 +0x50 == -1", *(unsigned int *)(eq4 + 0x50), 0xffffffffu);
+		check_eq("eqBuf elem4 +0x60 == 0 (never touched by EQ loop)", *(unsigned int *)(eq4 + 0x60), 0u);
+	}
 
 	printf("\n[2] TSTGArrayManager<T> ring-buffer-building loops\n");
 	auto FromU32 = [](unsigned int v) { return (unsigned char *)(unsigned long)v; };

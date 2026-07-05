@@ -73,6 +73,10 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/vector_manager_init.o \
            src/engine/vector_eg_ctors.o \
            src/engine/push_unsolicited_message.o \
+           src/engine/front_panel_smoothers.o \
+           src/engine/audio_bus_manager.o \
+           src/engine/program_slot_ctor.o \
+           src/engine/sequence_ctor.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -192,6 +196,10 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/vector_manager.cpp \
        src/engine/vector_manager_init.cpp \
        src/engine/vector_eg_ctors.cpp \
+       src/engine/front_panel_smoothers.cpp \
+       src/engine/audio_bus_manager.cpp \
+       src/engine/program_slot_ctor.cpp \
+       src/engine/sequence_ctor.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -237,7 +245,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_smoother_init verify/test_push_unsolicited_message \
          verify/test_startup_file verify/test_sk_stg_gate \
          verify/test_audio_input_mixer \
-         verify/test_alias_bank_convert verify/test_waveseq_generator
+         verify/test_alias_bank_convert verify/test_waveseq_generator \
+         verify/test_audio_bus_manager verify/test_program_slot_ctor \
+         verify/test_sequence_ctor
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -313,8 +323,8 @@ verify/test_global_ctor: verify/test_global_ctor.cpp src/engine/global_ctor.cpp 
 verify/test_engine_startup_bits: verify/test_engine_startup_bits.cpp src/engine/engine_startup_bits.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine_startup_bits.cpp src/engine/engine_startup_bits.cpp -o $@
 
-verify/test_engine_init: verify/test_engine_init.cpp src/engine/engine_init.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine_init.cpp src/engine/engine_init.cpp src/mem/bank_memory.cpp -o $@
+verify/test_engine_init: verify/test_engine_init.cpp src/engine/engine_init.cpp src/engine/front_panel_smoothers.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine_init.cpp src/engine/engine_init.cpp src/engine/front_panel_smoothers.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_audio_start: verify/test_audio_start.cpp src/init/audio_start.cpp include/oa_audio_start.h include/oa_engine.h include/oa_cpu_affinity.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_start.cpp src/init/audio_start.cpp -o $@
@@ -366,6 +376,15 @@ verify/test_alias_bank_convert: verify/test_alias_bank_convert.cpp src/engine/al
 
 verify/test_waveseq_generator: verify/test_waveseq_generator.cpp src/engine/waveseq_generator.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_waveseq_generator.cpp src/engine/waveseq_generator.cpp -o $@
+
+verify/test_audio_bus_manager: verify/test_audio_bus_manager.cpp src/engine/audio_bus_manager.cpp include/oa_engine.h include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_bus_manager.cpp src/engine/audio_bus_manager.cpp -o $@
+
+verify/test_program_slot_ctor: verify/test_program_slot_ctor.cpp src/engine/program_slot_ctor.cpp include/oa_global.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_program_slot_ctor.cpp src/engine/program_slot_ctor.cpp -o $@
+
+verify/test_sequence_ctor: verify/test_sequence_ctor.cpp src/engine/sequence_ctor.cpp include/oa_global.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_sequence_ctor.cpp src/engine/sequence_ctor.cpp -o $@
 
 verify/test_smoother_init: verify/test_smoother_init.cpp src/engine/smoother_init.cpp src/mem/bank_memory.cpp include/oa_engine_init.h include/oa_bank_memory.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_init.cpp src/engine/smoother_init.cpp src/mem/bank_memory.cpp -o $@

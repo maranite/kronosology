@@ -450,8 +450,44 @@ struct CSTGPerformance {
 	bool IsCurrentlyActive() const;
 };
 
+/*
+ * CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() (`.text+0x1e850`,
+ * confirmed real, sec 10.153) -- placement-`new`'d onto a
+ * `CSTGBankMemory::AllocAligned(0xcb0, 0x10)` pool (`engine_init.cpp`),
+ * and this ctor's own field writes account for the FULL 0xcb0 bytes
+ * exactly (4+4+0x1f8+0x318+63*12+99*12 = 0xcb0) -- a clean, independent
+ * confirmation of the class's total size. Layout:
+ *   +0x000  dword  knobSmootherBuf -- packed 32-bit pointer (ToU32/
+ *                  FromU32 convention) to a CSTGBankMemory::AllocAligned
+ *                  (0x800, 0x10) buffer, fully zeroed then re-populated
+ *                  by a confirmed "4-way interleaved" addressing scheme:
+ *                  element i (0..62) lives at buf + (i>>2)*0x80 +
+ *                  (i&3)*4 -- i.e. groups of 4 elements share a 128-byte
+ *                  "row", each element's own fields living 4 bytes apart
+ *                  within that row (an SoA-style layout, likely SIMD-
+ *                  motivated even though this build has no SSE). 63
+ *                  elements exactly fill 16 rows * 128 bytes = 0x800.
+ *   +0x004  dword  eqSmootherBuf -- same scheme, CSTGBankMemory::
+ *                  AllocAligned(0xc80, 0x10), 99 elements exactly filling
+ *                  25 rows * 128 bytes = 0xc80.
+ *   +0x008  0x1f8 bytes, confirmed zeroed, own meaning not determined.
+ *   +0x200  0x318 bytes, confirmed zeroed, own meaning not determined.
+ *   +0x518  63 * 12-byte elements, confirmed zeroed (3 dwords/elem:
+ *           +0x0/+0x4/+0x8), own meaning not determined.
+ *   +0x80c  99 * 12-byte elements, confirmed zeroed, same shape as above.
+ * `sInstance = this` is confirmed set BEFORE the first AllocAligned call
+ * (a real, harmless ordering quirk -- AllocAligned never reads
+ * sInstance, preserved anyway for faithfulness).
+ */
 struct CSTGFrontPanelSmoothers {
 	CSTGFrontPanelSmoothers();
+	static CSTGFrontPanelSmoothers *sInstance;
+	unsigned int knobSmootherBuf;			/* +0x000 */
+	unsigned int eqSmootherBuf;			/* +0x004 */
+	unsigned char _unrecovered1[0x1f8];		/* +0x008 */
+	unsigned char _unrecovered2[0x318];		/* +0x200 */
+	unsigned char _unrecovered3[63 * 12];		/* +0x518 */
+	unsigned char _unrecovered4[99 * 12];		/* +0x80c */
 };
 
 struct CSTGHDRMiniModel {

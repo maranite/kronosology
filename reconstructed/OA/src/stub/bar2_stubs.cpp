@@ -95,7 +95,8 @@ void CSTGVoiceAllocator::Initialize() {}
 /* CSTGVoiceAllocator::~CSTGVoiceAllocator()/CSTGMessageProcessor::
  * ~CSTGMessageProcessor() are real now, sec 10.147 -- see managers.cpp. */
 void CSTGAudioBusManager::MixPerformanceOutputs() {}
-void CSTGAudioBusManager::LRBusIndivMirror() {}
+/* CSTGAudioBusManager::LRBusIndivMirror() is real now, sec 10.153 -- see
+ * src/engine/audio_bus_manager.cpp. */
 /* CSTGAudioEvent::CSTGAudioEvent() is real now, sec 10.149 -- see
  * engine_init.cpp. */
 /* CSTGAudioManager::ASKThreadRoutine(void*)/AudioManagerThreadRoutine(void*)
@@ -190,7 +191,8 @@ void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
 void CSTGControllerRTData::SetControllerAssignment(void *, signed char, bool) {}
 CSTGControllerRTData *CSTGControllerRTData::sInstance;
 CSTGDrumKitData::CSTGDrumKitData() {}
-CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() {}
+/* CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() is real now, sec
+ * 10.153 -- see src/engine/front_panel_smoothers.cpp. */
 void CSTGGlobal::InitializePerformances() {}
 CSTGHDRMiniModel::CSTGHDRMiniModel() {}
 void CSTGHDRMiniModel::Initialize() {}
@@ -224,11 +226,14 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its
  * siblings. */
 CSTGProgram::CSTGProgram() {}
-/* CSTGProgramSlot/CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's
- * ctors + Initialize()/OnUpdateGlobalMidiChannel/
- * OnUpdateProgramDrumTrackMidiChannel all reconstructed for real, sec
- * 10.81/10.125/10.133 -- see src/engine/global.cpp. */
-CSTGProgramSlot::CSTGProgramSlot() {}
+/* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own ctors +
+ * Initialize()/OnUpdateGlobalMidiChannel/OnUpdateProgramDrumTrackMidiChannel
+ * all reconstructed for real, sec 10.81/10.125/10.133 -- see
+ * src/engine/global.cpp. CORRECTION (sec 10.153): this comment previously
+ * (mis)claimed CSTGProgramSlot's OWN base ctor was included in that same
+ * "all reconstructed" set -- it was NOT; only the two DERIVED ctors were.
+ * CSTGProgramSlot::CSTGProgramSlot() itself is real now too, sec 10.153 --
+ * see src/engine/program_slot_ctor.cpp. */
 /* IsActive()/AccessActiveSlotVoiceData()/HasActiveSlotVoiceData()/
  * HasActiveVoices() reconstructed for real, sec 10.142 -- see
  * src/engine/global.cpp. */
@@ -238,7 +243,8 @@ void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
  * uncovered: this class's true size is 0x301c bytes, not the 0x38 this
  * project had assumed before its ctor was ever disassembled). */
 CSTGSamplingInterface::CSTGSamplingInterface() {}
-CSTGSequence::CSTGSequence() {}
+/* CSTGSequence::CSTGSequence() is real now, sec 10.153 -- see
+ * src/engine/sequence_ctor.cpp. */
 CSTGSlotVoiceData::CSTGSlotVoiceData() {}
 /* CSTGSlotVoiceData::Initialize(unsigned short) is real now, sec
  * 10.150 -- see src/engine/global.cpp. Its own dependency,
