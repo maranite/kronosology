@@ -61,7 +61,8 @@ void CSTGPianoModel::RescanPianoTypes() {}
  * 10.147 -- see managers.cpp. */
 void CSTGEffectManager::Initialize() {}
 void CSTGEffectManager::RunEffects() {}
-void CSTGHDRManager::Initialize() {}
+/* CSTGHDRManager::Initialize() is real now, batch 22 -- see
+ * hdr_manager_init.cpp. */
 /* ProcessCommands()/Initialize() (CSTGMonitorMixer/CSTGHDRFileWriter/
  * CSTGSamplingDaemon/CSTGFileCloser/CSTGCDWorker) are real now, sec
  * 10.144 -- see managers.cpp. ProcessCommands() calls three still-
@@ -339,12 +340,9 @@ void CSTGSlotVoiceData::RunVoiceModelStaticBack(unsigned int) {}
  * Steal is now real (sec 10.140). */
 void CSTGSlotVoiceData::GetTotalStaticCosts(unsigned long *, unsigned long *) const {}
 void CSTGVoiceAllocator::StealVoiceList(void *) {}
-/* CSTGSmoother::CSTGSmoother() ctor still deliberately deferred (the
- * real body constructs 320 sub-objects with 4 different embedded
- * MessageContext vtable relocations each -- a much larger task, out of
- * scope for this pass). Initialize() reconstructed for real, sec
+/* CSTGSmoother::CSTGSmoother() ctor is real now, batch 22 -- see
+ * src/engine/smoother_ctor.cpp. Initialize() reconstructed for real, sec
  * 10.86 -- see src/engine/smoother_init.cpp. */
-CSTGSmoother::CSTGSmoother() {}
 /* CSTGSmoother::CancelAllSmoothers() is real now, sec 10.154 -- see
  * src/engine/smoother_cancel.cpp. */
 /* Sec 10.95's own confirmed-real, deliberately deferred externs.

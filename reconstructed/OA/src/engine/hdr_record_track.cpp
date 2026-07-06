@@ -56,6 +56,7 @@
 
 #include "oa_global.h"
 #include "oa_engine.h"
+#include "oa_bank_memory.h"
 
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
@@ -182,4 +183,121 @@ void CSTGHDRManager::ProcessRecordCommands()
  */
 void CSTGRecordTrack::StandbyRec(const char *, unsigned int, unsigned long, int, unsigned char)
 {
+}
+
+/*
+ * CSTGMonitorMixerChannel::Initialize(unsigned int) (batch 22,
+ * `.text+0x71570`, 18 bytes) confirmed:
+ *   *(this+0x0) = (unsigned char)busIndex;
+ *   ptr = *(this+0x4);            // packed 32-bit pointer field
+ *   *(ptr+0x60) = &sGlobalBusSet[busIndex];   // busIndex*0x80 stride
+ * The `+0x4` field is dereferenced UNCONDITIONALLY, no null check in
+ * the real disassembly -- faithfully reproduced. Real caveat, out of
+ * scope to fix this pass: `CSTGMonitorMixerChannel::CSTGMonitorMixerChannel()`
+ * is STILL an unreconstructed no-op stub in this project
+ * (`managers.cpp`'s own `{ }` body, sec 10.147-era placeholder,
+ * a "hidden" non-bare stub per the sec 10.164-established gotcha: it
+ * has content between the braces so it doesn't show up in the bare-`{}`
+ * stub count) -- meaning this `+0x4` field is never actually populated
+ * by any code in THIS project yet. `CSTGBankMemory::AllocAligned()`
+ * (bank_memory.cpp) is a plain bump allocator with no zeroing, so on
+ * real hardware this field's value depends entirely on whatever the
+ * kernel handed back as fresh module memory (typically zeroed at
+ * module load, but not guaranteed by this allocator itself) -- a real,
+ * pre-existing gap inherited from the deferred ctor, not introduced by
+ * this reconstruction. Host KATs must provide a valid backing buffer
+ * for this field explicitly (matching the sec 10.162
+ * "unconditional dereference" precedent) rather than relying on a
+ * zero-filled default.
+ */
+void CSTGMonitorMixerChannel::Initialize(unsigned int busIndex)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x0] = (unsigned char)busIndex;
+
+	unsigned char *ptr = FromU32(*(unsigned int *)(base + 0x4));
+	*(unsigned int *)(ptr + 0x60) =
+		(unsigned int)(unsigned long)(CSTGAudioBusManager::sGlobalBusSet + busIndex * 0x80);
+}
+
+/*
+ * CSTGRecordTrack::Initialize(unsigned short) (batch 22, `.text+0xd7220`,
+ * 136 bytes) confirmed. Resolves the sec 10.162 "likely-but-unconfirmed"
+ * cross-batch layout finding (and the near-identical hedge already
+ * written into this class's own oa_engine.h comment): this function's
+ * own `lea 0x20(%ebx),%eax` immediately before calling
+ * `CSTGMonitorMixerChannel::Initialize()` PROVES the embedded
+ * `CSTGMonitorMixerChannel` sub-object lives at THIS class's own `+0x20`
+ * -- i.e. `CSTGHDRManager`'s already-declared `monitorMixerChannelSlots`
+ * array (base `+0x5a4`) is really just `recordTracks[i] + 0x20` for
+ * `i==0`, not an independent array; the two "0xc0-stride, 16-element"
+ * arrays documented in two separate places in this codebase
+ * (`CSTGHDRManager`'s own ctor comment vs. this file's own
+ * `ProcessRecordCommands()` comment) are the SAME array, just measured
+ * from two different sub-object bases.
+ *
+ * Confirmed fields (regparm(3), this=EAX, trackIdx=EDX):
+ *   +0x00 state (unsigned short) = trackIdx        -- NOT the `+0x4`
+ *         "state" field Start/Pause/Stop use; this ctor writes the
+ *         PARAMETER verbatim into a DIFFERENT field at +0x0 (real,
+ *         confirmed -- `mov %dx,(%eax)`), then separately zeroes +0x4
+ *         explicitly below. Two distinct fields, not a typo.
+ *   +0x04 state (start/pause/stop's own field) = 0
+ *   +0x08 meterPtr = 0
+ *   +0x18 ringCapacity = 0x61 (97)
+ *   +0x1c activeBuffer = 0
+ *   +0x20..+0xcb embedded CSTGMonitorMixerChannel, Initialize()'d with
+ *         the same trackIdx (zero-extended)
+ *   +0xbc = 1.0f (this RecordTrack's own field, distinct from the next
+ *         one)
+ *   `this+0x24` is read ONCE, early (cached in `ecx`, before any of the
+ *         zeroing/vtable-adjacent writes above), and `*(ecx+0x68) =
+ *         1.0f` is stored through it. CRITICAL: `this+0x24` is NOT a
+ *         separate field -- it is EXACTLY the embedded
+ *         `CSTGMonitorMixerChannel`'s own `+0x4` field (`this+0x20+0x4`
+ *         == `this+0x24`), the SAME packed pointer
+ *         `CSTGMonitorMixerChannel::Initialize()` itself dereferences a
+ *         few instructions later at its own `+0x4` -- confirmed via a
+ *         real, if initially-missed, offset collision: an early KAT
+ *         draft used two INDEPENDENT buffers for "this+0x24" and "the
+ *         embedded channel's +0x4", and the two writes -- `+0x68`=1.0f
+ *         here vs. `+0x60`=`&sGlobalBusSet[...]` in
+ *         `CSTGMonitorMixerChannel::Initialize()` -- correctly landed
+ *         on the SAME pointee object once the KAT was fixed to use one
+ *         shared buffer, exactly matching sec 10.149/10.157's own
+ *         "recompute every touched absolute offset before writing a
+ *         KAT" discipline. This function reads the field BEFORE
+ *         `CSTGMonitorMixerChannel::Initialize()` runs and nothing in
+ *         between writes `+0x24`, so both reads observe the identical
+ *         value.
+ *   +0x0c ringBase = CSTGBankMemory::AllocAligned(0x184, 0x10)
+ *         (0x184 bytes / 4-byte stride = 0x61 entries, matching the
+ *         capacity set at +0x18 above -- independent cross-check).
+ */
+void CSTGRecordTrack::Initialize(unsigned short trackIdx)
+{
+	unsigned char *base = (unsigned char *)this;
+
+	unsigned char *otherPtr = FromU32(*(unsigned int *)(base + 0x24));
+
+	*(unsigned short *)(base + 0x0) = trackIdx;
+	*(int *)(base + 0xac) = 0;	/* +0xac..+0xb4: confirmed zeroed, real gap fields */
+	*(unsigned int *)(base + 0xb4) = 0x20;
+	*(unsigned int *)(base + 0xb8) = 0;
+	base[0xb0] = 1;
+
+	*(float *)(base + 0xbc) = 1.0f;
+	*(float *)(otherPtr + 0x68) = 1.0f;
+
+	*(unsigned int *)(base + 0x8) = 0;
+	*(unsigned int *)(base + 0x1c) = 0;
+	*(unsigned int *)(base + 0x4) = 0;
+
+	CSTGMonitorMixerChannel *mmc = (CSTGMonitorMixerChannel *)(base + 0x20);
+	mmc->Initialize((unsigned int)(unsigned short)trackIdx);
+
+	*(unsigned int *)(base + 0x18) = 0x61;
+
+	unsigned char *ringBuf = CSTGBankMemory::AllocAligned(0x184, 0x10);
+	*(unsigned int *)(base + 0xc) = (unsigned int)(unsigned long)ringBuf;
 }

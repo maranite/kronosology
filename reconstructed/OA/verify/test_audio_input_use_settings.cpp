@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <sys/mman.h>
 #include "oa_global.h"
+#include "oa_engine.h"
 
 static void *mmap32(unsigned long size)
 {
@@ -57,6 +58,11 @@ static void check_float_close(const char *label, float got, float want)
 }
 
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
+
+/* Needed now that CSTGAudioInputMixerBase::Initialize() (batch 22) is
+ * real and references it directly -- not linked from
+ * audio_bus_manager.cpp in this test binary, own local storage. */
+unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 
 /* Storage for the CSTGGlobal singleton pointer OnPerformanceDeactivate()
  * reads its `+0x680`/`+0x67f` fields through (batch 20). A plain buffer is

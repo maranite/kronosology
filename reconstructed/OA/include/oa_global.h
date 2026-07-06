@@ -1267,6 +1267,17 @@ struct CSTGPan {
  */
 struct CBusChangeStateMachine {
 	void StartBusChange(int busId, int busType, unsigned int arg3);
+	/*
+	 * Reset(eSTGBusID, eSTGBusType) (batch 22, `.text+0x46290`, 35
+	 * bytes) confirmed real, branch/call-free: sets a default
+	 * `busId`/`busType` pair (`0x20`/`dl`, `cl` -- i.e. `+0xa`=0x20,
+	 * `+0xb`=busType arg) and re-arms the "started"/"changeToken"
+	 * pair (`+0x0`=1, `+0x4`=1, `+0xc`=2). Called only from
+	 * `CSTGAudioInputMixerBase::Initialize()`'s own per-entry setup
+	 * loop with `busId=0x20, busType=0` (reading its own just-written
+	 * `+0xa`/`+0xb` defaults straight back).
+	 */
+	void Reset(int busId, int busType);
 };
 
 /*
@@ -1339,6 +1350,35 @@ public:
 	void SetFXCtrlBus(unsigned int busIndex, int value);
 	void SetOutputBus(unsigned int busIndex, int value);
 	void SetPan(unsigned int busIndex, float value);
+
+	/*
+	 * Initialize(unsigned int count) (batch 22, `.text+0x68a80`, 342
+	 * bytes) confirmed. Writes `count` (truncated to a byte) into
+	 * `_gap4[0]`, allocates+zeroes a `count*0x90`-byte `mixerStateArray`,
+	 * then for each entry: computes `CSTGPan::CalculateMonoPanCoeffs(
+	 * coeffs, 1.0f, 0.5f)` (the SAME constant inputs every iteration --
+	 * recomputed identically each time, faithfully preserved, not
+	 * hoisted) into `+0x0`/`+0x4`, and sets `+0x60`/`+0x64`/`+0x68`/
+	 * `+0x6c`/`+0x70`/`+0x74` to `&sGlobalBusSet[0]`/`[32]`/`[32]`/`[32]`/
+	 * `[32]`/`[32]` respectively (bus 0, then five copies of bus 32 --
+	 * a confirmed real, if slightly redundant-looking, default). Then
+	 * allocates a `count*0x10`-byte `busChangeArray` (`operator new[]`,
+	 * NOT `CSTGBankMemory::AllocAligned` -- a real, confirmed
+	 * asymmetry) and default-initializes each `CBusChangeStateMachine`
+	 * entry's own `+0x0`/`+0x8`/`+0x9`/`+0xa`/`+0xb`/`+0xc` fields
+	 * directly (NOT via a call to `Reset()`) to `0`/`0x20`/`0`/`0x20`/
+	 * `0`/`0` -- deliberately leaving `+0x4` untouched (a real,
+	 * confirmed gap vs. `Reset()`'s own four-field write). Finally, IF
+	 * `count != 0`, loops over each mixerState/busChange PAIR again:
+	 * duplicates `mixerState[i]+0x0..+0xf` to `+0x10..+0x1f` (re-zeroing
+	 * `+0x18` after) and `+0x20..+0x2f` to `+0x30..+0x3f` (pure 16-byte
+	 * data movement via `movaps` -- the already-known "SSE used for
+	 * wide copy, not real vector math" case, safe to model as a plain
+	 * struct copy), then calls `busChangeArray[i].Reset(busId=
+	 * busChangeArray[i]'s own +0xa byte, busType=+0xb byte)` -- i.e.
+	 * `Reset(0x20, 0)` given the defaults just written above.
+	 */
+	void Initialize(unsigned int count);
 };
 
 struct CSTGAudioInput {

@@ -72,6 +72,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/alias_bank_convert.o \
            src/engine/waveseq_generator.o \
            src/engine/smoother_init.o \
+           src/engine/smoother_ctor.o \
            src/engine/smoother_cancel.o \
            src/engine/controller_rt_data_init.o \
            src/engine/controller_rt_data_ctor.o \
@@ -91,6 +92,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_input_use_settings.o \
            src/engine/message_processor.o \
            src/engine/hdr_record_track.o \
+           src/engine/hdr_manager_init.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
@@ -221,6 +223,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
+       src/engine/smoother_ctor.cpp \
        src/engine/smoother_cancel.cpp \
        src/engine/controller_rt_data_ctor.cpp \
        src/engine/slot_voice_data_ctor.cpp \
@@ -241,6 +244,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/audio_input_use_settings.cpp \
        src/engine/message_processor.cpp \
        src/engine/hdr_record_track.cpp \
+       src/engine/hdr_manager_init.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
@@ -299,6 +303,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
          verify/test_sampling_interface_ctor \
          verify/test_channel_values verify/test_hdr_record_track \
+         verify/test_smoother_ctor verify/test_hdr_manager_init \
          verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters \
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
@@ -424,8 +429,8 @@ verify/test_midi_queue: verify/test_midi_queue.cpp src/engine/midi_queue.cpp inc
 verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heap.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp -o $@
 
-verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp include/oa_global.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp -o $@
+verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_waveseq_setlist_init: verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp -o $@
@@ -466,8 +471,14 @@ verify/test_sampling_interface_ctor: verify/test_sampling_interface_ctor.cpp src
 verify/test_channel_values: verify/test_channel_values.cpp src/engine/channel_values_set_controller_value.cpp src/engine/cc_info_table.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_channel_values.cpp src/engine/channel_values_set_controller_value.cpp src/engine/cc_info_table.cpp -o $@
 
-verify/test_hdr_record_track: verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp include/oa_global.h include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp -o $@
+verify/test_hdr_record_track: verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_smoother_ctor: verify/test_smoother_ctor.cpp src/engine/smoother_ctor.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_ctor.cpp src/engine/smoother_ctor.cpp -o $@
+
+verify/test_hdr_manager_init: verify/test_hdr_manager_init.cpp src/engine/hdr_manager_init.cpp src/engine/hdr_record_track.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h include/oa_bank_memory.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_manager_init.cpp src/engine/hdr_manager_init.cpp src/engine/hdr_record_track.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp -o $@
@@ -484,8 +495,8 @@ verify/test_slot_voice_data_free: verify/test_slot_voice_data_free.cpp src/engin
 verify/test_channel_values_reset: verify/test_channel_values_reset.cpp src/engine/channel_values_reset.cpp src/engine/cc_info_table.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_channel_values_reset.cpp src/engine/channel_values_reset.cpp src/engine/cc_info_table.cpp -o $@
 
-verify/test_audio_input_use_settings: verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp include/oa_global.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp -o $@
+verify/test_audio_input_use_settings: verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_message_processor: verify/test_message_processor.cpp src/engine/message_processor.cpp include/oa_engine.h include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_message_processor.cpp src/engine/message_processor.cpp -o $@

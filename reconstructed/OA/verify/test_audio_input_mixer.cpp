@@ -9,6 +9,7 @@
 #include <cstring>
 #include <sys/mman.h>
 #include "oa_global.h"
+#include "oa_engine.h"
 
 static void *mmap32(unsigned long size)
 {
@@ -37,6 +38,11 @@ static void check_eq(const char *label, unsigned int got, unsigned int want)
  * storage precedent (e.g. test_engine.cpp/test_global.cpp's own copies
  * of the same static). */
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
+
+/* Needed now that CSTGAudioInputMixerBase::Initialize() (batch 22) is
+ * real and references it directly -- not linked from
+ * audio_bus_manager.cpp in this test binary, own local storage. */
+unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 
 /* Raw vtable-slot-3 target SetFXCtrlBus/SetHDRBus both dispatch through
  * (matching the project's established raw-vtable-dispatch convention,

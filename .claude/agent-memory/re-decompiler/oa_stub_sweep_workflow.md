@@ -1641,3 +1641,128 @@ sec 10.169.
 session; the user's own standing rule (do not auto-continue past the
 current batch without a fresh request) still applies going into any
 future batch 22.
+
+**Batch 22 specifics** (2026-07-06, sec 10.170, commit TBD): the user
+gave fresh explicit authorization to continue past batch 21. Re-verified
+state myself first (HEAD `c6c3fb6`, clean tree, stub count 72, last
+section 10.169 -- matched the briefing). Picked `CSTGSmoother::
+CSTGSmoother()` (a long-deferred bare-`{}` ctor, sec 10.160 "big but
+branch/call-free" category) plus a full `CSTGHDRManager::Initialize()`
+cluster: `CSTGPlaybackBuffer::Initialize()` (both overloads),
+`CSTGMonitorMixerChannel::Initialize()`, `CSTGRecordTrack::Initialize()`,
+`CSTGSampler::Initialize()`, `CSTGCDAudioPlay::Initialize()`,
+`CSTGAudioInputMixerBase::Initialize()`, `CBusChangeStateMachine::Reset()`
+-- 10 functions total, stub count 72 -> 70. Full writeup:
+MASTER_REFERENCE.md sec 10.170.
+
+**Key technique, a new variant of "check the whole reachable cluster
+before rejecting a big function":** `CSTGHDRManager::Initialize()` (1284
+bytes) had been passed over by several prior batches' cursory looks as
+"obviously too big/complex" -- this batch did a FULL disassembly anyway
+and found its entire call graph (6 more functions across 4 classes, one
+of them -- `CSTGSampler` -- belonging to an otherwise-enormous,
+genuinely out-of-scope class) was tractable because each individual
+dependency, checked in isolation, turned out to have either zero or one
+external call and zero vtable dispatch. Lesson reinforced: a big
+function's OWN size/reputation is not evidence about its dependencies'
+tractability -- trace the full reachable set before accepting a prior
+batch's "too complex" verdict at face value, even when several batches
+in a row have already passed on the same candidate.
+
+**Definitively resolved a previously-flagged cross-batch ambiguity**:
+sec 10.162 found `CSTGHDRManager`'s own ctor comment and
+`ProcessRecordCommands()`'s own comment describing the SAME `+0x584..
++0x11a4` memory region two different ways (`CSTGMonitorMixerChannel[16]`
+at `+0x5a4` vs. `CSTGRecordTrack[16]` at `+0x584`) and guessed, without
+proof, that they were the same array (`CSTGMonitorMixerChannel` embedded
+at `CSTGRecordTrack`'s own `+0x20`). This batch's fresh disassembly of
+`CSTGRecordTrack::Initialize()` -- specifically its own `lea
+0x20(%ebx),%eax` immediately before calling `CSTGMonitorMixerChannel::
+Initialize()`, with no other candidate value assigned to `eax` in
+between -- proves it outright. Lesson: when an earlier batch's own
+"likely but unconfirmed" hedge names a SPECIFIC follow-up disassembly
+that would resolve it (here: "not independently proven byte-for-byte
+this pass"), actively look for that resolution when a related function
+comes up in a later batch, rather than treating the hedge as permanently
+unresolved.
+
+**New gotcha, caught by two real KAT `FAILED` lines, not proactively**:
+when a function reads one field early (cached in a register) for one
+purpose, and a LATER-called sibling function reads what looks like "the
+same numeric field name" for a different purpose, always check whether
+they're actually the IDENTICAL absolute byte offset before assuming they
+are independent fields deserving independent host-KAT backing buffers.
+`CSTGRecordTrack::Initialize()`'s own `this+0x24` (read early, used for
+a `+0x68=1.0f` store) and the embedded `CSTGMonitorMixerChannel`'s own
+`+0x4` (read inside `CSTGMonitorMixerChannel::Initialize()`, called
+moments later on the sub-object at `this+0x20`) are the EXACT SAME
+absolute location (`this+0x20+0x4 == this+0x24`) -- an early KAT draft
+(in BOTH `test_hdr_record_track.cpp` and `test_hdr_manager_init.cpp`)
+provisioned two independent buffers for what it assumed were two
+separate fields, and the second buffer's address silently clobbered the
+first at that shared offset, producing two real, reproducible `FAILED`
+lines (not a crash) that only made sense once the absolute offsets were
+recomputed by hand. Fixed by consolidating to one shared buffer per
+track in both KATs and correcting the reconstruction's own header
+comment (which had independently made the same "these are separate"
+assumption). Same family as sec 10.149/10.157's "recompute every touched
+absolute offset before trusting a comment" discipline, but this time
+surfacing as a genuine field-identity MISTAKE in a first-draft
+explanatory comment, not just an arithmetic slip.
+
+**Recurring gotcha, hit again on the READ side this time (previously
+only seen on the write/field-declaration side, sec 10.156/10.158)**: a
+packed 32-bit "pointer" field on a class reinterpreted directly onto raw
+target memory must be read via `FromU32(*(unsigned int*)(base+N))`, NEVER
+`*(T**)(base+N)` -- the latter is an 8-byte read on this 64-bit host and
+silently pulls in 4 bytes of adjacent poison as the pointer's own upper
+half. Caught by a real SIGSEGV (`gdb -batch -ex run -ex bt` pinpointed
+the exact line immediately) in a first draft of
+`CSTGMonitorMixerChannel::Initialize()`; the identical mistake was found
+and fixed pre-emptively in `CSTGRecordTrack::Initialize()`'s own
+`this+0x24` read once the audit habit kicked in. When translating ANY
+new function that dereferences a packed-pointer field (not just when
+declaring one as a struct member), grep the new code for `*(.*\*\*)` /
+native double-pointer casts before considering it done -- this project's
+own `FromU32`/`ToU32` helpers exist in every file that needs them
+specifically to make this mistake impossible to make silently.
+
+**Real, deliberately-NOT-fixed gap found this batch**: `CSTGMonitorMixerChannel::
+CSTGMonitorMixerChannel()` and `CSTGPlaybackBuffer::CSTGPlaybackBuffer()`
+(both in `managers.cpp`) are STILL no-op `{ }` stubs -- a THIRD confirmed
+instance of the sec 10.164 "non-bare stub invisible to the bare-`{}`
+count" gotcha (found first for `CSTGHeapManager::Alloc`, sec 10.164).
+This means `CSTGMonitorMixerChannel::Initialize()`'s own unconditional
+`+0x4` dereference reads a field no ctor in this project populates yet --
+a real, pre-existing gap (not introduced by this batch), documented in
+both the header comment and both new KATs (which explicitly provision
+the field), left for whichever future batch reconstructs those two
+ctors. When scanning `bar2_stubs.cpp`/`managers.cpp` for "the next
+smallest candidate," keep checking for non-bare stub bodies specifically
+-- this is the third time this exact pattern has hidden a real,
+still-open dependency from the official count.
+
+**Deferred candidates, fully characterized for a future batch**: `CSTGEQ`'s
+five core math functions (`CalculateLowShelfBeta`/`CalculateHighShelfBeta`/
+`CalculatePeakingBeta`/`CalculatePeakingCoefficients`/
+`CalculateShelvingCoefficients`) block `CSTGHDRMiniModel::Initialize()`
+-- all branch/call-free but two use real `fptan` and two do heavy
+multi-register x87 stack shuffling across real branches (biquad filter
+coefficient math), NOT reducible to this project's existing
+single-input/output x87 primitive-wrapper convention (sec 10.117) --
+tractable via a "transcribe the whole function as one verbatim inline-asm
+block" approach, deliberately not attempted this batch (time budget).
+`CSTGDrumKitData::CSTGDrumKitData()` (925 bytes, confirmed fully
+branch/call-free, hence zero crash risk to promote) is a genuinely
+intricate nested double-loop (273 outer x 129 inner) populating ~8
+near-identical UUID-derived sub-records per entry -- safe but warrants
+the sec 10.164 "hand-trace 2-3 cases independently" discipline before
+committing to a KAT, not attempted this batch either.
+
+**Verification**: 65 verify/ binaries (up from 63), all exit 0, both of
+two full clean-rebuild passes (byte-identical both times); 32 unresolved
+symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`;
+`OA.ko` 156,984 bytes (up from 153,844). Commit hash: see git log for
+the "batch 22" commit (recorded after this memory file was written, per
+this project's own established two-commit pattern for memory-hash
+fills).

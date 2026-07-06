@@ -9,12 +9,9 @@
  * own `g_cancelAllSmoothersCalls` is exercised by real UpdateXXX call-order
  * assertions there. None of those three files link this new TU.
  *
- * NOTE: CSTGSmoother::CSTGSmoother() itself remains a deliberately deferred
- * stub (bar2_stubs.cpp) -- see smoother_init.cpp's own header note. This
- * means the `+0xf000/+0xf004/+0xf008/+0xf00c/+0xf010/+0xf014/+0xf018/+0xf01c`
- * fields this function reads/writes are not actually established by any
- * real ctor yet either -- same documented gap Initialize() already flagged,
- * not silently papered over here.
+ * UPDATE (batch 22): CSTGSmoother::CSTGSmoother() is real now too (see
+ * smoother_ctor.cpp) -- it zeroes +0xf004/+0xf008/+0xf00c/+0xf010/
+ * +0xf014/+0xf018, matching this function's own field usage.
  *
  * CSTGSmoother::CancelAllSmoothers() (.text+0x2a3d0 in OA_real.ko, 375
  * bytes) confirmed: walks the real doubly-linked "active smoothers" list

@@ -21,10 +21,17 @@
  */
 
 #include "oa_global.h"
+#include "oa_engine.h"		/* CSTGAudioBusManager::sGlobalBusSet */
+#include "oa_bank_memory.h"	/* CSTGBankMemory::AllocAligned */
+#include "oa_new_delete.h"	/* oa_size_t, for operator new[] below */
 
 static unsigned char *FromU32(unsigned int v)
 {
 	return (unsigned char *)(unsigned long)v;
+}
+static unsigned int ToU32(void *p)
+{
+	return (unsigned int)(unsigned long)p;
 }
 
 /* STGAPIOutToBusType[26]/STGAPIOutToPhysBusId[26] (sec 10.150, confirmed
@@ -320,5 +327,95 @@ void CSTGPan::CalculateMonoPanCoeffs(STGMonoPanCoeffs &out, float scale, float p
 	} else {
 		out.coeff0 = 0.0f;
 		out.coeff4 = FMul(kHardGain, scale);
+	}
+}
+
+/*
+ * CBusChangeStateMachine::Reset(eSTGBusID, eSTGBusType) (batch 22,
+ * `.text+0x46290`, 35 bytes) confirmed real, branch/call-free -- see
+ * this method's own declaration comment in oa_global.h.
+ */
+void CBusChangeStateMachine::Reset(int busId, int busType)
+{
+	unsigned char *base = (unsigned char *)this;
+
+	base[0x8] = 0x20;
+	base[0x9] = 0;
+	base[0xa] = (unsigned char)busId;
+	base[0xb] = (unsigned char)busType;
+	*(unsigned int *)(base + 0x0) = 1;
+	*(unsigned int *)(base + 0x4) = 1;
+	*(unsigned int *)(base + 0xc) = 2;
+}
+
+/*
+ * CSTGAudioInputMixerBase::Initialize(unsigned int) (batch 22,
+ * `.text+0x68a80`, 342 bytes) confirmed -- see this method's own
+ * declaration comment in oa_global.h for the full derivation.
+ */
+void CSTGAudioInputMixerBase::Initialize(unsigned int count)
+{
+	_gap4[0] = (unsigned char)count;
+
+	unsigned int mixerBytes = count * 0x90;
+	unsigned char *mixerArr = CSTGBankMemory::AllocAligned(mixerBytes, 0x10);
+	mixerStateArray32 = ToU32(mixerArr);
+	for (unsigned int i = 0; i < mixerBytes; i++)
+		mixerArr[i] = 0;
+
+	for (unsigned int i = 0; i < count; i++) {
+		unsigned char *entry = mixerArr + i * 0x90;
+
+		STGMonoPanCoeffs coeffs;
+		CSTGPan::CalculateMonoPanCoeffs(coeffs, 1.0f, 0.5f);
+		*(float *)(entry + 0x0) = coeffs.coeff0;
+		*(float *)(entry + 0x4) = coeffs.coeff4;
+
+		*(unsigned int *)(entry + 0x60) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 0 * 0x80);
+		*(unsigned int *)(entry + 0x64) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+		*(unsigned int *)(entry + 0x68) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+		*(unsigned int *)(entry + 0x6c) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+		*(unsigned int *)(entry + 0x70) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+		*(unsigned int *)(entry + 0x74) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+	}
+
+	unsigned char *busArr = (unsigned char *)operator new[]((oa_size_t)(count * 0x10));
+	busChangeArray32 = ToU32(busArr);
+	for (unsigned int i = 0; i < count; i++) {
+		unsigned char *entry = busArr + i * 0x10;
+		*(unsigned int *)(entry + 0x0) = 0;
+		entry[0x8] = 0x20;
+		entry[0x9] = 0;
+		entry[0xa] = 0x20;
+		entry[0xb] = 0;
+		*(unsigned int *)(entry + 0xc) = 0;
+	}
+
+	if (count == 0)
+		return;
+
+	for (unsigned int i = 0; i < count; i++) {
+		unsigned char *entry = mixerArr + i * 0x90;
+		/* movaps-based 16-byte block duplication (pure data movement,
+		 * not real SIMD arithmetic -- modeled as a plain byte copy). */
+		for (int b = 0; b < 16; b++)
+			entry[0x10 + b] = entry[0x0 + b];
+		*(unsigned int *)(entry + 0x18) = 0;
+		for (int b = 0; b < 16; b++)
+			entry[0x30 + b] = entry[0x20 + b];
+
+		/* Confirmed regparm mapping: busId is zero-extended
+		 * (`movzbl 0xa(%eax),%edx`), busType is sign-extended
+		 * (`movsbl 0xb(%eax),%ecx`) -- not symmetric, faithfully
+		 * preserved. */
+		CBusChangeStateMachine *bcsm = (CBusChangeStateMachine *)(busArr + i * 0x10);
+		unsigned char *bcsmBytes = (unsigned char *)bcsm;
+		bcsm->Reset((int)(unsigned char)bcsmBytes[0xa], (int)(signed char)bcsmBytes[0xb]);
 	}
 }

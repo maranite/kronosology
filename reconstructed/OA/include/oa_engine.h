@@ -243,12 +243,34 @@ public:
 class CSTGPlaybackBuffer {
 public:
 	CSTGPlaybackBuffer();
+	/*
+	 * Initialize(unsigned long)/Initialize(unsigned char, unsigned long)
+	 * (batch 22, `.text+0xd64a0`/`.text+0xd64e0`, 64/86 bytes) confirmed
+	 * real -- both overloads embed a `CSTGHDRCircularBuffer` at this
+	 * object's own offset 0 (i.e. `(CSTGHDRCircularBuffer*)this` is a
+	 * valid reinterpretation), then set a fixed `+0x40` constant
+	 * (0xfa1) and allocate/store an 8002-byte buffer pointer at `+0x34`
+	 * via `CSTGBankMemory::AllocAligned(0x1f42, 0x10)`. See
+	 * src/engine/hdr_manager_init.cpp for the full derivation.
+	 */
+	void Initialize(unsigned long totalSize);
+	void Initialize(unsigned char mode, unsigned long totalSize);
 	unsigned char _unrecovered[88];		/* confirmed size (array stride, see CSTGHDRManager) */
 };
 
 class CSTGMonitorMixerChannel {
 public:
 	CSTGMonitorMixerChannel();
+	/*
+	 * Initialize(unsigned int) (batch 22, `.text+0x71570`, 18 bytes)
+	 * confirmed real -- see hdr_record_track.cpp for the full
+	 * derivation, including a real, pre-existing gap this pass found
+	 * but deliberately left unfixed (out of scope): this class's own
+	 * ctor above is still a no-op stub, so the packed pointer field
+	 * this method unconditionally dereferences at `+0x4` is never
+	 * actually populated anywhere in this project yet.
+	 */
+	void Initialize(unsigned int busIndex);
 	unsigned char _unrecovered[172];		/* confirmed size -- see CSTGHDRManager's comment
 							 * for how this differs from the array's 192-byte
 							 * storage stride */
@@ -340,16 +362,59 @@ public:
 	void ProcessRecordCommands();		/* .text+0xd5b20, confirmed real, deferred */
 	void ProcessSamplerCommands();		/* .text+0xd5c50, confirmed real, deferred */
 	void ProcessCommands();
-	/* Confirmed real (called from CSTGEngine::Initialize(), sec 10.58),
-	 * body not reconstructed in this pass. */
+	/*
+	 * Initialize() (batch 22, `.text+0xd41c0`, 1284 bytes) confirmed
+	 * real -- see src/engine/hdr_manager_init.cpp for the full
+	 * derivation. For each of the 16 `(CSTGPlaybackBuffer,
+	 * CSTGRecordTrack)` pairs (playbackBuffers[i]/`+0x584+i*0xc0`):
+	 * calls `playbackBuffers[i].Initialize(mode=i, totalSize=0x30000)`,
+	 * writes three more bytes + a `sGlobalBusSet`-relative pointer at
+	 * that buffer's own `+0x50..+0x54` (a confirmed tail field beyond
+	 * what `CSTGPlaybackBuffer::Initialize()` itself touches), then
+	 * calls the record track's own `Initialize(trackIdx=i)`. Afterward:
+	 * a 17th, standalone `CSTGPlaybackBuffer` at `+0x18970` (1-arg
+	 * overload, totalSize=0x190000), an embedded `CSTGSampler` at
+	 * `+0x1190` (`Initialize()`), an embedded `CSTGCDAudioPlay` at
+	 * `+0x189c8` (`Initialize()`), then three `CSTGBankMemory::
+	 * AllocAligned()`-backed ring buffers stored at `+0x18ad8`/
+	 * `+0x18ae8`/`+0x18af8` (the middle one is `ProcessRecordCommands()`'s
+	 * own already-documented `+0x18ae8` ring base -- independent
+	 * cross-confirmation), plus a handful of confirmed-zeroed flag
+	 * bytes/dwords.
+	 *
+	 * This PROVES (see `CSTGRecordTrack::Initialize()`'s own comment)
+	 * that the `monitorMixerChannelSlots` array declared below is the
+	 * SAME memory as `recordTracks[i]+0x20` for a `CSTGRecordTrack[16]`
+	 * array based at `+0x584` -- not an independently-allocated region.
+	 * Deliberately NOT restructured into a named `CSTGRecordTrack
+	 * recordTracks[16]` field this pass (would ripple into this
+	 * class's own ctor in managers.cpp, which already references
+	 * `monitorMixerChannelSlots` by name for a DIFFERENT confirmed
+	 * write -- `monitorMixerChannelSlots[i]+0xac/+0xb0/+0xb4`, i.e.
+	 * absolute `+0x5a4+i*0xc0+0xac` = `recordTracks[i]+0xcc`, spilling
+	 * into the NEXT record track's own header, a real confirmed quirk
+	 * already documented on that class -- a DIFFERENT byte range than
+	 * `Initialize()`'s own `recordTracks[i]+0xac/+0xb0/+0xb4/+0xb8`
+	 * writes, so no actual field collision, just a documentation
+	 * correction): both `hdr_record_track.cpp`'s raw-offset-based
+	 * `CSTGRecordTrack::Initialize()` and this array declaration
+	 * continue to coexist safely.
+	 */
 	void Initialize();
 
 	unsigned char _unrecovered_head[4];		/* +0x000..+0x003, confirmed untouched by this ctor
 							 * (the array itself starts at +0x004, not +0x000) */
 	CSTGPlaybackBuffer playbackBuffers[16];	/* +0x004..+0x584, confirmed clean array */
 	unsigned char _unrecovered_gap[0x20];		/* +0x584..+0x5a4, partially confirmed zeroed (see ctor) */
-	unsigned char monitorMixerChannelSlots[16][0xc0]; /* +0x5a4..+0x11a4, see class comment for the
-							    * 172-vs-192-byte size/stride distinction */
+	unsigned char monitorMixerChannelSlots[16][0xc0]; /* +0x5a4..+0x11a4 -- CONFIRMED (batch 22,
+							    * CSTGRecordTrack::Initialize()) to be the SAME
+							    * memory as a CSTGRecordTrack[16] array based at
+							    * +0x584 (this field's own +0x20 offset relative to
+							    * that base), NOT an independent array -- see the
+							    * Initialize() comment above and CSTGRecordTrack's
+							    * own comment in this header. Left as-is (not
+							    * retyped) to avoid touching this ctor's own
+							    * pre-existing managers.cpp references. */
 	/* Everything from CSTGSampler (+0x1190 in the real object) onward is
 	 * confirmed to exist (see class comment) but not reconstructed here.
 	 * This placeholder covers none of that real space -- this class's
@@ -458,6 +523,61 @@ public:
 };
 
 /*
+ * CSTGSampler -- brand-new, opaque class (batch 22): embedded inside
+ * CSTGHDRManager at `+0x1190` (real total size NOT determined -- the
+ * next confirmed field, a 17th standalone CSTGPlaybackBuffer, doesn't
+ * begin until `+0x18970`, ~97KB later; CSTGSampler is a large, richly-
+ * methoded class in the real binary -- StandbyRAM/StandbyDisk/
+ * ProcessSubRate/CopyPretriggerDataForDiskMode/etc, sec 10.162's own
+ * flagged blocker for `CSTGHDRManager::ProcessSamplerCommands()`).
+ * Only `Initialize()` is reconstructed here -- confirmed via full
+ * disassembly to have exactly ONE external call
+ * (`CSTGBankMemory::AllocAligned`), no dependency on any of this
+ * class's own other (unreconstructed) methods, so it stands alone
+ * safely despite the surrounding class being far out of scope.
+ * `.text+0xd78d0`, 247 bytes: writes several confirmed-constant fields
+ * (two `1.0f` floats, a `0x61`/97 ring capacity, a couple of small
+ * flag bytes) then allocates a 0x184-byte (0x61 entries * 4 bytes)
+ * ring buffer, stored at `+0x17714` -- the SAME "capacity 0x61,
+ * 4-byte-stride ring" shape already confirmed for
+ * `CSTGRecordTrack::Initialize()`'s own `+0xc`/`+0x18` fields.
+ */
+class CSTGSampler {
+public:
+	void Initialize();
+};
+
+/*
+ * CSTGCDAudioPlay -- brand-new, opaque class (batch 22): embedded
+ * inside CSTGHDRManager at `+0x189c8` (this class's OWN `+0x0` is the
+ * `CSTGHDRCircularBuffer` this header's own CSTGHDRManager comment
+ * already flagged at that absolute offset; `CSTGCDAudioPlay::sInstance`
+ * is set -- elsewhere, not in this method -- to point at that same
+ * sub-object). `Initialize()` (`.text+0xd3a20`, 159 bytes) confirmed:
+ *   +0x00 (embedded CSTGHDRCircularBuffer) Initialize(totalSize=0x24c00,
+ *         flag=false, extra=0)
+ *   +0x30 = 0 (byte)
+ *   +0x54 = 0xac44 (44100 -- a sample rate)
+ *   +0x9c = CSTGBankMemory::AllocAligned(0x100, 0x10) (256-byte buffer)
+ *   +0xa0 (embedded CSTGAudioInputMixerBase) Initialize(count=2) --
+ *         matches this header's own CSTGHDRManager comment's
+ *         independently-derived absolute offset `+0x189c8+0xa0` ==
+ *         `+0x18a68`, exactly where that comment already said a
+ *         CSTGAudioInputMixerBase gets constructed -- cross-confirms
+ *         both findings.
+ *   mixerStateArray[0].+0x60 = the 256-byte buffer above
+ *   mixerStateArray[1].+0x60 = that same buffer + 0x80 (a 128-byte
+ *         per-channel split of the 256-byte allocation)
+ *   +0xb0/+0xb1 = 0x19 (25), +0xb2/+0xb3/+0xb4/+0xb5 = 0 (three more
+ *         small confirmed byte pairs, real semantics not otherwise
+ *         determined)
+ */
+class CSTGCDAudioPlay {
+public:
+	void Initialize();
+};
+
+/*
  * CSTGRecordTrack (batch 15) -- brand-new class, embedded inside
  * CSTGHDRManager as a 16-element array at `+0x584` (stride `0xc0`=192
  * bytes, confirmed via `CSTGHDRManager::ProcessRecordCommands()`'s own
@@ -526,6 +646,18 @@ struct CSTGRecordTrack {
 	 */
 	void StandbyRec(const char *arg1, unsigned int arg2, unsigned long arg3,
 			 int arg4, unsigned char arg5);
+
+	/*
+	 * Initialize(unsigned short) (batch 22, `.text+0xd7220`, 136 bytes)
+	 * confirmed real -- see hdr_record_track.cpp for the full field
+	 * derivation. Resolves this struct's own "LIKELY relationship"
+	 * hedge above: PROVEN (not just likely) that the embedded
+	 * `CSTGMonitorMixerChannel` sub-object lives at this class's own
+	 * `+0x20`, confirming `CSTGHDRManager`'s `monitorMixerChannelSlots`
+	 * array (declared separately, base `+0x5a4`) is the SAME memory as
+	 * `recordTracks[i]+0x20`, not an independent array.
+	 */
+	void Initialize(unsigned short trackIdx);
 };
 
 /* CSTGMonitorMixer's constructor (.text+0x69000, 6 bytes) confirmed to do

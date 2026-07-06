@@ -8,13 +8,13 @@
  * the same reasoning as midi_queue_writer.cpp/waveseq_setlist_init.cpp/
  * alias_bank_init.cpp (sec 10.83-10.85).
  *
- * NOTE: CSTGSmoother::CSTGSmoother() itself remains a deliberately
- * deferred stub (bar2_stubs.cpp) -- its real body constructs 320 sub-
- * objects with 4 different embedded MessageContext vtable relocations
- * each, a much larger task out of scope here. This means the fields
- * Initialize() depends on (+0xf004/+0xf008/+0xf00c, confirmed zeroed
- * by the real ctor) are NOT actually zeroed on the real target yet --
- * a genuine, documented gap, not silently papered over.
+ * UPDATE (batch 22): CSTGSmoother::CSTGSmoother() is now real too (see
+ * src/engine/smoother_ctor.cpp) -- it independently CONFIRMS this
+ * comment's own long-standing prediction that +0xf004/+0xf008/+0xf00c
+ * are zeroed by the real ctor (now proven via fresh disassembly, not
+ * just inferred from this method's own field usage), and additionally
+ * zeroes three more list-management fields (+0xf010/+0xf014/+0xf018)
+ * this comment didn't previously need to mention.
  */
 
 #include "oa_engine_init.h"
