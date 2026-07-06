@@ -817,6 +817,242 @@ static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
 
 /*
+ * CSTGVoice::CSTGVoice(unsigned short) (sec 10.157, `.text+0x5bff0`, 375
+ * bytes) -- see oa_engine.h's own class comment for the full confirmed
+ * field list. Vtable-install only (slots never dispatched within this
+ * ctor or, per the sec 10.153/10.154 checks already run on this whole
+ * subsystem, anywhere else currently linked), so the zero-filled
+ * `_ZTV9CSTGVoice` placeholder below is safe.
+ */
+unsigned char _ZTV9CSTGVoice[20];
+
+CSTGVoice::CSTGVoice(unsigned short note)
+{
+	unsigned char *base = (unsigned char *)this;
+
+	*(unsigned short *)(base + 0x04) = note;
+	*(unsigned int *)(base + 0x00) = ToU32(_ZTV9CSTGVoice + 8);
+
+	*(unsigned char *)(base + 0x3d) = 0;
+	*(unsigned char *)(base + 0x40) = 0;
+	*(unsigned int *)(base + 0x5c) = 0x1105;
+
+	*(unsigned int *)(base + 0x98) = ToU32(base);
+	*(unsigned int *)(base + 0x90) = 0;
+	*(unsigned int *)(base + 0x94) = 0;
+	*(unsigned int *)(base + 0x9c) = 0;
+
+	*(unsigned int *)(base + 0xa8) = ToU32(base);
+	*(unsigned int *)(base + 0xa0) = 0;
+	*(unsigned int *)(base + 0xa4) = 0;
+	*(unsigned int *)(base + 0xac) = 0;
+
+	*(unsigned int *)(base + 0xb8) = ToU32(base);
+	*(unsigned int *)(base + 0xb0) = 0;
+	*(unsigned int *)(base + 0xb4) = 0;
+	*(unsigned int *)(base + 0xbc) = 0;
+
+	*(unsigned int *)(base + 0xc8) = ToU32(base);
+	*(unsigned int *)(base + 0xc0) = 0;
+	*(unsigned int *)(base + 0xc4) = 0;
+	*(unsigned int *)(base + 0xcc) = 0;
+
+	*(unsigned int *)(base + 0xd8) = ToU32(base);
+	*(unsigned int *)(base + 0xd0) = 0;
+	*(unsigned int *)(base + 0xd4) = 0;
+	*(unsigned int *)(base + 0xdc) = 0;
+
+	*(unsigned int *)(base + 0xe8) = ToU32(base);
+	*(unsigned int *)(base + 0xe0) = 0;
+	*(unsigned int *)(base + 0xe4) = 0;
+	*(unsigned int *)(base + 0xec) = 0;
+
+	*(unsigned int *)(base + 0x08) = 0;
+	*(unsigned int *)(base + 0x0c) = 0;
+	*(unsigned int *)(base + 0x10) = 0;
+	*(unsigned int *)(base + 0x38) = 0;
+	*(unsigned char *)(base + 0x59) = 0;
+
+	/* Six packed 32-bit pointers into this same object -- real target
+	 * pointers, ToU32 per this project's established convention. The
+	 * targets themselves (+0x18/+0x1c/+0x20/+0x24/+0x28/+0x2c) are a
+	 * confirmed real gap: never written by this ctor. */
+	*(unsigned int *)(base + 0x68) = ToU32(base + 0x2c);
+	*(unsigned int *)(base + 0x6c) = ToU32(base + 0x20);
+	*(unsigned int *)(base + 0x70) = ToU32(base + 0x24);
+	*(unsigned int *)(base + 0x74) = ToU32(base + 0x28);
+	*(unsigned int *)(base + 0x80) = ToU32(base + 0x18);
+	*(unsigned int *)(base + 0x84) = ToU32(base + 0x1c);
+
+	*(unsigned int *)(base + 0x54) = 0;
+	*(unsigned int *)(base + 0x30) = 0;
+	*(unsigned int *)(base + 0x34) = 0;
+	*(unsigned int *)(base + 0x60) = 0;
+
+	*(unsigned char *)(base + 0x3c) = 0x20;
+	*(unsigned char *)(base + 0x3e) = 0x20;
+	*(unsigned char *)(base + 0x3f) = 0x20;
+	*(unsigned char *)(base + 0x41) = 0x20;
+
+	*(unsigned int *)(base + 0x44) = 0;
+	*(unsigned int *)(base + 0x48) = 0;
+	*(unsigned int *)(base + 0x4c) = 0;
+	*(unsigned char *)(base + 0x50) = 0;
+}
+
+/*
+ * CSTGVoiceAllocator::Initialize() (sec 10.157, `.text+0x4c920`, 719
+ * bytes). Builds THREE confirmed doubly-linked "insert at tail" free
+ * lists, threading `next`/`prev` pointer pairs into records the ctor
+ * (sec 10.147) already zeroed at those exact offsets (see oa_engine.h's
+ * own class comment) -- confirmed via independent cross-check: the
+ * ctor's own already-documented field list for `selfRefNodes`/
+ * `ownerBackRefRecords` zeroes precisely the fields this function goes
+ * on to thread (+0x0/+0x4/+0x8 and +0x4c/+0x50/+0x58 respectively), a
+ * strong independent signal this decode is right, not guessed.
+ *
+ * Each list shares the same shape: a head/tail/count triplet living in
+ * `_unrecovered_tail`, and a per-node `owner` back-pointer set to the
+ * CONSTANT address of the list's own head field -- the same "owner
+ * back-pointer to shared parent" idiom already confirmed for
+ * CSTGSmoother's free list (sec 10.154) and CSTGFrontPanelSmoothers
+ * (sec 10.153).
+ */
+static void STGVoiceAllocAppendList(unsigned char *base, unsigned int headOff, unsigned int tailOff,
+	unsigned int nextOff, unsigned int prevOff,
+	unsigned int ownerOff, unsigned char *node, unsigned int *tail,
+	unsigned int *count)
+{
+	unsigned int nodeAddr = ToU32(node);
+	unsigned int headAddr = ToU32(base + headOff);
+
+	if (*tail != 0) {
+		unsigned char *tailNode = FromU32(*tail);
+		unsigned int tailNext = *(unsigned int *)(tailNode + nextOff);
+		*(unsigned int *)(node + prevOff) = *tail;
+		*(unsigned int *)(node + nextOff) = tailNext;
+		if (tailNext != 0) {
+			unsigned char *tn = FromU32(tailNext);
+			*(unsigned int *)(tn + prevOff) = nodeAddr;
+		}
+		*(unsigned int *)(tailNode + nextOff) = nodeAddr;
+	} else {
+		*(unsigned int *)(base + headOff) = nodeAddr;
+	}
+	*(unsigned int *)(base + tailOff) = nodeAddr;
+	*(unsigned int *)(node + ownerOff) = headAddr;
+	(*count)++;
+	*tail = nodeAddr;
+}
+
+void CSTGVoiceAllocator::Initialize()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int i;
+
+	*(unsigned int *)(base + 0x44b3c) = 0;
+	*(unsigned char *)(base + 0x44b40) = 0;
+	*(unsigned short *)(base + 0x44ea4) = 0;
+	*(unsigned int *)(base + 0x44b38) = 0;
+	*(unsigned int *)(base + 0x44b0c) = 0;
+	*(unsigned char *)(base + 0x44b0a) = 0;
+	*(unsigned char *)(base + 0x44b08) = 0;
+	*(unsigned char *)(base + 0x44b09) = 0;
+
+	/* ---- list1: ownerBackRefRecords[400], stride 0x6c ---- */
+	{
+		unsigned int tail = *(unsigned int *)(base + 0x3a7d4);
+		unsigned int count = *(unsigned int *)(base + 0x3a7d8);
+		for (i = 0; i < 0x190; i++) {
+			unsigned char *node = base + 0xbb8 + i * 0x6c;
+			*(unsigned short *)(node + 0x0) = (unsigned short)i;
+			STGVoiceAllocAppendList(base, 0x3a7d0, 0x3a7d4,
+						 0x4c, 0x50, 0x58, node, &tail, &count);
+		}
+		*(unsigned int *)(base + 0x3a7d8) = count;
+	}
+
+	/* ---- list2: _unrecovered_bigArray[400], stride 0xe8 ---- */
+	{
+		unsigned int tail = *(unsigned int *)(base + 0x3a7c8);
+		unsigned int count = *(unsigned int *)(base + 0x3a7cc);
+		for (i = 0; i < 0x190; i++) {
+			unsigned char *node = base + 0x23d38 + i * 0xe8;
+			*(unsigned short *)(node + 0x0) = (unsigned short)i;
+			STGVoiceAllocAppendList(base, 0x3a7c4, 0x3a7c8,
+						 0xd8, 0xdc, 0xe0, node, &tail, &count);
+		}
+		*(unsigned int *)(base + 0x3a7cc) = count;
+	}
+
+	/*
+	 * ---- list3: selfRefNodes[50], stride 0x2c ----
+	 * Each node's own +0xc/+0x10 pointer fields are set from TWO base
+	 * addresses read fresh out of `CSTGVoiceModelManager::sInstance`
+	 * every iteration (its own +0x0/+0x4 fields -- both real 32-bit
+	 * target pointers, matching this project's already-opaque
+	 * `CSTGVoiceModelManager::_unrecovered[92]` declaration), each
+	 * offset by a running per-node byte accumulator (0x1a80 and 0x3300
+	 * respectively) -- two distinct per-voice-model tables this project
+	 * hasn't otherwise named.
+	 */
+	{
+		unsigned int tail = *(unsigned int *)(base + 0x3a7bc);
+		unsigned int count = *(unsigned int *)(base + 0x3a7c0);
+		unsigned int accum1 = 0, accum2 = 0;
+		unsigned char *mgr = (unsigned char *)CSTGVoiceModelManager::sInstance;
+		for (i = 0; i < 0x32; i++) {
+			unsigned char *node = base + i * 0x2c;
+			unsigned int arrBBase = *(unsigned int *)(mgr + 0x0);
+			unsigned int arrABase = *(unsigned int *)(mgr + 0x4);
+			*(unsigned int *)(node + 0xc) = arrBBase + accum1;
+			*(unsigned int *)(node + 0x10) = arrABase + accum2;
+			*(unsigned short *)(node + 0x14) = (unsigned short)i;
+			STGVoiceAllocAppendList(base, 0x3a7b8, 0x3a7bc,
+						 0x0, 0x4, 0x8, node, &tail, &count);
+			accum2 += 0x3300;
+			accum1 += 0x1a80;
+		}
+		*(unsigned int *)(base + 0x3a7c0) = count;
+	}
+
+	/* 200 CSTGVoice objects, packed 32-bit pointers stored into
+	 * voicePtrs[]. */
+	for (i = 0; i < 200; i++) {
+		void *mem = CSTGBankMemory::AllocAligned(0xf0, 0x10);
+		new (mem) CSTGVoice((unsigned short)i);
+		voicePtrs[i] = ToU32(mem);
+	}
+	/* Second pass: a separate 0x4000-byte buffer per voice, pointer
+	 * stored at voice+0x60. */
+	for (i = 0; i < 200; i++) {
+		void *buf = CSTGBankMemory::AllocAligned(0x4000, 0x10);
+		unsigned char *voice = FromU32(voicePtrs[i]);
+		*(unsigned int *)(voice + 0x60) = ToU32(buf);
+	}
+
+	/* 16x128-word table at +0x40b54, companion 16-word row-flag array
+	 * at +0x41b54. */
+	for (unsigned int row = 0; row < 16; row++) {
+		*(unsigned short *)(base + 0x41b54 + row * 2) = 0;
+		unsigned char *rowBase = base + 0x40b54 + row * 0x100;
+		for (unsigned int col = 0; col < 0x80; col++)
+			*(unsigned short *)(rowBase + col * 2) = 0;
+	}
+
+	*(unsigned short *)(base + 0x44b10) = 0;
+	*(unsigned short *)(base + 0x44b12) = 0;
+	*(unsigned short *)(base + 0x44b14) = 0;
+	*(unsigned short *)(base + 0x44b16) = 0;
+	*(unsigned short *)(base + 0x44b18) = 0;
+	*(unsigned short *)(base + 0x44b1a) = 0;
+	*(unsigned short *)(base + 0x44b1c) = 0;
+	*(unsigned short *)(base + 0x44b1e) = 0;
+	*(unsigned short *)(base + 0x44b20) = 0;
+	*(unsigned short *)(base + 0x44b22) = 0;
+}
+
+/*
  * CSTGMonitorMixer::Initialize() (`.text+0x69010`, 4 bytes) confirmed: a
  * single `AND [this],0xe0` -- clears the low 5 bits of `this->fieldAt(0)`,
  * leaving the top 3 bits untouched. Same "partial flag clear implies a

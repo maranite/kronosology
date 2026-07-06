@@ -1056,18 +1056,72 @@ public:
  * (ctor) vs destroy/free (dtor) counterpart already established for
  * `CPowerOffTimer` (see that class's own comment).
  */
-/* Opaque forward decl -- CSTGVoice is a large, separately-reconstructed
- * synthesis-voice class not otherwise touched in this pass; only ever
- * needed here as a pointer target (EmergencyFreeVoiceList/FreeVoice's
- * own confirmed parameter type). */
-class CSTGVoice;
+/*
+ * CSTGVoice::CSTGVoice(unsigned short note) (sec 10.157, `.text+0x5bff0`,
+ * 375 bytes) -- confirmed real, reconstructed for real in managers.cpp
+ * (right alongside CSTGVoiceAllocator::Initialize(), the only place that
+ * constructs one). Vtable-install only, no dispatch within the ctor
+ * itself (safe per the sec 10.153 "install vs dispatch" rule). Confirmed
+ * minimum size 0xf0 (240) bytes, exactly matching
+ * `CSTGVoiceAllocator::Initialize()`'s own `AllocAligned(0xf0, 0x10)`
+ * call for each of the 200 voices it constructs.
+ *
+ * Confirmed fields (raw offsets, this class's own broader semantics --
+ * SetNote() etc, seen in passing while disassembling this ctor -- are
+ * NOT otherwise reconstructed in this pass, matching this project's
+ * established "opaque byte-array class, ctor only" precedent for
+ * CSTGSlotState/CEmergencyStealer):
+ *   +0x00  dword  vtable ptr (&_ZTV9CSTGVoice[2])
+ *   +0x04  word   note (the ctor's own argument, stored verbatim)
+ *   +0x08/+0x0c/+0x10/+0x38  dwords, zeroed
+ *   +0x30/+0x34/+0x44/+0x48/+0x4c/+0x54/+0x60/+0x90/+0x94/+0x9c/
+ *   +0xa0/+0xa4/+0xac/+0xb0/+0xb4/+0xbc/+0xc0/+0xc4/+0xcc/+0xd0/
+ *   +0xd4/+0xdc/+0xe0/+0xe4/+0xec  dwords, zeroed
+ *   +0x3d/+0x40/+0x50/+0x59  bytes, zeroed
+ *   +0x3c/+0x3e/+0x3f/+0x41  bytes, set to 0x20 (a constant, real
+ *                  meaning not determined)
+ *   +0x5c  dword, set to the constant 0x1105 (same "magic" value this
+ *                  project has already seen elsewhere, e.g. the global
+ *                  ctor for CSTGRandom::sRandomGenerator -- not
+ *                  otherwise interpreted here)
+ *   +0x98/+0xa8/+0xb8/+0xc8/+0xd8/+0xe8  dwords, each set to the
+ *                  object's OWN address (self-pointer, packed 32-bit --
+ *                  ToU32 per this project's established host/target
+ *                  pointer-width convention)
+ *   +0x68/+0x6c/+0x70/+0x74/+0x80/+0x84  dwords, each a packed 32-bit
+ *                  pointer INTO this object at a fixed relative offset
+ *                  (+0x2c/+0x20/+0x24/+0x28/+0x18/+0x1c respectively) --
+ *                  the targets themselves are never written by this
+ *                  ctor (a confirmed real gap, presumably populated by
+ *                  a not-otherwise-reconstructed sibling method).
+ */
+extern "C" unsigned char _ZTV9CSTGVoice[20];
+class CSTGVoice {
+public:
+	CSTGVoice(unsigned short note);
+	unsigned char _unrecovered[0xf0];
+};
 
 class CSTGVoiceAllocator {
 public:
 	static CSTGVoiceAllocator *sInstance;
 	CSTGVoiceAllocator();
 	~CSTGVoiceAllocator();
-	void Initialize();	/* confirmed real, body not reconstructed, sec 10.58 */
+	/*
+	 * Initialize() (sec 10.157, `.text+0x4c920`, 719 bytes) reconstructed
+	 * for real -- see managers.cpp. Builds THREE confirmed doubly-linked
+	 * "insert at tail" free lists over the ctor's own already-confirmed
+	 * arrays (see this class's own header comment above for the array
+	 * layout, and managers.cpp's own header comment for the exact
+	 * per-list head/tail/count field offsets and per-node next/prev/
+	 * owner field offsets), then constructs 200 `CSTGVoice` objects (one
+	 * per `voicePtrs[]` slot) plus a per-voice 0x4000-byte
+	 * `CSTGBankMemory::AllocAligned` buffer (pointer stored at each
+	 * voice's own +0x60), then zeroes a small 16x128-word table
+	 * (+0x40b54) with a companion 16-word row-flag array (+0x41b54) and
+	 * 10 more trailing words (+0x44b10..+0x44b22).
+	 */
+	void Initialize();
 
 	/* Confirmed real (via relocation from CSTGGlobal::
 	 * UpdateConvertPosition, sec 10.70), own body not reconstructed in
@@ -1107,12 +1161,48 @@ public:
 	void FreeVoice(CSTGVoice *voice);
 	void DoPendingMoveVoices();
 
-	unsigned char selfRefNodes[50][0x2c];		/* +0x0000..+0x0898, confirmed self-ref pattern */
-	unsigned char _unrecovered_gap1[0x320];	/* +0x0898..+0x0bb8, confirmed untouched */
-	unsigned char ownerBackRefRecords[400][0x6c];	/* +0x0bb8..+0xb478, confirmed pattern (see above) */
+	unsigned char selfRefNodes[50][0x2c];		/* +0x0000..+0x0898, confirmed self-ref pattern
+							 * (ctor) -- ALSO list3's own 50-node free list,
+							 * threaded by Initialize() (sec 10.157, see
+							 * managers.cpp): next@+0x0/prev@+0x4/owner@+0x8/
+							 * arrayBPtr@+0xc/arrayAPtr@+0x10/idx@+0x14 (u16),
+							 * all confirmed already-zeroed by the ctor's own
+							 * fields at those exact offsets -- no conflict. */
+	unsigned int  voicePtrs[200];			/* +0x0898..+0x0bb8, replaces the prior
+							 * "_unrecovered_gap1" placeholder -- confirmed
+							 * untouched by the CTOR (still real, see above)
+							 * but populated by Initialize() (sec 10.157):
+							 * 200 packed 32-bit CSTGVoice* pointers. */
+	unsigned char ownerBackRefRecords[400][0x6c];	/* +0x0bb8..+0xb478, confirmed pattern (see above,
+							 * ctor) -- ALSO list1's own 400-node free list,
+							 * threaded by Initialize() (sec 10.157): idx@+0x0
+							 * (u16)/next@+0x4c/prev@+0x50/owner@+0x58, all
+							 * confirmed already-zeroed by the ctor's own
+							 * fields at those exact offsets -- no conflict. */
 	CSTGSlotState slotStates[16];			/* +0xb478..+0x23d38, confirmed clean array */
-	unsigned char _unrecovered_bigArray[400][0xe8]; /* +0x23d38..+0x3a7b8, confirmed count/stride only */
-	unsigned char _unrecovered_tail[0x44ea8 - 0x3a7b8]; /* +0x3a7b8..+0x44ea8, confirmed to exist, not reconstructed */
+	unsigned char _unrecovered_bigArray[400][0xe8]; /* +0x23d38..+0x3a7b8, confirmed count/stride only
+							 * (ctor leaves this array's CONTENTS entirely
+							 * unreconstructed) -- ALSO list2's own 400-node
+							 * free list, threaded by Initialize() (sec
+							 * 10.157): idx@+0x0 (u16)/next@+0xd8/prev@+0xdc/
+							 * owner@+0xe0 (the rest of each 0xe8-byte record
+							 * remains opaque, matching this array's own
+							 * pre-existing "not reconstructed" status). */
+	unsigned char _unrecovered_tail[0x44ea8 - 0x3a7b8]; /* +0x3a7b8..+0x44ea8, confirmed to exist, not
+							 * reconstructed by the ctor -- Initialize() (sec
+							 * 10.157) DOES touch several fields inside this
+							 * blob: list3's own head(+0x3a7b8)/tail(+0x3a7bc)/
+							 * count(+0x3a7c0), list2's head(+0x3a7c4)/
+							 * tail(+0x3a7c8)/count(+0x3a7cc), list1's
+							 * head(+0x3a7d0)/tail(+0x3a7d4)/count(+0x3a7d8),
+							 * several small scalar flags at +0x44b08..+0x44ea4,
+							 * a 16x128-word table at +0x40b54 with a companion
+							 * 16-word row-flag array at +0x41b54, and 10 more
+							 * trailing words at +0x44b10..+0x44b22 -- all
+							 * accessed via raw offsets into this same opaque
+							 * blob in managers.cpp, no struct changes needed
+							 * (the remainder of this ~44KB region is still not
+							 * reconstructed). */
 	unsigned int  requirementsMutex;		/* +0x44ea8, confirmed real recursive pthread mutex handle */
 };
 

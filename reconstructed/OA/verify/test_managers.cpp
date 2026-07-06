@@ -17,6 +17,7 @@
 #include <new>
 #include <sys/mman.h>
 #include "oa_engine.h"
+#include "oa_bank_memory.h"
 
 /* Real kernel-only APIs (RTAI mutex wrappers) and a not-yet-reconstructed
  * static method (CSTGToneAdjustDescriptor) -- mocked here purely so
@@ -650,6 +651,158 @@ int main(void)
 			 g_lastKmallocFlags, 0xd1);
 		check_eq("return value == the __kmalloc'd pointer, truncated to 32 bits",
 			 ret, (unsigned int)(unsigned long)g_lastKmallocReturn);
+	}
+
+	printf("\n[24] CSTGVoiceAllocator::Initialize() (sec 10.157): three confirmed\n"
+	       "     doubly-linked free lists (400+400+50 nodes) + 200 CSTGVoice +\n"
+	       "     per-voice 0x4000 buffer\n");
+	{
+		/*
+		 * Every pointer this function stores into a packed 32-bit
+		 * field and later reconstitutes (list links, voicePtrs[],
+		 * the per-voice +0x60 buffer, and the two CSTGVoiceModelManager
+		 * array bases) must itself live in the low 32 bits of the
+		 * address space -- same MAP_32BIT precedent as test [22]'s own
+		 * `arr` above, needed here for real (not just documented)
+		 * since this function actually WALKS these lists, unlike
+		 * test [19]'s ctor-only checks which only ever compare
+		 * truncated values without dereferencing them.
+		 */
+		unsigned long arenaSize = 200UL * 0x100 + 200UL * 0x4000 + 0x10000;
+		unsigned char *arena = (unsigned char *)mmap(0, arenaSize, PROT_READ | PROT_WRITE,
+							      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		CSTGBankMemory::Initialize(arena, arenaSize);
+
+		unsigned char *arrB = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *arrA = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char modelMgrBuf[92];
+		memset(modelMgrBuf, 0, sizeof(modelMgrBuf));
+		*(unsigned int *)(modelMgrBuf + 0x0) = (unsigned int)(unsigned long)arrB;
+		*(unsigned int *)(modelMgrBuf + 0x4) = (unsigned int)(unsigned long)arrA;
+		CSTGVoiceModelManager::sInstance = (CSTGVoiceModelManager *)modelMgrBuf;
+
+		/*
+		 * The CSTGVoiceAllocator object itself must ALSO be MAP_32BIT
+		 * (Initialize() reconstitutes list-node pointers stored
+		 * within itself) -- `poison_and_construct`'s plain heap
+		 * `new[]` is not safe to reuse here, so this section builds
+		 * its own buffer instead. Zero-initialized (mmap's own
+		 * natural zero pages) rather than 0xcc-poisoned: several of
+		 * the fields Initialize() reads as PRE-EXISTING state (the
+		 * three lists' own head/tail/count triplets) are documented
+		 * as a real gap the ctor itself never establishes -- on real
+		 * hardware this object's own backing memory is understood to
+		 * start zeroed (matching every other CSTGBankMemory-pool-
+		 * backed global singleton in this project), so zero is the
+		 * realistic precondition, not an arbitrary weakening of the
+		 * test.
+		 */
+		unsigned char *va2Buf = (unsigned char *)mmap(0, sizeof(CSTGVoiceAllocator),
+							       PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		CSTGVoiceAllocator *va2 = new (va2Buf) CSTGVoiceAllocator();
+		va2->Initialize();
+
+		/* ---- list1: ownerBackRefRecords[400], stride 0x6c ---- */
+		check_eq("list1 count == 400", *(unsigned int *)(va2Buf + 0x3a7d8), 400u);
+		check_eq("list1 head == &ownerBackRefRecords[0]",
+			 *(unsigned int *)(va2Buf + 0x3a7d0),
+			 (unsigned int)(unsigned long)(va2Buf + 0xbb8));
+		check_eq("list1 tail == &ownerBackRefRecords[399]",
+			 *(unsigned int *)(va2Buf + 0x3a7d4),
+			 (unsigned int)(unsigned long)(va2Buf + 0xbb8 + 399 * 0x6c));
+		{
+			/* Walk the list head-to-tail; a tail-append build of
+			 * 400 sequential nodes must visit them in order
+			 * 0..399 (confirmed via each node's own +0x0 idx
+			 * field, not just a bare hop count). */
+			unsigned char *node = va2Buf + (unsigned long)(*(unsigned int *)(va2Buf + 0x3a7d0) -
+									(unsigned int)(unsigned long)va2Buf);
+			unsigned int hops = 0;
+			bool orderOk = true;
+			unsigned int ownerAddr = (unsigned int)(unsigned long)(va2Buf + 0x3a7d0);
+			bool ownerOk = true;
+			while (node) {
+				if (*(unsigned short *)(node + 0x0) != hops) orderOk = false;
+				if (*(unsigned int *)(node + 0x58) != ownerAddr) ownerOk = false;
+				unsigned int nextU32 = *(unsigned int *)(node + 0x4c);
+				hops++;
+				if (nextU32 == 0) break;
+				node = va2Buf + (nextU32 - (unsigned int)(unsigned long)va2Buf);
+			}
+			check_eq("list1 walk visits exactly 400 nodes in sequential idx order",
+				 hops, 400u);
+			check_eq("list1 walk: idx field matches walk order at every node",
+				 (unsigned int)orderOk, 1);
+			check_eq("list1 walk: owner back-pointer == &list1 head at every node",
+				 (unsigned int)ownerOk, 1);
+		}
+
+		/* ---- list2: _unrecovered_bigArray[400], stride 0xe8 ---- */
+		check_eq("list2 count == 400", *(unsigned int *)(va2Buf + 0x3a7cc), 400u);
+		check_eq("list2 head == &_unrecovered_bigArray[0]",
+			 *(unsigned int *)(va2Buf + 0x3a7c4),
+			 (unsigned int)(unsigned long)(va2Buf + 0x23d38));
+		check_eq("list2 tail == &_unrecovered_bigArray[399]",
+			 *(unsigned int *)(va2Buf + 0x3a7c8),
+			 (unsigned int)(unsigned long)(va2Buf + 0x23d38 + 399 * 0xe8));
+		{
+			unsigned char *node = va2Buf + (*(unsigned int *)(va2Buf + 0x3a7c4) -
+							 (unsigned int)(unsigned long)va2Buf);
+			unsigned int hops = 0;
+			bool orderOk = true;
+			while (node) {
+				if (*(unsigned short *)(node + 0x0) != hops) orderOk = false;
+				unsigned int nextU32 = *(unsigned int *)(node + 0xd8);
+				hops++;
+				if (nextU32 == 0) break;
+				node = va2Buf + (nextU32 - (unsigned int)(unsigned long)va2Buf);
+			}
+			check_eq("list2 walk visits exactly 400 nodes in sequential idx order",
+				 hops, 400u);
+			check_eq("list2 walk: idx field matches walk order at every node",
+				 (unsigned int)orderOk, 1);
+		}
+
+		/* ---- list3: selfRefNodes[50], stride 0x2c ---- */
+		check_eq("list3 count == 50", *(unsigned int *)(va2Buf + 0x3a7c0), 50u);
+		unsigned char *node3 = va2Buf + 3 * 0x2c;
+		check_eq("list3 node[3].+0xc == arrB + 3*0x1a80",
+			 *(unsigned int *)(node3 + 0xc),
+			 (unsigned int)((unsigned long)arrB + 3 * 0x1a80));
+		check_eq("list3 node[3].+0x10 == arrA + 3*0x3300",
+			 *(unsigned int *)(node3 + 0x10),
+			 (unsigned int)((unsigned long)arrA + 3 * 0x3300));
+		check_eq("list3 node[3].+0x14 idx == 3", *(unsigned short *)(node3 + 0x14), 3);
+
+		/* ---- 200 CSTGVoice + per-voice 0x4000 buffer ---- */
+		unsigned int voice0 = va2->voicePtrs[0];
+		unsigned int voice199 = va2->voicePtrs[199];
+		check_eq("voicePtrs[0] non-null", (unsigned int)(voice0 != 0), 1);
+		check_eq("voicePtrs[199] non-null", (unsigned int)(voice199 != 0), 1);
+		check_eq("voicePtrs[0] != voicePtrs[199] (distinct allocations)",
+			 (unsigned int)(voice0 != voice199), 1);
+		unsigned char *v0 = (unsigned char *)(unsigned long)voice0;
+		unsigned char *v199 = (unsigned char *)(unsigned long)voice199;
+		check_eq("CSTGVoice[0].note (+0x4) == 0", *(unsigned short *)(v0 + 0x4), 0);
+		check_eq("CSTGVoice[199].note (+0x4) == 199", *(unsigned short *)(v199 + 0x4), 199);
+		check_eq("CSTGVoice[0] self-pointer at +0x98 == itself",
+			 *(unsigned int *)(v0 + 0x98), (unsigned int)(unsigned long)v0);
+		unsigned int buf0 = *(unsigned int *)(v0 + 0x60);
+		unsigned int buf199 = *(unsigned int *)(v199 + 0x60);
+		check_eq("CSTGVoice[0]'s +0x60 buffer non-null", (unsigned int)(buf0 != 0), 1);
+		check_eq("CSTGVoice[199]'s +0x60 buffer non-null", (unsigned int)(buf199 != 0), 1);
+		check_eq("CSTGVoice[0]/[199]'s +0x60 buffers are distinct",
+			 (unsigned int)(buf0 != buf199), 1);
+
+		/* ---- trailing zeroed table + scalars ---- */
+		check_eq("+0x40b54 table[0][0] == 0", *(unsigned short *)(va2Buf + 0x40b54), 0);
+		check_eq("+0x40b54 table[15][127] == 0",
+			 *(unsigned short *)(va2Buf + 0x40b54 + 15 * 0x100 + 127 * 2), 0);
+		check_eq("+0x41b54 rowFlag[15] == 0", *(unsigned short *)(va2Buf + 0x41b54 + 15 * 2), 0);
+		check_eq("+0x44b22 (last trailing word) == 0", *(unsigned short *)(va2Buf + 0x44b22), 0);
 	}
 
 	printf("=====================================================\n");

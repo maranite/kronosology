@@ -91,7 +91,11 @@ void CSTGMidiPortManager::Initialize() {}
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
 void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) {}
 void CSTGMidiPortManager::NotifyNKS4TestMode() {}
-void CSTGVoiceAllocator::Initialize() {}
+/* CSTGVoiceAllocator::Initialize() is real now, sec 10.157 -- see
+ * managers.cpp (also CSTGVoice::CSTGVoice(unsigned short), a brand-new
+ * class this same pass gives its own full definition in oa_engine.h --
+ * see there for the confirmed field list and _ZTV9CSTGVoice's own
+ * zero-filled placeholder vtable, defined in managers.cpp). */
 /* CSTGVoiceAllocator::~CSTGVoiceAllocator()/CSTGMessageProcessor::
  * ~CSTGMessageProcessor() are real now, sec 10.147 -- see managers.cpp. */
 void CSTGAudioBusManager::MixPerformanceOutputs() {}
