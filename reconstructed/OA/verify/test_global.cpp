@@ -176,6 +176,12 @@ static void NotifySoloChangeVtableFn(void *self)
 static int g_balanceStaticLoadCalls;
 void CLoadBalancer::BalanceStaticLoad() { g_balanceStaticLoadCalls++; }
 unsigned char *STGAPIFrontPanelStatus::sInstance;
+/* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
+ * lives in engine_init.cpp (not linked here) -- this file links
+ * managers.cpp directly, so CSTGSamplingDaemon::ProcessCommands()'s own
+ * real reference to the CSTGRecordBuffer instantiation (sec 10.160)
+ * needs local storage to link. */
+template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 /* SendPerfChangeToMidiOut is now real (sec 10.98) -- see
  * src/engine/global.cpp; its own confirmed-real, deliberately deferred
  * dependencies still need link-satisfying mocks here (not exercised by

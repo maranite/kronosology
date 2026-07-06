@@ -89,7 +89,12 @@ void CSTGStreamingFileReader::ProcessCommands() {}
  * managers.cpp (also its own newly-discovered dependency,
  * CSTGHDRCircularBuffer, a brand-new fully-reconstructed class -- see
  * oa_engine.h). */
-void CSTGSamplingDaemon::ProcessCommands() {}
+/* CSTGSamplingDaemon::ProcessCommands() is real now, sec 10.160 -- see
+ * managers.cpp (right after CSTGCDWorker::ProcessCommands()). Its own
+ * FIVE siblings (CSTGFileCloser/CSTGHDRFileReader/CSTGHDRFileWriter/
+ * CSTGStreamingFileReader::ProcessCommands()) all still dispatch through
+ * a not-yet-recovered vtable or pointer-to-member-function table and
+ * remain deliberately stubbed below. */
 void CSTGMidiPortManager::Initialize() {}
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
 /* CSTGMidiPortManager::WriteSTGMidiOutQueue()/NotifyNKS4TestMode() are
@@ -262,7 +267,9 @@ void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
  * src/engine/engine_init.cpp (also corrects a real bug that promotion
  * uncovered: this class's true size is 0x301c bytes, not the 0x38 this
  * project had assumed before its ctor was ever disassembled). */
-CSTGSamplingInterface::CSTGSamplingInterface() {}
+/* CSTGSamplingInterface::CSTGSamplingInterface() is real now, sec
+ * 10.160 -- see src/engine/sampling_interface_ctor.cpp (also its own
+ * confirmed real vtable, _ZTV21CSTGSamplingInterface, defined there). */
 /* CSTGSequence::CSTGSequence() is real now, sec 10.153 -- see
  * src/engine/sequence_ctor.cpp. */
 /* CSTGSlotVoiceData::CSTGSlotVoiceData() is real now, sec 10.155 -- see

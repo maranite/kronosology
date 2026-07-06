@@ -81,6 +81,12 @@ extern "C" void PushUnsolicitedMessage(void *) { g_pushMsgCalls++; }
  * (CEmergencyStealer::sInstance cleared) directly, via CLoadBalancer's
  * own embedded `emergencyStealer` member. */
 unsigned char *STGAPIFrontPanelStatus::sInstance;
+/* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
+ * lives in engine_init.cpp (not linked here) -- this file links
+ * managers.cpp directly, so CSTGSamplingDaemon::ProcessCommands()'s own
+ * real reference to the CSTGRecordBuffer instantiation (sec 10.160)
+ * needs local storage to link. */
+template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 static unsigned int g_onlineCpus = 2, g_khz = 1500000;
 extern "C" unsigned int stg_num_online_cpus(void) { return g_onlineCpus; }
 extern "C" unsigned int stg_get_cpu_khz(void) { return g_khz; }

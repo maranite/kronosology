@@ -81,6 +81,12 @@ void CSTGControllerRTData::OnExtModeSetChange() { }
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) { }
 void CLoadBalancer::BalanceStaticLoad() { }
 unsigned char *STGAPIFrontPanelStatus::sInstance;
+/* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
+ * lives in engine_init.cpp (not linked here) -- this file links
+ * managers.cpp directly, so CSTGSamplingDaemon::ProcessCommands()'s own
+ * real reference to the CSTGRecordBuffer instantiation (sec 10.160)
+ * needs local storage to link. */
+template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int) { }
 void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int) { }
 void CSTGControllerRTData::HandleControllerChange(int, unsigned char, bool, bool) { }

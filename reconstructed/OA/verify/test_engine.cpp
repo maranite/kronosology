@@ -117,7 +117,12 @@ void CSTGStreamingFileReader::ProcessCommands()  { log_call("StreamingFileReader
  * the real body's producer==consumer==0 loop condition makes it a
  * genuine, silent no-op here -- no log_call to expect (see the updated
  * expected string below). */
-void CSTGSamplingDaemon::ProcessCommands()       { log_call("SamplingDaemon::ProcessCommands"); }
+/* CSTGSamplingDaemon::ProcessCommands() is real now (sec 10.160, see
+ * managers.cpp) -- no mock body here any more. Test [4] below constructs
+ * a real `sd` object (its own real ctor zeroes +0x0/+0x4/+0x8 to 0), so
+ * the real body's producer==consumer==0 loop condition makes it a
+ * genuine, silent no-op here too -- no log_call to expect, same as
+ * CSTGCDWorker::ProcessCommands() above. */
 CSTGMidiPortManager::~CSTGMidiPortManager()      { log_call("~CSTGMidiPortManager"); }
 void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) { }
 /* ~CSTGMessageProcessor() is now real (sec 10.147, see managers.cpp) --
@@ -188,6 +193,14 @@ void CSTGControllerRTData::ResetRTKKnobSmoothers() { }
 void CSTGControllerRTData::OnExtModeSetChange() { }
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) { }
 unsigned char *STGAPIFrontPanelStatus::sInstance;
+/* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
+ * lives in engine_init.cpp (not linked here) -- this file's own real
+ * CSTGSamplingDaemon::ProcessCommands() (sec 10.160, via managers.cpp)
+ * references the CSTGRecordBuffer instantiation even on its silent
+ * no-op path (test [4] never populates any ring entries), so the
+ * SYMBOL still needs local storage to link even though it's never
+ * dereferenced at runtime here. */
+template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 void CSetList::Activate() { }
 void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int) { }
 void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int) { }
@@ -395,10 +408,12 @@ int main(void)
 		  "HDRManager::ProcessSamplerCommands;FileOpener::ProcessCommands;"
 		  "HDRFileReader::ProcessCommands;HDRFileWriter::ProcessCommands;"
 		  "FileCloser::ProcessCommands;StreamingFileReader::ProcessCommands;"
-		  /* CDWorker::ProcessCommands() is real now (sec 10.158) -- `cdw`
-		   * is freshly, really-constructed just above (producer==consumer==0),
-		   * so it's a genuine silent no-op here, no log entry expected. */
-		  "SamplingDaemon::ProcessCommands;");
+		  /* CDWorker::ProcessCommands() and CSTGSamplingDaemon::
+		   * ProcessCommands() are both real now (sec 10.158/10.160) -- `cdw`
+		   * and `sd` are freshly, really-constructed just above
+		   * (producer==consumer==0 for both), so they're both genuine
+		   * silent no-ops here, no log entries expected for either. */
+		  "");
 
 	printf("[5] CSTGEngine destructor's exact confirmed teardown order\n");
 	CSTGMidiPortManager mpm; CSTGMidiPortManager::sInstance = &mpm;

@@ -1351,6 +1351,89 @@ void CSTGCDWorker::ProcessCommands()
 }
 
 /*
+ * CSTGSamplingDaemon::ProcessCommands() (`.text+0x11c7a0`, 120 bytes, sec
+ * 10.160): the SAME shape ring-buffer consumer loop as CSTGCDWorker::
+ * ProcessCommands() above, but at this class's OWN field offsets --
+ * `+0x0` base, `+0x4` producer index (never written here), `+0x8`
+ * consumer index (advanced here), `+0xc` capacity (confirmed never
+ * zeroed by this class's own ctor either, matching the same "Initialize()
+ * sets it later" gap already documented for CSTGCDWorker/CSTGFileCloser).
+ * Each entry is 8 bytes: a 16-bit type tag at +0x0, a dword payload
+ * pointer at +0x4 (unlike CSTGCDWorker's sibling, the payload here is a
+ * POINTER, not a size -- confirmed by the two handled tags below, both of
+ * which use it as an address). CONFIRMED: no vtable dispatch and no
+ * indirect calls anywhere in this function (fully verified via `call`
+ * mnemonic search over its own disassembly) -- unlike most of this
+ * class's sibling `ProcessCommands()` methods (CSTGFileCloser/
+ * CSTGHDRFileReader/CSTGHDRFileWriter/CSTGStreamingFileReader), which all
+ * dispatch through a not-yet-recovered vtable or pointer-to-member-
+ * function table and remain deliberately stubbed (see bar2_stubs.cpp).
+ *
+ * tag==0: writes 3 into the payload object's own `+0xc` field (a
+ * confirmed real byte-for-byte offset write into the opaque region of
+ * whatever the payload points to -- most likely a `CSTGRecordBuffer*`,
+ * see the tag==1 case below, but this project's own `CSTGRecordBuffer`
+ * declaration only names its own `+0x3004`/`+0x3008` fields, sec 10.148,
+ * so this write is left as a raw byte-offset store rather than adding an
+ * unconfirmed named field), then pushes `{payload, 0}` (8-byte stride)
+ * onto `CSTGFileCloser::sInstance`'s own FIRST embedded ring (the one at
+ * `+0x0`/`+0x4`/`+0x8`/`+0xc`, confirmed via relocation to
+ * `CSTGFileCloser::sInstance` -- a completely separate ring from the one
+ * `CSTGFileCloser::ProcessCommands()` itself consumes at `+0x10`/`+0x14`/
+ * `+0x18`/`+0x1c`; this is the producer side CSTGFileCloser's own
+ * `ProcessCommands()` never advances the writer of, confirming these are
+ * two independent, differently-shaped rings sharing one 32-byte object,
+ * not one ring read two ways).
+ *
+ * tag==1: pushes the SAME payload pointer directly into
+ * `TSTGArrayManager<CSTGRecordBuffer>::sInstance`'s own `bucketArray`
+ * (stride 4, confirmed via `BuildArrayManager()`'s own established
+ * fill pattern in engine_init.cpp -- returning a completed
+ * `CSTGRecordBuffer` to the free-list array, the strongest evidence the
+ * payload really is a `CSTGRecordBuffer*`).
+ *
+ * Any OTHER tag value is a real, faithfully-preserved no-op: the entry
+ * is simply consumed (consumer index still advances) with no further
+ * action, matching CSTGCDWorker::ProcessCommands()'s own established
+ * "unhandled tag" quirk.
+ */
+void CSTGSamplingDaemon::ProcessCommands()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int producerIdx = *(unsigned int *)(base + 0x4);
+	unsigned int consumerIdx = *(unsigned int *)(base + 0x8);
+
+	while (producerIdx != consumerIdx) {
+		unsigned int capacity = *(unsigned int *)(base + 0xc);
+		unsigned int nextIdx = (consumerIdx + 1) % capacity;
+		unsigned char *entry = FromU32(*(unsigned int *)(base + 0x0)) + consumerIdx * 8;
+
+		*(unsigned int *)(base + 0x8) = nextIdx;
+
+		unsigned short tag = *(unsigned short *)(entry + 0);
+		unsigned char *payload = FromU32(*(unsigned int *)(entry + 4));
+
+		if (tag == 0) {
+			*(unsigned int *)(payload + 0xc) = 3;
+
+			unsigned char *fc = (unsigned char *)CSTGFileCloser::sInstance;
+			unsigned int fcCursor = *(unsigned int *)(fc + 0x4);
+			unsigned char *fcEntry = FromU32(*(unsigned int *)(fc + 0x0)) + fcCursor * 8;
+			*(unsigned int *)(fcEntry + 0) = ToU32(payload);
+			*(unsigned int *)(fcEntry + 4) = 0;
+			*(unsigned int *)(fc + 0x4) = (fcCursor + 1) % *(unsigned int *)(fc + 0xc);
+		} else if (tag == 1) {
+			TSTGArrayManager<CSTGRecordBuffer> *mgr = TSTGArrayManager<CSTGRecordBuffer>::sInstance;
+			((unsigned int *)FromU32(mgr->bucketArray))[mgr->writeCursor] = ToU32(payload);
+			mgr->writeCursor = (mgr->writeCursor + 1) % mgr->modulus;
+		}
+
+		producerIdx = *(unsigned int *)(base + 0x4);
+		consumerIdx = *(unsigned int *)(base + 0x8);
+	}
+}
+
+/*
  * CSTGHDRFileReader::Initialize() (`.text+0x11ba90`, 148 bytes, sec
  * 10.151) confirmed: `fieldAt(0xc)=0xfa1`, `fieldAt(0)=AllocAligned
  * (0x7d08,0x10)`, `fieldAt(0x10)=AllocAligned(0x8000,0x10)`, then zeroes

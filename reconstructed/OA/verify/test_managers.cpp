@@ -34,6 +34,14 @@ CSTGAudioEvent::CSTGAudioEvent() {}
  * _ZTV17CSTGPlaybackEvent/_ZTV15CSTGRecordEvent. */
 unsigned char _ZTV18CSTGStreamingEvent[40];
 
+/* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
+ * lives in engine_init.cpp (not linked here) -- this file's own new
+ * CSTGSamplingDaemon::ProcessCommands() test (sec 10.160) needs the
+ * CSTGRecordBuffer instantiation's storage, so it gets its own local
+ * definition, same "give it its own local storage" treatment as
+ * _ZTV18CSTGStreamingEvent just above. */
+template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
+
 /* Real kernel-only APIs (RTAI mutex wrappers) and a not-yet-reconstructed
  * static method (CSTGToneAdjustDescriptor) -- mocked here purely so
  * CPowerOffTimer/CSTGVoiceModelManager's constructors link on the host,
@@ -1047,6 +1055,83 @@ int main(void)
 			 *(unsigned int *)((unsigned char *)&sem->events[0] + 0x3c), headSlotAddr);
 		check_eq("events[2]'s own +0x3c owner == &manager->freeListHead",
 			 *(unsigned int *)((unsigned char *)&sem->events[2] + 0x3c), headSlotAddr);
+	}
+
+	printf("\n[28] CSTGSamplingDaemon::ProcessCommands() (sec 10.160)\n");
+	{
+		/* CSTGSamplingDaemon's own ring base (+0x0) IS a packed 32-bit
+		 * field, reconstituted and dereferenced -- needs MAP_32BIT.
+		 * Two entries: [0] tag==0 (pushes into CSTGFileCloser::sInstance's
+		 * own +0x0 ring and sets the payload's own +0xc to 3), [1] tag==1
+		 * (pushes into TSTGArrayManager<CSTGRecordBuffer>::sInstance's
+		 * bucketArray). Payload pointers are stored as packed 32-bit
+		 * values too, so their own backing buffers need MAP_32BIT as well. */
+		unsigned char *ring = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload0 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload1 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(payload0, 0xcc, 0x20);
+		memset(payload1, 0xcc, 0x20);
+
+		*(unsigned short *)(ring + 0 * 8 + 0) = 0;
+		*(unsigned int *)(ring + 0 * 8 + 4) = (unsigned int)(unsigned long)payload0;
+		*(unsigned short *)(ring + 1 * 8 + 0) = 1;
+		*(unsigned int *)(ring + 1 * 8 + 4) = (unsigned int)(unsigned long)payload1;
+
+		CSTGSamplingDaemon *sd;
+		poison_and_construct(&sd);	/* real ctor zeroes +0x00/+0x04/+0x08 */
+		unsigned char *sdBase = (unsigned char *)sd;
+		*(unsigned int *)(sdBase + 0x0) = (unsigned int)(unsigned long)ring;
+		*(unsigned int *)(sdBase + 0xc) = 0x100;	/* capacity, Initialize()'s own job normally */
+		*(unsigned int *)(sdBase + 0x4) = 2;		/* producer: 2 entries enqueued */
+
+		/* CSTGFileCloser::sInstance is dereferenced directly as a plain
+		 * native pointer (matching CSTGHDRManager::sInstance's own
+		 * precedent above) -- a regular malloc buffer is fine for the
+		 * object itself, but ITS OWN +0x0 ring base field is packed and
+		 * reconstituted, so THAT needs MAP_32BIT. */
+		unsigned char *fcBuf = new unsigned char[32];
+		memset(fcBuf, 0, 32);
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcBuf;
+		unsigned char *fcRing = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		*(unsigned int *)(fcBuf + 0x0) = (unsigned int)(unsigned long)fcRing;
+		*(unsigned int *)(fcBuf + 0xc) = 0x10;	/* ring1 capacity */
+
+		/* TSTGArrayManager<CSTGRecordBuffer>::sInstance, same pattern:
+		 * plain object, MAP_32BIT-backed bucketArray. */
+		TSTGArrayManager<CSTGRecordBuffer> *mgr = new TSTGArrayManager<CSTGRecordBuffer>();
+		memset(mgr, 0, sizeof(*mgr));
+		TSTGArrayManager<CSTGRecordBuffer>::sInstance = mgr;
+		unsigned char *bucketArr = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+								  MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		mgr->bucketArray = (unsigned int)(unsigned long)bucketArr;
+		mgr->writeCursor = 0;
+		mgr->modulus = 97;
+
+		sd->ProcessCommands();
+
+		check_eq("ProcessCommands: consumer index (+0x8) advanced to 2",
+			 *(unsigned int *)(sdBase + 0x8), 2);
+		check_eq("ProcessCommands: producer index (+0x4) untouched",
+			 *(unsigned int *)(sdBase + 0x4), 2);
+		check_eq("tag==0: payload0's own +0xc field set to 3",
+			 *(unsigned int *)(payload0 + 0xc), 3);
+		check_eq("tag==0: CSTGFileCloser ring1 cursor (+0x4) advanced to 1",
+			 *(unsigned int *)(fcBuf + 0x4), 1);
+		check_eq("tag==0: CSTGFileCloser ring1 entry[0]'s own dword0 == payload0",
+			 *(unsigned int *)(fcRing + 0), (unsigned int)(unsigned long)payload0);
+		check_eq("tag==0: CSTGFileCloser ring1 entry[0]'s own dword4 == 0",
+			 *(unsigned int *)(fcRing + 4), 0);
+		check_eq("tag==1: TSTGArrayManager<CSTGRecordBuffer> writeCursor advanced to 1",
+			 mgr->writeCursor, 1);
+		check_eq("tag==1: bucketArray[0] == payload1",
+			 ((unsigned int *)bucketArr)[0], (unsigned int)(unsigned long)payload1);
+
+		delete[] fcBuf;
+		delete mgr;
 	}
 
 	printf("=====================================================\n");

@@ -937,7 +937,7 @@ struct CSetListBank {
 };
 
 /*
- * The following 8 classes are all confirmed real (via relocation, each
+ * The following 7 classes are all confirmed real (via relocation, each
  * default-constructed directly by CSTGGlobal's own constructor, sec
  * 10.56) but none of their own bodies are reconstructed in this pass
  * -- same "declare the shape, defer the body" treatment used
@@ -950,8 +950,26 @@ struct CSetListBank {
  * each; 1792 CSTGCombi (14 banks x 128) at 0x19e7 bytes each; 200
  * CSTGSequence (no banking) at 0x1cad bytes each; 128 CSetList at
  * 0x834 bytes each; 598 CSTGWaveSequence at 0xd14 bytes each.
+ *
+ * CSTGSamplingInterface::CSTGSamplingInterface() itself is now real
+ * (batch 13) -- see src/engine/sampling_interface_ctor.cpp for the
+ * confirmed field list. Real confirmed size 0x570 bytes (the gap
+ * between this sub-object's own `+0x98` placement and the next one,
+ * CSTGAudioInput at `+0x608`, sec 10.56) -- highest field this ctor
+ * itself touches is +0x56d, comfortably inside that bound. Has a real
+ * (but not yet virtually-dispatched-through) vtable, confirmed 0x60
+ * bytes via readelf (`vtable for CSTGSamplingInterface`), matching the
+ * same "ParamsOwner"-style message-handler interface shape as
+ * CSTGAudioInput/CSTGControllerInfo (dozens of Handle*() methods, none
+ * reconstructed here -- only the ctor, which never dispatches through
+ * its own vtable, satisfies the sec 10.153 "install vs dispatch" safe
+ * case).
  */
-struct CSTGSamplingInterface { CSTGSamplingInterface(); };
+struct CSTGSamplingInterface {
+	static CSTGSamplingInterface *sInstance;
+	CSTGSamplingInterface();
+	unsigned char _unrecovered[0x570];
+};
 /*
  * CSTGAudioInput -- reconstructed (sec 10.80). Real confirmed layout
  * (readelf/objdump against OA_real.ko, addresses 0xc9b30-0xc9ea0):
