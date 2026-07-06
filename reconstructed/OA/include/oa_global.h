@@ -1386,11 +1386,12 @@ struct CSTGAudioInput {
 	 */
 	void UseSettings();
 
-	/* OnPerformanceDeactivate() (batch 19, `.text+0xc9f00`, 39 bytes,
+	/* OnPerformanceDeactivate() (batch 20, `.text+0xc9f00`, 39 bytes,
 	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --
-	 * called there on the embedded sub-object at `+0xae7`) confirmed
-	 * real, deliberately deferred extern -- own body not reconstructed
-	 * this pass. */
+	 * called there on the embedded sub-object at `+0xae7`). Real now --
+	 * see src/engine/audio_input_use_settings.cpp (the exact counterpart
+	 * to UseSettings(): clears the same `+0x77`/`+0x67f` bit1 gate
+	 * UseSettings sets). */
 	void OnPerformanceDeactivate();
 };
 struct CSTGDrumKitData { CSTGDrumKitData(); };

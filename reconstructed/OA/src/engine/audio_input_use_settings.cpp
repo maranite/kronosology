@@ -162,3 +162,39 @@ void CSTGAudioInput::UseSettings()
 
 	base[0x77] |= 0x2;
 }
+
+/*
+ * CSTGAudioInput::OnPerformanceDeactivate() (batch 20, `.text+0xc9f00`,
+ * 39 bytes). The exact counterpart to UseSettings() above: where
+ * UseSettings() SETS the `+0x77` bit1 "performance active" gate, this
+ * CLEARS bit1 -- but from one of two places depending on whose settings
+ * are live, mirroring OnUseGlobalSettingsChanged()'s own two-target
+ * pattern (sec 10.134, oa_global.h):
+ *
+ *   if (CSTGGlobal::sInstance[0x680] != 0 || (this[0x77] & 1) != 0)
+ *       CSTGGlobal::sInstance[0x67f] &= ~0x2;     // clear the GLOBAL bit
+ *   else
+ *       this[0x77] &= ~0x2;                        // clear THIS input's bit
+ *
+ * `+0x680` is the global-settings-enabled flag and `+0x67f` bit1 is the
+ * global "active" bit -- both the exact same fields OnUseGlobalSettingsChanged
+ * already documents. The `||` faithfully models the real short-circuit
+ * (the asm's `jne` skips the `this[0x77]` read entirely when `+0x680` is
+ * set) and is safe to write as `||` here specifically because the skipped
+ * operand is a plain field READ with no side effect -- unlike the sec
+ * 10.167 no-short-circuit case, there is no call to be elided. No calls,
+ * no vtable dispatch; pure field read-modify-write.
+ *
+ * Called from CSTGPerformance::SetIsDying (batch 19) on the embedded
+ * sub-object at `perf+0xae7`.
+ */
+void CSTGAudioInput::OnPerformanceDeactivate()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+
+	if (g[0x680] != 0 || (base[0x77] & 0x1) != 0)
+		g[0x67f] &= (unsigned char)~0x2;
+	else
+		base[0x77] &= (unsigned char)~0x2;
+}

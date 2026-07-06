@@ -354,10 +354,24 @@ CSTGSmoother::CSTGSmoother() {}
  * stubbed below). */
 void CSTGSmoother::FinalizeAllSmoothers() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
+/* Two of the four batch-19 OnPerformanceDeactivate externs are real now,
+ * batch 20:
+ *   - CSTGAudioInput::OnPerformanceDeactivate() -- see
+ *     src/engine/audio_input_use_settings.cpp (counterpart of UseSettings).
+ *   - CSTGMessageProcessor::ClearUnsolicitedMessages() -- see
+ *     src/engine/message_processor.cpp (also its sole dependency,
+ *     CSTGDelayedMsgSender::Clear(), a new class -- see oa_engine.h).
+ * The other two remain deferred, each blocked by real vtable/callback
+ * dispatch (not mere complexity):
+ *   - CSTGFrontPanelSmoothers::OnPerformanceDeactivate() (523 bytes) makes
+ *     two indirect calls through a stack-cached callback pointer
+ *     (`call *0x24(%esp)` twice).
+ *   - CSTGControllerInfo::OnPerformanceDeactivate() (106 bytes) calls the
+ *     still-stubbed CSTGControllerInfo::SetPerfSwitch (539 bytes), which
+ *     itself dispatches through a vtable (`call *0x74(%ecx)`) plus a jump
+ *     table and four further unreconstructed calls. */
 void CSTGFrontPanelSmoothers::OnPerformanceDeactivate() {}
 void CSTGControllerInfo::OnPerformanceDeactivate() {}
-void CSTGAudioInput::OnPerformanceDeactivate() {}
-void CSTGMessageProcessor::ClearUnsolicitedMessages() {}
 /* CSTGStreamingEventManager::CSTGStreamingEventManager()/Initialize() are
  * real now, sec 10.158 -- see src/engine/streaming_event_manager.cpp
  * (also its own newly-discovered dependency, CSTGStreamingEvent, a

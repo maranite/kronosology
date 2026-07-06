@@ -943,11 +943,49 @@ public:
 
 	unsigned char _unrecovered[0x1040];	/* confirmed MINIMUM size -- see class comment */
 
-	/* ClearUnsolicitedMessages() (batch 19, `.text+0xed2e0`, 52 bytes,
-	 * confirmed via relocation from `CSTGPerformance::SetIsDying`)
-	 * confirmed real, deliberately deferred extern -- own body not
-	 * reconstructed this pass. */
+	/* ClearUnsolicitedMessages() (batch 20, `.text+0xed2e0`, 52 bytes,
+	 * confirmed via relocation from `CSTGPerformance::SetIsDying`). Real
+	 * now -- see src/engine/message_processor.cpp. Calls
+	 * CSTGDelayedMsgSender::Clear() on the three embedded senders at
+	 * `+0x6c`, `+0x608`, `+0xb24` (the ProgramSlot/ControllerInfo/IFX
+	 * unsol-msg senders documented in this class's own ctor comment
+	 * above). */
 	void ClearUnsolicitedMessages();
+};
+
+/*
+ * CSTGDelayedMsgSender (batch 20) -- the unsolicited-message queue class
+ * embedded three times in CSTGMessageProcessor (at `+0x6c`/`+0x608`/
+ * `+0xb24`, see that class's own ctor comment). Only Clear() is
+ * reconstructed this pass (`.text+0xf4e00`, 131 bytes) -- the class's
+ * other five methods remain deliberately deferred: Initialize()
+ * (`.text+0xf4d90`) dispatches through this object's OWN vtable slot 0
+ * (`call *(%ecx)`, an AllocNode-style virtual) to build its 32-node pool,
+ * and AddMessage() (`.text+0xf4c80`) tail-calls the not-yet-reconstructed
+ * SendMessageNow()/Flush()/ProcessSubRate() message-send path.
+ *
+ * Clear() recycles the entire ACTIVE intrusive doubly-linked list onto
+ * the FREE list. Confirmed sender-object field layout (all 32-bit packed,
+ * host/target-width-safe -- see message_processor.cpp for why every field
+ * is read/written as a 4-byte dword and pointers are reconstituted, not
+ * stored as native `void*`):
+ *   +0x4  active-list head          +0x10 free-list tail anchor
+ *   +0x8  active-list "special" node (cleared when Clear reaches it)
+ *   +0xc  active count (decremented) +0x14 free-list head anchor
+ *                                    +0x18 free count (incremented)
+ * Node fields: +0x0 next, +0x4 prev, +0xc back-ref to `&sender[0x10]`.
+ *
+ * `_fields` covers only the offsets Clear() touches (0x0..0x1c); the full
+ * sender size (header + a 32-element CSTGDelayedMsg queue, stride 0x2c for
+ * the ProgramSlot sender / 0x28 for the other two, per CSTGMessageProcessor's
+ * ctor comment) is NOT independently pinned this pass and is irrelevant
+ * here -- every real use is a raw-offset cast into CSTGMessageProcessor's
+ * own buffer, never a standalone `sizeof`.
+ */
+class CSTGDelayedMsgSender {
+public:
+	void Clear();
+	unsigned char _fields[0x20];
 };
 
 /* Confirmed abstract base with a real vtable -- the destructor tears it

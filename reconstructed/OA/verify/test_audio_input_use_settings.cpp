@@ -22,6 +22,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <sys/mman.h>
 #include "oa_global.h"
 
@@ -56,6 +57,12 @@ static void check_float_close(const char *label, float got, float want)
 }
 
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
+
+/* Storage for the CSTGGlobal singleton pointer OnPerformanceDeactivate()
+ * reads its `+0x680`/`+0x67f` fields through (batch 20). A plain buffer is
+ * fine -- OnPerformanceDeactivate never stores this object's address into
+ * a 32-bit field, so no MAP_32BIT is needed here. */
+CSTGGlobal *CSTGGlobal::sInstance;
 
 /* Raw vtable-slot-3 target SetFXCtrlBus/SetHDRBus both dispatch through
  * (matching the project's established raw-vtable-dispatch convention,
@@ -188,6 +195,51 @@ int main(void)
 		/* SetFXCtrlBus + SetHDRBus each dispatch the raw vtable slot 3 once per bus -> 12 total. */
 		check_eq("vtable slot 3 dispatched 12 times (6 FXCtrl + 6 HDR)",
 			 (unsigned int)g_vtableSlot3Calls, 12);
+	}
+
+	printf("\n[4] OnPerformanceDeactivate(): clears bit1 of global +0x67f or this +0x77\n");
+	{
+		unsigned char *gStorage = (unsigned char *)malloc(0x700);
+		CSTGGlobal::sInstance = (CSTGGlobal *)gStorage;
+
+		/* Case A: global-settings-enabled (+0x680 != 0) -> clear the
+		 * GLOBAL bit at +0x67f, leave this->+0x77 untouched. Poison
+		 * bit1 to 1 on both first so a clear is actually observable and
+		 * an accidental no-op/wrong-target would be caught. */
+		memset(gStorage, 0, 0x700);
+		memset(aiStorage, 0, 0x80);
+		gStorage[0x680] = 1;
+		gStorage[0x67f] = 0xff;   /* bit1 set -> must be cleared */
+		aiStorage[0x77] = 0xff;   /* must be left untouched in case A */
+		ai->OnPerformanceDeactivate();
+		check_eq("A: +0x680!=0 -> global +0x67f bit1 cleared", gStorage[0x67f], 0xfd);
+		check_eq("A: this +0x77 left untouched", aiStorage[0x77], 0xff);
+
+		/* Case B: global settings OFF (+0x680==0) but this input already
+		 * flagged active (this->+0x77 bit0 set) -> still clear the
+		 * GLOBAL bit, leave this->+0x77 untouched. */
+		memset(gStorage, 0, 0x700);
+		memset(aiStorage, 0, 0x80);
+		gStorage[0x680] = 0;
+		gStorage[0x67f] = 0xff;
+		aiStorage[0x77] = 0x01;   /* bit0 set -> first-operand-false, second-true */
+		ai->OnPerformanceDeactivate();
+		check_eq("B: (+0x77&1) -> global +0x67f bit1 cleared", gStorage[0x67f], 0xfd);
+		check_eq("B: this +0x77 left untouched (still 0x01)", aiStorage[0x77], 0x01);
+
+		/* Case C: global settings OFF and this input NOT flagged active
+		 * -> clear THIS input's own +0x77 bit1, leave the global bit
+		 * untouched. */
+		memset(gStorage, 0, 0x700);
+		memset(aiStorage, 0, 0x80);
+		gStorage[0x680] = 0;
+		gStorage[0x67f] = 0xff;   /* must be left untouched in case C */
+		aiStorage[0x77] = 0xfe;   /* bit0 clear, bit1 set -> must be cleared */
+		ai->OnPerformanceDeactivate();
+		check_eq("C: else -> this +0x77 bit1 cleared", aiStorage[0x77], 0xfc);
+		check_eq("C: global +0x67f left untouched", gStorage[0x67f], 0xff);
+
+		free(gStorage);
 	}
 
 	printf("=========================================================\n");

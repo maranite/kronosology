@@ -88,6 +88,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/channel_values_set_controller_value.o \
            src/engine/channel_values_reset.o \
            src/engine/audio_input_use_settings.o \
+           src/engine/message_processor.o \
            src/engine/hdr_record_track.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/slot_voice_data_midi_filters.o \
@@ -229,6 +230,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/channel_values_set_controller_value.cpp \
        src/engine/channel_values_reset.cpp \
        src/engine/audio_input_use_settings.cpp \
+       src/engine/message_processor.cpp \
        src/engine/hdr_record_track.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
@@ -290,6 +292,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters \
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
+         verify/test_message_processor \
          verify/test_load_balancer_static verify/test_performance_vars_set_is_dying
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
@@ -470,6 +473,9 @@ verify/test_channel_values_reset: verify/test_channel_values_reset.cpp src/engin
 
 verify/test_audio_input_use_settings: verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_use_settings.cpp src/engine/audio_input_use_settings.cpp src/engine/audio_input_mixer.cpp -o $@
+
+verify/test_message_processor: verify/test_message_processor.cpp src/engine/message_processor.cpp include/oa_engine.h include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_message_processor.cpp src/engine/message_processor.cpp -o $@
 
 verify/test_push_unsolicited_message: verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp include/oa_rtfifo_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp -o $@

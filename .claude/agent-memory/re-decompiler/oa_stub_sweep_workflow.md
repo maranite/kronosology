@@ -1481,6 +1481,68 @@ two full clean-rebuild passes; 32 unresolved symbols; `.gnu.linkonce.
 this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 151,596 bytes (up from
 150,200). Commit `900c8a2`.
 
-The user has asked to stop the stub-sweep after this batch (batch 19) --
-do not automatically start batch 20 in a future session without being
-asked again.
+**Batch 20 specifics** (2026-07-06, sec 10.168): the user explicitly
+RE-authorized the sweep ("continue the decompilation process of OA.ko...
+I believe we last started batch 20"), satisfying batch 19's own
+stop-until-asked note below. Picked the two TRACTABLE members of the four
+`OnPerformanceDeactivate`/`ClearUnsolicitedMessages` externs batch 19
+itself created -- a clean "batch N resolves batch N-1's own fallout" pass.
+Reconstructed `CSTGAudioInput::OnPerformanceDeactivate()` (39 B, the
+bit-clearing counterpart of `UseSettings()`, homed beside it in
+`audio_input_use_settings.cpp`), `CSTGMessageProcessor::
+ClearUnsolicitedMessages()` (52 B), and the brand-new `CSTGDelayedMsgSender`
+class's `Clear()` (131 B, intrusive active->free list recycle) -- the
+latter two in a new dedicated TU `message_processor.cpp`. Stub count -2
+(75 -> 73). Deferred (documented, real dispatch not mere complexity):
+`CSTGControllerInfo::OnPerformanceDeactivate` (its `SetPerfSwitch` callee
+has a `call *0x74(%ecx)` vtable dispatch + jump table + 4 more calls) and
+`CSTGFrontPanelSmoothers::OnPerformanceDeactivate` (2x `call *0x24(%esp)`
+stack-callback dispatch); of the new class's other 5 methods, only
+`Clear()` is dispatch-free (`Initialize()` calls its own vtable slot 0,
+`AddMessage()` tail-calls unreconstructed `SendMessageNow()`).
+
+**CRITICAL new process gotcha, cost ~3 wasted verification attempts before
+being caught: the build host's non-interactive SSH session lands in
+`/root`, which has NO Makefile -- NOT the OA dir.** Every `sshpass ...
+ssh root@192.168.3.92 "make ..."` MUST begin with `cd
+/home/share/kronosology/reconstructed/OA &&`. Worse, the failure is
+SILENT and reads as a false PASS: the idiom `make clean >/dev/null 2>&1 &&
+make all >/tmp/mk1.log 2>&1; echo "exit=$?"` run from `/root` has `make
+clean` fail (no makefile, exit 2), which SHORT-CIRCUITS the `&&` so `make
+all` never runs and NEVER WRITES `/tmp/mk1.log` -- leaving a STALE log
+from a PRIOR session's successful run, whose "All checks passed" tail looks
+exactly like a real pass, while `echo exit=$?` reports `make clean`'s 2 as
+if it were `make all`'s. Two independent traps stacked: wrong-cwd + stale
+/tmp log. Lessons: (1) always `cd` into the OA dir in the SAME ssh command
+(cwd does not persist across ssh invocations); (2) never trust a `/tmp/mk*.log`
+you did not just write THIS run -- redirect to a fresh path or verify the
+log's own first line matches this run; (3) an `exit=2` with a passing-looking
+log tail is the signature of this `&&`-short-circuit-onto-stale-log trap,
+not a real partial pass.
+
+**Two divergent repos -- do not confuse them.** The ACTIVE repo is
+`/home/share/kronosology` (CIFS, uses "batch N" numbering; batch 19/20
+committed 2026-07-06). `/home/build/kronosology` is an OLDER, separately-
+rooted divergent line (uses "sec 10.NNN"-only commit subjects, last touched
+2026-07-04 at "sec 10.141") -- NOT where this sweep is tracked, despite the
+name collision. Verify the batch position via `git -C /home/share/kronosology
+log` and MASTER_REFERENCE.md's own last `### 10.NNN` heading, never the
+/home/build tree. (The build HOST 192.168.3.92 mounts the same CIFS
+/home/share, so files edited here are what it compiles -- no copy step.)
+
+**`||`/`&&` short-circuit IS faithful when the skipped operand is a pure
+READ** -- the exact inverse-scoped companion to sec 10.167's no-short-circuit
+rule. `OnPerformanceDeactivate`'s `if (g[0x680] || (this[0x77]&1))` matches
+the real `cmpb ...; jne` short-circuit (the `this[0x77]` read is genuinely
+skipped when `+0x680` is set), and writing it as C++ `||` is BOTH faithful
+AND correct SPECIFICALLY because the elided operand is a side-effect-free
+field read. Sec 10.167's rule (must use bitwise `&`/`|`, never `&&`/`||`)
+applies only when the skipped operand is a CALL whose side effect the real
+x86 always performs. Decide per-operand: short-circuit the reads, fold the
+calls.
+
+**Batch-19 stop-note (now satisfied)**: batch 19 recorded "the user asked
+to stop the stub-sweep after batch 19 -- do not auto-start batch 20 without
+being asked again." The user DID ask again (this batch), so batch 20 was
+authorized. The standing rule remains: do not auto-continue to batch 21 in
+a future session without a fresh explicit request.
