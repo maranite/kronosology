@@ -87,6 +87,12 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
  * real reference to the CSTGRecordBuffer instantiation (sec 10.160)
  * needs local storage to link. */
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
+/* CSTGAudioBusManager::sGlobalBusSet's own real storage lives in
+ * audio_bus_manager.cpp (not linked here) -- batch 23's newly-real
+ * CSTGPlaybackBuffer/CSTGMonitorMixerChannel ctors (managers.cpp) are the
+ * first code there to reference it, so this file needs its own local
+ * definition too. */
+unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 static unsigned int g_onlineCpus = 2, g_khz = 1500000;
 extern "C" unsigned int stg_num_online_cpus(void) { return g_onlineCpus; }
 extern "C" unsigned int stg_get_cpu_khz(void) { return g_khz; }

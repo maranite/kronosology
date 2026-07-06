@@ -237,7 +237,8 @@ void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
  * alongside the real ctor, matching the CSTGFrontPanelSmoothers/
  * CSTGHDRMiniModel precedent of homing sInstance storage in the same
  * TU as the real ctor rather than here). */
-CSTGDrumKitData::CSTGDrumKitData() {}
+/* CSTGDrumKitData::CSTGDrumKitData() is real now, batch 23 -- see
+ * src/engine/drum_kit_data.cpp. */
 /* CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() is real now, sec
  * 10.153 -- see src/engine/front_panel_smoothers.cpp. */
 void CSTGGlobal::InitializePerformances() {}

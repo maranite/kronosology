@@ -1434,7 +1434,24 @@ struct CSTGAudioInput {
 	 * UseSettings sets). */
 	void OnPerformanceDeactivate();
 };
-struct CSTGDrumKitData { CSTGDrumKitData(); };
+/*
+ * CSTGDrumKitData::CSTGDrumKitData() (batch 23, `.text+0xa0940`, 925
+ * bytes) confirmed real -- see src/engine/drum_kit_data.cpp for the full
+ * derivation (a 273 (drum-kit patch) x 129 (MIDI note) x 8 (velocity
+ * zone) table of legacy multisample-bank UUID records, ~17.3MB).
+ * Confirmed MINIMUM real size 0x1143529 -- NOT simply
+ * `sizeof(vtable ptr) + 273*0x10302` (0x1143526): the last note record's
+ * own 8th velocity-zone sub-record deliberately overflows 3 bytes past
+ * the nominal array end (see that file's own header comment on the
+ * per-record 0x19-byte sub-record stride vs. the 0x202-byte record
+ * stride not dividing evenly) -- a real, confirmed quirk of the compiled
+ * loop, not a reconstruction bug. Declared size rounded up to 0x1143530.
+ */
+class CSTGDrumKitData {
+public:
+	CSTGDrumKitData();
+	unsigned char _unrecovered[0x1143530];
+};
 /*
  * CSTGWaveSequence::CSTGWaveSequence() -- NOT a standalone symbol in
  * OA_real.ko (confirmed absent from the whole symbol table, unlike

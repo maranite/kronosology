@@ -192,9 +192,13 @@ int main(void)
 		memset(chanMem, 0xcc, 0x1000);
 		unsigned char *targetObj = (unsigned char *)mmap32(0x1000);
 		memset(targetObj, 0xcc, 0x1000);
-		/* Real caveat, documented in this method's own header comment:
-		 * its own ctor is still a no-op, so +0x4 is never really
-		 * populated -- provide it explicitly here. */
+		/* This test exercises Initialize() directly on a raw poisoned
+		 * buffer (no ctor call) -- the real ctor (batch 23) computes
+		 * +0x4 as a self-referential aligned pointer into its OWN
+		 * object, not an externally-allocated one, so poking a
+		 * SEPARATE target object here (rather than a self-pointer)
+		 * remains a valid, independent way to verify Initialize()'s
+		 * own dereference-and-store behavior in isolation. */
 		*(unsigned int *)(chanMem + 0x4) = ToU32(targetObj);
 
 		CSTGMonitorMixerChannel *chan = (CSTGMonitorMixerChannel *)chanMem;
@@ -218,10 +222,11 @@ int main(void)
 		 * buffer, not two independent ones (an earlier draft of this
 		 * KAT used two separate buffers and got a real check FAILED
 		 * as a result -- see this method's own header comment in
-		 * hdr_record_track.cpp for the full derivation). That
-		 * pointee's own ctor is still a no-op stub (same real,
-		 * pre-existing gap as [3] above), so it needs an explicit
-		 * valid backing buffer here too. */
+		 * hdr_record_track.cpp for the full derivation). This test
+		 * exercises `Initialize()` directly on a raw poisoned buffer
+		 * (no ctor call, same as [3] above), so it needs an explicit
+		 * valid backing buffer here too regardless of the ctor's own
+		 * real behavior (batch 23; see managers.cpp). */
 		unsigned char *otherObj = (unsigned char *)mmap32(0x1000);
 		memset(otherObj, 0xcc, 0x1000);
 		*(unsigned int *)(trackMem + 0x24) = ToU32(otherObj);

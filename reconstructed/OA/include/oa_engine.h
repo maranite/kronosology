@@ -230,15 +230,16 @@ public:
 
 /*
  * Real, fully-fleshed classes with many other confirmed methods
- * (CSTGPlaybackBuffer: AddEvent/RemoveEvent/ProcessSubRate/Initialize/...;
+ * (CSTGPlaybackBuffer: AddEvent/RemoveEvent/ProcessSubRate/...;
  * CSTGMonitorMixerChannel: RunMonitor/StartRampIn/StartRampOut/
- * SetMonitorLevel/GetMeterLevel/...) -- reconstructing their own internals
- * is out of scope for this pass. Declared here only as opaque, empty-body
- * classes (same treatment as CEmergencyStealer) so CSTGHDRManager's own
- * confirmed array layout can be embedded and constructed faithfully.
- * Sizes are confirmed independently of these classes' own code, via
- * CSTGHDRManager::CSTGHDRManager()'s array-element address deltas (see
- * that class's own comment below) -- not guessed.
+ * SetMonitorLevel/GetMeterLevel/...) -- reconstructing every remaining
+ * internal method is out of scope for this pass, but each class's own
+ * ctor and Initialize() ARE real now (batch 22/23). Declared here as
+ * opaque classes (same treatment as CEmergencyStealer) beyond those
+ * methods, so CSTGHDRManager's own confirmed array layout can be embedded
+ * and constructed faithfully. Sizes are confirmed independently of these
+ * classes' own code, via CSTGHDRManager::CSTGHDRManager()'s array-element
+ * address deltas (see that class's own comment below) -- not guessed.
  */
 class CSTGPlaybackBuffer {
 public:
@@ -251,7 +252,9 @@ public:
 	 * valid reinterpretation), then set a fixed `+0x40` constant
 	 * (0xfa1) and allocate/store an 8002-byte buffer pointer at `+0x34`
 	 * via `CSTGBankMemory::AllocAligned(0x1f42, 0x10)`. See
-	 * src/engine/hdr_manager_init.cpp for the full derivation.
+	 * src/engine/hdr_manager_init.cpp for the full derivation. The
+	 * ctor itself (batch 23, `.text+0xd6450`, 78 bytes) is now real too
+	 * -- see managers.cpp.
 	 */
 	void Initialize(unsigned long totalSize);
 	void Initialize(unsigned char mode, unsigned long totalSize);
@@ -264,11 +267,15 @@ public:
 	/*
 	 * Initialize(unsigned int) (batch 22, `.text+0x71570`, 18 bytes)
 	 * confirmed real -- see hdr_record_track.cpp for the full
-	 * derivation, including a real, pre-existing gap this pass found
-	 * but deliberately left unfixed (out of scope): this class's own
-	 * ctor above is still a no-op stub, so the packed pointer field
-	 * this method unconditionally dereferences at `+0x4` is never
-	 * actually populated anywhere in this project yet.
+	 * derivation. The pre-existing gap batch 22 flagged here (this
+	 * class's own ctor being a no-op stub, leaving the `+0x4` packed
+	 * pointer field never populated) is now RESOLVED: batch 23's own
+	 * ctor reconstruction (managers.cpp) found `+0x4` is not an
+	 * externally-allocated buffer pointer at all -- it's a
+	 * self-referential 16-byte-aligned scratch pointer the ctor itself
+	 * computes (`(this+0x17) & ~0xF`) and stores back into `+0x4`, so
+	 * `Initialize()`'s own dereference of it was always safe once the
+	 * ctor runs first.
 	 */
 	void Initialize(unsigned int busIndex);
 	unsigned char _unrecovered[172];		/* confirmed size -- see CSTGHDRManager's comment
@@ -1321,12 +1328,13 @@ public:
 };
 
 /*
- * Real, fully-fleshed class (many other confirmed methods, same treatment
- * as CSTGMonitorMixerChannel) -- declared here only as an opaque,
- * empty-body class so CSTGVoiceAllocator's array of 16 can be
- * placement-constructed. Confirmed size (6284/0x188c bytes) comes from
- * CSTGVoiceAllocator::CSTGVoiceAllocator()'s own array-element address
- * deltas (16 constructor calls, consistent stride), not guessed.
+ * Real, fully-fleshed class (many other confirmed methods) -- declared
+ * here only as an opaque class so CSTGVoiceAllocator's array of 16 can be
+ * placement-constructed; only the ctor is reconstructed. Confirmed size
+ * (6284/0x188c bytes) comes from CSTGVoiceAllocator::CSTGVoiceAllocator()'s
+ * own array-element address deltas (16 constructor calls, consistent
+ * stride), not guessed. Ctor itself (batch 23, `.text+0x5cdc0`, 106
+ * bytes) confirmed real -- see managers.cpp.
  */
 class CSTGSlotState {
 public:

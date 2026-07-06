@@ -42,6 +42,14 @@ unsigned char _ZTV18CSTGStreamingEvent[40];
  * _ZTV18CSTGStreamingEvent just above. */
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 
+/* CSTGAudioBusManager::sGlobalBusSet's own real storage lives in
+ * audio_bus_manager.cpp (not linked here) -- batch 23's newly-real
+ * CSTGPlaybackBuffer/CSTGMonitorMixerChannel ctors (this file's own [18]
+ * test below) are the first code in managers.cpp to reference it, so
+ * this file needs its own local definition too, same "give it its own
+ * local storage" treatment as _ZTV18CSTGStreamingEvent above. */
+unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
+
 /* Real kernel-only APIs (RTAI mutex wrappers) and a not-yet-reconstructed
  * static method (CSTGToneAdjustDescriptor) -- mocked here purely so
  * CPowerOffTimer/CSTGVoiceModelManager's constructors link on the host,
@@ -134,6 +142,8 @@ float gAllPlusHeadroom[4]  = { -99.0f, -99.0f, -99.0f, -99.0f };
 float gAllMinusHeadroom[4] = {  99.0f,  99.0f,  99.0f,  99.0f };
 
 static int g_fail;
+
+static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 
 static void check_eq(const char *label, unsigned int got, unsigned int want)
 {
@@ -451,22 +461,61 @@ int main(void)
 		 sizeof(CSTGEffectManager), 0xb7c);
 	delete[] emBuf;
 
-	printf("[18] CSTGHDRManager: 16 opaque CSTGPlaybackBuffer (untouched by their own\n"
-	       "     empty ctor), 16 opaque CSTGMonitorMixerChannel slots (confirmed\n"
-	       "     172-vs-192-byte size/stride quirk: channels 0-14 get 3 tail dwords\n"
-	       "     zeroed, channel 15 does not) -- this is a PARTIAL reconstruction,\n"
-	       "     see oa_engine.h for everything confirmed-but-not-implemented past\n"
-	       "     this class's own declared (much smaller than real) size\n");
+	printf("[18] CSTGHDRManager: 16 real CSTGPlaybackBuffer (batch 23), 16 real\n"
+	       "     CSTGMonitorMixerChannel slots (batch 23, plus CSTGHDRManager's own\n"
+	       "     confirmed 172-vs-192-byte size/stride quirk: channels 0-14 get 3\n"
+	       "     tail dwords zeroed, channel 15 does not) -- this is a PARTIAL\n"
+	       "     reconstruction, see oa_engine.h for everything confirmed-but-not-\n"
+	       "     implemented past this class's own declared (much smaller than\n"
+	       "     real) size\n");
 	CSTGHDRManager *hdr;
 	unsigned char *hdrBuf = poison_and_construct(&hdr);
 
-	/* +0x000..+0x003 (_unrecovered_head) and +0x004..+0x583 (playbackBuffers[16],
-	 * whose opaque sub-ctor is empty) are both untouched by this ctor. */
-	bool headAndBuffersUntouched = true;
-	for (unsigned int off = 0; off < 4 + 16 * 88; off++)
-		if (hdrBuf[off] != 0xcc) headAndBuffersUntouched = false;
-	check_eq("+0x000..+0x583 (head + playbackBuffers[16]) entirely untouched",
-		 (unsigned int)headAndBuffersUntouched, 1);
+	/* +0x000..+0x003 (_unrecovered_head) is untouched by this ctor. */
+	bool headUntouched = true;
+	for (unsigned int off = 0; off < 4; off++)
+		if (hdrBuf[off] != 0xcc) headUntouched = false;
+	check_eq("+0x000..+0x003 (_unrecovered_head) untouched", (unsigned int)headUntouched, 1);
+
+	/* playbackBuffers[16] (batch 23: ctor is real now) -- check element 0
+	 * and element 15 in full, matching this file's own established
+	 * "first+last" convention. Fields the real ctor writes are verified
+	 * exactly; fields it deliberately never touches (the embedded
+	 * CSTGHDRCircularBuffer's own already-confirmed partial-zero gap,
+	 * sec 10.158, plus CSTGPlaybackBuffer's own Initialize()-only +0x40
+	 * and two never-written pad bytes) are verified STILL poisoned. */
+	bool pbOk = true;
+	for (int i = 0; i <= 15; i += 15) {
+		unsigned char *pb = hdrBuf + 4 + i * 88;
+		if (*(unsigned int *)(pb + 0x00) != 0) pbOk = false;
+		if (pb[0x04] != 0) pbOk = false;
+		if (pb[0x05] != 0xcc || pb[0x06] != 0xcc || pb[0x07] != 0xcc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x08) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x0c) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x10) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x14) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x18) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x1c) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x20) != 0xcccccccc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x24) != 0xcccccccc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x28) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x2c) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x30) != 0xcccccccc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x34) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x38) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x3c) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x40) != 0xcccccccc) pbOk = false;
+		if (pb[0x44] != 0) pbOk = false;
+		if (pb[0x45] != 0xcc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x48) != 0) pbOk = false;
+		if (*(unsigned int *)(pb + 0x4c) != 0xcccccccc) pbOk = false;
+		if (pb[0x50] != 0 || pb[0x51] != 0 || pb[0x52] != 0) pbOk = false;
+		if (pb[0x53] != 0xcc) pbOk = false;
+		if (*(unsigned int *)(pb + 0x54) !=
+		    ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80)) pbOk = false;
+	}
+	check_eq("playbackBuffers[0]/[15]: real ctor fields + confirmed gaps still poisoned",
+		 (unsigned int)pbOk, 1);
 
 	unsigned int gapBase = 4 + 16 * 88;	/* +0x584 */
 	bool gapOk =
@@ -485,8 +534,33 @@ int main(void)
 	bool allChannelsOk = true;
 	for (int i = 0; i < 16; i++) {
 		unsigned char *slot = hdrBuf + channelsBase + i * 0xc0;
-		for (unsigned int off = 0; off < 0xac; off++)
-			if (slot[off] != 0xcc) allChannelsOk = false;
+		/* CSTGMonitorMixerChannel's own real ctor (batch 23) computes a
+		 * self-referential 16-byte-aligned scratch pointer -- re-derive
+		 * it here with the SAME formula rather than assuming a fixed
+		 * offset (the offset from `slot` depends on `slot`'s own
+		 * alignment mod 16, which varies by index/allocator). */
+		unsigned char *aligned = (unsigned char *)(((unsigned long)slot + 0x17) & ~0xFUL);
+
+		if (slot[0x0] != 0) allChannelsOk = false;
+		if (*(unsigned int *)(slot + 0x4) != ToU32(aligned)) allChannelsOk = false;
+		if (slot[0x1] != 0) allChannelsOk = false;
+		if (slot[0x2] != 0) allChannelsOk = false;
+		for (int off = 0; off < 0x50; off++)
+			if (aligned[off] != 0) allChannelsOk = false;
+		if (*(unsigned int *)(aligned + 0x60) !=
+		    ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80)) allChannelsOk = false;
+		if (*(float *)(aligned + 0x68) != 1.0f) allChannelsOk = false;
+		if (*(unsigned int *)(aligned + 0x50) !=
+		    ToU32(CSTGAudioBusManager::sGlobalBusSet + 0 * 0x80)) allChannelsOk = false;
+		if (*(unsigned int *)(aligned + 0x58) != 0) allChannelsOk = false;
+		if (*(unsigned int *)(aligned + 0x5c) != 0) allChannelsOk = false;
+		if (aligned[0x54] != 1) allChannelsOk = false;
+		if (*(unsigned int *)(aligned + 0x64) != 0) allChannelsOk = false;
+		if (slot[0x87] != 0x14) allChannelsOk = false;
+		if (slot[0x88] != 0x14) allChannelsOk = false;
+		if (slot[0x89] != 0) allChannelsOk = false;
+		if (slot[0x8a] != 0) allChannelsOk = false;
+
 		if (i < 15) {
 			if (*(unsigned int *)(slot + 0xac) != 0) allChannelsOk = false;
 			if (*(unsigned int *)(slot + 0xb0) != 0) allChannelsOk = false;
@@ -497,7 +571,7 @@ int main(void)
 				if (slot[off] != 0xcc) allChannelsOk = false;	/* channel 15: NO tail zero at all */
 		}
 	}
-	check_eq("all 16 channel slots match the confirmed 172-vs-192 quirk exactly",
+	check_eq("all 16 channel slots: real ctor fields + confirmed 172-vs-192 quirk",
 		 (unsigned int)allChannelsOk, 1);
 
 	check_eq("sInstance == hdr", (unsigned int)(CSTGHDRManager::sInstance == hdr), 1);
@@ -506,9 +580,9 @@ int main(void)
 	delete[] hdrBuf;
 
 	printf("[19] CSTGVoiceAllocator: two confirmed self-ref/owner-backref arrays,\n"
-	       "     16 opaque CSTGSlotState (untouched by their own empty ctor), a\n"
-	       "     real recursive mutex -- PARTIAL reconstruction (~281KB confirmed\n"
-	       "     minimum size, two large regions' contents not reconstructed --\n"
+	       "     16 real CSTGSlotState (ctor real now, batch 23), a real recursive\n"
+	       "     mutex -- PARTIAL reconstruction (~281KB confirmed minimum size,\n"
+	       "     two large regions' contents not reconstructed --\n"
 	       "     see oa_engine.h)\n");
 	int mutexInitCallsBefore = g_mutexInitCalls;
 	int mutexattrCallsBefore = g_mutexattrCalls;
@@ -558,10 +632,18 @@ int main(void)
 
 	unsigned char *slotState0 = vaBuf + 0xb478;
 	unsigned char *slotState15 = vaBuf + 0xb478 + 15 * 0x188c;
-	bool slotStatesUntouched = slotState0[0] == 0xcc && slotState0[0x188b] == 0xcc &&
-				   slotState15[0] == 0xcc && slotState15[0x188b] == 0xcc;
-	check_eq("slotStates[0] and [15] entirely untouched (opaque sub-ctor is empty)",
-		 (unsigned int)slotStatesUntouched, 1);
+	/* CSTGSlotState's own real ctor (batch 23) zeroes +8..+0x1807 only
+	 * (a flat memset-equivalent double loop); +0..+7 and the +0x1808..
+	 * +0x188b tail remain untouched/poisoned. */
+	bool slotStatesOk =
+		slotState0[0] == 0xcc && slotState0[7] == 0xcc &&
+		slotState0[8] == 0 && slotState0[0x1807] == 0 &&
+		slotState0[0x1808] == 0xcc && slotState0[0x188b] == 0xcc &&
+		slotState15[0] == 0xcc && slotState15[7] == 0xcc &&
+		slotState15[8] == 0 && slotState15[0x1807] == 0 &&
+		slotState15[0x1808] == 0xcc && slotState15[0x188b] == 0xcc;
+	check_eq("slotStates[0]/[15]: real ctor zeroes +8..+0x1807, rest still poisoned",
+		 (unsigned int)slotStatesOk, 1);
 
 	bool bigArrayPoisoned = vaBuf[0x23d38] == 0xcc;
 	bool tailPoisoned = vaBuf[0x3a7b8] == 0xcc;

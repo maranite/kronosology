@@ -99,6 +99,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/slot_voice_data_free.o \
            src/engine/load_balancer_static.o \
            src/engine/performance_vars_set_is_dying.o \
+           src/engine/drum_kit_data.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -251,6 +252,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/slot_voice_data_free.cpp \
        src/engine/load_balancer_static.cpp \
        src/engine/performance_vars_set_is_dying.cpp \
+       src/engine/drum_kit_data.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -308,7 +310,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
          verify/test_message_processor \
-         verify/test_load_balancer_static verify/test_performance_vars_set_is_dying
+         verify/test_load_balancer_static verify/test_performance_vars_set_is_dying \
+         verify/test_drum_kit_data
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -521,6 +524,9 @@ verify/test_load_balancer_static: verify/test_load_balancer_static.cpp src/engin
 
 verify/test_performance_vars_set_is_dying: verify/test_performance_vars_set_is_dying.cpp src/engine/performance_vars_set_is_dying.cpp include/oa_engine.h include/oa_engine_init.h include/oa_global.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_performance_vars_set_is_dying.cpp src/engine/performance_vars_set_is_dying.cpp -o $@
+
+verify/test_drum_kit_data: verify/test_drum_kit_data.cpp src/engine/drum_kit_data.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_drum_kit_data.cpp src/engine/drum_kit_data.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

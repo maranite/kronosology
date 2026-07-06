@@ -156,9 +156,10 @@ int main(void)
 		 * field (`recordTrack[i]+0x20+0x4` == `recordTrack[i]+0x24`,
 		 * see CSTGRecordTrack::Initialize()'s own header comment in
 		 * hdr_record_track.cpp) -- ONE shared buffer per track, not
-		 * two independent ones. That pointee's own ctor is still a
-		 * no-op stub (real, pre-existing gap), so it needs an
-		 * explicit valid backing buffer here. */
+		 * two independent ones. This test exercises `Initialize()`
+		 * directly on a raw poisoned buffer (no ctor call), so it
+		 * needs an explicit valid backing buffer here regardless of
+		 * the ctor's own real behavior (batch 23; see managers.cpp). */
 		unsigned char *mmcTargets[16];
 		for (int i = 0; i < 16; i++) {
 			mmcTargets[i] = mmap32(0x1000);

@@ -1763,3 +1763,122 @@ committing to a KAT, not attempted this batch either.
 two full clean-rebuild passes (byte-identical both times); 32 unresolved
 symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`;
 `OA.ko` 156,984 bytes (up from 153,844). Commit `78649cc`.
+
+**Batch 23 specifics** (2026-07-06, sec 10.171, commit TBD): user gave
+fresh explicit authorization to continue past batch 22. Re-verified state
+myself first (HEAD `64bc607`, clean tree, stub count 70, last section
+`10.170` -- matched the briefing). Picked up BOTH of batch 22's own
+pre-scouted candidates: `CSTGPlaybackBuffer`/`CSTGMonitorMixerChannel`
+ctors (managers.cpp, the sec 10.164 "hidden non-bare stub" category --
+`{ }` not `{}`, invisible to the bare-stub grep) plus the same-category
+`CSTGSlotState` ctor, and `CSTGDrumKitData::CSTGDrumKitData()` (the
+925-byte, confirmed branch/call-free 273x129x8 legacy-UUID table batch 22
+explicitly flagged as needing the "hand-trace 2-3 cases independently"
+discipline). Stub count 70 -> 69 (net -1, bare-`{}` convention -- only
+`CSTGDrumKitData` counted; the other three were already-hidden gaps).
+
+**Key technique this batch, a mechanical scale-up of the sec 10.164
+"hand-trace 2-3 cases independently" rule for a loop far too large to
+trace safely by eye (35,217 total records)**: wrote a standalone Python
+script that replays the EXACT disassembled instruction semantics (same
+loop bounds, same per-record field offsets) over a real in-memory
+`bytearray`, then dumped first/second/mid/last-record field values BEFORE
+writing a single line of the C++ reconstruction. This caught, independent
+of any hand arithmetic, that the 8 per-record "velocity zone" sub-records
+(25-byte stride, `0x19`) collectively span 4 bytes WIDER than the
+record's own 514-byte (`0x202`) stride -- meaning the last sub-record's
+own trailing word/mask ALWAYS spills into the next record's own `+0`/`+1`
+bytes (confirmed real via the model, not a bug), and for the single LAST
+record overall, spills 3 bytes PAST the nominal array end, fixing the
+class's real confirmed minimum size at a non-obvious `0x1143529` (not the
+naively-expected `vtable+arraySize`). Every one of the model's
+predictions matched the real C++ KAT byte-for-byte on the FIRST run.
+Lesson for any future batch with a similarly huge nested-loop candidate:
+when a loop's total iteration count makes "hand-trace 2-3 cases" itself
+error-prone (tens of thousands of records, not tens), write a small
+Python replay of the disassembly first and generate ground truth from
+that, rather than trying to hand-verify a huge space directly -- this is
+the sec 10.161 "replay engine for a huge deterministic byte table"
+technique, now confirmed useful for a huge deterministic NESTED-LOOP
+effect too, not just a flat populate-a-static-array ctor.
+
+**Real, pre-existing gap RESOLVED this batch (not just found)**:
+`CSTGMonitorMixerChannel::Initialize()`'s own batch-22 comment had
+explicitly flagged its `+0x4` packed-pointer dereference as depending on
+"whatever the kernel handed back as fresh module memory" since its own
+ctor was still a no-op. This batch's fresh disassembly of the REAL ctor
+found the truth is both simpler and safer than that speculation: `+0x4`
+is a SELF-referential 16-byte-aligned scratch pointer the ctor itself
+computes (`(this+0x17) & ~0xF`, a manual re-alignment trick needed
+because this class sits at a non-16-aligned offset within its own parent
+array) and stores back into itself -- never an externally-allocated or
+uninitialized buffer at all. Lesson: a "real, pre-existing gap, out of
+scope to fix" note attached to an unreconstructed SIBLING ctor is exactly
+the kind of thing worth re-checking the moment that ctor itself becomes
+tractable -- the speculated danger doesn't always turn out to be real.
+
+**Ripple-effect gotcha (a new angle on the sec 10.153/10.158 family, not
+previously seen this way): a source file that has NEVER referenced a
+given static array before can start doing so the moment a NEW function is
+added to it, silently breaking every verify/ file that links that source
+file but not the array's own real-storage-providing file.**
+`managers.cpp` had never touched `CSTGAudioBusManager::sGlobalBusSet`
+before this batch (its real storage lives in `audio_bus_manager.cpp`) --
+both new ctors reference it, requiring the by-now-standard "local storage
+definition" fix (sec 10.158) in FIVE separate verify/ files
+(`test_managers.cpp`/`test_engine.cpp`/`test_global.cpp`/
+`test_global_ctor.cpp`/`test_engine_startup_bits2.cpp`) that all link
+`managers.cpp` directly. Found reliably by grepping the Makefile for every
+`managers.cpp` link line FIRST (5 targets), not by waiting for 5 separate
+link failures one at a time. Whenever a new function lands in an
+already-heavily-shared file and references ANY static/global whose real
+definition lives in a DIFFERENT file, immediately check every verify/
+target that links the shared file (not just the one being edited) for
+the same gap -- this is the same discipline sec 10.160's
+`TSTGArrayManager<CSTGRecordBuffer>` finding already established, now
+confirmed for a plain (non-template) static array too.
+
+**Second ripple-effect gotcha, caught by proactively re-reading existing
+test assertions before running the suite (not by a KAT FAIL): promoting a
+ctor from empty to real breaks any PRE-EXISTING test that explicitly
+asserted "this sub-object's memory is untouched because its own ctor is a
+no-op."** `test_managers.cpp`'s own `[18]`/`[19]` sections had exactly
+such assertions for all three of this batch's newly-real classes
+(`CSTGHDRManager`'s and `CSTGVoiceAllocator`'s own already-real ctors
+placement-construct 16 of each). Rewrote all three blocks to check the
+real written fields plus the still-genuinely-poisoned confirmed gaps,
+instead of blanket "still 0xcc". For `CSTGMonitorMixerChannel`'s
+self-aligned pointer specifically, the test re-derives the SAME
+`(slot+0x17)&~0xF` formula dynamically rather than assuming a fixed
+byte offset (the real offset from the object's own base varies with that
+object's own alignment mod 16, which isn't guaranteed constant across
+array elements unless the array's own outer base happens to be
+16-aligned) -- computing it independently in the test would have been
+fragile; re-deriving via the identical formula is not. Lesson, a repeat of
+the sec 10.153/10.158 family: before considering a ctor promotion done,
+grep every verify/ file for the specific classes it constructs (not just
+files that mock the promoted symbol directly) for any assertion whose own
+wording implies "because the ctor does nothing" -- that wording is a
+reliable signal the assertion needs updating, not just re-running.
+
+**Verification**: 66 verify/ binaries (up from 65, new
+`test_drum_kit_data`), all exit 0 by real per-binary process exit code
+(never log-grepped), both of two full clean-rebuild passes
+(byte-identical both times); 32 unresolved symbols; `.gnu.linkonce.
+this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 157,960 bytes (up from
+156,984). Commit TBD.
+
+**Deferred for a future batch**: `CSTGEQ`'s five core math functions
+(unchanged from sec 10.170 -- not re-evaluated this batch, time budget):
+`CalculateLowShelfBeta`/`CalculateHighShelfBeta`/`CalculatePeakingBeta`/
+`CalculatePeakingCoefficients`/`CalculateShelvingCoefficients`, blocking
+`CSTGHDRMiniModel::Initialize()` -- two use `fptan`, two do heavy x87
+stack shuffling across real branches, tractable only via a "transcribe
+the whole function as one verbatim inline-asm block" approach (sec
+10.117 primitives don't fit). Also worth a fresh look next batch:
+`CSTGPlaybackBuffer`/`CSTGMonitorMixerChannel` now being real ctors makes
+it worth re-checking whether any of THEIR OWN other methods
+(`AddEvent`/`RemoveEvent`/`ProcessSubRate`/`RunMonitor`/`StartRampIn`/
+`StartRampOut`/`SetMonitorLevel`/`GetMeterLevel`/etc, still fully
+opaque/unreconstructed) are now individually tractable given the class's
+own fields are no longer purely speculative.

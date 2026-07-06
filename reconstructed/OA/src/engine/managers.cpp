@@ -75,13 +75,116 @@ CSTGVoiceAllocator      *CSTGVoiceAllocator::sInstance;
 CSTGAudioManager        *CSTGAudioManager::sInstance;
 CSTGMessageProcessor    *CSTGMessageProcessor::sInstance;
 
-/* Opaque sub-object constructors -- real bodies not reconstructed in this
- * pass (see oa_engine.h's CSTGPlaybackBuffer/CSTGMonitorMixerChannel/
- * CSTGSlotState comments). Defined empty purely so the owning classes'
- * arrays of each can be placement-constructed. */
-CSTGPlaybackBuffer::CSTGPlaybackBuffer() { }
-CSTGMonitorMixerChannel::CSTGMonitorMixerChannel() { }
-CSTGSlotState::CSTGSlotState() { }
+/*
+ * CSTGPlaybackBuffer::CSTGPlaybackBuffer() (batch 23, `.text+0xd6450`, 78
+ * bytes) confirmed: embeds a `CSTGHDRCircularBuffer` base object at offset
+ * 0 (same "eax unmodified across the call" evidence as
+ * `CSTGPlaybackBuffer::Initialize()`, hdr_manager_init.cpp), then zeroes
+ * three dwords (+0x34/+0x38/+0x3c) and one more (+0x48), zeroes three
+ * bytes (+0x50/+0x51/+0x52), sets a default bus-set pointer at +0x54
+ * (`&sGlobalBusSet[32]`, bus index 32 -- later overwritten per-instance by
+ * `CSTGHDRManager::Initialize()`'s own loop, hdr_manager_init.cpp:149-150,
+ * confirming this is just a placeholder default), and zeroes one more byte
+ * (+0x44). Confirmed real size 0x58 (88) bytes -- exactly
+ * `CSTGHDRCircularBuffer`'s own 0x34-byte base plus these fields ending at
+ * +0x58, matching this class's own already-documented array stride
+ * (oa_engine.h, CSTGHDRManager's ctor comment).
+ */
+CSTGPlaybackBuffer::CSTGPlaybackBuffer()
+{
+	new (this) CSTGHDRCircularBuffer();
+
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0x34) = 0;
+	*(unsigned int *)(base + 0x3c) = 0;
+	*(unsigned int *)(base + 0x38) = 0;
+	*(unsigned int *)(base + 0x48) = 0;
+	base[0x50] = 0;
+	base[0x51] = 0;
+	base[0x52] = 0;
+	*(unsigned int *)(base + 0x54) = ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+	base[0x44] = 0;
+}
+
+/*
+ * CSTGMonitorMixerChannel::CSTGMonitorMixerChannel() (batch 23,
+ * `.text+0x714d0`, 154 bytes) confirmed. Resolves the real, pre-existing
+ * gap this class's own `Initialize()` comment flagged (hdr_record_track.cpp):
+ * the `+0x4` field it unconditionally dereferences is NOT an
+ * externally-allocated buffer pointer -- it's a self-referential 16-byte-
+ * aligned SCRATCH pointer computed as `(this+0x17) & ~0xF` and stored back
+ * into this object's own `+0x4` field (the classic "manually align an
+ * SSE-sized sub-region within an object whose own placement in its parent
+ * array isn't guaranteed 16-aligned" pattern -- confirmed: this class sits
+ * at a 0xc0 stride inside `CSTGHDRManager`, `0xc0 mod 0x10 == 0`, but the
+ * ARRAY's own base `+0x5a4`/embedded-`+0x20` offset is only 4-aligned, so
+ * every element needs its own runtime re-alignment). Uses `movaps`/`xorps`
+ * purely for wide zero-fill (the already-known "SSE for pure data
+ * movement" gotcha, CLAUDE.md) -- reimplemented as plain zeroing, no SSE
+ * needed under this project's `-mno-sse` build.
+ *
+ * Fields written through the aligned pointer (all real, confirmed via
+ * relocation for the two `sGlobalBusSet`-relative stores):
+ *   +0x00..0x4F  zeroed (5 x 16-byte `movaps`)
+ *   +0x50        = &sGlobalBusSet[0]   (bus index 0 default)
+ *   +0x54 (byte) = 1
+ *   +0x58        = 0
+ *   +0x5c        = 0
+ *   +0x60        = &sGlobalBusSet[32]  (bus index 32 default -- overwritten
+ *                  per-instance by `Initialize(busIndex)`, hdr_record_track.cpp)
+ *   +0x64        = 0
+ *   +0x68        = 1.0f (matches `CSTGRecordTrack::Initialize()`'s own
+ *                  confirmed `*(ecx+0x68) = 1.0f` write through this SAME
+ *                  field, hdr_record_track.cpp's cross-checked offset note)
+ * Fields written directly on `this` (not through the aligned pointer):
+ *   +0x00/+0x01/+0x02 = 0 (bytes)
+ *   +0x87 = 0x14, +0x88 = 0x14, +0x89 = 0, +0x8a = 0 (bytes)
+ * All fields fit within the class's own confirmed 0xac-byte real size.
+ */
+CSTGMonitorMixerChannel::CSTGMonitorMixerChannel()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *aligned = (unsigned char *)(((unsigned long)base + 0x17) & ~0xFUL);
+
+	base[0x0] = 0;
+	*(unsigned int *)(base + 0x4) = ToU32(aligned);
+	base[0x1] = 0;
+	base[0x2] = 0;
+
+	for (int i = 0; i < 0x50; i++)
+		aligned[i] = 0;			/* +0x00..0x4F, 5 x 16-byte movaps */
+
+	*(unsigned int *)(aligned + 0x60) = ToU32(CSTGAudioBusManager::sGlobalBusSet + 32 * 0x80);
+	*(float *)(aligned + 0x68) = 1.0f;
+	*(unsigned int *)(aligned + 0x50) = ToU32(CSTGAudioBusManager::sGlobalBusSet + 0 * 0x80);
+	*(unsigned int *)(aligned + 0x58) = 0;
+	*(unsigned int *)(aligned + 0x5c) = 0;
+	aligned[0x54] = 1;
+	*(unsigned int *)(aligned + 0x64) = 0;
+
+	base[0x88] = 0x14;
+	base[0x87] = 0x14;
+	base[0x89] = 0;
+	base[0x8a] = 0;
+}
+
+/*
+ * CSTGSlotState::CSTGSlotState() (batch 23, `.text+0x5cdc0`, 106 bytes)
+ * confirmed: two back-to-back 2-iteration loops, both zeroing 12-byte
+ * (3-dword) records across the identical 0x600-byte span, at `this+8` and
+ * then contiguously at `this+8+0xc00` -- mechanically equivalent to a
+ * single flat `memset(this+8, 0, 0x1800)` (0x1800 divides evenly into
+ * 12-byte records with zero remainder, confirmed via `0x600*2*2 == 0x1800`
+ * and `0x1800 % 12 == 0`). Leaves `+0x1808..+0x188c` (0x84 bytes) an
+ * unrecovered tail, within this class's own already-documented confirmed
+ * 0x188c-byte real size (oa_engine.h).
+ */
+CSTGSlotState::CSTGSlotState()
+{
+	unsigned char *base = (unsigned char *)this;
+	for (int i = 0; i < 0x1800; i++)
+		base[8 + i] = 0;
+}
 
 /* Real kernel-side RTAI recursive-mutex wrappers, confirmed via relocation
  * (same allocate/init shape as CPowerOffTimer's already-confirmed mutex,

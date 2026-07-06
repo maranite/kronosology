@@ -375,6 +375,12 @@ void CSTGChannelValues::InitializeLongHand() { g_initLongHandCalls++; }
  * [Initialize] scenario). */
 unsigned char CSTGChannelValues::sTemplateReady;
 unsigned char CSTGChannelValues::sTemplate[0x92c];
+/* CSTGAudioBusManager::sGlobalBusSet's own real storage lives in
+ * audio_bus_manager.cpp (not linked here) -- batch 23's newly-real
+ * CSTGPlaybackBuffer/CSTGMonitorMixerChannel ctors (managers.cpp) are the
+ * first code there to reference it, so this file needs its own local
+ * definition too. */
+unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 STGLFOSubRateParams *CSTGCommonLFO::sSubRateParams;
 STGStepSeqSubRateParams *CSTGCommonStepSeq::sSubRateParams;
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own ctors +
