@@ -2230,7 +2230,7 @@ matching `RemoveEvent()`'s own mechanics) -- deliberately left for its own
 dedicated future pass rather than rushed alongside this batch's already-
 substantial 6 DSP conversion functions.
 
-**Batch 27 specifics** (2026-07-06, sec 10.175, commit `PENDING_BATCH27_HASH`): the user
+**Batch 27 specifics** (2026-07-06, sec 10.175, commit `ab5ac1a`): the user
 gave fresh explicit authorization to continue past batch 26. Re-verified
 state myself first (HEAD `3835657`, clean tree, bare-`{}` stub count 69,
 last section `10.174` -- matched the briefing). Ran on `192.168.3.92`
@@ -2327,7 +2327,7 @@ outer/caller-visible slot after being pushed onto a free list.
 (never log-grepped), both of two full clean-rebuild passes on
 `192.168.3.92` (byte-identical both times, `OA.ko` 164,432 bytes both
 runs); 32 unresolved symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0
-`R_386_GOTPC`. Commit `PENDING_BATCH27_HASH`.
+`R_386_GOTPC`. Commit `ab5ac1a`.
 
 **Deferred for a future batch, unchanged**: `CSTGEQ`'s five core math
 functions (still needs the verbatim-inline-asm-transcription approach).
