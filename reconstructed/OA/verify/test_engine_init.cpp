@@ -143,8 +143,27 @@ CSTGMetronome::CSTGMetronome() { sInstance = this; }
 CSTGTempoUtils *CSTGTempoUtils::sInstance;
 CSTGTempoUtils::CSTGTempoUtils() { sInstance = this; }
 
+/* CSTGStreamingEventManager now has a real `CSTGStreamingEvent events[401]`
+ * member (sec 10.158) -- since CSTGStreamingEvent has its own user-declared
+ * constructor, C++ automatically invokes it 401 times as part of ANY
+ * CSTGStreamingEventManager construction, real OR mocked (member
+ * construction is not optional/skippable). This trivial mock keeps this
+ * test's own construction of the (mocked) manager below linkable without
+ * pulling in the real CSTGStreamingEvent::CSTGStreamingEvent() (which
+ * itself needs CSTGAudioEvent/CSTGHDRCircularBuffer -- out of scope for
+ * this test's own deliberately-isolated mock philosophy). */
+CSTGStreamingEvent::CSTGStreamingEvent() {}
+
 static unsigned short g_streamingEventArg1;
 static unsigned long g_streamingEventArg2;
+/* CSTGStreamingEventManager::sInstance storage used to come from
+ * engine_init.cpp (linked directly into this test); sec 10.158 moved that
+ * storage to src/engine/streaming_event_manager.cpp (alongside the class's
+ * own now-real ctor/Initialize()) -- NOT linked here (this file
+ * deliberately mocks every dependency instead, see this file's own header
+ * comment), so this test needs its own local storage now, same as
+ * CLoadBalancer/CSTGDiskCostManager/CSTGMetronome/CSTGTempoUtils above. */
+CSTGStreamingEventManager *CSTGStreamingEventManager::sInstance;
 CSTGStreamingEventManager::CSTGStreamingEventManager() { sInstance = this; }
 void CSTGStreamingEventManager::Initialize(unsigned short a1, unsigned long a2)
 {

@@ -356,6 +356,107 @@ public:
 	 * sizeof() is intentionally smaller than the real ~101KB object. */
 };
 
+/*
+ * CSTGHDRCircularBuffer -- embedded inside CSTGHDRManager at +0x189c8 (see
+ * that class's own comment above: a 17th standalone CSTGPlaybackBuffer ends
+ * at +0x189c8, and a CSTGPlaybackEvent begins at +0x189fc), confirmed
+ * exactly 0x34 (52) bytes. Fully reconstructed this pass -- all NINE
+ * methods that exist for this class (per the real symbol table) are small
+ * and self-contained. A single-writer/single-reader BYTE-COUNT ring
+ * (used for streaming audio-to-disk buffering): `readPos`/`fillPos` are two
+ * independent cursors walking the SAME allocated buffer (`bufferBase`..
+ * `bufferEnd`), while `availableReadBytes`/`availableFillBytes` track how
+ * many bytes are currently valid to consume/produce -- this class does the
+ * byte ACCOUNTING only; callers elsewhere are trusted to do the actual
+ * copy.
+ *
+ * Field offsets, confirmed via every method below (not guessed):
+ * Confirmed real ctor gap: the ctor zeroes field00/flagByte/bufferBase/
+ * readPos/fillPos/bufferEnd/totalSize/effectiveSize/fillCarry/readCarry
+ * (ten fields) but NEVER touches availableReadBytes (+0x20) or
+ * availableFillBytes (+0x24) -- confirmed via full disassembly (only ten
+ * `mov [x],0` stores total, none targeting +0x20/+0x24). Not a bug: every
+ * real caller of this class runs Initialize()/Reset()/SetEffectiveSize()
+ * (all three DO set both fields) before any other use.
+ *
+ *   +0x00 confirmed zeroed by the ctor; never read/written by any of the
+ *         other 8 methods here in ISOLATION -- but CSTGStreamingEventManager::
+ *         Initialize() (streaming_event_manager.cpp) confirms ONE concrete
+ *         use: it manually overwrites this field with the owning
+ *         CSTGStreamingEvent's own array index, right after calling
+ *         Initialize() below -- so in that context it's a back-reference
+ *         index, though this class's OWN methods never read it back.
+ *   +0x04 a single bool/mode byte, set from Initialize()'s own 2nd
+ *         argument, zeroed by the ctor -- never read by any other method
+ *         reconstructed here.
+ *   +0x08 bufferBase -- an AllocAligned()'d pointer, packed 32-bit
+ *         (ToU32()/FromU32() per this project's convention), set once by
+ *         Initialize(), read (never written again) by Reset()/
+ *         AdvanceReadPosition()/AdvanceFillPosition(). Every method here
+ *         only does ADDRESS ARITHMETIC on these pointer fields (byte-count
+ *         differences), never dereferences them -- so no MAP_32BIT hazard
+ *         for this class's own methods in isolation.
+ *   +0x0c readPos     -- pointer, walked by AdvanceReadPosition().
+ *   +0x10 fillPos     -- pointer, walked by AdvanceFillPosition().
+ *   +0x14 bufferEnd   -- pointer, bufferBase + effectiveSize at
+ *         Initialize()/SetEffectiveSize() time; read-only afterward.
+ *   +0x18 totalSize   -- Initialize()'s own 1st argument, stored verbatim;
+ *         never read by any other method reconstructed here.
+ *   +0x1c effectiveSize -- same value as totalSize at Initialize() time,
+ *         but independently re-settable via SetEffectiveSize() (a separate
+ *         confirmed real method) -- this is the value actually used to
+ *         (re)compute bufferEnd/availableFillBytes.
+ *   +0x20 availableReadBytes -- bytes ready to be consumed by a reader;
+ *         incremented by IncrementAvailableReadBytes() (CSTGCDWorker's own
+ *         dependency, see managers.cpp), decremented by
+ *         AdvanceReadPosition() (capped so it can never go negative -- see
+ *         that method's own `cmova`-based real clamp, faithfully
+ *         reproduced).
+ *   +0x24 availableFillBytes -- remaining free space for a writer;
+ *         decremented UNCONDITIONALLY (no clamp -- a real, confirmed
+ *         asymmetry vs. AdvanceReadPosition's own clamped decrement) by
+ *         AdvanceFillPosition(), incremented back by ReturnUnusedFillBytes()
+ *         and by ReaderDaemonAdjustAvailableFillBytes().
+ *   +0x28 fillCarry -- an accumulator touched by
+ *         ReaderDaemonAdjustAvailableFillBytes()/AdvanceReadPosition()/
+ *         ReturnUnusedFillBytes(); real high-level semantics not fully
+ *         determined, but every touch point is faithfully reproduced.
+ *   +0x2c readCarry -- symmetric accumulator, touched only by
+ *         ReaderDaemonAdjustAvailableFillBytes() (reads then re-derives
+ *         both +0x28 and +0x2c from their own difference) -- same
+ *         "faithfully reproduced, not fully named" treatment.
+ *   +0x30..+0x34 confirmed to exist (this class's real size is exactly
+ *         0x34, per its confirmed embedding gap in CSTGHDRManager) but
+ *         never touched by any of the nine methods reconstructed here.
+ */
+class CSTGHDRCircularBuffer {
+public:
+	CSTGHDRCircularBuffer();
+	void Initialize(unsigned long totalSize, bool flag, unsigned char extra);
+	void SetEffectiveSize(unsigned long newSize);
+	void Reset();
+	void AdvanceReadPosition(unsigned long n);
+	void AdvanceFillPosition(unsigned long n);
+	void ReaderDaemonAdjustAvailableFillBytes();
+	void IncrementAvailableReadBytes(unsigned long n);
+	void ReturnUnusedFillBytes(unsigned long n);
+
+	unsigned int  field00;
+	unsigned char flagByte;
+	unsigned char _gap5[3];
+	unsigned int  bufferBase;
+	unsigned int  readPos;
+	unsigned int  fillPos;
+	unsigned int  bufferEnd;
+	unsigned int  totalSize;
+	unsigned int  effectiveSize;
+	unsigned int  availableReadBytes;
+	unsigned int  availableFillBytes;
+	unsigned int  fillCarry;
+	unsigned int  readCarry;
+	unsigned char _unrecovered_tail[4];	/* +0x30..+0x34 */
+};
+
 /* CSTGMonitorMixer's constructor (.text+0x69000, 6 bytes) confirmed to do
  * exactly one thing: `sInstance = this;` -- the smallest manager
  * constructor found in this codebase so far. Total object size not

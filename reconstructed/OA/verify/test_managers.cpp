@@ -17,7 +17,22 @@
 #include <new>
 #include <sys/mman.h>
 #include "oa_engine.h"
+#include "oa_engine_init.h"
 #include "oa_bank_memory.h"
+
+/* CSTGAudioEvent's real ctor lives in engine_init.cpp (not linked here) --
+ * this file's own new tests for CSTGStreamingEvent (sec 10.158) only need
+ * the base sub-object's memory to be sane, not CSTGAudioEvent's own real
+ * semantics (already covered by test_engine_init.cpp). Trivial
+ * link-satisfying mock, same treatment as CSTGToneAdjustDescriptor::
+ * InitializeCommonToneAdjustDescriptors() above. */
+CSTGAudioEvent::CSTGAudioEvent() {}
+/* _ZTV18CSTGStreamingEvent's own real storage lives in bar2_stubs.cpp (not
+ * linked here) -- this file needs its own local definition to satisfy the
+ * `extern "C"` declaration in oa_engine_init.h, same treatment
+ * test_engine_init.cpp already uses for _ZTV14CSTGAudioEvent/
+ * _ZTV17CSTGPlaybackEvent/_ZTV15CSTGRecordEvent. */
+unsigned char _ZTV18CSTGStreamingEvent[40];
 
 /* Real kernel-only APIs (RTAI mutex wrappers) and a not-yet-reconstructed
  * static method (CSTGToneAdjustDescriptor) -- mocked here purely so
@@ -803,6 +818,235 @@ int main(void)
 			 *(unsigned short *)(va2Buf + 0x40b54 + 15 * 0x100 + 127 * 2), 0);
 		check_eq("+0x41b54 rowFlag[15] == 0", *(unsigned short *)(va2Buf + 0x41b54 + 15 * 2), 0);
 		check_eq("+0x44b22 (last trailing word) == 0", *(unsigned short *)(va2Buf + 0x44b22), 0);
+	}
+
+	printf("\n[25] CSTGHDRCircularBuffer: all nine methods (sec 10.158)\n");
+	{
+		unsigned long arenaSize = 64 * 1024;
+		unsigned char *arena = (unsigned char *)mmap(0, arenaSize, PROT_READ | PROT_WRITE,
+							      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		CSTGBankMemory::Initialize(arena, arenaSize);
+
+		/* Ctor: all-zero. Plain heap new[] is safe -- none of this
+		 * class's own methods reconstitute-and-dereference their own
+		 * pointer fields (pure address arithmetic throughout, see the
+		 * class comment in oa_engine.h). */
+		CSTGHDRCircularBuffer *cb;
+		poison_and_construct(&cb);
+		check_eq("ctor: field00 == 0", cb->field00, 0);
+		check_eq("ctor: flagByte == 0", cb->flagByte, 0);
+		check_eq("ctor: bufferBase == 0", cb->bufferBase, 0);
+		check_eq("ctor: readPos == 0", cb->readPos, 0);
+		check_eq("ctor: fillPos == 0", cb->fillPos, 0);
+		check_eq("ctor: bufferEnd == 0", cb->bufferEnd, 0);
+		check_eq("ctor: totalSize == 0", cb->totalSize, 0);
+		check_eq("ctor: effectiveSize == 0", cb->effectiveSize, 0);
+		/* Confirmed real gap: the ctor does NOT zero +0x20/+0x24 (every
+		 * other scalar field is zeroed, but these two are only ever
+		 * (re)set by Initialize()/Reset()/SetEffectiveSize(), all of
+		 * which this class's own real callers always run before first
+		 * use) -- still poisoned at 0xcc here, not a bug in this
+		 * reconstruction. */
+		check_eq("ctor: availableReadBytes still 0xcc (confirmed real gap)",
+			 cb->availableReadBytes, 0xcccccccc);
+		check_eq("ctor: availableFillBytes still 0xcc (confirmed real gap)",
+			 cb->availableFillBytes, 0xcccccccc);
+		check_eq("ctor: fillCarry == 0", cb->fillCarry, 0);
+		check_eq("ctor: readCarry == 0", cb->readCarry, 0);
+
+		cb->Initialize(0x100, true, 0x8);
+		check_eq("Initialize: totalSize == 0x100", cb->totalSize, 0x100);
+		check_eq("Initialize: effectiveSize == 0x100", cb->effectiveSize, 0x100);
+		check_eq("Initialize: flagByte == 1", cb->flagByte, 1);
+		check_eq("Initialize: bufferBase non-null", (unsigned int)(cb->bufferBase != 0), 1);
+		check_eq("Initialize: readPos == bufferBase", cb->readPos, cb->bufferBase);
+		check_eq("Initialize: fillPos == bufferBase", cb->fillPos, cb->bufferBase);
+		check_eq("Initialize: bufferEnd == bufferBase+0x100", cb->bufferEnd, cb->bufferBase + 0x100);
+		check_eq("Initialize: availableReadBytes == 0", cb->availableReadBytes, 0);
+		check_eq("Initialize: availableFillBytes == 0x100", cb->availableFillBytes, 0x100);
+		check_eq("Initialize: fillCarry == 0", cb->fillCarry, 0);
+		check_eq("Initialize: readCarry == 0", cb->readCarry, 0);
+
+		unsigned int base = cb->bufferBase;
+
+		/* AdvanceFillPosition, no wrap: fillPos += n, availableFillBytes
+		 * decremented by the FULL n unconditionally (no clamp -- real
+		 * confirmed asymmetry vs. AdvanceReadPosition below). */
+		cb->AdvanceFillPosition(0x30);
+		check_eq("AdvanceFillPosition(0x30): fillPos == base+0x30", cb->fillPos, base + 0x30);
+		check_eq("AdvanceFillPosition(0x30): availableFillBytes == 0xd0", cb->availableFillBytes, 0xd0);
+
+		/* AdvanceFillPosition, WITH wrap: remaining-to-end (0x100-0x30=0xd0)
+		 * <= n (0xe0), so fillPos wraps to base+(n-remaining) = base+0x10. */
+		cb->AdvanceFillPosition(0xe0);
+		check_eq("AdvanceFillPosition(0xe0) wraps: fillPos == base+0x10", cb->fillPos, base + 0x10);
+		check_eq("AdvanceFillPosition(0xe0) wraps: availableFillBytes == 0xf0 (unclamped, underflowed)",
+			 cb->availableFillBytes, (unsigned int)(0xd0 - 0xe0));
+
+		cb->IncrementAvailableReadBytes(0x50);
+		check_eq("IncrementAvailableReadBytes(0x50): availableReadBytes == 0x50",
+			 cb->availableReadBytes, 0x50);
+
+		/* AdvanceReadPosition, no wrap, n < availableReadBytes: full
+		 * decrement, no clamp needed. */
+		cb->AdvanceReadPosition(0x20);
+		check_eq("AdvanceReadPosition(0x20): readPos == base+0x20", cb->readPos, base + 0x20);
+		check_eq("AdvanceReadPosition(0x20): availableReadBytes == 0x30", cb->availableReadBytes, 0x30);
+		check_eq("AdvanceReadPosition(0x20): fillCarry == 0x20", cb->fillCarry, 0x20);
+
+		/* AdvanceReadPosition, n > availableReadBytes: confirmed clamp
+		 * (cmova-based min) -- availableReadBytes can never go negative. */
+		cb->AdvanceReadPosition(0x90);
+		check_eq("AdvanceReadPosition(0x90) clamped: readPos == base+0xb0", cb->readPos, base + 0xb0);
+		check_eq("AdvanceReadPosition(0x90) clamped: availableReadBytes == 0 (floor)",
+			 cb->availableReadBytes, 0);
+		check_eq("AdvanceReadPosition(0x90) clamped: fillCarry == 0x50 (0x20 + capped 0x30)",
+			 cb->fillCarry, 0x50);
+
+		cb->ReturnUnusedFillBytes(0x10);
+		check_eq("ReturnUnusedFillBytes(0x10): availableReadBytes -= 0x10 (underflow, unclamped)",
+			 cb->availableReadBytes, (unsigned int)(0 - 0x10));
+		check_eq("ReturnUnusedFillBytes(0x10): fillCarry == 0x60", cb->fillCarry, 0x60);
+
+		check_eq("readCarry still 0 before ReaderDaemonAdjust...()", cb->readCarry, 0);
+		cb->ReaderDaemonAdjustAvailableFillBytes();
+		check_eq("ReaderDaemonAdjust...(): readCarry == fillCarry (0x60)", cb->readCarry, cb->fillCarry);
+		check_eq("ReaderDaemonAdjust...(): availableFillBytes increased by 0x60",
+			 cb->availableFillBytes, (unsigned int)(0xd0 - 0xe0 + 0x60));
+
+		cb->SetEffectiveSize(0x40);
+		check_eq("SetEffectiveSize(0x40): effectiveSize == 0x40", cb->effectiveSize, 0x40);
+		check_eq("SetEffectiveSize(0x40): availableFillBytes == 0x40 (full reset)",
+			 cb->availableFillBytes, 0x40);
+		check_eq("SetEffectiveSize(0x40): readPos == bufferBase (reset)", cb->readPos, base);
+		check_eq("SetEffectiveSize(0x40): fillPos == bufferBase (reset)", cb->fillPos, base);
+		check_eq("SetEffectiveSize(0x40): bufferEnd == base+0x40", cb->bufferEnd, base + 0x40);
+		check_eq("SetEffectiveSize(0x40): availableReadBytes == 0", cb->availableReadBytes, 0);
+		check_eq("SetEffectiveSize(0x40): totalSize UNCHANGED at 0x100 (only Reset/Initialize touch it)",
+			 cb->totalSize, 0x100);
+
+		cb->AdvanceFillPosition(0x10);
+		cb->IncrementAvailableReadBytes(0x5);
+		cb->Reset();
+		check_eq("Reset(): readPos == bufferBase", cb->readPos, base);
+		check_eq("Reset(): fillPos == bufferBase", cb->fillPos, base);
+		check_eq("Reset(): availableReadBytes == 0", cb->availableReadBytes, 0);
+		check_eq("Reset(): availableFillBytes == effectiveSize (0x40)", cb->availableFillBytes, 0x40);
+		check_eq("Reset(): fillCarry == 0", cb->fillCarry, 0);
+		check_eq("Reset(): readCarry == 0", cb->readCarry, 0);
+		check_eq("Reset(): effectiveSize UNCHANGED at 0x40", cb->effectiveSize, 0x40);
+	}
+
+	printf("\n[26] CSTGCDWorker::ProcessCommands() (sec 10.158)\n");
+	{
+		/* CSTGHDRManager::sInstance is dereferenced directly as a plain
+		 * native pointer (not a packed 32-bit field) -- a regular malloc
+		 * buffer is fine here (no MAP_32BIT needed, see managers.cpp's
+		 * own comment on this). Big enough to cover the embedded
+		 * CSTGHDRCircularBuffer at +0x189c8..+0x189fc. */
+		unsigned char *hdrBuf = new unsigned char[0x18a00];
+		memset(hdrBuf, 0, 0x18a00);
+		CSTGHDRManager::sInstance = (CSTGHDRManager *)hdrBuf;
+		unsigned char *circBuf = hdrBuf + 0x189c8;
+
+		/* The ring buffer's own base pointer IS a packed 32-bit field,
+		 * reconstituted and dereferenced by ProcessCommands() -- needs
+		 * MAP_32BIT (see managers.cpp's own comment on this). Two
+		 * entries: [0] tag==0 (handled, size=0x30), [1] tag==7
+		 * (confirmed real no-op, still consumes/advances). */
+		unsigned char *ring = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		ring[0 * 8 + 0] = 0;
+		*(unsigned int *)(ring + 0 * 8 + 4) = 0x30;
+		ring[1 * 8 + 0] = 7;
+		*(unsigned int *)(ring + 1 * 8 + 4) = 0xdead;
+
+		CSTGCDWorker *cdw;
+		poison_and_construct(&cdw);	/* real ctor zeroes +0x228/+0x22c/+0x230 */
+		unsigned char *cdwBase = (unsigned char *)cdw;
+		*(unsigned int *)(cdwBase + 0x228) = (unsigned int)(unsigned long)ring;
+		*(unsigned int *)(cdwBase + 0x234) = 0x81;	/* matches real Initialize()'s own constant */
+		*(unsigned int *)(cdwBase + 0x22c) = 2;	/* producer: 2 entries enqueued */
+
+		cdw->ProcessCommands();
+
+		check_eq("ProcessCommands: consumer index (+0x230) advanced to 2",
+			 *(unsigned int *)(cdwBase + 0x230), 2);
+		check_eq("ProcessCommands: producer index (+0x22c) untouched",
+			 *(unsigned int *)(cdwBase + 0x22c), 2);
+		check_eq("ProcessCommands: tag==0 entry's size (0x30) reached IncrementAvailableReadBytes",
+			 *(unsigned int *)(circBuf + 0x20), 0x30);
+	}
+
+	printf("\n[27] CSTGStreamingEventManager + CSTGStreamingEvent (sec 10.158)\n");
+	{
+		unsigned long arenaSize = 16 * 1024;
+		unsigned char *arena = (unsigned char *)mmap(0, arenaSize, PROT_READ | PROT_WRITE,
+							      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		CSTGBankMemory::Initialize(arena, arenaSize);
+
+		/* Initialize() reconstitutes-and-dereferences ITS OWN packed
+		 * pointers (the free-list threading through events[i]'s own
+		 * +0x30 field) -- the whole 0x14c44-byte object must be
+		 * MAP_32BIT, same sec 10.157 rule as CSTGVoiceAllocator::
+		 * Initialize()'s own test above (not just a ctor-only check). */
+		unsigned char *semBuf = (unsigned char *)mmap(0, 0x14c44, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		CSTGStreamingEventManager *sem = new (semBuf) CSTGStreamingEventManager();
+
+		check_eq("ctor: sInstance == this",
+			 (unsigned int)((unsigned long)CSTGStreamingEventManager::sInstance == (unsigned long)sem), 1);
+		check_eq("ctor: freeListHead (+0x14c18) == 0", sem->freeListHead, 0);
+		check_eq("ctor: count (+0x14c20) == 0", sem->count, 0);
+		check_eq("ctor: mutexPtr32 non-null", (unsigned int)(sem->mutexPtr32 != 0), 1);
+
+		/* Small values (NOT the real 401/0x10000 call-site constants --
+		 * see oa_engine_init.h's own class comment for those) so the
+		 * per-event CSTGHDRCircularBuffer::Initialize() allocations stay
+		 * tiny; exercises the exact same code path with fewer
+		 * iterations. */
+		sem->Initialize(3, 0x40);
+
+		check_eq("Initialize(3, 0x40): field14c40 == 0x80 (size*2)", sem->field14c40, 0x80);
+		check_eq("Initialize(3, 0x40): count == 3", sem->count, 3);
+		check_eq("Initialize(3, 0x40): field14c3c == 0", sem->field14c3c, 0);
+
+		for (int i = 0; i < 3; i++) {
+			unsigned char *ev = (unsigned char *)&sem->events[i];
+			char label[64];
+			snprintf(label, sizeof(label), "events[%d]: own index stamped at +0x4", i);
+			check_eq(label, *(unsigned short *)(ev + 0x4), (unsigned int)i);
+			snprintf(label, sizeof(label), "events[%d]: embedded CSTGHDRCircularBuffer field00 == %d (overwritten with index)", i, i);
+			check_eq(label, *(unsigned int *)(ev + 0x40), (unsigned int)i);
+			snprintf(label, sizeof(label), "events[%d]: embedded CSTGHDRCircularBuffer availableReadBytes == 0 (Initialize ran)", i);
+			check_eq(label, *(unsigned int *)(ev + 0x40 + 0x20), 0);
+			snprintf(label, sizeof(label), "events[%d]: embedded CSTGHDRCircularBuffer effectiveSize == 0x80", i);
+			check_eq(label, *(unsigned int *)(ev + 0x40 + 0x1c), 0x80);
+		}
+
+		/* Walk the free list from head (event[0]) via its own +0x30
+		 * "next" field, confirming sequential order 0,1,2, then
+		 * confirming freeListTail == the last node's own +0x30 address
+		 * and every node's own +0x3c "owner" back-pointer is the fixed
+		 * freeListHead slot address. */
+		unsigned int headSlotAddr = (unsigned int)((unsigned long)sem + 0x14c18);
+		unsigned char *node0 = (unsigned char *)&sem->events[0] + 0x30;
+		check_eq("freeListHead == &events[0]+0x30",
+			 sem->freeListHead, (unsigned int)(unsigned long)node0);
+		unsigned int next0 = *(unsigned int *)node0;
+		unsigned char *node1 = (unsigned char *)&sem->events[1] + 0x30;
+		check_eq("events[0]'s own +0x30 next == &events[1]+0x30", next0, (unsigned int)(unsigned long)node1);
+		unsigned int next1 = *(unsigned int *)node1;
+		unsigned char *node2 = (unsigned char *)&sem->events[2] + 0x30;
+		check_eq("events[1]'s own +0x30 next == &events[2]+0x30", next1, (unsigned int)(unsigned long)node2);
+		unsigned int next2 = *(unsigned int *)node2;
+		check_eq("events[2]'s own +0x30 next == 0 (list terminator)", next2, 0);
+		check_eq("freeListTail == &events[2]+0x30",
+			 sem->freeListTail, (unsigned int)(unsigned long)node2);
+		check_eq("events[0]'s own +0x3c owner == &manager->freeListHead",
+			 *(unsigned int *)((unsigned char *)&sem->events[0] + 0x3c), headSlotAddr);
+		check_eq("events[2]'s own +0x3c owner == &manager->freeListHead",
+			 *(unsigned int *)((unsigned char *)&sem->events[2] + 0x3c), headSlotAddr);
 	}
 
 	printf("=====================================================\n");

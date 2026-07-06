@@ -85,7 +85,10 @@ void CSTGHDRFileWriter::ProcessCommands() {}
 void CSTGStreamingFileReader::ProcessCommands() {}
 /* CSTGCDWorker_InitializeBuffer is real now, sec 10.148 -- see
  * managers.cpp (right after CSTGCDWorker::Initialize(), sec 10.144). */
-void CSTGCDWorker::ProcessCommands() {}
+/* CSTGCDWorker::ProcessCommands() is real now, sec 10.158 -- see
+ * managers.cpp (also its own newly-discovered dependency,
+ * CSTGHDRCircularBuffer, a brand-new fully-reconstructed class -- see
+ * oa_engine.h). */
 void CSTGSamplingDaemon::ProcessCommands() {}
 void CSTGMidiPortManager::Initialize() {}
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
@@ -299,8 +302,11 @@ CSTGSmoother::CSTGSmoother() {}
 void CSTGSmoother::FinalizeAllSmoothers() {}
 void CSTGPerformanceVars::SetIsDying() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
-CSTGStreamingEventManager::CSTGStreamingEventManager() {}
-void CSTGStreamingEventManager::Initialize(unsigned short, unsigned long) {}
+/* CSTGStreamingEventManager::CSTGStreamingEventManager()/Initialize() are
+ * real now, sec 10.158 -- see src/engine/streaming_event_manager.cpp
+ * (also its own newly-discovered dependency, CSTGStreamingEvent, a
+ * brand-new class -- see oa_engine_init.h). sInstance storage moved there
+ * too (was previously in engine_init.cpp). */
 /* CSTGVectorEGBase::CSTGVectorEGBase() is real now, sec 10.148 -- see
  * src/engine/vector_eg_ctors.cpp (also corrects a real speculative claim
  * in oa_engine_init.h's own header comment, sec 10.66 -- see there). */
@@ -352,6 +358,11 @@ unsigned char _ZTV14CSTGAudioEvent[40];
  * `vtable for CSTGPlaybackEvent`) as its CSTGAudioEvent/CSTGRecordEvent
  * siblings above. */
 unsigned char _ZTV17CSTGPlaybackEvent[40];
+/* _ZTV18CSTGStreamingEvent -- needed now that CSTGStreamingEvent::
+ * CSTGStreamingEvent() is real (sec 10.158, streaming_event_manager.cpp)
+ * and references it directly, same confirmed 40-byte size (nm -CS) as its
+ * CSTGAudioEvent/CSTGRecordEvent/CSTGPlaybackEvent siblings above. */
+unsigned char _ZTV18CSTGStreamingEvent[40];
 
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,
  * already set by setup_global_resources.cpp; definition (storage) not

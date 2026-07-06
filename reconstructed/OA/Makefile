@@ -80,6 +80,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_bus_manager.o \
            src/engine/program_slot_ctor.o \
            src/engine/sequence_ctor.o \
+           src/engine/streaming_event_manager.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -206,6 +207,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/audio_bus_manager.cpp \
        src/engine/program_slot_ctor.cpp \
        src/engine/sequence_ctor.cpp \
+       src/engine/streaming_event_manager.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -294,8 +296,8 @@ verify/test_new_delete: verify/test_new_delete.cpp src/mem/new_delete.cpp includ
 verify/test_engine: verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
 
-verify/test_managers: verify/test_managers.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_managers.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
+verify/test_managers: verify/test_managers.cpp src/engine/managers.cpp src/engine/streaming_event_manager.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_managers.cpp src/engine/managers.cpp src/engine/streaming_event_manager.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_global: verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp -o $@

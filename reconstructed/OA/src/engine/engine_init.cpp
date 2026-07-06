@@ -42,7 +42,11 @@ CSTGWaveSeqManager *CSTGWaveSeqManager::sInstance;
 CSTGVectorManager *CSTGVectorManager::sInstance;
 CSTGMidiDispatcher *CSTGMidiDispatcher::sInstance;
 CSTGHDRMiniModel *CSTGHDRMiniModel::sInstance;
-CSTGStreamingEventManager *CSTGStreamingEventManager::sInstance;
+/* CSTGStreamingEventManager::sInstance storage moved to
+ * src/engine/streaming_event_manager.cpp, alongside the real ctor/
+ * Initialize() (sec 10.158) -- same "home sInstance storage with the real
+ * ctor" convention already used for CSTGControllerRTData/
+ * CSTGFrontPanelSmoothers/CSTGHDRMiniModel. */
 CSTGSmoother *CSTGSmoother::sInstance;
 
 template <typename T> TSTGArrayManager<T> *TSTGArrayManager<T>::sInstance;

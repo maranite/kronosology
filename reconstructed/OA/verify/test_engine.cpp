@@ -111,7 +111,12 @@ void CSTGFileCloser::ProcessCommands()           { log_call("FileCloser::Process
 void CSTGHDRFileReader::ProcessCommands()        { log_call("HDRFileReader::ProcessCommands"); }
 void CSTGHDRFileWriter::ProcessCommands()        { log_call("HDRFileWriter::ProcessCommands"); }
 void CSTGStreamingFileReader::ProcessCommands()  { log_call("StreamingFileReader::ProcessCommands"); }
-void CSTGCDWorker::ProcessCommands()             { log_call("CDWorker::ProcessCommands"); }
+/* CSTGCDWorker::ProcessCommands() is real now (sec 10.158, see
+ * managers.cpp) -- no mock body here any more. Test [4] below constructs
+ * a real `cdw` object (its own real ctor zeroes +0x22c/+0x230 to 0), so
+ * the real body's producer==consumer==0 loop condition makes it a
+ * genuine, silent no-op here -- no log_call to expect (see the updated
+ * expected string below). */
 void CSTGSamplingDaemon::ProcessCommands()       { log_call("SamplingDaemon::ProcessCommands"); }
 CSTGMidiPortManager::~CSTGMidiPortManager()      { log_call("~CSTGMidiPortManager"); }
 void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) { }
@@ -390,7 +395,10 @@ int main(void)
 		  "HDRManager::ProcessSamplerCommands;FileOpener::ProcessCommands;"
 		  "HDRFileReader::ProcessCommands;HDRFileWriter::ProcessCommands;"
 		  "FileCloser::ProcessCommands;StreamingFileReader::ProcessCommands;"
-		  "CDWorker::ProcessCommands;SamplingDaemon::ProcessCommands;");
+		  /* CDWorker::ProcessCommands() is real now (sec 10.158) -- `cdw`
+		   * is freshly, really-constructed just above (producer==consumer==0),
+		   * so it's a genuine silent no-op here, no log entry expected. */
+		  "SamplingDaemon::ProcessCommands;");
 
 	printf("[5] CSTGEngine destructor's exact confirmed teardown order\n");
 	CSTGMidiPortManager mpm; CSTGMidiPortManager::sInstance = &mpm;

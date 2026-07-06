@@ -496,6 +496,71 @@ struct CSTGHDRMiniModel {
 	void Initialize();
 };
 
+/*
+ * CSTGStreamingEvent::CSTGStreamingEvent() (`.text+0xd2090`, 72 bytes)
+ * fully reconstructed (see src/engine/streaming_event_manager.cpp): calls
+ * `CSTGAudioEvent::CSTGAudioEvent()` as its real base-object ctor, same
+ * "placement-construct then overwrite vtable pointer" technique already
+ * established for CSTGPlaybackEvent (its own derived fields at +0x30/+0x34
+ * likewise start INSIDE CSTGAudioEvent's own confirmed +0x2c..+0x38 tail --
+ * standard single inheritance can't express that overlap, so this is NOT
+ * modeled via C++ `: public CSTGAudioEvent`). Confirmed real size 0xd4
+ * (212 bytes) exactly, independently derived TWO ways: (1) the last
+ * confirmed touch is the AND-masked flag byte at +0xd1; (2)
+ * CSTGStreamingEventManager's own ctor constructs 401 of these back-to-back
+ * at a clean, nothing-else-interleaved 0xd4-byte stride (matching the
+ * `TSTGArrayManager`-adjacent "clean array" pattern already established
+ * elsewhere in this project) -- both give the same number.
+ */
+struct CSTGStreamingEvent {
+	CSTGStreamingEvent();
+	unsigned char _unrecovered[0xd4];
+};
+/* The real vtable symbol (40 confirmed bytes via nm -CS, matching
+ * CSTGAudioEvent/CSTGRecordEvent/CSTGPlaybackEvent's own vtable sizes) --
+ * storage lives in bar2_stubs.cpp per this project's established "extern C
+ * byte-array trick". */
+extern "C" unsigned char _ZTV18CSTGStreamingEvent[];
+
+/*
+ * CSTGStreamingEventManager -- confirmed real object size EXACTLY 0x14c44
+ * (independently confirmed via its own construction call site in
+ * engine_init.cpp: `CSTGBankMemory::AllocAligned(0x14c44, 0x10)`, matching
+ * this class's own field layout below byte-for-byte). Ctor
+ * (`.text+0xd1b40`, 156 bytes) and Initialize() (`.text+0xd1be0`, 200
+ * bytes) both fully reconstructed this pass (see
+ * src/engine/streaming_event_manager.cpp).
+ *
+ *   +0x000        confirmed untouched by the ctor (the array below starts
+ *                 at +0x004, not +0x000).
+ *   +0x004        events[401], a confirmed clean 0xd4-byte-stride array
+ *                 (401*0xd4 = 0x14c14 exactly -- the ctor's own
+ *                 default-construction loop condition, `cmp esi,0x14c14`,
+ *                 confirms this precisely; the real call-site argument to
+ *                 Initialize(), 0x191 == 401, independently agrees).
+ *   +0x14c18      freeListHead -- head of a singly-linked free list
+ *                 threaded through each event's own +0x30 field (see
+ *                 CSTGStreamingEvent's own header comment above),
+ *                 populated by Initialize(), zeroed by the ctor.
+ *   +0x14c1c      freeListTail -- tail of the same list, updated every
+ *                 Initialize() iteration.
+ *   +0x14c20      count -- incremented once per Initialize() iteration.
+ *   +0x14c24/+0x14c28/+0x14c2c  confirmed zeroed by the ctor only; never
+ *                 touched by Initialize() -- real semantics undetermined.
+ *   +0x14c30      mutexPtr32 -- packed pointer, `rtwrap_malloc
+ *                 (get_sizeof_rtwrap_pthread_mutex())` then
+ *                 `rtwrap_pthread_mutex_init(mutex, 0)`, same established
+ *                 idiom as CPowerOffTimer's own ctor (managers.cpp).
+ *   +0x14c34      confirmed real gap between mutexPtr32 and the next
+ *                 zeroed field -- never touched by either method here.
+ *   +0x14c38      confirmed zeroed by the ctor only.
+ *   +0x14c3c      confirmed zeroed by Initialize() only (unconditionally,
+ *                 whether or not its own loop ran any iterations).
+ *   +0x14c40      confirmed = Initialize()'s own 2nd argument * 2, set
+ *                 unconditionally before the loop -- also the per-event
+ *                 `m` argument this function forwards into each embedded
+ *                 CSTGHDRCircularBuffer::Initialize() call.
+ */
 struct CSTGStreamingEventManager {
 	CSTGStreamingEventManager();
 	static CSTGStreamingEventManager *sInstance;
@@ -503,6 +568,20 @@ struct CSTGStreamingEventManager {
 	 * (401, an unsigned short), ecx=0x10000 (65536, an unsigned long) --
 	 * matching the mangled `10InitializeEtm` signature exactly. */
 	void Initialize(unsigned short arg1, unsigned long arg2);
+
+	unsigned char _unrecovered_head[4];		/* +0x000 */
+	CSTGStreamingEvent events[401];		/* +0x004..+0x14c18 */
+	unsigned int freeListHead;			/* +0x14c18 */
+	unsigned int freeListTail;			/* +0x14c1c */
+	unsigned int count;				/* +0x14c20 */
+	unsigned int field14c24;			/* +0x14c24 */
+	unsigned int field14c28;			/* +0x14c28 */
+	unsigned int field14c2c;			/* +0x14c2c */
+	unsigned int mutexPtr32;			/* +0x14c30 */
+	unsigned int field14c34;			/* +0x14c34, confirmed gap */
+	unsigned int field14c38;			/* +0x14c38 */
+	unsigned int field14c3c;			/* +0x14c3c */
+	unsigned int field14c40;			/* +0x14c40 */
 };
 
 struct CSTGSmoother {

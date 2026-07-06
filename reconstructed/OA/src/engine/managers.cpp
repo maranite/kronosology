@@ -45,6 +45,14 @@
 #include "oa_internal.h"
 #include "oa_new_delete.h"	/* for __kmalloc/OA_GFP_KERNEL, sec 10.148 (CSTGCDWorker_InitializeBuffer) */
 
+/* Host/target pointer-width helpers (ToU32/FromU32 per this project's
+ * established convention) -- moved here (used to live further down, right
+ * before the sec 10.144 batch) so CSTGHDRCircularBuffer's own methods
+ * (sec 10.158), inserted earlier in this file right after CSTGHDRManager's
+ * ctor, can use them too. */
+static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
+static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
+
 CSTGDiskCostManager     *CSTGDiskCostManager::sInstance;
 CSTGSamplingDaemon      *CSTGSamplingDaemon::sInstance;
 CSTGHDRFileReader       *CSTGHDRFileReader::sInstance;
@@ -513,6 +521,148 @@ CSTGHDRManager::CSTGHDRManager()
 	CSTGHDRManager::sInstance = this;
 }
 
+/*
+ * CSTGHDRCircularBuffer -- all nine confirmed real methods (sec 10.158).
+ * See oa_engine.h's own class comment for the full confirmed field list;
+ * comments here focus on each method's own control flow.
+ */
+CSTGHDRCircularBuffer::CSTGHDRCircularBuffer()
+{
+	unsigned char *p = (unsigned char *)this;
+	*(unsigned int *)(p + 0x18) = 0;
+	*(unsigned int *)(p + 0x1c) = 0;
+	*(unsigned int *)(p + 0x08) = 0;
+	*(unsigned int *)(p + 0x0c) = 0;
+	*(unsigned int *)(p + 0x10) = 0;
+	*(unsigned int *)(p + 0x14) = 0;
+	*(unsigned int *)(p + 0x28) = 0;
+	*(unsigned int *)(p + 0x2c) = 0;
+	*(unsigned int *)(p + 0x00) = 0;
+	p[0x04] = 0;
+}
+
+void CSTGHDRCircularBuffer::Initialize(unsigned long totalSizeArg, bool flag, unsigned char extra)
+{
+	unsigned char *p = (unsigned char *)this;
+
+	*(unsigned int *)(p + 0x18) = totalSizeArg;
+	*(unsigned int *)(p + 0x1c) = totalSizeArg;
+	p[0x04] = flag;
+
+	unsigned int allocSize = (unsigned int)extra + totalSizeArg;
+	unsigned char *buf = CSTGBankMemory::AllocAligned(allocSize, 0x10);
+
+	unsigned int es = *(unsigned int *)(p + 0x1c);
+	*(unsigned int *)(p + 0x08) = ToU32(buf);
+	*(unsigned int *)(p + 0x10) = ToU32(buf);
+	*(unsigned int *)(p + 0x0c) = ToU32(buf);
+	*(unsigned int *)(p + 0x20) = 0;
+	*(unsigned int *)(p + 0x24) = es;
+	*(unsigned int *)(p + 0x14) = ToU32(buf) + es;
+	*(unsigned int *)(p + 0x28) = 0;
+	*(unsigned int *)(p + 0x2c) = 0;
+}
+
+void CSTGHDRCircularBuffer::SetEffectiveSize(unsigned long newSize)
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int base = *(unsigned int *)(p + 0x08);
+
+	*(unsigned int *)(p + 0x1c) = newSize;
+	*(unsigned int *)(p + 0x24) = newSize;
+	*(unsigned int *)(p + 0x10) = base;
+	*(unsigned int *)(p + 0x0c) = base;
+	*(unsigned int *)(p + 0x20) = 0;
+	*(unsigned int *)(p + 0x14) = base + newSize;
+	*(unsigned int *)(p + 0x28) = 0;
+	*(unsigned int *)(p + 0x2c) = 0;
+}
+
+void CSTGHDRCircularBuffer::Reset()
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int base = *(unsigned int *)(p + 0x08);
+	unsigned int es = *(unsigned int *)(p + 0x1c);
+
+	*(unsigned int *)(p + 0x10) = base;
+	*(unsigned int *)(p + 0x0c) = base;
+	*(unsigned int *)(p + 0x20) = 0;
+	*(unsigned int *)(p + 0x24) = es;
+	*(unsigned int *)(p + 0x14) = base + es;
+	*(unsigned int *)(p + 0x28) = 0;
+	*(unsigned int *)(p + 0x2c) = 0;
+}
+
+/* Real, faithfully-preserved asymmetry vs. AdvanceFillPosition() below:
+ * this method clamps its own decrement of availableReadBytes (via the
+ * confirmed `cmova`-based min()) so it can never go negative;
+ * AdvanceFillPosition() does NOT clamp its own availableFillBytes
+ * decrement. */
+void CSTGHDRCircularBuffer::AdvanceReadPosition(unsigned long n)
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int bufferEnd = *(unsigned int *)(p + 0x14);
+	unsigned int readPos = *(unsigned int *)(p + 0x0c);
+	unsigned int remaining = bufferEnd - readPos;
+
+	if (remaining > n) {
+		*(unsigned int *)(p + 0x0c) = readPos + n;
+	} else {
+		unsigned int base = *(unsigned int *)(p + 0x08);
+		*(unsigned int *)(p + 0x0c) = base + (n - remaining);
+	}
+
+	unsigned int availableReadBytes = *(unsigned int *)(p + 0x20);
+	unsigned int cappedN = (n > availableReadBytes) ? availableReadBytes : n;
+	*(unsigned int *)(p + 0x20) = availableReadBytes - cappedN;
+	*(unsigned int *)(p + 0x28) = *(unsigned int *)(p + 0x28) + cappedN;
+}
+
+void CSTGHDRCircularBuffer::AdvanceFillPosition(unsigned long n)
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int bufferEnd = *(unsigned int *)(p + 0x14);
+	unsigned int fillPos = *(unsigned int *)(p + 0x10);
+	unsigned int remaining = bufferEnd - fillPos;
+
+	*(unsigned int *)(p + 0x24) = *(unsigned int *)(p + 0x24) - n;
+
+	if (remaining > n) {
+		*(unsigned int *)(p + 0x10) = fillPos + n;
+	} else {
+		unsigned int base = *(unsigned int *)(p + 0x08);
+		*(unsigned int *)(p + 0x10) = base + (n - remaining);
+	}
+}
+
+/* Reconciles `fillCarry` (+0x28, credited by AdvanceReadPosition()/
+ * ReturnUnusedFillBytes()) into `availableFillBytes`, using `readCarry`
+ * (+0x2c) as a high-water mark of how much of `fillCarry` has already been
+ * folded in -- after this call, readCarry == fillCarry. */
+void CSTGHDRCircularBuffer::ReaderDaemonAdjustAvailableFillBytes()
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int readCarry = *(unsigned int *)(p + 0x2c);
+	unsigned int fillCarry = *(unsigned int *)(p + 0x28);
+	unsigned int diff = fillCarry - readCarry;
+
+	*(unsigned int *)(p + 0x24) = *(unsigned int *)(p + 0x24) + diff;
+	*(unsigned int *)(p + 0x2c) = readCarry + diff;
+}
+
+void CSTGHDRCircularBuffer::IncrementAvailableReadBytes(unsigned long n)
+{
+	unsigned char *p = (unsigned char *)this;
+	*(unsigned int *)(p + 0x20) = *(unsigned int *)(p + 0x20) + n;
+}
+
+void CSTGHDRCircularBuffer::ReturnUnusedFillBytes(unsigned long n)
+{
+	unsigned char *p = (unsigned char *)this;
+	*(unsigned int *)(p + 0x20) = *(unsigned int *)(p + 0x20) - n;
+	*(unsigned int *)(p + 0x28) = *(unsigned int *)(p + 0x28) + n;
+}
+
 CSTGVoiceAllocator::CSTGVoiceAllocator()
 {
 	/* +0x0000..+0x0898: 50 self-referencing "empty list node" records,
@@ -813,8 +963,6 @@ CEffectorDatabase::~CEffectorDatabase()
  * `CSTGBankMemory::AllocAligned(unsigned int, unsigned int)` (`.text+0x232e0`,
  * already implemented, `src/mem/bank_memory.cpp`).
  */
-static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
-static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
 
 /*
  * CSTGVoice::CSTGVoice(unsigned short) (sec 10.157, `.text+0x5bff0`, 375
@@ -1145,6 +1293,61 @@ void CSTGCDWorker::Initialize()
 	*(unsigned int *)(base + 0x20) = CSTGCDWorker_InitializeBuffer(this);
 	*(unsigned int *)(base + 0x234) = 0x81;
 	*(unsigned int *)(base + 0x228) = ToU32(CSTGBankMemory::AllocAligned(0x408, 0x10));
+}
+
+/*
+ * CSTGCDWorker::ProcessCommands() (`.text+0x11b720`, 124 bytes, sec
+ * 10.158): a single-producer/single-consumer ring-buffer consumer loop
+ * over this worker's own command queue -- `+0x228` base (a 0x408-byte
+ * `AllocAligned` buffer per Initialize() above), `+0x22c` producer index
+ * (never written by this method -- some other, not-yet-reconstructed
+ * producer side owns it), `+0x230` consumer index (advanced here),
+ * `+0x234` capacity (confirmed `0x81` == 129 == 0x408/8, an exact match
+ * for an 8-byte-per-entry ring). Each entry is 8 bytes: a type-tag byte at
+ * +0x0, a size/count dword at +0x4. Only tag==0 is handled: it calls
+ * `CSTGHDRCircularBuffer::IncrementAvailableReadBytes(size)` on
+ * `CSTGHDRManager::sInstance`'s own embedded `CSTGHDRCircularBuffer`
+ * sub-object (`CSTGHDRManager::sInstance + 0x189c8`, confirmed offset --
+ * see that class's own header comment in oa_engine.h). Any OTHER tag
+ * value is a real, faithfully-preserved no-op: the entry is simply
+ * consumed (the consumer index still advances) with no further action --
+ * this function itself never handles a second command type.
+ *
+ * `CSTGHDRManager::sInstance` is dereferenced here as a plain native
+ * pointer (NOT a packed/ToU32'd field -- it's declared a real
+ * `CSTGHDRManager*` in oa_engine.h and already dereferenced directly
+ * elsewhere, e.g. `engine.cpp`'s `CSTGHDRManager::sInstance->
+ * ProcessCommands()`), so no MAP_32BIT hazard for THAT pointer. The ring
+ * buffer's own base pointer (`+0x228`), by contrast, IS a packed 32-bit
+ * field (stored via ToU32() in Initialize() above) and IS reconstituted
+ * and dereferenced here (`entry[0]`/`entry+4`) -- a real KAT exercising a
+ * populated entry needs that specific buffer to be MAP_32BIT-backed.
+ */
+void CSTGCDWorker::ProcessCommands()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int producerIdx = *(unsigned int *)(base + 0x22c);
+	unsigned int consumerIdx = *(unsigned int *)(base + 0x230);
+
+	while (producerIdx != consumerIdx) {
+		unsigned int capacity = *(unsigned int *)(base + 0x234);
+		unsigned int nextIdx = (consumerIdx + 1) % capacity;
+		unsigned char *entry = FromU32(*(unsigned int *)(base + 0x228)) + consumerIdx * 8;
+
+		*(unsigned int *)(base + 0x230) = nextIdx;
+
+		unsigned char tag = entry[0];
+		unsigned int sizeParam = *(unsigned int *)(entry + 4);
+		if (tag == 0) {
+			unsigned char *hdrBase = (unsigned char *)CSTGHDRManager::sInstance;
+			CSTGHDRCircularBuffer *circBuf =
+				(CSTGHDRCircularBuffer *)(hdrBase + 0x189c8);
+			circBuf->IncrementAvailableReadBytes(sizeParam);
+		}
+
+		producerIdx = *(unsigned int *)(base + 0x22c);
+		consumerIdx = *(unsigned int *)(base + 0x230);
+	}
 }
 
 /*
