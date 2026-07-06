@@ -211,7 +211,11 @@ void CSTGControllerInfo::SetPerfSwitch(int, bool) {}
 void CSTGControllerRTData::ResetKnobsJumpCatch() {}
 void CSTGControllerRTData::ResetSlidersJumpCatch() {}
 void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
-void CSTGControllerRTData::SetControllerAssignment(void *, signed char, bool) {}
+/* CSTGControllerRTData::SetControllerAssignment() is real now, batch 16
+ * -- see src/engine/controller_rt_data_set_assignment.cpp.
+ * CSTGSlotVoiceData::UpdateAllActiveMIDIFilters() is real now too, same
+ * batch -- see src/engine/slot_voice_data_midi_filters.cpp
+ * (UpdateMIDIFilterAndResendAllCCs() deliberately deferred there). */
 /* CSTGControllerRTData::sInstance storage now lives in
  * src/engine/controller_rt_data_ctor.cpp, sec 10.155 (moved there
  * alongside the real ctor, matching the CSTGFrontPanelSmoothers/

@@ -214,10 +214,14 @@ public:
 	void RequestAnalogInputPositions();
 
 	/*
-	 * SetControllerAssignment (.text+0x293e, called from
+	 * SetControllerAssignment (.text+0x1c800, 322 bytes, called from
 	 * UpdateFootSwitchAssign/UpdateFootPedalAssign, sec 10.67/10.69)
-	 * confirmed real, deliberately deferred extern. Its real mangled
-	 * signature (`_ZN20CSTGControllerRTData23SetControllerAssignmentE
+	 * batch 16 (sec 10.163): fully reconstructed -- see
+	 * src/engine/controller_rt_data_set_assignment.cpp for the complete
+	 * confirmed shape (three curVal ranges, the `kControllerCCIdTable`/
+	 * `kSetControllerAssignmentNotifyTable` tables, and the curVal==0x13
+	 * float-compare quirk). Real mangled signature
+	 * (`_ZN20CSTGControllerRTData23SetControllerAssignmentE
 	 * R11TPackedEnumI17eControllerAssignES1_b`) is
 	 * `(TPackedEnum<eControllerAssign>&, TPackedEnum<eControllerAssign>,
 	 * bool)` -- arg1 is a REFERENCE. **Callers differ**: at
@@ -231,6 +235,15 @@ public:
 	 * `TPackedEnum<eControllerAssign>&`) precisely because its target
 	 * varies by caller. */
 	void SetControllerAssignment(void *selfRef, signed char newValue, bool flag);
+
+	/*
+	 * kControllerCCIdTable (sec 10.163, `.rodata+0x334`, 18 bytes) --
+	 * confirmed real: maps a "knob/slider assignable" `curVal` (1..0x12)
+	 * to a MIDI CC id via `kControllerCCIdTable[curVal-1]` (confirmed via
+	 * the real `movzx eax,byte[edx-1]` addressing, addend -1 folded into
+	 * the relocation). Values (1,2,4,5,7,8,10,11,12,13,16,18,65,66,67,82,
+	 * 91,93) all fit the real 7-bit MIDI CC domain. */
+	static const unsigned char kControllerCCIdTable[18];
 
 	/* SetAudioInSolo(unsigned int slot, bool solo)/ResetSendKnobsJumpCatch()
 	 * (sec 10.80, confirmed via CSTGAudioInput::UpdateSolo/UpdateBusSelect's
@@ -529,6 +542,39 @@ struct CSTGSlotVoiceData {
 	 * `EmergencyFreeVoiceList`).
 	 */
 	void Steal();
+
+	/*
+	 * UpdateAllActiveMIDIFilters() (sec 10.163, `.text+0xb8a50`, 624
+	 * bytes, confirmed via relocation from `CSTGControllerRTData::
+	 * SetControllerAssignment`'s own unconditional commit path) fully
+	 * reconstructed -- see src/engine/slot_voice_data_midi_filters.cpp.
+	 * Confirmed real: ignores `this` ENTIRELY (same "operates purely via
+	 * a global singleton" shape as `NotifySoloChange`, sec 10.107) --
+	 * modeled as `static` since the real disassembly never references
+	 * any `this`-derived value anywhere in its body. Walks the SAME
+	 * 16-entry, 12-byte-stride `CSTGGlobal::sInstance+0x29c990c` active-
+	 * voice-data-node table already confirmed for `CSTGProgramSlot::
+	 * ResolveActiveVoiceDataNode()` (sec 10.142, global.cpp) -- for each
+	 * non-null node, dereferences its own `+0x8` payload field (NO
+	 * separate null check on the payload itself, matching
+	 * `ResolveActiveVoiceDataNode`'s own callers' identical lack of a
+	 * payload null check -- a confirmed "node non-null implies payload
+	 * non-null" invariant, not a reconstruction omission) and, if the
+	 * payload's `+0x40` byte is 0, calls the payload's own
+	 * `UpdateMIDIFilterAndResendAllCCs()`.
+	 */
+	static void UpdateAllActiveMIDIFilters();
+
+	/*
+	 * UpdateMIDIFilterAndResendAllCCs() (`.text+0xb8610`, 1075 bytes) --
+	 * confirmed real, deliberately deferred: substantially larger than
+	 * `UpdateAllActiveMIDIFilters()` itself and out of scope for this
+	 * pass. Own no-op body given directly in
+	 * src/engine/slot_voice_data_midi_filters.cpp (not bar2_stubs.cpp,
+	 * which is never linked into any verify/ binary -- matching the
+	 * `CSTGRecordTrack::StandbyRec()` precedent, sec 10.162).
+	 */
+	void UpdateMIDIFilterAndResendAllCCs();
 };
 struct CSTGProgram;	/* forward decl, real definition further below */
 

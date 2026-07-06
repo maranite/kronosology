@@ -86,6 +86,9 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/sampling_interface_ctor.o \
            src/engine/channel_values_set_controller_value.o \
            src/engine/hdr_record_track.o \
+           src/engine/controller_rt_data_set_assignment.o \
+           src/engine/slot_voice_data_midi_filters.o \
+           src/engine/slot_voice_data_update_midi_filter_resend.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -218,6 +221,9 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/sampling_interface_ctor.cpp \
        src/engine/channel_values_set_controller_value.cpp \
        src/engine/hdr_record_track.cpp \
+       src/engine/controller_rt_data_set_assignment.cpp \
+       src/engine/slot_voice_data_midi_filters.cpp \
+       src/engine/slot_voice_data_update_midi_filter_resend.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -268,7 +274,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_sequence_ctor verify/test_smoother_cancel \
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
          verify/test_sampling_interface_ctor \
-         verify/test_channel_values verify/test_hdr_record_track
+         verify/test_channel_values verify/test_hdr_record_track \
+         verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -430,6 +437,12 @@ verify/test_channel_values: verify/test_channel_values.cpp src/engine/channel_va
 
 verify/test_hdr_record_track: verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp -o $@
+
+verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp -o $@
+
+verify/test_slot_voice_data_midi_filters: verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp -o $@
 
 verify/test_push_unsolicited_message: verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp include/oa_rtfifo_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp -o $@
