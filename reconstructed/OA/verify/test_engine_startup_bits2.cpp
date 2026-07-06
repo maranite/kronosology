@@ -210,6 +210,84 @@ int main(void)
 	check_eq("status+0x10f0 == 0x20000", *(unsigned int *)(statusBuf + 0x10f0), 0x20000);
 	check_eq("status+0x1100 == +0x8 (0)", *(unsigned int *)(statusBuf + 0x1100), 0);
 
+	printf("\n[6b] CSTGDiskCostManager's remaining small methods (batch 24)\n");
+	{
+		/* ResetWaterMarks() -- direct re-application of the same triple. */
+		*(unsigned int *)(dcmBuf + 0x14) = 0;
+		*(unsigned int *)(dcmBuf + 0x18) = 0;
+		*(unsigned int *)(dcmBuf + 0x1c) = 0xff;
+		dcm->ResetWaterMarks();
+		check_eq("ResetWaterMarks: +0x14 == 0x190000", *(unsigned int *)(dcmBuf + 0x14), 0x190000);
+		check_eq("ResetWaterMarks: +0x18 == 0x20000", *(unsigned int *)(dcmBuf + 0x18), 0x20000);
+		check_eq("ResetWaterMarks: +0x1c == 0", *(unsigned int *)(dcmBuf + 0x1c), 0);
+
+		/* UpdateHDRBufferWaterMarks() -- plain "keep the max", 2nd arg unused. */
+		*(unsigned int *)(dcmBuf + 0x14) = 500;
+		dcm->UpdateHDRBufferWaterMarks(200, 0);
+		check_eq("UpdateHDRBufferWaterMarks: lower value ignored", *(unsigned int *)(dcmBuf + 0x14), 500);
+		dcm->UpdateHDRBufferWaterMarks(600, 0);
+		check_eq("UpdateHDRBufferWaterMarks: higher value adopted", *(unsigned int *)(dcmBuf + 0x14), 600);
+
+		/* GetAvailableStreamingVoices() const -- clamped subtraction. */
+		*(unsigned int *)(dcmBuf + 0x4) = 10;	/* total */
+		*(unsigned int *)(dcmBuf + 0x8) = 2;
+		*(unsigned int *)(dcmBuf + 0xc) = 3;
+		*(unsigned int *)(dcmBuf + 0x10) = 1;	/* used == 6, total == 10 */
+		check_eq("GetAvailableStreamingVoices: 10-6 == 4", dcm->GetAvailableStreamingVoices(), 4);
+		*(unsigned int *)(dcmBuf + 0x10) = 20;	/* used now exceeds total */
+		check_eq("GetAvailableStreamingVoices: clamped to 0", dcm->GetAvailableStreamingVoices(), 0);
+
+		/* UpdateDiskThroughputBytesRead(long) -- plain signed accumulator. */
+		*(long *)(dcmBuf + 0x2c) = 1000;
+		dcm->UpdateDiskThroughputBytesRead(234);
+		check_eq("UpdateDiskThroughputBytesRead: accumulates", *(unsigned int *)(dcmBuf + 0x2c), 1234);
+
+		/* UpdateStolenStreams(long) -- clamped to a minimum of 0. */
+		*(long *)(dcmBuf + 0x38) = 5;
+		dcm->UpdateStolenStreams(3);
+		check_eq("UpdateStolenStreams: 5+3 == 8", *(unsigned int *)(dcmBuf + 0x38), 8);
+		dcm->UpdateStolenStreams(-20);
+		check_eq("UpdateStolenStreams: clamped to 0 (8-20<0)", *(unsigned int *)(dcmBuf + 0x38), 0);
+
+		/* SetCurrentInUseHDR{Input,Output}Streams(unsigned int) -- each
+		 * writes its own field AND mirrors to STGAPIFrontPanelStatus,
+		 * then resets the watermark triple IFF the +0x8/+0xc/+0x10 sum
+		 * is exactly 0. */
+		*(unsigned int *)(dcmBuf + 0x8) = 0;
+		*(unsigned int *)(dcmBuf + 0xc) = 0;
+		*(unsigned int *)(dcmBuf + 0x10) = 0;
+		*(unsigned int *)(dcmBuf + 0x14) = 111;	/* poison, must get reset */
+		dcm->SetCurrentInUseHDRInputStreams(0);
+		check_eq("SetCurrentInUseHDRInputStreams(0): sum==0, watermark reset",
+			 *(unsigned int *)(dcmBuf + 0x14), 0x190000);
+		check_eq("SetCurrentInUseHDRInputStreams: status+0x10fc mirrored",
+			 *(unsigned int *)(statusBuf + 0x10fc), 0);
+
+		dcm->SetCurrentInUseHDRInputStreams(7);
+		check_eq("SetCurrentInUseHDRInputStreams: +0x10 == 7", *(unsigned int *)(dcmBuf + 0x10), 7);
+		check_eq("SetCurrentInUseHDRInputStreams: status+0x10fc == 7",
+			 *(unsigned int *)(statusBuf + 0x10fc), 7);
+		*(unsigned int *)(dcmBuf + 0x14) = 222;	/* must NOT reset (sum != 0) */
+		dcm->SetCurrentInUseHDRInputStreams(7);
+		check_eq("SetCurrentInUseHDRInputStreams: watermark untouched (sum!=0)",
+			 *(unsigned int *)(dcmBuf + 0x14), 222);
+
+		*(unsigned int *)(dcmBuf + 0x8) = 0;
+		*(unsigned int *)(dcmBuf + 0xc) = 0;
+		*(unsigned int *)(dcmBuf + 0x10) = 0;
+		*(unsigned int *)(dcmBuf + 0x14) = 111;
+		dcm->SetCurrentInUseHDROutputStreams(0);
+		check_eq("SetCurrentInUseHDROutputStreams(0): sum==0, watermark reset",
+			 *(unsigned int *)(dcmBuf + 0x14), 0x190000);
+		check_eq("SetCurrentInUseHDROutputStreams: status+0x10f8 mirrored",
+			 *(unsigned int *)(statusBuf + 0x10f8), 0);
+
+		dcm->SetCurrentInUseHDROutputStreams(9);
+		check_eq("SetCurrentInUseHDROutputStreams: +0xc == 9", *(unsigned int *)(dcmBuf + 0xc), 9);
+		check_eq("SetCurrentInUseHDROutputStreams: status+0x10f8 == 9",
+			 *(unsigned int *)(statusBuf + 0x10f8), 9);
+	}
+
 	printf("\n[7] CSTGCommonLFO::Initialize()\n");
 	g_lfoQuadCalls = 0;
 	CSTGCommonLFO::Initialize();

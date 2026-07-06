@@ -228,16 +228,22 @@ public:
 	static unsigned char sEffectThreadBusSets[240 * 0x80];
 };
 
+struct CSTGPlaybackEvent;	/* forward decl, real definition in oa_engine_init.h */
+
 /*
  * Real, fully-fleshed classes with many other confirmed methods
- * (CSTGPlaybackBuffer: AddEvent/RemoveEvent/ProcessSubRate/...;
+ * (CSTGPlaybackBuffer: RemoveEvent/EventFileError/ProcessSubRate/...;
  * CSTGMonitorMixerChannel: RunMonitor/StartRampIn/StartRampOut/
  * SetMonitorLevel/GetMeterLevel/...) -- reconstructing every remaining
  * internal method is out of scope for this pass, but each class's own
- * ctor and Initialize() ARE real now (batch 22/23). Declared here as
- * opaque classes (same treatment as CEmergencyStealer) beyond those
- * methods, so CSTGHDRManager's own confirmed array layout can be embedded
- * and constructed faithfully. Sizes are confirmed independently of these
+ * ctor and Initialize() ARE real now (batch 22/23), and batch 24 added
+ * CSTGPlaybackBuffer's own event-management cluster (AddEvent/
+ * SetCurrentReadEvent/AdvanceToNextFillEvent/HandleAdvanceCancelledEvent/
+ * EventBufferStartLocationUpdated/AdvanceReadPosition, see
+ * src/engine/playback_buffer_events.cpp). Declared here as opaque classes
+ * (same treatment as CEmergencyStealer) beyond those methods, so
+ * CSTGHDRManager's own confirmed array layout can be embedded and
+ * constructed faithfully. Sizes are confirmed independently of these
  * classes' own code, via CSTGHDRManager::CSTGHDRManager()'s array-element
  * address deltas (see that class's own comment below) -- not guessed.
  */
@@ -258,6 +264,39 @@ public:
 	 */
 	void Initialize(unsigned long totalSize);
 	void Initialize(unsigned char mode, unsigned long totalSize);
+	/*
+	 * Event-management cluster, batch 24 (`.text+0xd6540`..`.text+0xd6b90`,
+	 * see src/engine/playback_buffer_events.cpp for the full derivation of
+	 * every field these touch: `+0x34` a `CSTGBankMemory::AllocAligned`'d
+	 * `unsigned short[0xfa1]` ring of `CSTGPlaybackEvent` array-indices,
+	 * `+0x38`/`+0x3c` its write/read cursors, `+0x40` its capacity (the
+	 * same `0xfa1` constant `Initialize()` already writes), `+0x44` a
+	 * "has a pending fill event" byte flag, `+0x48`/`+0x4c` the current
+	 * fill/read `CSTGPlaybackEvent*` (packed 32-bit). `+0xc` (this
+	 * class's own embedded `CSTGHDRCircularBuffer::readPos`) doubles as a
+	 * cached mirror of the current read event's own "buffer start
+	 * location" pointer -- confirmed via `EventBufferStartLocationUpdated`
+	 * only ever writing it when its own event argument IS the current
+	 * read event. `RemoveEvent`/`EventFileError` (their own
+	 * `TSTGArrayManager<CSTGPlaybackEvent>::sInstance`-based free-list
+	 * push is itself tractable) remain deliberately deferred: both
+	 * dispatch through `CSTGPlaybackEvent`'s own vtable slot 7
+	 * (`call *0x1c(%edx)`), which is still the sec 10.153 "install only,
+	 * never dispatch" zero-filled placeholder -- a confirmed real crash
+	 * risk to promote before that slot's real target is reconstructed.
+	 * `ProcessSubRate()` remains deferred too: 4 further external calls
+	 * (`CSTGPlaybackEvent::GetDispositionForReadAttempt`,
+	 * `USTGHDRUtils::ConvertWaveToSTGSamples`,
+	 * `CSTGDiskCostManager::UpdateHDRBufferWaterMarks` (now real, see
+	 * below), and `CSTGHDRCircularBuffer::AdvanceReadPosition`, already
+	 * real) -- the first two are genuinely unreconstructed.
+	 */
+	void EventBufferStartLocationUpdated(CSTGPlaybackEvent *event, char *newLoc);
+	void SetCurrentReadEvent(CSTGPlaybackEvent *newEvt);
+	void AdvanceToNextFillEvent();
+	void HandleAdvanceCancelledEvent(CSTGPlaybackEvent *event);
+	void AddEvent(CSTGPlaybackEvent *event);
+	void AdvanceReadPosition(unsigned long n, bool updateWaterMarks);
 	unsigned char _unrecovered[88];		/* confirmed size (array stride, see CSTGHDRManager) */
 };
 
@@ -819,12 +858,39 @@ public:
  * confirmed by disassembly (6 bytes total, no other instructions). Real
  * 72-byte object presumably has other fields, but none are constructor-
  * initialized (zero-initialized by its CSTGBankMemory allocation, or set
- * later by its own Initialize()). */
+ * later by its own Initialize()).
+ *
+ * Batch 24 added 7 more small, fully self-contained (zero calls, zero
+ * vtable dispatch) methods -- see src/engine/engine_startup_bits2.cpp for
+ * the derivation. Confirmed field roles (cross-checked against
+ * `Initialize()`'s own already-real field writes, sec 10.58):
+ *   +0x04 totalStreamingVoiceCapacity (default 0x190)
+ *   +0x08 some third in-use stream count (role not independently named;
+ *         contributes to the +0xc/+0x8/+0x10 "used" sum below)
+ *   +0x0c currentInUseHDROutputStreams (mirrored to
+ *         STGAPIFrontPanelStatus+0x10f8)
+ *   +0x10 currentInUseHDRInputStreams (mirrored to
+ *         STGAPIFrontPanelStatus+0x10fc)
+ *   +0x14/+0x18/+0x1c a 3-word HDR buffer high-watermark triple (defaults
+ *         0x190000/0x20000/0), +0x14 updated via a plain "keep the max"
+ *         idiom in UpdateHDRBufferWaterMarks()
+ *   +0x2c signed running total, UpdateDiskThroughputBytesRead's own
+ *         accumulator
+ *   +0x38 signed "stolen streams" counter, UpdateStolenStreams() clamps
+ *         it to a minimum of 0 (`cmovns`)
+ */
 class CSTGDiskCostManager {
 public:
 	static CSTGDiskCostManager *sInstance;
 	CSTGDiskCostManager();
 	void Initialize();	/* confirmed real, body not reconstructed, sec 10.58 */
+	void UpdateHDRBufferWaterMarks(unsigned long n, const CSTGHDRCircularBuffer *buf);
+	void ResetWaterMarks();
+	unsigned int GetAvailableStreamingVoices() const;
+	void UpdateDiskThroughputBytesRead(long n);
+	void UpdateStolenStreams(long n);
+	void SetCurrentInUseHDRInputStreams(unsigned int n);
+	void SetCurrentInUseHDROutputStreams(unsigned int n);
 	unsigned char _unrecovered[72];
 };
 

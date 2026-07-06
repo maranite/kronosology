@@ -232,6 +232,97 @@ void CSTGDiskCostManager::Initialize()
 }
 
 /*
+ * CSTGDiskCostManager's remaining small methods (batch 24) -- all
+ * confirmed real, all fully self-contained (zero calls, zero branches
+ * to another function, zero vtable dispatch). Ground-truthed via
+ * objdump -dr against /home/share/Decomp/OA.ko_Decomp/OA.ko:
+ *   UpdateHDRBufferWaterMarks(m,const*)  .text+0x62ab0,  9B
+ *   ResetWaterMarks()                    .text+0x62a90, 22B
+ *   GetAvailableStreamingVoices() const  .text+0x62a70, 26B
+ *   UpdateDiskThroughputBytesRead(l)     .text+0x62c50,  4B
+ *   UpdateStolenStreams(l)               .text+0x62d10, 12B
+ *   SetCurrentInUseHDRInputStreams(j)    .text+0x62c10, 50B
+ *   SetCurrentInUseHDROutputStreams(j)   .text+0x62bd0, 50B
+ * See oa_engine.h's own CSTGDiskCostManager comment for the confirmed
+ * field-offset summary these all share with Initialize() above.
+ */
+void CSTGDiskCostManager::UpdateHDRBufferWaterMarks(unsigned long n, const CSTGHDRCircularBuffer *)
+{
+	/* Real disassembly never dereferences its own 2nd (pointer) argument --
+	 * a plain "keep the running max" update against +0x14, confirmed via
+	 * `cmp %edx,0x14(%eax); jbe skip; mov %edx,0x14(%eax)`. */
+	unsigned char *base = (unsigned char *)this;
+	if (n > *(unsigned int *)(base + 0x14))
+		*(unsigned int *)(base + 0x14) = n;
+}
+
+void CSTGDiskCostManager::ResetWaterMarks()
+{
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0x14) = 0x190000;
+	*(unsigned int *)(base + 0x18) = 0x20000;
+	*(unsigned int *)(base + 0x1c) = 0;
+}
+
+unsigned int CSTGDiskCostManager::GetAvailableStreamingVoices() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int total = *(unsigned int *)(base + 0x4);
+	unsigned int used = *(unsigned int *)(base + 0xc) +
+			     *(unsigned int *)(base + 0x8) +
+			     *(unsigned int *)(base + 0x10);
+	return (total > used) ? (total - used) : 0;
+}
+
+void CSTGDiskCostManager::UpdateDiskThroughputBytesRead(long n)
+{
+	*(long *)((unsigned char *)this + 0x2c) += n;
+}
+
+void CSTGDiskCostManager::UpdateStolenStreams(long n)
+{
+	unsigned char *base = (unsigned char *)this;
+	long sum = *(long *)(base + 0x38) + n;
+	*(long *)(base + 0x38) = (sum >= 0) ? sum : 0;
+}
+
+void CSTGDiskCostManager::SetCurrentInUseHDRInputStreams(unsigned int n)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *status = STGAPIFrontPanelStatus::sInstance;
+
+	*(unsigned int *)(base + 0x10) = n;
+	*(unsigned int *)(status + 0x10fc) = n;
+
+	unsigned int sum = *(unsigned int *)(base + 0xc) +
+			    *(unsigned int *)(base + 0x8) +
+			    *(unsigned int *)(base + 0x10);
+	if (sum == 0) {
+		*(unsigned int *)(base + 0x14) = 0x190000;
+		*(unsigned int *)(base + 0x18) = 0x20000;
+		*(unsigned int *)(base + 0x1c) = 0;
+	}
+}
+
+void CSTGDiskCostManager::SetCurrentInUseHDROutputStreams(unsigned int n)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *status = STGAPIFrontPanelStatus::sInstance;
+
+	*(unsigned int *)(base + 0xc) = n;
+	*(unsigned int *)(status + 0x10f8) = n;
+
+	unsigned int sum = *(unsigned int *)(base + 0xc) +
+			    *(unsigned int *)(base + 0x8) +
+			    *(unsigned int *)(base + 0x10);
+	if (sum == 0) {
+		*(unsigned int *)(base + 0x14) = 0x190000;
+		*(unsigned int *)(base + 0x18) = 0x20000;
+		*(unsigned int *)(base + 0x1c) = 0;
+	}
+}
+
+/*
  * CSTGCommonLFO::Initialize() / CSTGCommonStepSeq::Initialize() --
  * confirmed real: allocate one big CSTGBankMemory pool (0x4a00/0x2000
  * bytes) and carve it into 32 fixed-stride blocks (0x250/0x100 bytes

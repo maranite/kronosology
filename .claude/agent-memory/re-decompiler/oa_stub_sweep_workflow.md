@@ -1882,3 +1882,123 @@ it worth re-checking whether any of THEIR OWN other methods
 `StartRampOut`/`SetMonitorLevel`/`GetMeterLevel`/etc, still fully
 opaque/unreconstructed) are now individually tractable given the class's
 own fields are no longer purely speculative.
+
+**Batch 24 specifics** (2026-07-06, sec 10.172, commit
+`<see MASTER_REFERENCE.md 10.172, filled in by the same follow-up
+"fill in commit hash placeholder" pass every prior batch uses>`): the
+user gave fresh explicit authorization to continue past batch 23.
+Re-verified state myself first (HEAD `5e28bb4`, clean tree, bare-`{}`
+stub count 69, last section `10.171` -- matched the briefing). Ran on
+the `kronosdev` host (192.168.3.86, same local `/home/share` +
+`/home/build/linux-kronos` access as batch 21 -- no SSH to 192.168.3.92
+needed this time either) with **direct access to
+`/home/share/Decomp/OA.ko_Decomp/OA.ko`** (the actual OA_real.ko binary,
+not just a pre-existing text dump) -- `nm -S -C --size-sort` and
+`objdump -dr` against it directly, no Ghidra MCP needed at all this
+batch.
+
+Picked up batch 22/23's own explicitly pre-scouted lead: now that
+`CSTGPlaybackBuffer`/`CSTGMonitorMixerChannel` have real ctors, checked
+their OWN other still-opaque methods. Reconstructed
+`CSTGPlaybackBuffer`'s full event-management cluster --
+`EventBufferStartLocationUpdated`/`SetCurrentReadEvent`/
+`AdvanceToNextFillEvent`/`HandleAdvanceCancelledEvent`/`AddEvent`/
+`AdvanceReadPosition` (6 methods, new dedicated file
+`playback_buffer_events.cpp`) -- plus, via `AdvanceReadPosition`'s own
+one new dependency, ALL SEVEN of `CSTGDiskCostManager`'s remaining small
+methods (added directly to `engine_startup_bits2.cpp`, which already
+owns that class's real `Initialize()`). 13 functions total, bare-`{}`
+stub count UNCHANGED (69 -> 69) -- none of these 13 had a pre-existing
+stub placeholder to remove (same accounting shape as sec 10.158's
+brand-new-class batches); don't be alarmed by a flat delta when the
+batch's own candidates were never bare-`{}` stubs to begin with.
+
+**Key technique, a further confirmed instance of "check the whole class
+once a tiny dependency turns up" (sec 10.158/10.169)**: `AdvanceReadPosition`'s
+own only unreconstructed dependency, `CSTGDiskCostManager::
+UpdateHDRBufferWaterMarks`, was itself a 9-byte one-liner -- checking
+that WHOLE class's method table via `nm -S -C --size-sort | grep
+CSTGDiskCostManager::` immediately turned up six more equally tiny,
+equally self-contained (zero calls, zero vtable dispatch) methods,
+reconstructed alongside it for barely more effort than the one method
+that was strictly needed.
+
+**Satisfying field-identity confirmation, not a new gotcha**:
+`CSTGPlaybackBuffer::EventBufferStartLocationUpdated`/`SetCurrentReadEvent`
+both write into `this+0xc` -- which turned out to be the ALREADY-NAMED
+`CSTGHDRCircularBuffer::readPos` field (the embedded sub-object at this
+class's own offset 0), not a new field needing its own name. It doubles
+as a cache of the current read event's own "buffer start location"
+pointer. A clean example of the sec 10.157/10.163 "re-read an earlier
+pass's own already-confirmed field layout before hand-deriving a new
+name" technique paying off immediately, with zero ambiguity.
+
+**Important new gotcha, caught by a real `ld` "multiple definition"
+error on the FIRST `make ko` attempt -- a sharper, previously-unstated
+angle on the sec 10.160 template-static-storage fix**: that fix (an
+explicit full specialization, `template<> TSTGArrayManager<SomeType>
+*TSTGArrayManager<SomeType>::sInstance = 0;`) has ORDINARY (strong)
+linkage and is a **verify/-only-binary technique** -- safe ONLY in a
+standalone host KAT that never links `engine_init.cpp`. A PRODUCTION
+`.cpp` file that ends up in `OA-objs` (linked into the real `.ko`
+alongside `engine_init.cpp`) must NEVER carry that same explicit
+specialization line if `engine_init.cpp` itself already ODR-uses that
+exact `T` -- `engine_init.cpp`'s own generic (non-specialized) template
+definition line has VAGUE/WEAK linkage and already implicitly
+instantiates the same storage there, so the production file's own
+strong-linkage explicit specialization collides with it at the real
+`.ko` link (`ld: multiple definition of
+'TSTGArrayManager<CSTGPlaybackEvent>::sInstance'`), even though the
+identical-looking line links perfectly fine in isolation in a verify/-only
+binary. Fixed by removing the explicit specialization from the
+production file (`playback_buffer_events.cpp`) entirely -- it now relies
+on `engine_init.cpp`'s own already-linked instantiation for the real
+`.ko` -- and keeping it ONLY in the new file's own dedicated verify/ KAT,
+exactly matching the pre-existing (but previously not explicitly
+articulated this way) `managers.cpp`/`TSTGArrayManager<CSTGRecordBuffer>`
+precedent: `managers.cpp` itself never defines that storage either, only
+the verify/ files that skip `engine_init.cpp` do. **Rule going forward:
+before writing an explicit-specialization storage line for ANY
+`TSTGArrayManager<T>` (or other plain-template-defined) static in a
+PRODUCTION file (destined for `OA-objs`), first `grep
+'TSTGArrayManager<YourType>' src/engine/engine_init.cpp` -- if
+`engine_init.cpp` already ODR-uses that exact `T`, do NOT add the
+explicit specialization there; add it only to that file's own dedicated
+verify/ test instead.** This is a real, previously-latent trap: sec
+10.160's own writeup never distinguished "verify/-only" from
+"production/OA-objs" placement, and this is the first batch where a
+`TSTGArrayManager<T>` reconstruction landed in a file that's ALSO linked
+into the real `.ko` alongside `engine_init.cpp`.
+
+**Smaller gotcha, caught by a real KAT `FAILED` line in the new test's
+own first draft (a test bug, not a reconstruction bug)**:
+`CSTGHDRCircularBuffer::ReturnUnusedFillBytes(n)` (already-real,
+managers.cpp, sec 10.158) decrements `availableReadBytes` (`+0x20`), NOT
+`availableFillBytes` (`+0x24`) -- despite the method's own name
+suggesting the latter. Fixed the KAT's own expectation, not the
+reconstruction (which correctly just calls the already-real method).
+Another instance of "don't infer a field's role from a method's English
+name alone, check the actual already-committed body" (sec 10.149
+family).
+
+**Deliberately NOT promoted, characterized for a future batch**:
+`CSTGPlaybackBuffer::RemoveEvent`/`EventFileError` (121B/212B) are BOTH
+otherwise fully tractable (their own `TSTGArrayManager<CSTGPlaybackEvent>::
+sInstance`-based free-list push, via its already-declared
+`bucketArray`/`writeCursor`/`modulus` fields, is itself simple field
+arithmetic) but each contains one real `call *0x1c(%edx)` -- a genuine
+vtable slot-7 dispatch on `CSTGPlaybackEvent`'s own still-zero-filled
+placeholder vtable (`_ZTV17CSTGPlaybackEvent`, sec 10.153's "install
+only" category) -- a confirmed new crash risk, not mere complexity.
+Tractable the MOMENT that vtable slot gets a real target. `ProcessSubRate()`
+(860B) remains rejected too: 2 of its 4 external calls
+(`CSTGPlaybackEvent::GetDispositionForReadAttempt`,
+`USTGHDRUtils::ConvertWaveToSTGSamples`) are genuinely unreconstructed.
+
+**Verification**: 67 verify/ binaries (up from 66, new
+`test_playback_buffer_events`), all exit 0 by real per-binary process
+exit code (never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times); 32 unresolved symbols;
+`.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 159,660
+bytes (up from 157,960). Commit: see MASTER_REFERENCE.md sec 10.172 once
+the commit-hash-fill-in pass runs.
