@@ -344,10 +344,20 @@ void CSTGVoiceAllocator::StealVoiceList(void *) {}
 CSTGSmoother::CSTGSmoother() {}
 /* CSTGSmoother::CancelAllSmoothers() is real now, sec 10.154 -- see
  * src/engine/smoother_cancel.cpp. */
-/* Sec 10.95's own confirmed-real, deliberately deferred externs. */
+/* Sec 10.95's own confirmed-real, deliberately deferred externs.
+ * CSTGPerformanceVars::SetIsDying() is real now, batch 19 -- see
+ * src/engine/performance_vars_set_is_dying.cpp (also its own three
+ * newly-discovered dependencies, CSTGSlotVoiceData::SetIsDying()/
+ * CSTGMIDIClockSync::DisableActivePerfClock()/CSTGPerformance::
+ * SetIsDying(CSTGPerformanceVars*), all real too, plus four further
+ * confirmed-real, deliberately deferred externs that call needs,
+ * stubbed below). */
 void CSTGSmoother::FinalizeAllSmoothers() {}
-void CSTGPerformanceVars::SetIsDying() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
+void CSTGFrontPanelSmoothers::OnPerformanceDeactivate() {}
+void CSTGControllerInfo::OnPerformanceDeactivate() {}
+void CSTGAudioInput::OnPerformanceDeactivate() {}
+void CSTGMessageProcessor::ClearUnsolicitedMessages() {}
 /* CSTGStreamingEventManager::CSTGStreamingEventManager()/Initialize() are
  * real now, sec 10.158 -- see src/engine/streaming_event_manager.cpp
  * (also its own newly-discovered dependency, CSTGStreamingEvent, a

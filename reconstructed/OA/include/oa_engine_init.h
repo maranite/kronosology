@@ -51,6 +51,7 @@
 
 struct CSTGControllerValue;	/* forward decl, real definition in oa_global.h */
 struct CSTGSlotVoiceData;	/* forward decl, real definition in oa_global.h */
+struct CSTGPerformanceVars;	/* forward decl, real definition further down this file */
 
 /* Raw indirect dispatch through a confirmed vtable slot 2 (matching
  * CCostProfile's own established treatment) -- shared by all ten "Model"
@@ -456,11 +457,27 @@ struct CSTGMidiDispatcher {
  * CSTGPerformance -- confirmed real (sec 10.77, via a direct, non-
  * virtual relocation to `_ZNK15CSTGPerformance17IsCurrentlyActiveEv`
  * from CSTGGlobal::UpdateVJSXAssignment/UpdateVJSYAssignment). Own
- * layout not reconstructed -- only the one confirmed real const
- * method needed to link those two callers.
+ * layout not reconstructed -- only the confirmed real methods needed
+ * to link those callers.
+ *
+ * SetIsDying(CSTGPerformanceVars*) (batch 19, `.text+0xb9a40`, 64
+ * bytes, confirmed via relocation from `CSTGPerformanceVars::
+ * SetIsDying()`) confirmed: the passed `CSTGPerformanceVars*` argument
+ * is received (edx, regparm(3)) but CONFIRMED UNUSED anywhere in the
+ * real body -- preserved faithfully as an unused parameter rather than
+ * dropped. Unconditionally calls, in order: `CSTGFrontPanelSmoothers::
+ * sInstance->OnPerformanceDeactivate()`, `this->fieldAt(0xad3)`
+ * (an embedded `CSTGControllerInfo` sub-object)`-> OnPerformanceDeactivate()`,
+ * `this->fieldAt(0xae7)` (an embedded `CSTGAudioInput` sub-object)
+ * `-> OnPerformanceDeactivate()`, and `CSTGMessageProcessor::
+ * sInstance->ClearUnsolicitedMessages()`. All four callees are newly
+ * discovered, confirmed real, deliberately deferred externs -- own
+ * bodies not reconstructed this pass (see src/engine/
+ * performance_vars_set_is_dying.cpp).
  */
 struct CSTGPerformance {
 	bool IsCurrentlyActive() const;
+	void SetIsDying(CSTGPerformanceVars *unused);
 };
 
 /*
@@ -501,6 +518,12 @@ struct CSTGFrontPanelSmoothers {
 	unsigned char _unrecovered2[0x318];		/* +0x200 */
 	unsigned char _unrecovered3[63 * 12];		/* +0x518 */
 	unsigned char _unrecovered4[99 * 12];		/* +0x80c */
+
+	/* OnPerformanceDeactivate() (batch 19, `.text+0x208d0`, 523 bytes,
+	 * confirmed via relocation from `CSTGPerformance::SetIsDying`)
+	 * confirmed real, deliberately deferred extern -- own body
+	 * substantially larger than this pass's scope, not reconstructed. */
+	void OnPerformanceDeactivate();
 };
 
 struct CSTGHDRMiniModel {
@@ -664,8 +687,32 @@ struct CSTGSmoother {
  * not independently confirmed beyond that one call site).
  */
 struct CSTGPerformanceVars {
-	/* SetIsDying() confirmed real, deliberately deferred extern -- own
-	 * body not reconstructed. */
+	/*
+	 * SetIsDying() is real now, batch 19 (`.text+0xbad40`, 478 bytes,
+	 * confirmed via relocation from `CSTGGlobal::
+	 * PreprocessPerformanceChange`) -- see src/engine/
+	 * performance_vars_set_is_dying.cpp for the full confirmed shape:
+	 * no-op unless `+0x23d1 == 2`; calls `this->fieldAt(0x23d4)->
+	 * SetIsDying(this)` (the owning `CSTGPerformance`, arg confirmed
+	 * unused by the callee); walks the SAME `CSTGGlobal::
+	 * sInstance+0x29c9900` active-voice-data list `RunVoiceModelFeedback`/
+	 * `NotifyAllKeysAndPedalsReleased` use, calling `SetIsDying()` on
+	 * every payload whose own `+0x28c8` group id matches `+0x23d0` and
+	 * AND-folding their `AreAllKeysAndPedalsReleased()` results; commits
+	 * `+0x23d1 = 4` (all released, or list/filter empty) or `= 3`
+	 * (still waiting), running the SAME "update front-panel active
+	 * manager count, maybe PushUnsolicitedMessage" block
+	 * `NotifyAllKeysAndPedalsReleased()`/`AllocPerformanceVars()`
+	 * already use -- here CONFIRMED UNREACHABLE in practice (the block's
+	 * own `oldState <= 1` guard is read immediately after this
+	 * function's own entry guard already established `+0x23d1 == 2`,
+	 * and nothing between the two writes that byte), the THIRD
+	 * confirmed instance of the "unconditional pre-write makes a later
+	 * guard unreachable" quirk in this cluster -- preserved faithfully
+	 * as dead code rather than special-cased away. Finally calls
+	 * `CSTGMIDIClockSync::sInstance->DisableActivePerfClock()`
+	 * unconditionally.
+	 */
 	void SetIsDying();
 
 	/*
@@ -743,6 +790,12 @@ struct CSTGMIDIClockSync {
 	/* Confirmed real (`_ZN17CSTGMIDIClockSync9sInstanceE`), needed by
 	 * CSTGLFOBase::InitializeQuad() -- sec 10.61. */
 	static CSTGMIDIClockSync *sInstance;
+
+	/* DisableActivePerfClock() is real now, batch 19 (`.text+0x675b0`,
+	 * 11 bytes, confirmed via relocation from `CSTGPerformanceVars::
+	 * SetIsDying()`) -- trivially sets `fieldAt(0xc8) = -1`. See
+	 * src/engine/performance_vars_set_is_dying.cpp. */
+	void DisableActivePerfClock();
 };
 
 /*

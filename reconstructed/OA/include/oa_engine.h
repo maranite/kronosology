@@ -942,6 +942,12 @@ public:
 	~CSTGMessageProcessor();
 
 	unsigned char _unrecovered[0x1040];	/* confirmed MINIMUM size -- see class comment */
+
+	/* ClearUnsolicitedMessages() (batch 19, `.text+0xed2e0`, 52 bytes,
+	 * confirmed via relocation from `CSTGPerformance::SetIsDying`)
+	 * confirmed real, deliberately deferred extern -- own body not
+	 * reconstructed this pass. */
+	void ClearUnsolicitedMessages();
 };
 
 /* Confirmed abstract base with a real vtable -- the destructor tears it

@@ -528,6 +528,16 @@ struct CSTGSlotVoiceData {
 	 * its own separate call site -- see slot_voice_data_free.cpp. */
 	bool AreAllKeysAndPedalsReleased() const;
 
+	/* SetIsDying() is real now, batch 19 (`.text+0xb3c50`, 15 bytes,
+	 * confirmed via relocation from `CSTGPerformanceVars::SetIsDying()`)
+	 * -- see src/engine/performance_vars_set_is_dying.cpp: idempotent,
+	 * only takes effect the FIRST time (`+0x40 == 0`): sets `+0x40 = 1`
+	 * (the SAME "dying" flag byte `EmergencyFreeDyingSlotVoiceData`/
+	 * `StealDyingSlotVoiceDatasForCost`/`UpdateAllActiveMIDIFilters`
+	 * already read) and `+0x41 = 0` (the SAME flag `Steal()` sets to 1,
+	 * sec 10.140 -- this clears it back). */
+	void SetIsDying();
+
 	/* RunVoiceModelStaticFront(unsigned int)/RunVoiceModelStaticBack(
 	 * unsigned int) (sec 10.93, confirmed via relocation from
 	 * CSTGGlobal's own same-named methods below) confirmed real,
@@ -1375,6 +1385,13 @@ struct CSTGAudioInput {
 	 * in this pass.
 	 */
 	void UseSettings();
+
+	/* OnPerformanceDeactivate() (batch 19, `.text+0xc9f00`, 39 bytes,
+	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --
+	 * called there on the embedded sub-object at `+0xae7`) confirmed
+	 * real, deliberately deferred extern -- own body not reconstructed
+	 * this pass. */
+	void OnPerformanceDeactivate();
 };
 struct CSTGDrumKitData { CSTGDrumKitData(); };
 /*
@@ -1474,6 +1491,13 @@ struct CSTGControllerInfo {
 	 */
 	static void SendUnsolicitedUIParam(unsigned int paramId, unsigned int value,
 					    long arg3, int midiSource);
+
+	/* OnPerformanceDeactivate() (batch 19, `.text+0x92a90`, 106 bytes,
+	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --
+	 * called there on the embedded sub-object at `+0xad3`) confirmed
+	 * real, deliberately deferred extern -- own body not reconstructed
+	 * this pass. */
+	void OnPerformanceDeactivate();
 };
 
 /*
