@@ -228,7 +228,12 @@ void CSTGGlobal::InitializePerformances() {}
 /* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
  * src/engine/engine_init.cpp. */
 void CSTGHDRMiniModel::Initialize() {}
-unsigned int CSTGHeapManager::Alloc(unsigned int) { return 0; }
+/* CSTGHeapManager::Alloc(unsigned int) -- oa_setup_global_resources.h's
+ * own local "static" ecosystem stand-in for the real instance method
+ * CSTGHeapManager::Alloc(unsigned long) -- is real now, batch 17, see
+ * src/mem/heap_manager_alloc_static.cpp (its own dedicated TU:
+ * test_setup_global_resources.cpp carries its own load-bearing
+ * call-counting mock of this exact symbol). */
 /* CSTGHeldKeyList::Reset() reconstructed for real, sec 10.82 -- see
  * src/engine/global.cpp. CSTGHeldKeyList::CSTGHeldKeyList() is real now
  * too, sec 10.155 -- see src/engine/slot_voice_data_ctor.cpp. */
@@ -296,8 +301,13 @@ void CSTGChannelValues::InitializeLongHand() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 void CSTGSlotVoiceData::UpdateGlobalTune(float) {}
 /* Sec 10.92's own confirmed-real, deliberately deferred externs.
- * EmergencyFreeAllVoices is now real (sec 10.138). */
-void CSTGSlotVoiceData::FreeSlotVoiceData(bool) {}
+ * EmergencyFreeAllVoices is now real (sec 10.138). CSTGSlotVoiceData::
+ * FreeSlotVoiceData(bool) is real now too, batch 17 -- see
+ * src/engine/slot_voice_data_free.cpp (also its own two newly-discovered
+ * dependencies, CSTGSmoother::CancelAllSlotVoiceDataCCSmoothers() and
+ * CSTGPerformanceVars::NotifyAllKeysAndPedalsReleased(), plus
+ * CSTGSlotVoiceData::AreAllKeysAndPedalsReleased() const, all in the
+ * same file). */
 /* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is real now, sec
  * 10.149 -- see managers.cpp. Its own two newly-discovered confirmed-
  * real, deliberately deferred siblings (own bodies not reconstructed

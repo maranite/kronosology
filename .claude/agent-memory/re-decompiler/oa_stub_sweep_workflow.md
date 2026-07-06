@@ -1185,3 +1185,104 @@ than assumed" instruction is given, it's fine (and correct) to conclude
 "no, still blocked, but for a DIFFERENT/MORE SPECIFIC reason than
 before" -- that's a real, useful finding, not a failure to find
 something.
+
+**Batch 17 specifics** (2026-07-06, sec 10.164): picked `CSTGSlotVoiceData::
+FreeSlotVoiceData(bool)` (394 bytes, one of sec 10.157's own long-standing
+deferred externs) plus its three newly-discovered dependencies
+(`CSTGSmoother::CancelAllSlotVoiceDataCCSmoothers`, `CSTGSlotVoiceData::
+AreAllKeysAndPedalsReleased`, `CSTGPerformanceVars::
+NotifyAllKeysAndPedalsReleased`, all small/tractable), plus separately
+resolved `CSTGHeapManager::Alloc(unsigned int)` (this project's own local
+"static ecosystem" duplicate of the already-real `Alloc(unsigned long)`).
+Stub count -1 by the project's own `grep -cE '^\S.*\{\}$'` convention
+(75->74) -- see the new gotcha below on why this doesn't move by -2.
+
+**New gotcha: this project's own stub-counting convention
+(`grep -cE '^\S.*\{\}$'`) only counts BARE `{}` stub bodies -- a stub with
+ANY content between the braces (`{ return 0; }`, `{ return false; }`,
+etc.) is silently excluded from the count, making it easy to overlook as
+"not a real stub" when skimming `bar2_stubs.cpp`.** `CSTGHeapManager::
+Alloc(unsigned int)`'s own stub body was `{ return 0; }` -- a genuine,
+still-unreconstructed deliberate stub (confirmed via its
+`oa_setup_global_resources.h` declaration comment: "own body not
+reconstructed... NOT independently named in the real binary beyond its
+mangled member-function symbol") that the grep-based count had been
+silently excluding all along. Found only by cross-referencing that
+header comment against the stub file directly, not by trusting the
+"N stubs remain" grep output. When scanning for the next batch's
+candidates, also check `bar2_stubs.cpp` for non-empty placeholder bodies
+(`return 0`/`return false`/etc.), not just bare `{}` lines -- a real,
+tractable candidate can hide there and never show up in the "official"
+count.
+
+**Key technique this batch, worth reusing: a class's own "local static
+ecosystem duplicate" of an already-fully-reconstructed real method can
+often be resolved for free by mechanically transliterating the
+ALREADY-VERIFIED real algorithm via raw offset arithmetic, rather than
+re-disassembling from scratch.** `oa_setup_global_resources.h`'s own
+`CSTGHeapManager` stand-in (`static char *sInstance; static unsigned int
+Alloc(unsigned int size);`) is a DIFFERENT, differently-mangled symbol
+from the real class's own `Alloc(unsigned long)` (Itanium ABI: different
+parameter type means a different mangled name, `Ej` vs `Em`) -- but since
+`heap_manager.cpp`'s own `Alloc(unsigned long)` was ALREADY fully
+ground-truthed (sec 10.63), the static duplicate's own body could be
+written as a byte-offset transliteration of that SAME already-proven
+algorithm (no new disassembly needed) -- and, as a side benefit, using
+raw 4-byte `unsigned int` reads/writes throughout makes THIS version
+slightly MORE faithful to the real 32-bit target than the original
+class's own `unsigned long`-typed struct fields are on this 64-bit host.
+Whenever a "local ecosystem stand-in" duplicates a class whose REAL
+counterpart is already reconstructed elsewhere in this project, check
+whether the real implementation's own algorithm can just be replayed via
+raw offsets before treating the duplicate as a fresh reconstruction task.
+
+**New list-unlink naming discipline, worth reusing whenever a list's own
+directional convention isn't independently confirmed**: `FreeSlotVoiceData(bool)`'s
+own two embedded intrusive lists (node fields `+0x4`/`+0x8` and
+`+0x14`/`+0x18`) use the SAME "identity via `&node+linkOffset`" token
+convention already established for `CSTGHeapManager`'s sentinel, but this
+batch's own head/tail-update disassembly didn't obviously match either a
+"prev" or "next" semantic for either field -- rather than guess and risk
+mislabeling (which could mislead a FUTURE pass into "fixing" a
+non-existent bug), the fields were transcribed with neutral `link1`/
+`link2` names and a comment stating the semantic direction is
+unconfirmed. Mechanically verified correct anyway via a host KAT
+exercising BOTH a single-entry list (head==tail==self) and a
+middle-of-three-node list (checking exact neighbor-propagation values,
+not just "no crash").
+
+**Recurring gotcha, hit TWICE in this batch's own new test file (a
+genuine own-test bug, not a reconstruction bug): every object whose
+address is round-tripped through a packed 32-bit list-link field must be
+`mmap32()`/`MAP_32BIT`-backed, never a plain stack array or `calloc()`,
+on this 64-bit host.** First hit (caught by `-Warray-bounds` at compile
+time, not a runtime crash): `test_slot_voice_data_free.cpp`'s own `[1]`
+section used a `buf[0x1800]` too small for the `+0x2888`/`+0x1790`/
+`+0x17a8` offsets it needed to poke, and `[2]`'s own `smootherBuf[0x1000]`
+was too small for the `+0xf010` list-head offset -- fixed by enlarging
+both (and moving `smootherBuf` to `mmap32`). Second, more dangerous hit
+(a real SIGSEGV, only found by `stdbuf -oL` per-section output localizing
+the crash to section `[2]` -- `gdb -batch -ex run -ex bt` gave no useful
+frame info under this project's `-O2`/no-debug-symbols host build):
+`[2]`'s own `targetBuf`/`otherBuf`/`node0..2`/`mapping0..2` were plain
+STACK arrays whose addresses got stored into 32-bit list-link fields and
+read back -- a 64-bit stack address routinely exceeds 32 bits and
+truncates to a wild pointer on reconstruction. Fixed by `mmap32()`-backing
+all six. Lesson: when a NEW test's own list/node objects have their
+OWN address stored into ANY 32-bit field (not just when the test's
+top-level "singleton" object does), audit EVERY such object individually
+for mmap32 backing -- a `-Warray-bounds` catch on ONE bug in a test file
+does not mean there isn't a SECOND, more dangerous pointer-width bug
+sitting right next to it.
+
+**Rejected/deferred candidates this batch** (full detail in sec 10.164):
+`CLoadBalancer::BalanceStaticLoad()` + its own new `BalanceStaticLoadHelper`
+dependency (blocked by a 3-method `CSTGSlotVoiceData` cost-accounting
+cluster); `CSTGEffectManager::RunEffects()` (blocked by a 3-deep
+`CSTGPerformanceVarsManager::RunEffects()`/`CSTGPerformance::RunEffects()`
+chain plus `CSTGMIDIClockSync::GetFilteredTempoBPM()`); `CSTGMidiPortManager::
+~CSTGMidiPortManager()` (confirmed real vtable dispatch on up to 8 array
+entries); `CSTGPerformanceVars::EnterActivatingState()` (re-confirmed the
+EXACT sec 10.153 six-new-class cluster); `CSTGSlotVoiceData::
+UpdateGlobalTune(float)` (confirmed real vtable dispatch through
+`CSTGPatchMessageContext`, a repeat of the already-known blocker).

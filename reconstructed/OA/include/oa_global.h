@@ -509,12 +509,24 @@ struct CSTGSlotVoiceData {
 	 * head fields within this object).
 	 *
 	 * FreeSlotVoiceData(bool) (sec 10.92, confirmed via relocation from
-	 * CSTGGlobal::EmergencyFreeDyingSlotVoiceData) confirmed real,
-	 * deliberately deferred extern -- own body not reconstructed in this
-	 * pass.
+	 * CSTGGlobal::EmergencyFreeDyingSlotVoiceData) is real now, batch 17
+	 * -- see src/engine/slot_voice_data_free.cpp (its own dedicated TU:
+	 * this symbol has three separate pre-existing mocks in
+	 * test_engine.cpp/test_global_ctor.cpp/test_global.cpp, the latter
+	 * load-bearing across several call-count assertions).
 	 */
 	void EmergencyFreeAllVoices();
 	void FreeSlotVoiceData(bool flag);
+
+	/*
+	 * AreAllKeysAndPedalsReleased() const (batch 17, `.text+0xb3b50`, 33
+	 * bytes, confirmed via relocation from `CSTGPerformanceVars::
+	 * NotifyAllKeysAndPedalsReleased()`) confirmed: `false` if `+0x2888`
+	 * is set; `false` if `+0x1790 > 0x4f` (unsigned); else
+	 * `+0x17a8 <= 0x3f` (unsigned). The EXACT same 3-field check is also
+	 * inlined (no `call`) directly inside `FreeSlotVoiceData(bool)` at
+	 * its own separate call site -- see slot_voice_data_free.cpp. */
+	bool AreAllKeysAndPedalsReleased() const;
 
 	/* RunVoiceModelStaticFront(unsigned int)/RunVoiceModelStaticBack(
 	 * unsigned int) (sec 10.93, confirmed via relocation from

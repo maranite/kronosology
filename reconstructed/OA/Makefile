@@ -47,6 +47,7 @@ OA-objs := src/auth/klm_manager.o \
            src/mem/scale.o \
            src/mem/new_delete.o \
            src/mem/heap_manager.o \
+           src/mem/heap_manager_alloc_static.o \
            src/engine/engine.o \
            src/engine/global.o \
            src/engine/cc_info_table.o \
@@ -89,6 +90,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
+           src/engine/slot_voice_data_free.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -190,6 +192,7 @@ SRC := src/auth/klm_manager.cpp \
        src/mem/scale.cpp \
        src/mem/new_delete.cpp \
        src/mem/heap_manager.cpp \
+       src/mem/heap_manager_alloc_static.cpp \
        src/engine/engine.cpp \
        src/engine/global.cpp \
        src/engine/cc_info_table.cpp \
@@ -224,6 +227,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
+       src/engine/slot_voice_data_free.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -275,7 +279,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
          verify/test_sampling_interface_ctor \
          verify/test_channel_values verify/test_hdr_record_track \
-         verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters
+         verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters \
+         verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -443,6 +448,12 @@ verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_se
 
 verify/test_slot_voice_data_midi_filters: verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp -o $@
+
+verify/test_heap_manager_alloc_static: verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp -o $@
+
+verify/test_slot_voice_data_free: verify/test_slot_voice_data_free.cpp src/engine/slot_voice_data_free.cpp include/oa_global.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_slot_voice_data_free.cpp src/engine/slot_voice_data_free.cpp -o $@
 
 verify/test_push_unsolicited_message: verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp include/oa_rtfifo_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp -o $@

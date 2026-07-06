@@ -50,6 +50,7 @@
 #include "oa_engine.h"
 
 struct CSTGControllerValue;	/* forward decl, real definition in oa_global.h */
+struct CSTGSlotVoiceData;	/* forward decl, real definition in oa_global.h */
 
 /* Raw indirect dispatch through a confirmed vtable slot 2 (matching
  * CCostProfile's own established treatment) -- shared by all ten "Model"
@@ -638,6 +639,20 @@ struct CSTGSmoother {
 	 * reconstructed in this pass.
 	 */
 	void FinalizeSmoother(void *node, bool flag);
+
+	/*
+	 * CancelAllSlotVoiceDataCCSmoothers(const CSTGSlotVoiceData*) (batch
+	 * 17, `.text+0x2b790`, 83 bytes, confirmed via relocation from
+	 * `CSTGSlotVoiceData::FreeSlotVoiceData(bool)`) confirmed: walks the
+	 * SAME singly-linked list as `CancelAllCCSmoothers()` above (anchored
+	 * at `this->fieldAt(0xf010)`, node `+0x0`=next, `+0x8`=mapping
+	 * pointer) but with a DIFFERENT filter -- mapping's own `+0x10` must
+	 * equal `8` (not `2` or `8`) AND mapping's own `+0xac` must equal the
+	 * passed `target` pointer exactly. On a match, calls `this->
+	 * FinalizeSmoother(node, false)` -- see
+	 * src/engine/slot_voice_data_free.cpp.
+	 */
+	void CancelAllSlotVoiceDataCCSmoothers(const CSTGSlotVoiceData *target);
 };
 
 /*
@@ -669,6 +684,32 @@ struct CSTGPerformanceVars {
 	 */
 	void BeginActivation(CSTGPerformance *perf, bool flag);
 	void EnterActivatingState();
+
+	/*
+	 * NotifyAllKeysAndPedalsReleased() (batch 17, `.text+0xbafc0`, 279
+	 * bytes, confirmed via relocation from `CSTGSlotVoiceData::
+	 * FreeSlotVoiceData(bool)`) confirmed: no-op unless `+0x23d1 == 3`.
+	 * Otherwise walks the SAME `CSTGGlobal::sInstance+0x29c9900`
+	 * active-voice-data list already confirmed for
+	 * `FreeVoicelessDyingSlots()` below (node `+0x0`=next, `+0x8`=payload
+	 * pointer) -- for each payload whose own `+0x28c8` byte equals
+	 * `this->fieldAt(0x23d0)` (the SAME per-manager group id), calls the
+	 * payload's `AreAllKeysAndPedalsReleased()`; if ANY qualifying
+	 * payload returns false, bails out immediately (a real, confirmed
+	 * early-return). Otherwise commits `+0x23d1 = 4` and, only if the
+	 * OLD state was `<= 1`, recomputes the SAME front-panel "active
+	 * manager count" (`STGAPIFrontPanelStatus::sInstance+0x1094`)
+	 * `AllocPerformanceVars()`/`EnterActivatingState()` also maintain.
+	 * CONFIRMED REAL, PRESERVED BUG-FOR-BUG: the real disassembly's own
+	 * trailing `PushUnsolicitedMessage` block is genuinely UNREACHABLE
+	 * (its own guard reads `+0x23d1` AFTER it was already unconditionally
+	 * overwritten to `4` earlier in the SAME call) -- the exact same
+	 * "unconditional pre-write makes a later guard unreachable" quirk
+	 * already confirmed for `CSTGPerformanceVarsManager::
+	 * AllocPerformanceVars()` (see oa_global.h/global.cpp). See
+	 * src/engine/slot_voice_data_free.cpp for the full implementation.
+	 */
+	void NotifyAllKeysAndPedalsReleased();
 
 	/*
 	 * FreeVoicelessDyingSlots() (confirmed real via a relocation from
