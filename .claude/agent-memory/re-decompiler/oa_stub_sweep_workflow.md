@@ -2000,7 +2000,7 @@ exit code (never log-grepped), both of two full clean-rebuild passes on
 `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 159,660
 bytes (up from 157,960). Commit `5eba788`.
 
-**Batch 25 specifics** (2026-07-06, sec 10.173, commit `<pending>`): the
+**Batch 25 specifics** (2026-07-06, sec 10.173, commit `613ebc9`): the
 user gave fresh explicit authorization to continue past batch 24.
 Re-verified state myself first (HEAD `54a54cf`, clean tree, bare-`{}`
 stub count 69, last section `10.172` -- matched the briefing). Ran on
@@ -2112,7 +2112,7 @@ HandleFileClosed integration), all exit 0 by real per-binary process exit
 code (never log-grepped), both of two full clean-rebuild passes on
 `kronosdev` (byte-identical both times); 32 unresolved symbols;
 `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 161,496
-bytes (up from 159,660). Commit `<pending>`.
+bytes (up from 159,660). Commit `613ebc9`.
 
 **Deferred for a future batch**: `CSTGEQ`'s five core math functions
 (unchanged, still needs the "transcribe the whole function as one
