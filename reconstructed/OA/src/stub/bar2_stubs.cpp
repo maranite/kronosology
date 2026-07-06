@@ -67,7 +67,9 @@ void CSTGHDRManager::Initialize() {}
  * 10.144 -- see managers.cpp. ProcessCommands() calls three still-
  * deferred siblings, stubbed below. */
 void CSTGHDRManager::ProcessPlaybackCommands() {}
-void CSTGHDRManager::ProcessRecordCommands() {}
+/* CSTGHDRManager::ProcessRecordCommands() is real now, batch 15 -- see
+ * src/engine/hdr_record_track.cpp (also introduces CSTGRecordTrack::
+ * Start()/Pause()/Stop(), StandbyRec() deliberately deferred). */
 void CSTGHDRManager::ProcessSamplerCommands() {}
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGMonitorMixer::RunMonitors() {}
@@ -201,7 +203,8 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
 void CLoadBalancer::BalanceStaticLoad() {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 void CSTGChannelValues::Reset() {}
-void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) {}
+/* CSTGChannelValues::SetControllerValue() is real now, batch 15 -- see
+ * src/engine/channel_values_set_controller_value.cpp. */
 /* Sec 10.101's own confirmed-real, deliberately deferred externs. */
 void CSTGControllerRTData::HandleControllerChange(int, unsigned char, bool, bool) {}
 void CSTGControllerInfo::SetPerfSwitch(int, bool) {}

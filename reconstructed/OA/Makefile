@@ -84,6 +84,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/sequence_ctor.o \
            src/engine/streaming_event_manager.o \
            src/engine/sampling_interface_ctor.o \
+           src/engine/channel_values_set_controller_value.o \
+           src/engine/hdr_record_track.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -214,6 +216,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/sequence_ctor.cpp \
        src/engine/streaming_event_manager.cpp \
        src/engine/sampling_interface_ctor.cpp \
+       src/engine/channel_values_set_controller_value.cpp \
+       src/engine/hdr_record_track.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -263,7 +267,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_audio_bus_manager verify/test_program_slot_ctor \
          verify/test_sequence_ctor verify/test_smoother_cancel \
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
-         verify/test_sampling_interface_ctor
+         verify/test_sampling_interface_ctor \
+         verify/test_channel_values verify/test_hdr_record_track
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -419,6 +424,12 @@ verify/test_slot_voice_data_ctor: verify/test_slot_voice_data_ctor.cpp src/engin
 
 verify/test_sampling_interface_ctor: verify/test_sampling_interface_ctor.cpp src/engine/sampling_interface_ctor.cpp include/oa_global.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_sampling_interface_ctor.cpp src/engine/sampling_interface_ctor.cpp -o $@
+
+verify/test_channel_values: verify/test_channel_values.cpp src/engine/channel_values_set_controller_value.cpp src/engine/cc_info_table.cpp include/oa_global.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_channel_values.cpp src/engine/channel_values_set_controller_value.cpp src/engine/cc_info_table.cpp -o $@
+
+verify/test_hdr_record_track: verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_record_track.cpp src/engine/hdr_record_track.cpp -o $@
 
 verify/test_push_unsolicited_message: verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp include/oa_rtfifo_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp -o $@

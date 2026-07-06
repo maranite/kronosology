@@ -457,6 +457,77 @@ public:
 	unsigned char _unrecovered_tail[4];	/* +0x30..+0x34 */
 };
 
+/*
+ * CSTGRecordTrack (batch 15) -- brand-new class, embedded inside
+ * CSTGHDRManager as a 16-element array at `+0x584` (stride `0xc0`=192
+ * bytes, confirmed via `CSTGHDRManager::ProcessRecordCommands()`'s own
+ * `trackIdx*3, shl 6` == `trackIdx*192` addressing). Only the fields
+ * actually touched by `Start()`/`Pause()`/`Stop()` are confirmed here --
+ * full layout NOT independently recovered (own `Initialize()`,
+ * `StandbyRec()`, `ProcessSubRate()`, `SetupNewRecBuffer()`,
+ * `SetupNewRecEvent()`, `StopCurrentRecEvent()`, `GetNextFilledBuffer()`
+ * are all confirmed-real but NOT reconstructed this pass -- accessed via
+ * raw offsets in hdr_record_track.cpp rather than named here, matching
+ * this project's established convention for partially-recovered classes).
+ *
+ * LIKELY relationship to the already-declared `monitorMixerChannelSlots`
+ * array above (base `+0x5a4`, NOT independently re-verified this pass,
+ * so deliberately not merged into one declaration): `CSTGHDRManager`'s
+ * own ctor comment records that channel slot 0's "32-byte gap" at
+ * `+0x584..+0x5a4` has exactly THREE confirmed-zeroed dwords, at
+ * `+0x590`/`+0x594`/`+0x598` -- i.e. RELATIVE offsets `+0xc`/`+0x10`/
+ * `+0x14` from this struct's own `+0x584` base, matching `ringBase`/
+ * `ringWriteIdx`/an unconfirmed third field below almost exactly. This
+ * strongly suggests each 192-byte "channel slot" is really ONE
+ * `CSTGRecordTrack` whose own `CSTGMonitorMixerChannel` sub-object lives
+ * at ITS OWN `+0x20` (172 bytes, ending at `+0xcc` -- 20 bytes short of
+ * the full 192-byte stride, matching that class's own already-confirmed
+ * "172-vs-192" size note) -- not independently proven byte-for-byte this
+ * pass, so this struct is declared here purely via its own confirmed
+ * `Start`/`Pause`/`Stop` offsets, without asserting a merged layout.
+ *
+
+ * Confirmed fields (regparm(3), this=EAX):
+ *   +0x04 state       -- 0=idle, 1=standby, 2=active(recording); Start()
+ *                        only fires when state==1, Pause() only when
+ *                        state!=0, Stop() treats state 1||2 as
+ *                        "was active" (full teardown) vs anything else
+ *                        (just resets state to 0).
+ *   +0x08 meterPtr     -- packed 32-bit pointer to some other object (NOT
+ *                         a CSTGRecordBuffer, see +0x1c below); Start()/
+ *                         Stop() both poke ITS OWN `+0x8` field (2/3, a
+ *                         tag matching the SAME tag convention used by
+ *                         CSTGSamplingDaemon::ProcessCommands' ring
+ *                         pushes, sec 10.160) -- not otherwise identified.
+ *   +0x0c ringBase     -- this track's OWN small "finished/returned
+ *                         buffer" ring, packed 32-bit pointer, 4-byte
+ *                         stride entries (raw CSTGRecordBuffer pointers).
+ *   +0x10 ringWriteIdx -- write cursor into the ring above.
+ *   +0x18 ringCapacity -- modulus for ringWriteIdx wraparound.
+ *   +0x1c activeBuffer -- packed 32-bit pointer to the CSTGRecordBuffer
+ *                         currently owned by this track (NULL when idle);
+ *                         GetPeakConvertedLevel(bool) (not reconstructed
+ *                         here) forwards straight to
+ *                         `CSTGRecordBuffer::GetPeakConvertedLevel(bool)`
+ *                         on this same pointer.
+ */
+struct CSTGRecordTrack {
+	int Start();
+	int Pause();
+	int Stop();
+	/*
+	 * StandbyRec(const char*, unsigned int, unsigned long,
+	 * eSTGAPIBusIDRecSource, unsigned char) (`.text+0xd72b0`, 440 bytes)
+	 * confirmed real, deliberately deferred extern -- substantially
+	 * larger than Start/Pause/Stop, own body not reconstructed this
+	 * pass. Called from CSTGHDRManager::ProcessRecordCommands() with
+	 * (entry+4, entry+0xc, entry+0x10, entry+0x14, entry+0x18) -- see
+	 * hdr_record_track.cpp for the confirmed regparm argument mapping.
+	 */
+	void StandbyRec(const char *arg1, unsigned int arg2, unsigned long arg3,
+			 int arg4, unsigned char arg5);
+};
+
 /* CSTGMonitorMixer's constructor (.text+0x69000, 6 bytes) confirmed to do
  * exactly one thing: `sInstance = this;` -- the smallest manager
  * constructor found in this codebase so far. Total object size not
