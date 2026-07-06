@@ -455,15 +455,12 @@ void CSTGControllerRTData::OnExtModeSetChange()
 	g_onExtModeSetChangeCalls++;
 	g_lastOnExtModeSetChangeThis = this;
 }
-static int g_onExtModeAssignChangeCalls;
-static const char *g_lastOnExtModeAssignChangeFamily;
-static unsigned int g_lastOnExtModeAssignChangeIndex;
-void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int index)
-{
-	g_onExtModeAssignChangeCalls++;
-	g_lastOnExtModeAssignChangeFamily = "Knob";
-	g_lastOnExtModeAssignChangeIndex = index;
-}
+/* CSTGControllerRTData::OnExtModeKnobAssignChange/OnExtModeSliderAssignChange
+ * are now real (sec 10.161) -- see src/engine/global.cpp + the new
+ * src/engine/cc_info_table.cpp (both linked here). Exercised directly
+ * in section [21b] below (a dedicated block, since their real shape --
+ * CC-table lookup + jump-catch state + a PushUnsolicitedMessage --
+ * doesn't fit section [21]'s existing isReal-boolean two-shape loop). */
 /* OnExtModePlayMuteSwitchAssignChange/OnExtModeSelectSwitchAssignChange
  * are now real (sec 10.126) -- see src/engine/global.cpp; verified via
  * STGAPIFrontPanelStatus's own real field write plus this mock for
@@ -476,12 +473,6 @@ void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int paramId, unsigned i
 	g_sendUnsolicitedUIParamCalls++;
 	g_lastSendUnsolicitedUIParamId = paramId;
 	g_lastSendUnsolicitedUIParamValue = value;
-}
-void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int index)
-{
-	g_onExtModeAssignChangeCalls++;
-	g_lastOnExtModeAssignChangeFamily = "Slider";
-	g_lastOnExtModeAssignChangeIndex = index;
 }
 static int g_handleControllerChangeCalls;
 static int g_lastHandleControllerChangeAssign;
@@ -1555,8 +1546,8 @@ int main(void)
 		munmap(mgr1, 0x24000);
 	}
 
-	printf("\n[21] The 8 UpdateExtXXXCCAssign/MidiChannel handlers: shared shape,\n"
-	       "     per-family stride (8 vs 9 for Slider), per-pair shared notify target\n");
+	printf("\n[21] The 4 UpdateExtXXXSwitchCCAssign/MidiChannel handlers (PlayMute/\n"
+	       "     Select): shared shape, real SendUnsolicitedUIParam notify target\n");
 	{
 		CSTGGlobal *g = (CSTGGlobal *)buf;
 		CSTGMessageContext ctx;
@@ -1568,31 +1559,40 @@ int main(void)
 		unsigned char *panelStatus = mmap32(0x1000);
 		STGAPIFrontPanelStatus::sInstance = panelStatus;
 
+		/* UpdateExtKnobCCAssign/MidiChannel and UpdateExtSliderCCAssign/
+		 * MidiChannel used to share this loop too (as mock-only "notify"
+		 * cases) -- now that their own notify targets
+		 * (OnExtModeKnobAssignChange/OnExtModeSliderAssignChange) are
+		 * real (sec 10.161), they no longer fit this loop's two-shape
+		 * (mock vs real-SendUnsolicitedUIParam) model: the real bodies
+		 * have their OWN extra `this+0x2b` gate (this loop's shared
+		 * `buf` aliases `CSTGControllerRTData::sInstance` at `+0x1000`
+		 * via section [17]'s own setup, and gets fully zeroed by this
+		 * loop's own `memset` every iteration -- so the gate would
+		 * always read closed here, silently suppressing the very
+		 * notify-message assertions this loop used to make). See the
+		 * new dedicated section [21b] below instead, which sets up its
+		 * own independent `CSTGControllerRTData` instance and drives
+		 * both the direct method calls AND one full
+		 * `UpdateExtKnobCCAssign` integration call. */
 		struct {
 			const char *label;
 			void (CSTGGlobal::*fn)(CSTGMessageContext &, STGConvertedParam &);
 			unsigned int writeOffset;
 			unsigned int stride;
-			const char *family;
-			bool isReal;          /* PlayMuteSwitch/SelectSwitch (sec 10.126) */
 			unsigned int panelOffset;
 			unsigned int paramId;
 		} cases[] = {
-			{ "UpdateExtKnobCCAssign", &CSTGGlobal::UpdateExtKnobCCAssign, 0x29ca3c8, 8, "Knob", false, 0, 0 },
-			{ "UpdateExtKnobMidiChannel", &CSTGGlobal::UpdateExtKnobMidiChannel, 0x29c9fc8, 8, "Knob", false, 0, 0 },
-			{ "UpdateExtPlayMuteSwitchCCAssign", &CSTGGlobal::UpdateExtPlayMuteSwitchCCAssign, 0x29cabc8, 8, "PlayMuteSwitch", true, 0x913, 9 },
-			{ "UpdateExtPlayMuteSwitchMidiChannel", &CSTGGlobal::UpdateExtPlayMuteSwitchMidiChannel, 0x29ca7c8, 8, "PlayMuteSwitch", true, 0x913, 9 },
-			{ "UpdateExtSelectSwitchCCAssign", &CSTGGlobal::UpdateExtSelectSwitchCCAssign, 0x29cb3c8, 8, "SelectSwitch", true, 0x91b, 10 },
-			{ "UpdateExtSelectSwitchMidiChannel", &CSTGGlobal::UpdateExtSelectSwitchMidiChannel, 0x29cafc8, 8, "SelectSwitch", true, 0x91b, 10 },
-			{ "UpdateExtSliderCCAssign", &CSTGGlobal::UpdateExtSliderCCAssign, 0x29cbc48, 9, "Slider", false, 0, 0 },
-			{ "UpdateExtSliderMidiChannel", &CSTGGlobal::UpdateExtSliderMidiChannel, 0x29cb7c8, 9, "Slider", false, 0, 0 },
+			{ "UpdateExtPlayMuteSwitchCCAssign", &CSTGGlobal::UpdateExtPlayMuteSwitchCCAssign, 0x29cabc8, 8, 0x913, 9 },
+			{ "UpdateExtPlayMuteSwitchMidiChannel", &CSTGGlobal::UpdateExtPlayMuteSwitchMidiChannel, 0x29ca7c8, 8, 0x913, 9 },
+			{ "UpdateExtSelectSwitchCCAssign", &CSTGGlobal::UpdateExtSelectSwitchCCAssign, 0x29cb3c8, 8, 0x91b, 10 },
+			{ "UpdateExtSelectSwitchMidiChannel", &CSTGGlobal::UpdateExtSelectSwitchMidiChannel, 0x29cafc8, 8, 0x91b, 10 },
 		};
 
 		for (auto &c : cases) {
 			memset(buf, 0, globalSize);
 			memset(panelStatus, 0xff, 0x1000);
 			mgr[0x23d1] = 0;
-			g_onExtModeAssignChangeCalls = 0;
 			g_sendUnsolicitedUIParamCalls = 0;
 
 			buf[0x29cc0c8] = 2; /* active ext-set slot index */
@@ -1604,41 +1604,200 @@ int main(void)
 			check_eq(label, buf[2 * c.stride + 3 + c.writeOffset], 0x5a);
 			check_eq("  ...not initialized -> bit0 unconditionally set",
 				 (unsigned int)(buf[0x29cc0c9] & 1), 1);
-			if (c.isReal) {
-				check_eq("  ...no SendUnsolicitedUIParam call while uninitialized",
-					 (unsigned int)g_sendUnsolicitedUIParamCalls, 0);
-			} else {
-				check_eq("  ...no notify call while uninitialized",
-					 (unsigned int)g_onExtModeAssignChangeCalls, 0);
-			}
+			check_eq("  ...no SendUnsolicitedUIParam call while uninitialized",
+				 (unsigned int)g_sendUnsolicitedUIParamCalls, 0);
 
 			buf[0x29cc0c9] = 0;
 			buf[0x6ae] = 1;
 			mgr[0x23d1] = 2;
 			(g->*c.fn)(ctx, param);
-			if (c.isReal) {
-				check_eq("  ...initialized + mgr flag==2 -> real SendUnsolicitedUIParam fires",
-					 (unsigned int)g_sendUnsolicitedUIParamCalls, 1);
-				check_eq("  ...with the confirmed real paramId",
-					 g_lastSendUnsolicitedUIParamId, c.paramId);
-				check_eq("  ...and value == ctx.index",
-					 g_lastSendUnsolicitedUIParamValue, ctx.index);
-				check_eq("  ...STGAPIFrontPanelStatus's own real byte zeroed",
-					 panelStatus[ctx.index + c.panelOffset], 0);
-			} else {
-				check_eq("  ...initialized + mgr flag==2 -> notify fires",
-					 (unsigned int)g_onExtModeAssignChangeCalls, 1);
-				check_eq("  ...dispatched to the correct family",
-					 (unsigned int)(strcmp(g_lastOnExtModeAssignChangeFamily, c.family) == 0), 1);
-				check_eq("  ...notify arg == ctx.index",
-					 g_lastOnExtModeAssignChangeIndex, ctx.index);
-			}
+			check_eq("  ...initialized + mgr flag==2 -> real SendUnsolicitedUIParam fires",
+				 (unsigned int)g_sendUnsolicitedUIParamCalls, 1);
+			check_eq("  ...with the confirmed real paramId",
+				 g_lastSendUnsolicitedUIParamId, c.paramId);
+			check_eq("  ...and value == ctx.index",
+				 g_lastSendUnsolicitedUIParamValue, ctx.index);
+			check_eq("  ...STGAPIFrontPanelStatus's own real byte zeroed",
+				 panelStatus[ctx.index + c.panelOffset], 0);
 			check_eq("  ...bit0 NOT set in this branch (same quirk as UpdateExtSetSelect)",
 				 (unsigned int)(buf[0x29cc0c9] & 1), 0);
 		}
 		munmap(panelStatus, 0x1000);
 
 		munmap(mgr, 0x24000);
+	}
+
+	printf("\n[21b] OnExtModeKnobAssignChange/OnExtModeSliderAssignChange (sec\n"
+	       "      10.161): CC-table lookup, panel display write, +0x2b gate,\n"
+	       "      per-index mirror + jump-catch state, PushUnsolicitedMessage\n");
+	{
+		CSTGGlobal *g = (CSTGGlobal *)buf;
+		memset(buf, 0, globalSize);
+		CSTGGlobal::sInstance = g;
+
+		unsigned char *rtBuf = mmap32(0x100);
+		CSTGControllerRTData *rt = (CSTGControllerRTData *)rtBuf;
+		CSTGControllerRTData::sInstance = rt;
+
+		unsigned char *panelStatus2 = mmap32(0x1000);
+		STGAPIFrontPanelStatus::sInstance = panelStatus2;
+
+		const unsigned int idx = 3;
+		buf[0x29cc0c8] = 2; /* active ext-set slot index ("mode") */
+
+		/* 1. Unassigned (0xff): no panel write, no message, regardless
+		 * of the +0x2b gate. */
+		memset(panelStatus2, 0xff, 0x1000);
+		memset(rtBuf, 0, 0x100);
+		rtBuf[0x2b] = 4;
+		buf[0x29ca3c8 + 2 * 8 + idx] = 0xff;
+		g_pushUnsolicitedMessageCalls = 0;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("Knob unassigned (0xff) -> no panel write", panelStatus2[idx + 0x90b], 0xff);
+		check_eq("Knob unassigned -> no message", (unsigned int)g_pushUnsolicitedMessageCalls, 0);
+
+		/* 2. Assigned CC10 (pan, confirmed real default 0x40), gate
+		 * closed (+0x2b != 4): panel write still happens, nothing else
+		 * does. */
+		memset(panelStatus2, 0xff, 0x1000);
+		memset(rtBuf, 0, 0x100);
+		rtBuf[0x2b] = 0;
+		buf[0x29ca3c8 + 2 * 8 + idx] = 10;
+		g_pushUnsolicitedMessageCalls = 0;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("Knob CC10 -> panel display shows its confirmed default 0x40",
+			 panelStatus2[idx + 0x90b], 0x40);
+		check_eq("Knob CC10, gate closed -> no mirror store", rtBuf[0x56 + idx * 3], 0x00);
+		check_eq("Knob CC10, gate closed -> no message", (unsigned int)g_pushUnsolicitedMessageCalls, 0);
+
+		/* 3. Assigned CC10, gate open (+0x2b==4), flag==0 (+0x29c9fc0==0
+		 * on CSTGGlobal): bit7 clear -> mirrored; "already matched" byte
+		 * set to 1; message sent. */
+		memset(rtBuf, 0, 0x100);
+		rtBuf[0x2b] = 4;
+		buf[0x29c9fc0] = 0;
+		g_pushUnsolicitedMessageCalls = 0;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("Knob CC10, gate open, bit7 clear -> mirrored into +0x56+idx*3",
+			 rtBuf[0x56 + idx * 3], 0x40);
+		check_eq("Knob CC10, gate open, flag==0 -> +0x54+idx*3 set to 1",
+			 rtBuf[0x54 + idx * 3], 1);
+		check_eq("Knob CC10, gate open -> message pushed", (unsigned int)g_pushUnsolicitedMessageCalls, 1);
+		check_eq("  ...msg word0 == 0x14", *(unsigned short *)(g_lastUnsolicitedMessage + 0), 0x14);
+		check_eq("  ...msg word2 == 1", *(unsigned short *)(g_lastUnsolicitedMessage + 2), 1);
+		check_eq("  ...msg dword@4 == 0", *(unsigned int *)(g_lastUnsolicitedMessage + 4), 0u);
+		check_eq("  ...msg dword@8 == 0xe (Knob)", *(unsigned int *)(g_lastUnsolicitedMessage + 8), 0xeu);
+		check_eq("  ...msg dword@0xc == index", *(unsigned int *)(g_lastUnsolicitedMessage + 0xc), idx);
+		check_eq("  ...msg dword@0x10 == CC's own default value (0x40)",
+			 *(unsigned int *)(g_lastUnsolicitedMessage + 0x10), 0x40u);
+
+		/* 4. Gate open, flag!=0 -> jump-catch record sub-branches
+		 * (this+0x50+idx*3, bytes +4/+5/+6). CONFIRMED REAL OVERLAP
+		 * (see oa_global.h): rec[6] (this+0x56+idx*3) is the EXACT SAME
+		 * byte as step-4's own mirror-store target above -- since CC10
+		 * has bit7 clear, EVERY call below first overwrites rec[6] with
+		 * the CC's own default value (0x40) before the jump-catch code
+		 * ever reads it, regardless of what's poked into rec[6] before
+		 * the call. So rec[5] is set relative to 0x40 (the value rec[6]
+		 * will actually hold DURING the comparison), not to whatever
+		 * rec[6] is poked to beforehand. */
+		buf[0x29c9fc0] = 1;
+		unsigned char *rec = rtBuf + 0x50 + idx * 3;
+		rec[5] = 0xff;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("jump-catch: rec[5]==0xff -> rec[4]=0xff", rec[4], 0xff);
+		rec[5] = 0x40; /* == the mirrored value rec[6] will hold */
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("jump-catch: rec[5]==rec[6](==0x40 post-mirror) -> rec[4]=1", rec[4], 1);
+		rec[5] = 0x50; /* > 0x40 */
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("jump-catch: rec[5](0x50)>rec[6](0x40) -> rec[4]=2", rec[4], 2);
+		rec[5] = 0x30; /* < 0x40 */
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("jump-catch: rec[5](0x30)<rec[6](0x40) -> rec[4]=0", rec[4], 0);
+
+		/* Confirmed real quirk: the comparison is SIGNED 8-bit (real
+		 * `setg` operating on the raw byte sub-registers), not an
+		 * unsigned/zero-extended compare -- 0x7f (127) vs 0x80 (-128
+		 * signed) would come out the OPPOSITE way under an unsigned
+		 * compare (0x7f < 0x80 -> rec[4]=0). Exercised with a
+		 * temporary bit7-set synthetic CC (21, restored after) so the
+		 * mirror-store above is SKIPPED and rec[6] survives un-clobbered
+		 * at the manually-poked 0x80. */
+		unsigned char savedCC21 = CSTGCCInfo::sCCInfoTable[21 * 10 + 0];
+		CSTGCCInfo::sCCInfoTable[21 * 10 + 0] = 0x80;
+		buf[0x29ca3c8 + 2 * 8 + idx] = 21;
+		rec[6] = 0x80;
+		rec[5] = 0x7f;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("jump-catch: SIGNED compare quirk (0x7f >(signed) 0x80) -> rec[4]=2", rec[4], 2);
+		CSTGCCInfo::sCCInfoTable[21 * 10 + 0] = savedCC21;
+		buf[0x29ca3c8 + 2 * 8 + idx] = 10; /* restore for the next steps below */
+
+		/* 5. bit7-set CC value -> mirror store skipped (synthetic: no
+		 * real CC in the confirmed table has bit7 set in byte 0, so
+		 * this pokes one directly to exercise the branch; restored
+		 * afterward). */
+		unsigned char savedByte0 = CSTGCCInfo::sCCInfoTable[20 * 10 + 0];
+		CSTGCCInfo::sCCInfoTable[20 * 10 + 0] = 0x81;
+		buf[0x29ca3c8 + 2 * 8 + idx] = 20;
+		rtBuf[0x56 + idx * 3] = 0x55; /* sentinel -- must NOT be overwritten */
+		buf[0x29c9fc0] = 0;
+		g_pushUnsolicitedMessageCalls = 0;
+		rt->OnExtModeKnobAssignChange(idx);
+		check_eq("bit7 set on CC value -> mirror store SKIPPED", rtBuf[0x56 + idx * 3], 0x55);
+		check_eq("  ...but message still sent with the raw (bit7-set) value",
+			 *(unsigned int *)(g_lastUnsolicitedMessage + 0x10), 0x81u);
+		CSTGCCInfo::sCCInfoTable[20 * 10 + 0] = savedByte0;
+
+		/* 6. Slider: smoke test of its own distinct offsets (panel
+		 * +0x923, mirror +0x6e, flag-false +0x6c, rec +0x60/0xd/0xe/0xc,
+		 * msg dword@8=0xf, table stride 9). */
+		memset(panelStatus2, 0xff, 0x1000);
+		memset(rtBuf, 0, 0x100);
+		rtBuf[0x2b] = 4;
+		buf[0x29c9fc0] = 0;
+		buf[0x29cbc48 + 2 * 9 + idx] = 11; /* CC11 = expression, confirmed default 0x7f */
+		g_pushUnsolicitedMessageCalls = 0;
+		rt->OnExtModeSliderAssignChange(idx);
+		check_eq("Slider CC11 -> panel display +0x923 shows 0x7f", panelStatus2[idx + 0x923], 0x7f);
+		check_eq("Slider CC11, flag==0 -> +0x6c+idx*3 set to 1", rtBuf[0x6c + idx * 3], 1);
+		check_eq("Slider CC11, bit7 clear -> mirrored into +0x6e+idx*3", rtBuf[0x6e + idx * 3], 0x7f);
+		check_eq("Slider -> message pushed", (unsigned int)g_pushUnsolicitedMessageCalls, 1);
+		check_eq("  ...msg dword@8 == 0xf (Slider)", *(unsigned int *)(g_lastUnsolicitedMessage + 8), 0xfu);
+		check_eq("  ...msg dword@0x10 == 0x7f", *(unsigned int *)(g_lastUnsolicitedMessage + 0x10), 0x7fu);
+
+		/* 7. Integration: a full CSTGGlobal::UpdateExtKnobCCAssign call
+		 * (already real, sec 10.72) reaching all the way through to the
+		 * newly-real OnExtModeKnobAssignChange via
+		 * CSTGControllerRTData::sInstance. */
+		memset(buf, 0, globalSize);
+		CSTGGlobal::sInstance = g;
+		memset(rtBuf, 0, 0x100);
+		rtBuf[0x2b] = 4;
+		memset(panelStatus2, 0xff, 0x1000);
+		unsigned char *mgr2 = mmap32(0x2400);
+		memset(mgr2, 0, 0x2400);
+		mgr2[0x23d1] = 2;
+		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) = (unsigned int)(unsigned long)mgr2;
+		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 4) = 0;
+		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 8) = 0;
+		buf[0x6ae] = 1;
+		buf[0x29cc0c8] = 2;
+		CSTGMessageContext ctx2; ctx2.index = 3;
+		STGConvertedParam param2; param2.value = 16; /* CC16, general purpose 1, default 0x40 */
+		g_pushUnsolicitedMessageCalls = 0;
+		g->UpdateExtKnobCCAssign(ctx2, param2);
+		check_eq("integration: UpdateExtKnobCCAssign wrote table[mode*8+idx]",
+			 buf[0x29ca3c8 + 2 * 8 + 3], 16);
+		check_eq("integration: OnExtModeKnobAssignChange fired via the real dispatch chain",
+			 (unsigned int)g_pushUnsolicitedMessageCalls, 1);
+		check_eq("  ...panel display shows CC16's own confirmed default 0x40",
+			 panelStatus2[3 + 0x90b], 0x40);
+
+		munmap(mgr2, 0x2400);
+		munmap(panelStatus2, 0x1000);
+		munmap(rtBuf, 0x100);
 	}
 
 	printf("\n[22] UpdateMFXDisable/UpdateIFXDisable/UpdateTFXDisable: 2-bit mask toggle\n"

@@ -191,8 +191,10 @@ CSTGCombi::CSTGCombi() {}
 /* CSTGControllerRTData::CSTGControllerRTData() is real now, sec 10.155 --
  * see src/engine/controller_rt_data_ctor.cpp. CSTGControllerRTData::
  * Initialize()/RequestAnalogInputPositions() reconstructed for real, sec
- * 10.88 -- see src/engine/controller_rt_data_init.cpp. */
-void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int) {}
+ * 10.88 -- see src/engine/controller_rt_data_init.cpp.
+ * OnExtModeKnobAssignChange()/OnExtModeSliderAssignChange() are real now
+ * too, sec 10.161 -- see src/engine/global.cpp + the new
+ * src/engine/cc_info_table.cpp (CSTGCCInfo::sCCInfoTable). */
 void CSTGControllerRTData::OnExtModeSetChange() {}
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) {}
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
@@ -200,7 +202,6 @@ void CLoadBalancer::BalanceStaticLoad() {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 void CSTGChannelValues::Reset() {}
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) {}
-void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int) {}
 /* Sec 10.101's own confirmed-real, deliberately deferred externs. */
 void CSTGControllerRTData::HandleControllerChange(int, unsigned char, bool, bool) {}
 void CSTGControllerInfo::SetPerfSwitch(int, bool) {}

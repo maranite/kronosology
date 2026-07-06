@@ -49,6 +49,7 @@ OA-objs := src/auth/klm_manager.o \
            src/mem/heap_manager.o \
            src/engine/engine.o \
            src/engine/global.o \
+           src/engine/cc_info_table.o \
            src/engine/global_ctor.o \
            src/engine/engine_startup_bits.o \
            src/engine/engine_startup_bits2.o \
@@ -186,6 +187,7 @@ SRC := src/auth/klm_manager.cpp \
        src/mem/heap_manager.cpp \
        src/engine/engine.cpp \
        src/engine/global.cpp \
+       src/engine/cc_info_table.cpp \
        src/engine/global_ctor.cpp \
        src/engine/engine_startup_bits.cpp \
        src/engine/engine_startup_bits2.cpp \
@@ -298,14 +300,14 @@ verify/test_scale: verify/test_scale.cpp src/mem/scale.cpp include/oa_scale.h
 verify/test_new_delete: verify/test_new_delete.cpp src/mem/new_delete.cpp include/oa_new_delete.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_new_delete.cpp src/mem/new_delete.cpp -o $@
 
-verify/test_engine: verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_global.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
+verify/test_engine: verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine.cpp src/engine/engine.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_managers: verify/test_managers.cpp src/engine/managers.cpp src/engine/streaming_event_manager.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_managers.cpp src/engine/managers.cpp src/engine/streaming_event_manager.cpp src/mem/bank_memory.cpp -o $@
 
-verify/test_global: verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp -o $@
+verify/test_global: verify/test_global.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp src/engine/midi_queue.cpp -o $@
 
 verify/test_init_module: verify/test_init_module.cpp src/init/init_module.cpp include/oa_init.h include/oa_atmel.h include/oa_stgheap_init.h include/oa_shmemproc_init.h include/oa_keybed_init.h include/oa_comport.h include/oa_audio_start.h include/oa_rtfifo_init.h include/oa_cpu_affinity.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_module.cpp src/init/init_module.cpp -o $@
@@ -331,8 +333,8 @@ verify/test_comport: verify/test_comport.cpp src/init/comport.cpp include/oa_com
 verify/test_comport_init: verify/test_comport_init.cpp src/init/comport_init.cpp src/init/comport.cpp include/oa_comport.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_comport_init.cpp src/init/comport_init.cpp src/init/comport.cpp -o $@
 
-verify/test_global_ctor: verify/test_global_ctor.cpp src/engine/global_ctor.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp include/oa_global.h include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global_ctor.cpp src/engine/global_ctor.cpp src/engine/global.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp -o $@
+verify/test_global_ctor: verify/test_global_ctor.cpp src/engine/global_ctor.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_global_ctor.cpp src/engine/global_ctor.cpp src/engine/global.cpp src/engine/cc_info_table.cpp src/engine/managers.cpp src/mem/bank_memory.cpp src/engine/controller_rt_data_init.cpp -o $@
 
 verify/test_engine_startup_bits: verify/test_engine_startup_bits.cpp src/engine/engine_startup_bits.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine_startup_bits.cpp src/engine/engine_startup_bits.cpp -o $@

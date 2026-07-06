@@ -171,6 +171,100 @@ void CSTGControllerRTData::OnExtModeSelectSwitchAssignChange(unsigned int index)
 }
 
 /*
+ * OnExtModeKnobAssignChange(unsigned int)/OnExtModeSliderAssignChange(unsigned int)
+ * (sec 10.161, `.text+0x19dc0`/`.text+0x19eb0`, 238 bytes each): see
+ * oa_global.h for the full confirmed shape. The two are parallel in
+ * structure with different literal offsets/strides (Knob: table stride
+ * 8, panel +0x90b, per-index arrays at +0x50/+0x54/+0x56, msg dword +8
+ * = 0xe; Slider: table stride 9, panel +0x923, per-index arrays at
+ * +0x60/+0x6c/+0x6e, msg dword +8 = 0xf) -- written out separately
+ * rather than factored into one shared helper, matching the real
+ * binary's own two independent (not tail-call-shared) function bodies.
+ */
+void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int index)
+{
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	unsigned int mode = g[0x29cc0c8];
+	unsigned char cc = g[0x29ca3c8 + mode * 8 + index];
+	if (cc == 0xff)
+		return;
+
+	unsigned char *status = (unsigned char *)STGAPIFrontPanelStatus::sInstance;
+	unsigned char val = CSTGCCInfo::sCCInfoTable[cc * 10 + 0];
+	status[index + 0x90b] = val;
+
+	unsigned char *t = (unsigned char *)this;
+	if (t[0x2b] != 4)
+		return;
+
+	if (!(val & 0x80))
+		t[0x56 + index * 3] = val;
+
+	if (g[0x29c9fc0] == 0) {
+		t[0x54 + index * 3] = 1;
+	} else {
+		unsigned char *rec = t + 0x50 + index * 3;
+		unsigned char cl = rec[5];
+		if (cl == 0xff)
+			rec[4] = 0xff;
+		else if (cl == rec[6])
+			rec[4] = 1;
+		else
+			rec[4] = ((signed char)cl > (signed char)rec[6]) ? 2 : 0;
+	}
+
+	unsigned char msg[0x14];
+	*(unsigned short *)(msg + 0x0) = 0x14;
+	*(unsigned short *)(msg + 0x2) = 1;
+	*(unsigned int *)(msg + 0x4) = 0;
+	*(unsigned int *)(msg + 0x8) = 0xe;
+	*(unsigned int *)(msg + 0xc) = index;
+	*(unsigned int *)(msg + 0x10) = val;
+	PushUnsolicitedMessage(msg);
+}
+void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int index)
+{
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	unsigned int mode = g[0x29cc0c8];
+	unsigned char cc = g[0x29cbc48 + mode * 9 + index];
+	if (cc == 0xff)
+		return;
+
+	unsigned char *status = (unsigned char *)STGAPIFrontPanelStatus::sInstance;
+	unsigned char val = CSTGCCInfo::sCCInfoTable[cc * 10 + 0];
+	status[index + 0x923] = val;
+
+	unsigned char *t = (unsigned char *)this;
+	if (t[0x2b] != 4)
+		return;
+
+	if (!(val & 0x80))
+		t[0x6e + index * 3] = val;
+
+	if (g[0x29c9fc0] == 0) {
+		t[0x6c + index * 3] = 1;
+	} else {
+		unsigned char *rec = t + 0x60 + index * 3;
+		unsigned char cl = rec[0xd];
+		if (cl == 0xff)
+			rec[0xc] = 0xff;
+		else if (cl == rec[0xe])
+			rec[0xc] = 1;
+		else
+			rec[0xc] = ((signed char)cl > (signed char)rec[0xe]) ? 2 : 0;
+	}
+
+	unsigned char msg[0x14];
+	*(unsigned short *)(msg + 0x0) = 0x14;
+	*(unsigned short *)(msg + 0x2) = 1;
+	*(unsigned int *)(msg + 0x4) = 0;
+	*(unsigned int *)(msg + 0x8) = 0xf;
+	*(unsigned int *)(msg + 0xc) = index;
+	*(unsigned int *)(msg + 0x10) = val;
+	PushUnsolicitedMessage(msg);
+}
+
+/*
  * SetSplitLayerWorkState (.text+0x9740, 7 bytes) confirmed: direct byte
  * store, no conversion.
  */

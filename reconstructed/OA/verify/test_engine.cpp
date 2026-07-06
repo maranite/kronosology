@@ -202,8 +202,9 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
  * dereferenced at runtime here. */
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 void CSetList::Activate() { }
-void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int) { }
-void CSTGControllerRTData::OnExtModeSliderAssignChange(unsigned int) { }
+/* CSTGControllerRTData::OnExtModeKnobAssignChange/OnExtModeSliderAssignChange
+ * are now real (sec 10.161) -- see global.cpp (this file already links
+ * global.cpp + the new cc_info_table.cpp directly). */
 void CSTGControllerRTData::HandleControllerChange(int, unsigned char, bool, bool) { }
 void CSTGControllerInfo::SetPerfSwitch(int, bool) { }
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) { }

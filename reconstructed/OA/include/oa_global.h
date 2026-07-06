@@ -113,6 +113,67 @@ struct CSTGMessageContext {
 };
 
 /*
+ * CSTGCCInfo -- a brand-new class this pass (sec 10.161), holding a single
+ * static 120-entry x 10-byte MIDI-CC info table (`sCCInfoTable`, one entry
+ * per CC number 0..119, `.bss`, confirmed real size 0x4b0 = 1200 bytes) plus
+ * a small derived scalar (`sNumVoiceModelCCs`).
+ *
+ * In the real binary, `sCCInfoTable` is NOT `.rodata` -- it's `.bss`,
+ * populated by a 7734-byte "global constructor keyed to
+ * CSTGCCInfo::sCCInfoTable" (`.text+0x277d0`) that runs once at module
+ * init. Confirmed via a full disassembly + relocation dump (2219
+ * instructions) that this ctor is 100% straight-line code: no branches, no
+ * calls, only `movb`/`mov`/`lea`/`movzbl`/`ret`. It reads
+ * `sNumVoiceModelCCs` exactly ONCE at entry (guaranteed 0 at that point --
+ * `.bss` is zero at module-init time and nothing else writes this field
+ * first), then a run of `lea N(%eax),%edx` + `mov %dl,OFFSET` writes 18
+ * sequential index values (0..17) into the `+9` byte of 18 specific
+ * entries (CC 1, 2, 5, 7, 11, 16, 64, 65, 70-79 -- exactly the MIDI CCs
+ * conventionally used for "voice model" / filter-envelope control:
+ * mod wheel, breath, portamento time, volume, expression, general
+ * purpose 1, sustain, portamento on/off, sound controllers 1-10), and
+ * finally writes the terminal count (18 = 0x12) back to
+ * `sNumVoiceModelCCs`. Every other write is a plain literal `movb
+ * $imm,OFFSET` into `sCCInfoTable` -- confirmed via a small Python
+ * simulator (parses the disassembly+relocations, walks the 1098 total
+ * writes) that every one of the table's 1200 bytes is written AT MOST
+ * once (zero collisions) and 102 bytes are never written at all (left at
+ * their `.bss` zero default). This means the ctor's own entire effect is
+ * a single deterministic, fully compile-time-computable byte array --
+ * reproduced here as a plain initialized `static` array rather than as
+ * 1098 lines of transliterated store instructions, since both are
+ * behaviorally identical (confirmed via the same simulation) and the
+ * array form is vastly more reviewable. `sCCInfoTable` is NOT declared
+ * `const`, matching the real symbol's mutable `.bss`/`.data` linkage,
+ * even though no other function anywhere in the ~14MB binary is
+ * confirmed to write to it (a whole-binary relocation scan against
+ * `CSTGCCInfo::sCCInfoTable`/`sNumVoiceModelCCs` found only this one
+ * ctor as a writer; ~50 other methods across a dozen classes read from
+ * it, none of them reconstructed yet beyond the two below).
+ *
+ * Per-entry field semantics are only partially confirmed (this pass's
+ * two consumers, `OnExtModeKnobAssignChange`/`OnExtModeSliderAssignChange`
+ * below, only ever read byte +0 of an entry): byte 0 is a per-CC
+ * "default/current value" (cross-checked against real MIDI conventions --
+ * CC7/volume and CC11/expression both read 0x7f=127, CC10/pan reads
+ * 0x40=64, the standard center value, CC64/sustain reads 0). Byte +9 is
+ * the confirmed "voice model CC index" described above (0xff is NOT the
+ * not-applicable sentinel here -- it's plain 0, indistinguishable from
+ * legitimate index 0 by value alone; whatever reader distinguishes them
+ * must use another field, not yet identified). Bytes +1..+8 are left
+ * undocumented (not exercised by either consumer below) -- kept as an
+ * opaque flat byte array rather than named struct fields to avoid
+ * implying confirmed semantics this pass didn't verify, matching this
+ * project's established convention for partially-recovered layouts
+ * (see `CSTGControllerRTData` below).
+ */
+class CSTGCCInfo {
+public:
+	static unsigned char sCCInfoTable[1200];	/* 120 entries x 10 bytes */
+	static unsigned char sNumVoiceModelCCs;
+};
+
+/*
  * CSTGControllerRTData -- like CSTGAudioBusManager before it, accessed by
  * CSTGGlobal via a computed `this+OFFSET` pointer (here, `+0x10`,
  * confirmed via a `lea`). **The "why does this alias" question
@@ -242,8 +303,56 @@ public:
 	 * params). Called on the SAME static `sInstance` pointer
 	 * `OnExtModeSetChange` uses (same `mov reg, ds:sInstance`
 	 * load-the-pointer-value idiom, confirmed via a full disassembly of
-	 * all 8 callers, not a spot check) -- own bodies not reconstructed
-	 * in this pass. */
+	 * all 8 callers, not a spot check).
+	 *
+	 * `OnExtModeKnobAssignChange`/`OnExtModeSliderAssignChange` (sec
+	 * 10.161, `.text+0x19dc0`/`.text+0x19eb0`, 238 bytes each) are now
+	 * fully reconstructed -- see `global.cpp`, right after
+	 * `OnExtModePlayMuteSwitchAssignChange`/`OnExtModeSelectSwitchAssignChange`
+	 * below. Unlike those two (a fixed two-call sequence ignoring
+	 * `this`), these two are a genuinely different, larger shape:
+	 * (1) look up the CC currently assigned to `index` via the SAME
+	 * per-mode table `CSTGGlobal::UpdateExtAssign()` writes
+	 * (`CSTGGlobal::sInstance + 0x29ca3c8 + mode*8 + index` for Knob,
+	 * `+0x29cbc48 + mode*9 + index` for Slider, `mode` read from
+	 * `CSTGGlobal+0x29cc0c8`) -- 0xff means "unassigned", early return,
+	 * no further effect; (2) read `CSTGCCInfo::sCCInfoTable[cc]`'s own
+	 * byte 0 (a per-CC default/current value) and write it into
+	 * `STGAPIFrontPanelStatus::sInstance[index + 0x90b]` (Knob) /
+	 * `[index + 0x923]` (Slider) for UI display; (3) if
+	 * `this->fieldAt(0x2b) != 4`, stop here (no message, no jump-catch
+	 * update) -- a confirmed real gate, not yet independently named;
+	 * (4) otherwise, if the CC value's own bit7 is clear, mirror it
+	 * into a per-index 3-byte-stride array at `this+0x56+index*3`
+	 * (Knob) / `this+0x6e+index*3` (Slider); (5) branch on
+	 * `CSTGGlobal+0x29c9fc0` (the SAME flag `UpdateKnobFaderMode`'s
+	 * `ResetAllJumpCatch` gate reads, sec 10.129) -- if clear, just set
+	 * a per-index "already matched" byte to 1 at `this+0x54+index*3`
+	 * (Knob) / `this+0x6c+index*3` (Slider); if set, treat
+	 * `this+0x50+index*3` (Knob) / `this+0x60+index*3` (Slider) as a
+	 * small per-index "jump catch" record and update its own `+4`
+	 * (Knob) / `+0xc` (Slider) tri-state byte by comparing its `+5`
+	 * (Knob) / `+0xd` (Slider) byte against its `+6` (Knob) / `+0xe`
+	 * (Slider) byte -- `0xff`->`0xff`, equal->`1`, else a SIGNED 8-bit
+	 * `>` comparison selects `2`/`0` (confirmed via the real `setg`
+	 * instruction operating on the raw byte-width sub-registers, NOT
+	 * an unsigned/zero-extended compare -- matters if either byte is
+	 * ever >=0x80). **Confirmed real overlap, not two independent
+	 * fields**: `this+0x50+index*3`'s own `+6` byte (Knob) IS
+	 * `this+0x56+index*3` (Slider: `this+0x60+index*3`'s `+0xe` byte IS
+	 * `this+0x6e+index*3`) -- the EXACT SAME byte step (4)'s mirror
+	 * store just wrote (when bit7 was clear). So in the common case
+	 * (bit7 clear), this step's own "equal"/">" comparison is really
+	 * "does the CC's brand new mirrored value equal/exceed byte `+5`
+	 * (Knob) / `+0xd` (Slider), a SEPARATE persistent 'previous value'
+	 * byte this function itself never writes" -- i.e. a genuine
+	 * "did the assignment's effective value change since last time"
+	 * check, not a comparison of two independently-settable fields.
+	 * (6) always finishes (whenever step 3's gate
+	 * passed) by building a 20-byte `PushUnsolicitedMessage()` packet
+	 * (`{u16 0x14, u16 1, u32 0, u32 0xe (Knob) / 0xf (Slider), u32
+	 * index, u32 ccValue}`), the SAME tagged-message shape used
+	 * throughout `global.cpp`. */
 	void OnExtModeKnobAssignChange(unsigned int index);
 
 	/*
