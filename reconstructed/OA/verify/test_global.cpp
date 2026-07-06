@@ -1689,7 +1689,16 @@ int main(void)
 			check_eq("  ...msg[2] == 0x00 (value!=0 -> 'off')", (unsigned int)g_lastMidiMsg[2], 0x00u);
 		}
 
-		munmap(midiPortMgr, 0x10);
+		munmap(midiPortMgr, 0x300); /* matches the mmap32(0x300) above --
+					     * was a stale 0x10 left over from
+					     * before sec 10.150 enlarged this
+					     * allocation. Harmless in practice
+					     * (Linux munmap() rounds the length
+					     * up to a whole page either way, and
+					     * nothing between here and the next
+					     * section's own fresh mmap32()
+					     * dereferences the freed buffer), but
+					     * fixed for clarity/consistency. */
 	}
 
 	printf("\n[23] The 22 UpdateXXXCCAssign handlers: 120-slot claim table at\n"
@@ -2738,7 +2747,14 @@ int main(void)
 			 (unsigned int)g_notifyNKS4TestModeCalls, 1u);
 
 		munmap(mgr1, 0x24000);
-		munmap(midiPortMgr, 0x100);
+		munmap(midiPortMgr, 0x300); /* matches the mmap32(0x300) above --
+					     * was a stale 0x100 left over from
+					     * before sec 10.150 enlarged this
+					     * allocation (the actual segfault
+					     * fix for this dangling-pointer
+					     * hazard is section [30]'s own new
+					     * midiPortMgr30 setup, not this size
+					     * correction -- see there). */
 		munmap(aiStorage2, 0x1000);
 		munmap(midiDisp2, 0x200);
 	}
@@ -2747,6 +2763,22 @@ int main(void)
 	{
 		CSTGGlobal *g = (CSTGGlobal *)buf;
 		memset(buf, 0, globalSize);
+
+		/* This section was written back when CSTGMidiQueue::
+		 * GetNumWritableBytes() was still a mock that never touched
+		 * `this` (sec 10.92), so RepeatLastPerformanceChange/
+		 * BeginPerformanceChange/BeginSetListSlotChange/SetMode below
+		 * (all of which funnel into the now-real SubmitPerfChangeRequest,
+		 * sec 10.116/10.150) never needed a valid
+		 * CSTGMidiPortManager::sInstance of their own -- they silently
+		 * relied on whatever a PRIOR, unrelated section happened to
+		 * leave behind in that same global static. Give this section
+		 * its own fresh ringCtl setup, exactly like every other section
+		 * in this file that reaches the same real dependency chain
+		 * (see [22]/[24]/[36]/[41]/[42]/[49]). */
+		unsigned char *midiPortMgr30 = mmap32(0x300);
+		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr30;
+		SetupFakeRingCtl(midiPortMgr30);
 
 		printf("  -- ValidateParamChange --\n");
 		g_validateParamChangeCalls = 0;
@@ -2890,6 +2922,31 @@ int main(void)
 			 (unsigned int)g_writeMidiOutQueueCalls, 2u);
 
 		printf("  -- EmergencyFreeDyingSlotVoiceData --\n");
+		/* This section was added in sec 10.149 when EmergencyFreeVoiceList
+		 * went from a flat call-counting mock to a real body -- but it
+		 * never gave itself a valid CSTGVoiceAllocator::sInstance of its
+		 * own (the real body needs one: CSTGSlotVoiceData::
+		 * EmergencyFreeAllVoices() dispatches through
+		 * `CSTGVoiceAllocator::sInstance->EmergencyFreeVoiceList()`,
+		 * which reads the real `requirementsMutex` field at +0x44ea8).
+		 * Without this, the test silently inherited whatever OTHER,
+		 * unrelated section happened to set CSTGVoiceAllocator::sInstance
+		 * to last (here: [29]'s own `voiceAlloc = mmap32(0x10)`, already
+		 * munmap'd by this point) -- a dangling/undersized pointer,
+		 * confirmed segfaulting at managers.cpp:666's `requirementsMutex`
+		 * read. Fixed the same way as the analogous
+		 * CSTGMidiPortManager::sInstance gap in section [30] above: give
+		 * this section its own valid instance. Using the REAL ctor here
+		 * (not a raw mmap32() buffer) rather than hand-picking a size,
+		 * since managers.cpp's CSTGVoiceAllocator::CSTGVoiceAllocator()
+		 * is already real, already linked, and already sets both
+		 * `requirementsMutex` and `sInstance` correctly (same pattern
+		 * test_managers.cpp's own [19] uses) -- every mock it needs
+		 * (get_sizeof_rtwrap_pthread_mutex/rtwrap_malloc/
+		 * rtwrap_pthread_mutex_init/mutexattr_*) is already defined near
+		 * the top of this file for managers.cpp's own link requirements. */
+		CSTGVoiceAllocator *voiceAllocEFD = new CSTGVoiceAllocator();
+		(void)voiceAllocEFD;
 		unsigned char *node0 = mmap32(0x10);
 		unsigned char *voice0 = mmap32(0x60);
 		unsigned char *sub0 = mmap32(0x50);
@@ -2901,6 +2958,23 @@ int main(void)
 		*(unsigned short *)(voice0 + 0x4c) = 0;
 		*(unsigned short *)(voice0 + 0x58) = 0;                    /* sum==0 -> free */
 		voice0[0x41] = 0;
+		/* node0 wires TWO separate roles here, both confirmed real: (1)
+		 * the OUTER dying-slot list rooted at buf+0x29c9904, which
+		 * EmergencyFreeDyingSlotVoiceData() itself walks to LOCATE voice0
+		 * as the dying CSTGSlotVoiceData; and (2) voice0's OWN embedded
+		 * group-0 voice list (self+0x44), which EmergencyFreeAllVoices()
+		 * walks via the now-real EmergencyFreeVoiceList() to actually
+		 * FREE something. This second wiring was missing from the
+		 * original sec 10.149 KAT -- voice0+0x44/+0x50 were left at
+		 * mmap32()'s own zero-fill, so EmergencyFreeVoiceList's list was
+		 * always empty and FreeVoice() was silently never exercised (the
+		 * segfault fixed above always killed the process before
+		 * execution ever reached this check, so the gap went unnoticed
+		 * until now). Point voice0's own group-0 list at node0 too, so
+		 * the walk actually finds one node (payload==voice0) and calls
+		 * FreeVoice(voice0) once, matching this test's own stated intent
+		 * below. */
+		*(unsigned int *)(voice0 + 0x44) = (unsigned int)(unsigned long)node0;
 		*(unsigned int *)(buf + 0x29c9904) = (unsigned int)(unsigned long)node0;
 		g_doPendingMoveVoicesCalls = 0;
 		g_freeVoiceCalls = 0;
@@ -2982,6 +3056,8 @@ int main(void)
 		g->SetMode(2, 9);
 		check_eq("mode 2: value1 == 0 (literal)", PendingRequest(buf).value1, 0u);
 		check_eq("mode 2: value2 == +0x6a0", PendingRequest(buf).value2, 0x555u);
+
+		munmap(midiPortMgr30, 0x300);
 	}
 
 	printf("\n[31] RunVoiceModelStaticFront/RunVoiceModelStaticBack (sec 10.93)\n");
@@ -3063,6 +3139,15 @@ int main(void)
 		memset(buf, 0, globalSize);
 
 		printf("  -- HandleMidiPerformanceChange --\n");
+		/* Same CSTGMidiPortManager::sInstance gap as section [30]/
+		 * EmergencyFreeDyingSlotVoiceData above: HandleMidiPerformanceChange
+		 * reaches the now-real SubmitPerfChangeRequest/GetNumWritableBytes
+		 * (sec 10.116/10.150), so this section needs its own valid ring
+		 * setup rather than inheriting whatever a prior section left in
+		 * that global static. */
+		unsigned char *midiPortMgr32 = mmap32(0x300);
+		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr32;
+		SetupFakeRingCtl(midiPortMgr32);
 		unsigned char *midiDisp3 = mmap32(0x200);
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp3;
 		midiDisp3[0xa2] = 0;
@@ -3173,6 +3258,7 @@ int main(void)
 		check_eq("active count decremented", *(unsigned int *)(buf + 0x29c9908), 4u);
 		check_eq("free count incremented", *(unsigned int *)(buf + 0x29c98fc), 4u);
 		munmap(fnode, 0x40);
+		munmap(midiPortMgr32, 0x300);
 	}
 
 	printf("\n[33] PreprocessPerformanceChange (sec 10.95)\n");
@@ -3547,6 +3633,12 @@ int main(void)
 		CSTGGlobal *g = (CSTGGlobal *)buf;
 		memset(buf, 0, globalSize);
 
+		/* Same CSTGMidiPortManager::sInstance gap as sections [30]/[32]
+		 * above: HandleMidiBankAndPerformanceChange reaches the now-real
+		 * SubmitPerfChangeRequest/GetNumWritableBytes (sec 10.116/10.150). */
+		unsigned char *midiPortMgr37 = mmap32(0x300);
+		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr37;
+		SetupFakeRingCtl(midiPortMgr37);
 		unsigned char *midiDisp5 = mmap32(0x10);
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp5;
 		midiDisp5[0xa2] = 0;
@@ -3628,6 +3720,7 @@ int main(void)
 		check_eq("slotB+4 not in {0,1} -> no-op", buf[0x2975185], 0);
 
 		munmap(midiDisp5, 0x10);
+		munmap(midiPortMgr37, 0x300);
 	}
 
 	printf("\n[38] GetFreeSlotVoiceData (sec 10.100)\n");
@@ -3882,6 +3975,13 @@ int main(void)
 		CSTGGlobal *g = (CSTGGlobal *)buf;
 		memset(buf, 0, globalSize);
 
+		/* Same CSTGMidiPortManager::sInstance gap as sections [30]/[32]/[37]
+		 * above: IncrementPerformance/DecrementPerformance reach the
+		 * now-real SubmitPerfChangeRequest/GetNumWritableBytes (sec
+		 * 10.116/10.150). */
+		unsigned char *midiPortMgr41 = mmap32(0x300);
+		CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr41;
+		SetupFakeRingCtl(midiPortMgr41);
 		unsigned char *midiDisp6 = mmap32(0x10);
 		CSTGMidiDispatcher::sInstance = (CSTGMidiDispatcher *)midiDisp6;
 		midiDisp6[0xa2] = 1;
@@ -4005,6 +4105,7 @@ int main(void)
 		check_eq("slotB+4 not in {0,1} -> no-op for both", buf[0x2975185], 0);
 
 		munmap(midiDisp6, 0x10);
+		munmap(midiPortMgr41, 0x300);
 	}
 
 	printf("\n[42] ProcessPerfChangeRequest (sec 10.104)\n");

@@ -158,12 +158,44 @@ extern "C" void rt_printk(const char *, ...) {}
 
 /* new_delete.cpp's own real kernel-allocator externs, mocked host-side
  * (matches this project's established cdrom_check.cpp-style treatment).
- * Calls raw libc malloc/free directly -- NOT ::operator new/delete,
- * which (this project's own real implementation, linked into this same
- * test) themselves call stg_kmalloc -> this exact mock, which would
- * otherwise recurse infinitely. */
-extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
-extern "C" void kfree(void *ptr) { free(ptr); }
+ * NOT ::operator new/delete, which (this project's own real
+ * implementation, linked into this same test) themselves call
+ * stg_kmalloc -> this exact mock, which would otherwise recurse
+ * infinitely.
+ *
+ * Deliberately NOT plain libc malloc()/free(): CSTGPCMPrecacheManager::
+ * Reset() (sec 10.154) round-trips whatever operator new[]/new returns
+ * through a genuinely 32-bit field (PCMPrecacheToU32()/FromU32() in
+ * setup_global_resources.cpp) -- exactly matching the real 32-bit
+ * target, where every pointer naturally fits in 32 bits. On this 64-bit
+ * test host, plain malloc() (PIE heap, typically based well above 4GB)
+ * returns addresses that silently truncate when stored through that
+ * 32-bit field, corrupting the round-tripped pointer -- not a bug in
+ * Reset() itself, the same host/target width hazard already handled
+ * for every OTHER buffer in this file via mmap32()/MAP_32BIT. Reuse
+ * that exact fix here: a tiny bump allocator over a mmap32() arena, so
+ * every pointer this mock ever hands out is guaranteed representable in
+ * 32 bits. kfree() is a deliberate no-op (this test never needs to
+ * reclaim/reuse the arena within a single short-lived process). */
+static unsigned char *g_kmallocArena;
+static unsigned long g_kmallocArenaSize;
+static unsigned long g_kmallocOffset;
+extern "C" void *__kmalloc(unsigned long size, unsigned int)
+{
+	if (!g_kmallocArena) {
+		g_kmallocArenaSize = 1u * 1024 * 1024;
+		g_kmallocArena = mmap32(g_kmallocArenaSize);
+	}
+	size = (size + 15) & ~15UL; /* keep every allocation 16-byte aligned */
+	if (g_kmallocOffset + size > g_kmallocArenaSize) {
+		fprintf(stderr, "test __kmalloc: arena exhausted (%lu byte request)\n", size);
+		abort();
+	}
+	unsigned char *p = g_kmallocArena + g_kmallocOffset;
+	g_kmallocOffset += size;
+	return p;
+}
+extern "C" void kfree(void *ptr) { (void)ptr; }
 
 int main(void)
 {
