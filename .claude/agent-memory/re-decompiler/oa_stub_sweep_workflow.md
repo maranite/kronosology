@@ -1764,7 +1764,7 @@ two full clean-rebuild passes (byte-identical both times); 32 unresolved
 symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`;
 `OA.ko` 156,984 bytes (up from 153,844). Commit `78649cc`.
 
-**Batch 23 specifics** (2026-07-06, sec 10.171, commit TBD): user gave
+**Batch 23 specifics** (2026-07-06, sec 10.171, commit `246d1df`): user gave
 fresh explicit authorization to continue past batch 22. Re-verified state
 myself first (HEAD `64bc607`, clean tree, stub count 70, last section
 `10.170` -- matched the briefing). Picked up BOTH of batch 22's own
@@ -1866,7 +1866,7 @@ reliable signal the assertion needs updating, not just re-running.
 (never log-grepped), both of two full clean-rebuild passes
 (byte-identical both times); 32 unresolved symbols; `.gnu.linkonce.
 this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 157,960 bytes (up from
-156,984). Commit TBD.
+156,984). Commit `246d1df`.
 
 **Deferred for a future batch**: `CSTGEQ`'s five core math functions
 (unchanged from sec 10.170 -- not re-evaluated this batch, time budget):
