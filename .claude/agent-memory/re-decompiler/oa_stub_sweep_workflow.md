@@ -1547,7 +1547,7 @@ being asked again." The user DID ask again (this batch), so batch 20 was
 authorized. The standing rule remains: do not auto-continue to batch 21 in
 a future session without a fresh explicit request.
 
-**Batch 21 specifics** (2026-07-06, sec 10.169, commit TBD): the user
+**Batch 21 specifics** (2026-07-06, sec 10.169, commit 850a9a3): the user
 gave fresh explicit authorization to continue past batch 20, satisfying
 the batch-19/20 stop-note above. Re-verified state myself before starting
 (HEAD `59c6fd8`, clean tree, stub count 73, last section 10.168 -- all
