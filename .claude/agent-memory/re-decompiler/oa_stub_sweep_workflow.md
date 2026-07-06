@@ -1883,9 +1883,7 @@ it worth re-checking whether any of THEIR OWN other methods
 opaque/unreconstructed) are now individually tractable given the class's
 own fields are no longer purely speculative.
 
-**Batch 24 specifics** (2026-07-06, sec 10.172, commit
-`<see MASTER_REFERENCE.md 10.172, filled in by the same follow-up
-"fill in commit hash placeholder" pass every prior batch uses>`): the
+**Batch 24 specifics** (2026-07-06, sec 10.172, commit `5eba788`): the
 user gave fresh explicit authorization to continue past batch 23.
 Re-verified state myself first (HEAD `5e28bb4`, clean tree, bare-`{}`
 stub count 69, last section `10.171` -- matched the briefing). Ran on
@@ -2000,5 +1998,4 @@ Tractable the MOMENT that vtable slot gets a real target. `ProcessSubRate()`
 exit code (never log-grepped), both of two full clean-rebuild passes on
 `kronosdev` (byte-identical both times); 32 unresolved symbols;
 `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 159,660
-bytes (up from 157,960). Commit: see MASTER_REFERENCE.md sec 10.172 once
-the commit-hash-fill-in pass runs.
+bytes (up from 157,960). Commit `5eba788`.
