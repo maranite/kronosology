@@ -6,6 +6,13 @@
  * AdvanceReadPosition, plus the one small dependency they collectively
  * need, CSTGDiskCostManager::UpdateHDRBufferWaterMarks() (implemented in
  * engine_startup_bits2.cpp alongside CSTGDiskCostManager::Initialize()).
+ * Batch 25 adds RemoveEvent()/EventFileError() (see their own header
+ * comment below) -- now tractable now that CSTGPlaybackEvent::Reset(),
+ * their real confirmed vtable-slot-7 dispatch target, is real too (see
+ * playback_event_methods.cpp). This file and playback_event_methods.cpp
+ * have a genuine mutual dependency (HandleFileClosed() there calls
+ * RemoveEvent() here); both are linked together wherever either is
+ * needed, including the real .ko build.
  *
  * Deliberately its own dedicated TU (matching the CSTGRecordTrack/
  * CSTGStreamingEventManager/CSTGMIDIClockSync precedent, sec 10.145/
@@ -200,4 +207,86 @@ void CSTGPlaybackBuffer::AdvanceReadPosition(unsigned long n, bool updateWaterMa
 		unsigned int availableReadBytes = ((CSTGHDRCircularBuffer *)this)->availableReadBytes;
 		CSTGDiskCostManager::sInstance->UpdateHDRBufferWaterMarks(availableReadBytes, (CSTGHDRCircularBuffer *)this);
 	}
+}
+
+/*
+ * RemoveEvent()/EventFileError() (batch 25, `.text+0xd65a0`/
+ * `.text+0xd6a60`, 121B/212B) -- both confirmed to share a BYTE-FOR-BYTE
+ * IDENTICAL tail sequence (return unused fill bytes, retire the current-
+ * read-event pointer if it matches, dispatch the event's own vtable slot
+ * 7, then push the event back onto TSTGArrayManager<CSTGPlaybackEvent>'s
+ * own free list) -- factored into PlaybackEventReclaimAndRecycle() below,
+ * matching this project's own sec 10.167 "identical instruction sequence
+ * -> shared static helper" technique. `EventFileError()` additionally has
+ * its own leading block (only reached when the event argument IS the
+ * current FILL event) that is ALSO confirmed byte-for-byte identical to
+ * this class's own already-real `AdvanceToNextFillEvent()` -- called
+ * directly rather than re-transcribed inline, since the real disassembly
+ * duplicating it (rather than emitting a `call`) is just this project's
+ * own compiler's inlining choice, not a behavioral requirement to
+ * reproduce literally (this project already applies this same "call the
+ * existing real method instead of re-deriving an identical block"
+ * judgment elsewhere).
+ *
+ * The event's own vtable slot 7 (`call *0x1c(%edx)`) is confirmed via
+ * readelf relocation resolution against
+ * `.rodata._ZTV17CSTGPlaybackEvent` to be `CSTGPlaybackEvent::Reset()`
+ * -- the ONLY site in the whole real binary that ever installs this
+ * exact vtable pointer is CSTGPlaybackEvent's own ctor, and nothing
+ * derives from it, so there is no second possible dispatch target to
+ * model: reproduced as a direct `event->Reset()` call.
+ *
+ * Real, confirmed quirk (found by hand-tracing the disassembly, not by
+ * a KAT failure): both functions SAVE the event's own `+0x10` field
+ * (`CSTGAudioEvent::field10`, a field `CSTGAudioEvent::Reset()` itself
+ * unconditionally zeroes as part of the dispatched `Reset()` call)
+ * BEFORE the dispatch, and RESTORE the saved value immediately
+ * afterward -- net effect, this one field alone survives the Reset()
+ * call untouched, even though every other field Reset() zeroes does
+ * get cleared. Faithfully reproduced, not "simplified away".
+ */
+static void PlaybackEventReclaimAndRecycle(CSTGPlaybackBuffer *bufThis, CSTGPlaybackEvent *event)
+{
+	unsigned char *bufBase = (unsigned char *)bufThis;
+	unsigned char *evt = (unsigned char *)event;
+
+	unsigned int bytesPerFrame = evt[0x1d];
+	unsigned int remainingFrames = *(unsigned int *)(evt + 0x44);
+	((CSTGHDRCircularBuffer *)bufThis)->ReturnUnusedFillBytes(remainingFrames * bytesPerFrame);
+
+	if (*(unsigned int *)(bufBase + 0x4c) == ToU32(event))
+		*(unsigned int *)(bufBase + 0x4c) = 0;
+
+	unsigned int savedField10 = *(unsigned int *)(evt + 0x10);
+	event->Reset();
+	*(unsigned int *)(evt + 0x10) = savedField10;
+
+	TSTGArrayManager<CSTGPlaybackEvent> *mgr = TSTGArrayManager<CSTGPlaybackEvent>::sInstance;
+	unsigned int *bucket = (unsigned int *)FromU32(mgr->bucketArray);
+	bucket[mgr->writeCursor] = ToU32(event);
+	mgr->writeCursor = (mgr->writeCursor + 1) % mgr->modulus;
+}
+
+void CSTGPlaybackBuffer::RemoveEvent(CSTGPlaybackEvent *event)
+{
+	unsigned char *evt = (unsigned char *)event;
+	if (evt[0x16] != 0)
+		return;
+	PlaybackEventReclaimAndRecycle(this, event);
+}
+
+void CSTGPlaybackBuffer::EventFileError(CSTGPlaybackEvent *event)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *evt = (unsigned char *)event;
+
+	if (*(unsigned int *)(base + 0x48) == ToU32(event)) {
+		if (event != 0)
+			AdvanceToNextFillEvent();
+	}
+
+	if (evt[0x16] != 0)
+		return;
+
+	PlaybackEventReclaimAndRecycle(this, event);
 }

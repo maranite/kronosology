@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_playback_buffer_events.cpp  -  KAT for
- * ../src/engine/playback_buffer_events.cpp's six reconstructed
- * CSTGPlaybackBuffer methods (batch 24): EventBufferStartLocationUpdated/
+ * ../src/engine/playback_buffer_events.cpp's reconstructed
+ * CSTGPlaybackBuffer methods: batch 24's six (EventBufferStartLocationUpdated/
  * SetCurrentReadEvent/AdvanceToNextFillEvent/HandleAdvanceCancelledEvent/
  * AddEvent/AdvanceReadPosition, plus the one CSTGDiskCostManager method
  * (UpdateHDRBufferWaterMarks, engine_startup_bits2.cpp) the last of these
- * conditionally calls.
+ * conditionally calls), plus batch 25's RemoveEvent()/EventFileError()
+ * (sections [7]/[8]) and playback_event_methods.cpp's
+ * CSTGPlaybackEvent::HandleFileClosed() (section [9], the one real
+ * integration point between the two files -- this test now links
+ * playback_event_methods.cpp too).
  *
  * Links src/engine/managers.cpp directly (for the embedded
  * CSTGHDRCircularBuffer's own already-real AdvanceReadPosition()/
@@ -96,6 +100,16 @@ void CSTGStepSeqBase::InitializeQuad(STGStepSeqSubRateParams *) { }
  * CSTGCDAudioPlay::Initialize()) reference this real static pointer;
  * nothing in this test's own call paths reaches either of those methods. */
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
+/* Needed now that this file also links playback_event_methods.cpp
+ * (batch 25, for RemoveEvent()/EventFileError()'s own real
+ * CSTGPlaybackEvent::Reset() dependency) -- ~CSTGPlaybackEvent()
+ * references this symbol directly; same 40-byte confirmed size
+ * (readelf) as every other sibling in this vtable family. */
+unsigned char _ZTV14CSTGAudioEvent[40];
+/* CSTGPlaybackEvent::HandleFileOpened()'s own CSTGFile_GetFileSize()
+ * dependency -- not otherwise mocked in this file, and not exercised by
+ * this test (only RemoveEvent()/EventFileError()/Reset() are). */
+extern "C" unsigned int CSTGFile_GetFileSize(void *) { return 0; }
 
 static int g_fail;
 static void check_eq(const char *label, unsigned long got, unsigned long want)
@@ -146,6 +160,13 @@ int main(void)
 	unsigned char *indexArrayBuf = mmap32(0x1000);
 	memset(indexArrayBuf, 0, 0x1000);
 	TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray = ToU32(indexArrayBuf);
+	/* Batch 25: RemoveEvent()/EventFileError()'s own free-list push also
+	 * needs a real bucketArray + modulus (BuildArrayManager's own real
+	 * shape, engine_init.cpp -- modulus == count+1). */
+	unsigned char *bucketArrayBuf = mmap32(0x1000);
+	memset(bucketArrayBuf, 0, 0x1000);
+	TSTGArrayManager<CSTGPlaybackEvent>::sInstance->bucketArray = ToU32(bucketArrayBuf);
+	TSTGArrayManager<CSTGPlaybackEvent>::sInstance->modulus = 65;	/* matches capacity+1, arbitrary but nonzero */
 
 	/* Three fake CSTGPlaybackEvent objects (real confirmed size 0x68). */
 	unsigned char *eventBufs[3];
@@ -349,6 +370,113 @@ int main(void)
 		*(unsigned int *)(dcmBuf + 0x14) = 999999;
 		pb->AdvanceReadPosition(0, true);
 		check_eq("watermark NOT lowered", *(unsigned int *)(dcmBuf + 0x14), 999999);
+	}
+
+	printf("[7] RemoveEvent -- batch 25\n");
+	{
+		unsigned int wcBefore = TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor;
+		unsigned int *bucket = (unsigned int *)FromU32(TSTGArrayManager<CSTGPlaybackEvent>::sInstance->bucketArray);
+		unsigned int fillCarryBefore = cb->fillCarry;
+
+		/* [7a] evtA->+0x16 != 0: early return, no side effects at all. */
+		((unsigned char *)evtA)[0x16] = 1;
+		*(unsigned int *)((unsigned char *)evtA + 0x44) = 999;
+		pb->RemoveEvent(evtA);
+		check_eq("+0x16!=0: fillCarry untouched", cb->fillCarry, fillCarryBefore);
+		check_eq("+0x16!=0: writeCursor untouched", TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor, wcBefore);
+
+		/* [7b] real removal: evtA is also the current read event
+		 * (this->+0x4c), evtA->+0x44/+0x1d combine for the reclaimed
+		 * byte count, and evtA->+0x10 must SURVIVE the Reset() call
+		 * that clears everything else (the save/restore quirk). */
+		((unsigned char *)evtA)[0x16] = 0;
+		*(unsigned int *)((unsigned char *)evtA + 0x44) = 10;	/* remainingFrames */
+		((unsigned char *)evtA)[0x1d] = 4;			/* bytesPerFrame */
+		*(unsigned int *)((unsigned char *)evtA + 0x10) = 0xdeadbeef;
+		*(unsigned int *)(pbBuf + 0x4c) = ToU32(evtA);		/* current read event == evtA */
+
+		pb->RemoveEvent(evtA);
+
+		check_eq("fillCarry += 40 (10 frames * 4 bytes)", cb->fillCarry, fillCarryBefore + 40);
+		check_eq("this->+0x4c cleared (was evtA)", *(unsigned int *)(pbBuf + 0x4c), 0);
+		check_eq("evtA fully Reset() (e.g. +0x44 cleared)", *(unsigned int *)((unsigned char *)evtA + 0x44), 0);
+		check_eq("evtA->+0x10 SURVIVES the Reset() call (save/restore quirk)",
+			 *(unsigned int *)((unsigned char *)evtA + 0x10), 0xdeadbeef);
+		check_eq("evtA pushed onto the free list at the old writeCursor", bucket[wcBefore], ToU32(evtA));
+		check_eq("writeCursor advanced by 1", TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor, wcBefore + 1);
+
+		/* [7c] this->+0x4c did NOT match the removed event: left alone. */
+		*(unsigned int *)(pbBuf + 0x4c) = ToU32(evtC);
+		((unsigned char *)evtB)[0x16] = 0;
+		((unsigned char *)evtB)[0x1d] = 1;
+		*(unsigned int *)((unsigned char *)evtB + 0x44) = 0;
+		pb->RemoveEvent(evtB);
+		check_eq("this->+0x4c untouched (didn't match evtB)", *(unsigned int *)(pbBuf + 0x4c), ToU32(evtC));
+	}
+
+	printf("[8] EventFileError -- batch 25\n");
+	{
+		unsigned short *fillRing = (unsigned short *)FromU32(*(unsigned int *)(pbBuf + 0x34));
+		unsigned int *indexArray = (unsigned int *)FromU32(TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray);
+		indexArray[9] = ToU32(evtB);
+
+		/* [8a] event is NOT the current fill event: no
+		 * AdvanceToNextFillEvent side effect, straight to removal. */
+		*(unsigned int *)(pbBuf + 0x48) = ToU32(evtC);	/* current fill event != evtA */
+		((unsigned char *)evtA)[0x16] = 0;
+		((unsigned char *)evtA)[0x1d] = 2;
+		*(unsigned int *)((unsigned char *)evtA + 0x44) = 0;
+		pb->EventFileError(evtA);
+		check_eq("current fill event untouched (didn't match evtA)",
+			 *(unsigned int *)(pbBuf + 0x48), ToU32(evtC));
+
+		/* [8b] event IS the current fill event: the inline "advance to
+		 * next fill event" prelude runs first (ring[readIdx]==9 ->
+		 * indexArray[9]==evtB becomes the new +0x48), THEN the shared
+		 * removal logic still runs on the ORIGINAL event argument
+		 * (evtC), not the newly-advanced one. */
+		*(unsigned int *)(pbBuf + 0x48) = ToU32(evtC);
+		*(unsigned int *)(pbBuf + 0x38) = 20;	/* writeCursor != readCursor -> real advance */
+		*(unsigned int *)(pbBuf + 0x3c) = 6;
+		fillRing[6] = 9;
+		((unsigned char *)evtC)[0x16] = 0;
+		((unsigned char *)evtC)[0x1d] = 3;
+		*(unsigned int *)((unsigned char *)evtC + 0x44) = 5;
+		pb->EventFileError(evtC);
+		check_eq("advance-prelude ran: +0x48 == evtB now", *(unsigned int *)(pbBuf + 0x48), ToU32(evtB));
+		check_eq("advance-prelude ran: read cursor advanced to 7", *(unsigned int *)(pbBuf + 0x3c), 7);
+		check_eq("evtC (the ORIGINAL argument) still got Reset()", *(unsigned int *)((unsigned char *)evtC + 0x44), 0);
+
+		/* [8c] event->+0x16 != 0: early return (no removal at all),
+		 * even when it IS the current fill event -- but the prelude
+		 * still runs first (it's checked independently, before the
+		 * +0x16 guard). */
+		*(unsigned int *)(pbBuf + 0x48) = ToU32(evtB);
+		((unsigned char *)evtB)[0x16] = 1;
+		unsigned int fillCarrySnapshot = cb->fillCarry;
+		pb->EventFileError(evtB);
+		check_eq("+0x16!=0: fillCarry untouched by the removal step", cb->fillCarry, fillCarrySnapshot);
+	}
+
+	printf("[9] HandleFileClosed -- integration with the real RemoveEvent()\n");
+	{
+		CSTGAudioEvent *baseA = (CSTGAudioEvent *)evtA;
+		*(unsigned int *)((unsigned char *)evtA + 0x30) = ToU32(pb);	/* owner back-ref */
+		((unsigned char *)evtA)[0x16] = 0;
+
+		/* [9a] state != 3: no-op (RemoveEvent not reached). */
+		baseA->field8 = 2;
+		unsigned int wcBefore = TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor;
+		evtA->HandleFileClosed();
+		check_eq("state!=3: writeCursor untouched", TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor, wcBefore);
+
+		/* [9b] state == 3: dispatches to the real RemoveEvent(), which
+		 * pushes evtA onto the free list. */
+		baseA->field8 = 3;
+		*(unsigned int *)((unsigned char *)evtA + 0x44) = 0;
+		evtA->HandleFileClosed();
+		check_eq("state==3: writeCursor advanced (real RemoveEvent ran)",
+			 TSTGArrayManager<CSTGPlaybackEvent>::sInstance->writeCursor, wcBefore + 1);
 	}
 
 	printf("=========================================================\n");

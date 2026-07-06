@@ -1119,9 +1119,37 @@ struct CSTGStepSeqBase { static void InitializeQuad(STGStepSeqSubRateParams *qua
  * `+0x30/+0x34/+0x38/+0x3c/+0x40/+0x44/+0x48/+0x50/+0x54/+0x58/+0x60/
  * +0x61/+0x64`). Total confirmed real size 0x68 (104 bytes), matching
  * the pre-existing `_unrecovered[0x68]` declaration below exactly.
+ *
+ * Batch 25 adds the rest of this class's small confirmed methods (see
+ * src/engine/playback_event_methods.cpp for the full per-method
+ * derivation): Reset()/HandleFileOpened()/HandleFileClosed()/
+ * HandleErrorOpening()/HandleErrorReading()/
+ * GetDispositionForReadAttempt()/IncrementBufferStartLocation()/
+ * SeekSkipFileBytes()/~CSTGPlaybackEvent() -- every one of these,
+ * confirmed via `nm -C -S OA.ko | grep CSTGPlaybackEvent::`, is now
+ * reconstructed; every offset they touch stays accessed via raw byte
+ * arithmetic on `_unrecovered` (same "still-opaque class" treatment
+ * playback_buffer_events.cpp already established), EXCEPT the shared
+ * `CSTGAudioEvent` prefix fields (`+0x8`/`+0x1d`/`+0x24`, all strictly
+ * BEFORE the `+0x2c` overlap boundary, so reinterpreting `this` as
+ * `CSTGAudioEvent*` to reach them by name is exact, not a guess).
+ * Reset()'s own real vtable-slot-7 installation (confirmed via readelf
+ * relocation resolution against `.rodata._ZTV17CSTGPlaybackEvent`) is
+ * now the ONLY installed target for that slot across the whole real
+ * binary -- see `CSTGPlaybackBuffer::RemoveEvent`/`EventFileError`
+ * (playback_buffer_events.cpp) for how that dispatch is reproduced.
  */
 struct CSTGPlaybackEvent {
 	CSTGPlaybackEvent();
+	~CSTGPlaybackEvent();
+	void Reset();
+	void HandleFileOpened();
+	void HandleFileClosed();
+	void HandleErrorOpening();
+	void HandleErrorReading();
+	unsigned int GetDispositionForReadAttempt(unsigned int pos) const;
+	void IncrementBufferStartLocation(unsigned int n);
+	void SeekSkipFileBytes(unsigned int delta);
 	unsigned char _unrecovered[0x68];
 };
 /* The real vtable symbol (40 confirmed bytes via readelf, `vtable for
@@ -1143,9 +1171,14 @@ extern "C" unsigned char _ZTV17CSTGPlaybackEvent[];
  * (0xbb80 = 48000) is the only field whose semantic role is reasonably
  * inferable from its value alone; the rest are confirmed-value-only,
  * not confirmed-semantics (fieldN naming, not a guess at meaning).
+ *
+ * Reset() (batch 25, `.text+0xd17e0`, 70 bytes) is CONFIRMED
+ * BYTE-FOR-BYTE IDENTICAL to the ctor's own 12 field writes above,
+ * minus the vtable-pointer install -- see playback_event_methods.cpp.
  */
 struct CSTGAudioEvent {
 	CSTGAudioEvent();
+	void Reset();
 	unsigned int  vtablePtr32;	/* +0x0, packed 32-bit vtable pointer (see ctor) */
 	unsigned char _gap4[4];		/* +0x4..+0x7, not touched by ctor */
 	unsigned int  field8;		/* +0x8, confirmed zeroed */

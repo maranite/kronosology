@@ -277,19 +277,28 @@ public:
 	 * cached mirror of the current read event's own "buffer start
 	 * location" pointer -- confirmed via `EventBufferStartLocationUpdated`
 	 * only ever writing it when its own event argument IS the current
-	 * read event. `RemoveEvent`/`EventFileError` (their own
-	 * `TSTGArrayManager<CSTGPlaybackEvent>::sInstance`-based free-list
-	 * push is itself tractable) remain deliberately deferred: both
-	 * dispatch through `CSTGPlaybackEvent`'s own vtable slot 7
-	 * (`call *0x1c(%edx)`), which is still the sec 10.153 "install only,
-	 * never dispatch" zero-filled placeholder -- a confirmed real crash
-	 * risk to promote before that slot's real target is reconstructed.
-	 * `ProcessSubRate()` remains deferred too: 4 further external calls
-	 * (`CSTGPlaybackEvent::GetDispositionForReadAttempt`,
+	 * read event. `RemoveEvent`/`EventFileError` are now real too (batch
+	 * 25): their own real vtable-slot-7 dispatch on the event argument
+	 * (`call *0x1c(%edx)`) is confirmed via readelf relocation
+	 * resolution against `.rodata._ZTV17CSTGPlaybackEvent` to
+	 * unconditionally resolve to `CSTGPlaybackEvent::Reset()` -- the
+	 * ctor is the ONLY site anywhere in the real binary that installs
+	 * this exact vtable pointer, and no derived class overrides it, so
+	 * there is no second possible dispatch target to model; reproduced
+	 * as a direct `event->Reset()` call rather than a redundant runtime
+	 * vtable-pointer read (see playback_buffer_events.cpp for the full
+	 * derivation, including a confirmed real quirk: both methods save
+	 * and restore the event's own `+0x10` field -- a `CSTGAudioEvent`
+	 * field `Reset()` itself unconditionally zeroes -- around the call,
+	 * so that one field alone survives the reset untouched).
+	 * `ProcessSubRate()` remains deferred: 2 further external calls
+	 * (`CSTGPlaybackEvent::GetDispositionForReadAttempt`, now real, and
 	 * `USTGHDRUtils::ConvertWaveToSTGSamples`,
 	 * `CSTGDiskCostManager::UpdateHDRBufferWaterMarks` (now real, see
 	 * below), and `CSTGHDRCircularBuffer::AdvanceReadPosition`, already
-	 * real) -- the first two are genuinely unreconstructed.
+	 * real) -- `ConvertWaveToSTGSamples` (581 bytes, `USTGHDRUtils`, a
+	 * brand-new class) is the sole remaining genuinely unreconstructed
+	 * dependency.
 	 */
 	void EventBufferStartLocationUpdated(CSTGPlaybackEvent *event, char *newLoc);
 	void SetCurrentReadEvent(CSTGPlaybackEvent *newEvt);
@@ -297,6 +306,8 @@ public:
 	void HandleAdvanceCancelledEvent(CSTGPlaybackEvent *event);
 	void AddEvent(CSTGPlaybackEvent *event);
 	void AdvanceReadPosition(unsigned long n, bool updateWaterMarks);
+	void RemoveEvent(CSTGPlaybackEvent *event);
+	void EventFileError(CSTGPlaybackEvent *event);
 	unsigned char _unrecovered[88];		/* confirmed size (array stride, see CSTGHDRManager) */
 };
 

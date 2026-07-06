@@ -1999,3 +1999,126 @@ exit code (never log-grepped), both of two full clean-rebuild passes on
 `kronosdev` (byte-identical both times); 32 unresolved symbols;
 `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 159,660
 bytes (up from 157,960). Commit `5eba788`.
+
+**Batch 25 specifics** (2026-07-06, sec 10.173, commit `<pending>`): the
+user gave fresh explicit authorization to continue past batch 24.
+Re-verified state myself first (HEAD `54a54cf`, clean tree, bare-`{}`
+stub count 69, last section `10.172` -- matched the briefing). Ran on
+`kronosdev` (192.168.3.86), same local `/home/share` +
+`/home/build/linux-kronos` access as batches 21/24 -- no SSH detour.
+
+Picked up sec 10.172's own explicitly pre-scouted lead: `CSTGPlaybackBuffer::
+RemoveEvent()`/`EventFileError()`, deferred because both dispatch through
+`CSTGPlaybackEvent`'s own vtable slot 7 (`call *0x1c(%edx)`), a
+zero-filled placeholder at the time. Checked the WHOLE `CSTGPlaybackEvent`
+class (`nm -S -C --size-sort`) rather than just the one needed method --
+every remaining method (`Reset()`/`HandleFileOpened()`/`HandleFileClosed()`/
+`HandleErrorOpening()`/`HandleErrorReading()`/`GetDispositionForReadAttempt()`/
+`IncrementBufferStartLocation()`/`SeekSkipFileBytes()`/destructor) turned
+out small and self-contained -- a further confirmed instance of the sec
+10.158/10.169/10.172 "check the whole class once a tiny dependency turns
+up" technique. 12 functions total across two files
+(`playback_event_methods.cpp` new, `playback_buffer_events.cpp` extended).
+Bare-`{}` stub count unchanged, 69 -> 69 (none of these had a pre-existing
+stub -- same accounting shape as sec 10.158/10.172's brand-new-method
+batches).
+
+**Core finding: resolved the vtable slot itself, not just the caller.**
+`readelf -r` against `.rodata._ZTV17CSTGPlaybackEvent` shows slot 7 (byte
+offset `0x24` of the 40-byte array) is `CSTGPlaybackEvent::Reset()` --
+and since the ctor is the ONLY site in the whole real binary that ever
+installs this exact vtable pointer (nothing derives from it), there is no
+second possible dispatch target to model. `RemoveEvent`/`EventFileError`
+reproduce the confirmed `call *0x1c(%edx)` as a DIRECT `event->Reset()`
+call rather than populating the placeholder byte-array vtable and reading
+through it at runtime -- much simpler than the `g_programSlotVtable`/
+`CallVtableSlot7` machinery (sec 10.153/`global.cpp`), which stays
+reserved for cases where the real dispatch target genuinely isn't known.
+When a "dispatch through a still-placeholder vtable" blocker gets
+re-examined, always resolve the SPECIFIC slot via `readelf -r` first --
+if it turns out to have exactly one possible real installer anywhere in
+the binary, a direct call is both simpler and more honest than rigging a
+fake vtable array.
+
+**Confirmed real quirk, found by hand-tracing (not by a KAT failure)**:
+`RemoveEvent()`/`EventFileError()` both SAVE the event's own `+0x10`
+field (a `CSTGAudioEvent` field that the dispatched `Reset()` call itself
+unconditionally zeroes) immediately before the dispatch, and RESTORE the
+saved value immediately after -- net effect, that one field alone
+survives the `Reset()` call untouched. KAT'd by priming `+0x10` to a
+poison value and asserting it survives (sec 10.153's poison-pattern
+discipline, applied to "assert what's supposed to survive," not just
+what's supposed to change).
+
+**MAJOR new gotcha, found by a real KAT `FAILED` line then confirmed via
+`objdump` against an actual `-m32 -mregparm=3` compile: GCC eliminates
+memory writes in ANY destructor whose ONLY effect is a write to `this`
+with no other calls.** This is a "destructor purity" dead-store
+elimination UNIQUE to genuine `~ClassName()` destructors (a plain
+function with an IDENTICAL body does NOT get this treatment) -- since
+nothing in the C++ abstract machine can legally observe a write to an
+object whose lifetime just ended, GCC removes the store entirely,
+compiling `~CSTGPlaybackEvent()`'s one-line body down to a bare `ret`.
+Verified directly: a plain, non-volatile version of `*(unsigned int
+*)this = ToU32(...)` inside a real `~ClassName()` produces ZERO
+instructions under `-O2 -m32 -mregparm=3` (checked via a throwaway
+host-arch repro AND an actual `-m32` object file compiled with this
+project's exact Kbuild flags) -- a real divergence from the confirmed
+real 7-byte body. Every OTHER destructor already reconstructed in this
+project (`~CSTGVoiceAllocator`/`~CSTGMessageProcessor`/
+`~CSTGVoiceModelManager`) happens to call at least one other function in
+its own body, which suppresses this optimization -- this is the FIRST
+destructor in this project whose only effect is a raw write, hence the
+first to expose it. Fixed with a `volatile` write on the store itself
+(re-confirmed via the same `-m32 objdump` check to restore the real
+instruction) -- doesn't change real-target behavior (nothing on the
+real target does C++-abstract-machine lifetime reasoning about kernel
+memory; this only defeats GCC's own optimization pass), it's a pure
+codegen fix. **Standing rule for all future batches: any destructor whose
+ENTIRE body is a memory write with no other calls needs a `volatile`
+write, verified via `objdump` -- do NOT trust a host KAT alone to catch
+this (the read side, even a `volatile` read, does NOT catch it -- only
+making the WRITE volatile fixes the codegen; confirmed both ways via a
+throwaway repro before touching production code).** Also worth noting:
+a plain FUNCTION (not a real destructor) with the identical body is NOT
+affected -- this is genuinely specific to the compiler's C++ object-
+lifetime reasoning for `~ClassName()`, not a generic "last write before
+return" optimization.
+
+**Second gotcha (minor): a mutual file dependency between two production
+`.cpp` files is fine and sometimes unavoidable.** `playback_event_methods.cpp`'s
+`HandleFileClosed()` calls `CSTGPlaybackBuffer::RemoveEvent()`
+(`playback_buffer_events.cpp`), and `RemoveEvent()`/`EventFileError()`
+there call `CSTGPlaybackEvent::Reset()` (`playback_event_methods.cpp`) --
+a genuine two-way dependency. Harmless for the real `.ko` build (both
+files are always linked together in `OA-objs`), but any verify/ KAT that
+exercises EITHER cross-call must link BOTH files. Solved by extending the
+existing `test_playback_buffer_events.cpp` (which already has the heavy
+fixture -- a real `CSTGPlaybackBuffer::Initialize()`'d instance, a real
+`TSTGArrayManager<CSTGPlaybackEvent>` setup) to also link
+`playback_event_methods.cpp`, while giving the OTHER class's own simpler
+methods a lightweight, SEPARATE `test_playback_event_methods.cpp` that
+mocks `CSTGPlaybackBuffer::RemoveEvent()` (to test `HandleFileClosed()`'s
+own dispatch logic in isolation, without needing the full heavy fixture).
+When two production files have a genuine mutual dependency, split KAT
+responsibility this way rather than trying to force one giant combined
+test or (worse) picking an arbitrary link order that silently under-tests
+one direction.
+
+**Verification**: 68 verify/ binaries (up from 67, two new:
+`test_playback_event_methods`, plus `test_playback_buffer_events` extended
+with 3 new sections: [7] RemoveEvent, [8] EventFileError, [9]
+HandleFileClosed integration), all exit 0 by real per-binary process exit
+code (never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times); 32 unresolved symbols;
+`.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 161,496
+bytes (up from 159,660). Commit `<pending>`.
+
+**Deferred for a future batch**: `CSTGEQ`'s five core math functions
+(unchanged, still needs the "transcribe the whole function as one
+verbatim inline-asm block" approach). `CSTGPlaybackBuffer::ProcessSubRate()`
+(`.text+0xd6660`, 860B) is now down to ONE genuinely unreconstructed
+dependency: `USTGHDRUtils::ConvertWaveToSTGSamples(...)` (`.text+0xd37a0`,
+245B, a brand-new class) -- its own two prior co-blockers
+(`GetDispositionForReadAttempt`/`UpdateHDRBufferWaterMarks`) are both real
+now (this batch and sec 10.172 respectively).
