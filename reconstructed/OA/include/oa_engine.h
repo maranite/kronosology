@@ -297,19 +297,19 @@ public:
 	 * wave_sample_convert.cpp), alongside `CSTGPlaybackEvent::
 	 * GetDispositionForReadAttempt`/`CSTGDiskCostManager::
 	 * UpdateHDRBufferWaterMarks`/`CSTGHDRCircularBuffer::
-	 * AdvanceReadPosition` (already real). `ProcessSubRate()` itself is
-	 * NOT promoted this batch even though it is now unblocked
-	 * externally: fresh full disassembly (batch 26) shows its own
-	 * 860-byte body is a substantial real-time state machine in its own
-	 * right -- a `GetDispositionForReadAttempt()`-driven disposition
-	 * dispatch across 5 outcomes, a `CSTGDiskCostManager` water-mark
-	 * update, a 4096-byte `static CSTGPlaybackBuffer::sConvertBuffer`
-	 * scratch area filled via a wraparound `rep movsl/movsw/movsb` copy
-	 * out of the embedded ring, and a `TSTGArrayManager<CSTGPlaybackEvent>`
-	 * free-list recycle byte-for-byte matching `RemoveEvent()`'s own
-	 * mechanics (batch 25) -- deliberately left for its own dedicated
-	 * future pass rather than rushed alongside 6 already-substantial DSP
-	 * conversion functions in the same batch.
+	 * AdvanceReadPosition` (already real). Batch 27 promotes
+	 * `ProcessSubRate()` itself (`.text+0xd6660`, 860 bytes) -- see
+	 * src/engine/playback_subrate.cpp for the complete per-block
+	 * derivation. **Correction to batch 26's own inference**: batch 26's
+	 * comment guessed `sConvertBuffer` was 4096 bytes "to back every real
+	 * invocation" without independently checking the real symbol --
+	 * `nm -S -C OA.ko` actually confirms `CSTGPlaybackBuffer::
+	 * sConvertBuffer` is exactly 0x100 (256) bytes (matching the real
+	 * `rep stosb`/`ecx=0x100` zero-fill ProcessSubRate() itself performs
+	 * on it every chunk); this is comfortably enough for the real max
+	 * per-chunk copy (`threshold`<=0x40 samples * `field1d`<=3 bytes/
+	 * sample <= 192 bytes), so no behavior was ever at risk -- only the
+	 * batch 26 comment's own stated byte count was wrong, now fixed here.
 	 */
 	void EventBufferStartLocationUpdated(CSTGPlaybackEvent *event, char *newLoc);
 	void SetCurrentReadEvent(CSTGPlaybackEvent *newEvt);
@@ -319,6 +319,15 @@ public:
 	void AdvanceReadPosition(unsigned long n, bool updateWaterMarks);
 	void RemoveEvent(CSTGPlaybackEvent *event);
 	void EventFileError(CSTGPlaybackEvent *event);
+	/*
+	 * ProcessSubRate() (batch 27, `.text+0xd6660`, 860 bytes) -- see
+	 * src/engine/playback_subrate.cpp for the complete derivation. Real
+	 * scratch buffer used to stage one chunk's worth of ring-buffer bytes
+	 * before conversion (confirmed real size 0x100, see the correction
+	 * above).
+	 */
+	void ProcessSubRate();
+	static unsigned char sConvertBuffer[0x100];
 	unsigned char _unrecovered[88];		/* confirmed size (array stride, see CSTGHDRManager) */
 };
 

@@ -2229,3 +2229,110 @@ copy, and a `TSTGArrayManager<CSTGPlaybackEvent>` free-list recycle
 matching `RemoveEvent()`'s own mechanics) -- deliberately left for its own
 dedicated future pass rather than rushed alongside this batch's already-
 substantial 6 DSP conversion functions.
+
+**Batch 27 specifics** (2026-07-06, sec 10.175, commit `PENDING_BATCH27_HASH`): the user
+gave fresh explicit authorization to continue past batch 26. Re-verified
+state myself first (HEAD `3835657`, clean tree, bare-`{}` stub count 69,
+last section `10.174` -- matched the briefing). Ran on `192.168.3.92`
+(root/kronosbuild via `sshpass -p kronosbuild ssh ...` -- no key auth from
+this environment), same CIFS-shared `/home/share/kronosology` + local
+`/home/build/linux-kronos` as prior batches; always `cd
+/home/share/kronosology/reconstructed/OA && ...` in one non-interactive ssh
+command (batch 20's own standing gotcha -- a bare login lands in `/root`).
+
+Picked up sec 10.174's own pre-scouted lead: `CSTGPlaybackBuffer::
+ProcessSubRate()` (`.text+0xd6660`, 860 bytes), confirmed to have ZERO
+remaining external dependency. ONE function reconstructed
+(`src/engine/playback_subrate.cpp`), plus its own required new
+`CSTGPlaybackBuffer::sConvertBuffer[]` storage + `ProcessSubRate()` method
+declaration in `oa_engine.h`. Bare-`{}` stub count unchanged, 69 -> 69 (no
+pre-existing stub -- same "brand-new method on an already-real class"
+accounting shape as several prior batches).
+
+**Batch 26's own "4096-byte sConvertBuffer" claim was WRONG -- caught by
+independently `nm -S`-checking the real symbol before writing any code
+against it, not by a KAT failure.** The real confirmed size is `0x100`
+(256) bytes, matching the function's own `rep stosb`/`ecx=0x100` zero-fill
+exactly. No real behavior was ever at risk (max real per-chunk copy is
+`threshold`(<=0x40)*`field1d`(<=3) <= 192 bytes, well under 256) -- but a
+future batch inheriting an unverified "4096-byte" claim and sizing a NEW
+buffer/test against it would have been building on a wrong premise. Lesson
+reinforced (this is at least the second time in this project a PRIOR
+batch's own inferred-not-measured claim about a real symbol's size turned
+out to be wrong, sec 10.155's own hex-addition slip being the other): when
+a future batch's own pre-scouted lead comment states a byte size for a REAL
+symbol, re-verify it with `nm -S -C` before trusting it, even if it "sounds
+plausible" and even when picking up a lead you didn't originate.
+
+**Full hand-trace technique for a large, no-decompiler-available, tightly
+looping state machine (five outcome codes, three different loop-continue
+jump targets, one register-carryover-across-loop-iterations dependency)**:
+labeled every basic block by its own address first, wrote its literal
+register-level effect (never renaming/interpreting until AFTER the full
+CFG was mapped), THEN cross-referenced already-established field names from
+sibling files (`playback_buffer_events.cpp`'s `windowSize`/`consumed`/
+`windowThreshold`/`maxReadBytes`, `playback_event_methods.cpp`'s
+`CSTGAudioEvent::fieldC`) to confirm several of ProcessSubRate()'s own
+touched offsets were ALREADY-NAMED fields on `CSTGPlaybackEvent`, not new
+ones -- a strong independent cross-check (same technique as batch 10's own
+"re-read the target class's own earlier header comment first" win),
+finding zero contradictions. The one place a register (EAX) genuinely
+carries a stale value from a PRIOR loop iteration into a later branch
+(the `outcome==3` bookkeeping path) was reproduced via an algebraically
+equivalent persistent local (`carry = consumed - convertCount`) rather than
+trying to mimic raw register lifetime in structured C -- simpler and
+exactly as faithful once the algebra is verified independently (which the
+KAT then confirmed).
+
+**Genuinely new gotcha, its own build-flag angle distinct from every prior
+`-msoft-float`/float-helper instance**: this function's own wraparound ring
+copy has two RUNTIME-length segments (not compile-time constants) --
+`__builtin_memcpy` for a runtime length compiles fine under a plain host
+`g++` sanity check but, once built against the REAL kernel tree via
+`make ko`, lowers to an actual call to library `memcpy` (GCC can't inline a
+builtin copy of unknown-at-compile-time length) -- this pushed `nm -u
+OA.ko` from 32 to 33, a NEW unresolved symbol no other file in this project
+had ever needed. Caught ONLY because the full `make ko`+invariant-check
+sequence was run (a host-only `g++` compile of the same file gave zero
+warnings and looked completely clean) -- reinforces the standing rule that
+a host KAT passing is never sufficient on its own; the real `.ko` build's
+own `nm -u`/linkonce/GOTPC checks must ALWAYS run too, even when nothing
+about the change "looks" float/SIMD-related. Fixed with a plain manual
+per-byte copy loop (`RawCopy()`) instead of `__builtin_memcpy` -- the SAME
+file's OWN `__builtin_memset(sConvertBuffer, 0, sizeof(...))` (a genuine
+compile-time-constant 256-byte size) was unaffected and stays as-is: the
+distinguishing factor for `__builtin_mem*` is compile-time-constant size
+(inlines away cleanly) vs. runtime size (silently pulls in a real libcall),
+not "is this a builtin at all."
+
+**Confirmed real quirk, found by hand-tracing THEN verified by an actual
+KAT `FAILED` line against a first, wrong test expectation (own-test bug,
+not a real-binary bug)**: `recycle_event`'s `event->+0x8 = 0` write does
+NOT survive to the end of the call when that same event is also
+`this->+0x4c` (the current read event) -- recycling never updates
+`this->+0x4c`, so the immediately-following `advance_to_next` block
+re-examines the SAME event as `curReadEvt`, sees state `0 != 3`, and
+unconditionally forces it back to 3. A first KAT draft asserted `+0x8==0`
+after recycling and got a real `FAILED: got=0x3 want=0x0` -- fixed the
+TEST's own expectation (not the reconstruction) after re-deriving the
+interaction a second time from the raw disassembly. Same family as sec
+10.158's "don't assume, count the actual zero-stores" discipline, but this
+time the trap is a cross-block interaction rather than a single ctor's own
+field list -- worth checking for on ANY future "recycle/retire" style
+function where the SAME object pointer might still be referenced by an
+outer/caller-visible slot after being pushed onto a free list.
+
+**Verification**: 70 verify/ binaries (up from 69, new
+`test_playback_subrate`), all exit 0 by real per-binary process exit code
+(never log-grepped), both of two full clean-rebuild passes on
+`192.168.3.92` (byte-identical both times, `OA.ko` 164,432 bytes both
+runs); 32 unresolved symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0
+`R_386_GOTPC`. Commit `PENDING_BATCH27_HASH`.
+
+**Deferred for a future batch, unchanged**: `CSTGEQ`'s five core math
+functions (still needs the verbatim-inline-asm-transcription approach).
+`USTGHDRUtils::Convert44100WaveToSTGSamples()` (`.text+0xd3270`, 1313
+bytes), fully characterized since batch 26, not attempted. With
+`ProcessSubRate()` now real, `CSTGPlaybackBuffer` has no more known
+unreconstructed methods of its own -- batch 28 will need a fresh
+`nm -S -C --size-sort` sweep rather than a pre-scouted single-class lead.

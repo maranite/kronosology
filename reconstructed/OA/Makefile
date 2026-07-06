@@ -103,6 +103,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/playback_buffer_events.o \
            src/engine/playback_event_methods.o \
            src/engine/wave_sample_convert.o \
+           src/engine/playback_subrate.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -270,6 +271,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/playback_buffer_events.cpp \
        src/engine/playback_event_methods.cpp \
        src/engine/wave_sample_convert.cpp \
+       src/engine/playback_subrate.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -330,7 +332,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_load_balancer_static verify/test_performance_vars_set_is_dying \
          verify/test_drum_kit_data verify/test_playback_buffer_events \
          verify/test_playback_event_methods \
-         verify/test_wave_sample_convert
+         verify/test_wave_sample_convert \
+         verify/test_playback_subrate
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -555,6 +558,9 @@ verify/test_playback_event_methods: verify/test_playback_event_methods.cpp src/e
 
 verify/test_wave_sample_convert: verify/test_wave_sample_convert.cpp src/engine/wave_sample_convert.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_wave_sample_convert.cpp src/engine/wave_sample_convert.cpp -o $@
+
+verify/test_playback_subrate: verify/test_playback_subrate.cpp src/engine/playback_subrate.cpp include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_playback_subrate.cpp src/engine/playback_subrate.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
