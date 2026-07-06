@@ -1355,3 +1355,36 @@ vtable-dispatch pattern at its own two call sites instead. Another
 confirmed instance of sec 10.163's "an inlined helper is not the same as
 a call to the shared helper" finding -- worth re-checking every time a
 sibling method LOOKS like it should just call a newly-real helper.
+
+**Batch 18 postscript, a genuine CI/tooling bug found during this batch's
+OWN independent re-verification of the already-committed d3dd96c state
+(not a reconstruction bug): the entire `Makefile` has ALWAYS used CRLF
+line endings (`file Makefile` reports it, ~515/515 lines) -- almost
+always harmless (GNU Make silently tolerates a trailing `\r` immediately
+after a `\`-continuation), EXCEPT for the LAST token of a `\`-continued
+variable when that token sits on the FINAL line of the block (no
+trailing `\` after it) -- there, the `\r` becomes a literal trailing byte
+of the variable's own last value, silently breaking any exact-match
+lookup against that name.** Concretely: appending
+`verify/test_load_balancer_static` as the new last line of the `TESTS`
+variable made ITS OWN value become `verify/test_load_balancer_static\r`
+-- invisible in every editor/pager, but `[ -x "$t" ]` (and, independently
+confirmed, `make verify`'s own `for t in $(TESTS); do ./$$t; done` loop)
+both silently fail to find/run it, while every OTHER entry in the same
+list (each followed by a continuation `\`) works completely normally.
+The test binary itself was fully valid and passed cleanly (`exit=0`,
+confirmed via a direct, separate invocation) -- this was purely a
+list-membership/lookup artifact, not a build or reconstruction failure,
+and easy to misdiagnose as "the newest test binary didn't build" when the
+real cause is one invisible trailing byte on one line. **Fixed by
+stripping CR from the whole file** (`sed -i 's/\r$//' Makefile`,
+confirmed via `diff <(tr -d '\r' <backup) Makefile` to be a byte-for-byte
+no-op everywhere except CR removal -- zero functional content change).
+Lesson for any future batch that adds a NEW final entry to a
+`\`-continued Makefile variable (`TESTS`, `OA-objs`, `SRC`, etc): if a
+freshly-added test binary mysteriously "doesn't exist" right after a
+successful build, check `file Makefile` for CRLF endings and `cat -A` the
+specific line before assuming the build itself is broken -- and prefer
+appending new entries via a MIDDLE position (with a trailing `\` after
+them) rather than as the new last line, until/unless the whole file's
+line endings are normalized.
