@@ -86,6 +86,16 @@ void CSTGFileCloser::ProcessCommands() {}
 void CSTGHDRFileReader::ProcessCommands() {}
 void CSTGHDRFileWriter::ProcessCommands() {}
 void CSTGStreamingFileReader::ProcessCommands() {}
+/* USTGHDRUtils::ConvertWaveToSTGSamples() is real now, batch 26 -- see
+ * src/engine/wave_sample_convert.cpp. Convert44100WaveToSTGSamples()
+ * (its own 44100Hz-source-only sibling, see oa_engine.h's USTGHDRUtils
+ * class comment for the full deferral reasoning -- a genuine
+ * fractional-phase resampler, x87-heavy across real branches) stays a
+ * deliberately deferred stub; ConvertWaveToSTGSamples() itself never
+ * calls it except in the untested-so-far 44100Hz path. */
+unsigned long USTGHDRUtils::Convert44100WaveToSTGSamples(float *, bool, bool, char *, bool, bool,
+                                                          unsigned long, CSTGPlaybackEvent *,
+                                                          unsigned long) { return 0; }
 /* CSTGCDWorker_InitializeBuffer is real now, sec 10.148 -- see
  * managers.cpp (right after CSTGCDWorker::Initialize(), sec 10.144). */
 /* CSTGCDWorker::ProcessCommands() is real now, sec 10.158 -- see

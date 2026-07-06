@@ -291,14 +291,25 @@ public:
 	 * and restore the event's own `+0x10` field -- a `CSTGAudioEvent`
 	 * field `Reset()` itself unconditionally zeroes -- around the call,
 	 * so that one field alone survives the reset untouched).
-	 * `ProcessSubRate()` remains deferred: 2 further external calls
-	 * (`CSTGPlaybackEvent::GetDispositionForReadAttempt`, now real, and
-	 * `USTGHDRUtils::ConvertWaveToSTGSamples`,
-	 * `CSTGDiskCostManager::UpdateHDRBufferWaterMarks` (now real, see
-	 * below), and `CSTGHDRCircularBuffer::AdvanceReadPosition`, already
-	 * real) -- `ConvertWaveToSTGSamples` (581 bytes, `USTGHDRUtils`, a
-	 * brand-new class) is the sole remaining genuinely unreconstructed
-	 * dependency.
+	 * `ProcessSubRate()` remains deferred, but batch 26 resolves its own
+	 * last remaining EXTERNAL dependency: `USTGHDRUtils::
+	 * ConvertWaveToSTGSamples` (581 bytes) is now real (see
+	 * wave_sample_convert.cpp), alongside `CSTGPlaybackEvent::
+	 * GetDispositionForReadAttempt`/`CSTGDiskCostManager::
+	 * UpdateHDRBufferWaterMarks`/`CSTGHDRCircularBuffer::
+	 * AdvanceReadPosition` (already real). `ProcessSubRate()` itself is
+	 * NOT promoted this batch even though it is now unblocked
+	 * externally: fresh full disassembly (batch 26) shows its own
+	 * 860-byte body is a substantial real-time state machine in its own
+	 * right -- a `GetDispositionForReadAttempt()`-driven disposition
+	 * dispatch across 5 outcomes, a `CSTGDiskCostManager` water-mark
+	 * update, a 4096-byte `static CSTGPlaybackBuffer::sConvertBuffer`
+	 * scratch area filled via a wraparound `rep movsl/movsw/movsb` copy
+	 * out of the embedded ring, and a `TSTGArrayManager<CSTGPlaybackEvent>`
+	 * free-list recycle byte-for-byte matching `RemoveEvent()`'s own
+	 * mechanics (batch 25) -- deliberately left for its own dedicated
+	 * future pass rather than rushed alongside 6 already-substantial DSP
+	 * conversion functions in the same batch.
 	 */
 	void EventBufferStartLocationUpdated(CSTGPlaybackEvent *event, char *newLoc);
 	void SetCurrentReadEvent(CSTGPlaybackEvent *newEvt);
@@ -309,6 +320,48 @@ public:
 	void RemoveEvent(CSTGPlaybackEvent *event);
 	void EventFileError(CSTGPlaybackEvent *event);
 	unsigned char _unrecovered[88];		/* confirmed size (array stride, see CSTGHDRManager) */
+};
+
+/*
+ * USTGHDRUtils -- a plain static-method utility class (no fields, no
+ * vtable, no ctor -- confirmed via `nm -C OA.ko | grep USTGHDRUtils`:
+ * only method symbols, no `vtable for`/`typeinfo for`). Batch 26 fully
+ * reconstructs `ConvertWaveToSTGSamples()` (see wave_sample_convert.cpp
+ * for the complete per-format derivation); `Convert44100WaveToSTGSamples()`
+ * stays a confirmed-real, deliberately DEFERRED extern (own bare stub in
+ * bar2_stubs.cpp): the real function (`.text+0xd3270`, 1313 bytes) is a
+ * genuine fractional-phase-accumulator resampler (44100Hz source ->
+ * the engine's native rate, confirmed 4-tap history ramp-up + a
+ * per-iteration `0xeb3333`-step 24.8 fixed-point phase accumulator)
+ * implemented via heavy x87-stack-juggling arithmetic across real
+ * branches -- not reducible to this project's existing single-I/O x87
+ * primitive-wrapper convention (sec 10.117's `MulRoundToFloat`/`FYL2X`),
+ * matching the `CSTGEQ` "verbatim inline-asm transcription" deferred
+ * category (sec 10.170/10.173) rather than being attempted this batch.
+ * `ConvertWaveToSTGSamples()` forwards to it UNCHANGED (all 9 args,
+ * verbatim) whenever `event->sampleRate == 44100` -- see
+ * wave_sample_convert.cpp for the exact tail-call reproduction.
+ */
+class USTGHDRUtils {
+public:
+	/*
+	 * (`.text+0xd37a0`, 581 bytes) -- the format-2 (16-bit PCM,
+	 * SSE-accelerated in the real binary)/format-3 (24-bit PCM, inline
+	 * FPU loop) dispatcher, plus the 44100Hz-source special case above.
+	 * See wave_sample_convert.cpp for the complete derivation of every
+	 * parameter's role and every dispatch branch.
+	 */
+	static unsigned long ConvertWaveToSTGSamples(float *dest, bool stereoInterleavedOutput,
+	                                              bool resamplerReservedFlag, char *src,
+	                                              bool sourceIsStereo, bool needsByteSwap,
+	                                              unsigned long count, CSTGPlaybackEvent *event,
+	                                              unsigned long reservedArg9);
+	/* Deliberately deferred -- see class comment above. */
+	static unsigned long Convert44100WaveToSTGSamples(float *dest, bool stereoInterleavedOutput,
+	                                                   bool resamplerReservedFlag, char *src,
+	                                                   bool sourceIsStereo, bool needsByteSwap,
+	                                                   unsigned long count, CSTGPlaybackEvent *event,
+	                                                   unsigned long reservedArg9);
 };
 
 class CSTGMonitorMixerChannel {

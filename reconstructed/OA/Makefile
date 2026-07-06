@@ -102,6 +102,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/drum_kit_data.o \
            src/engine/playback_buffer_events.o \
            src/engine/playback_event_methods.o \
+           src/engine/wave_sample_convert.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -178,6 +179,17 @@ CFLAGS_smoother_init.o := -mhard-float -msse2 -mfpmath=sse
 # CSTGMIDIClockSync()/RecomputeMIDIClockInterval() would otherwise pull
 # in unresolvable libgcc soft-float/double helpers.
 CFLAGS_midi_clock_sync.o := -mhard-float -msse2 -mfpmath=sse
+
+# Same reasoning again: wave_sample_convert.cpp's own scalar reimplementation
+# of the real SSE2 sample-conversion leaf functions (int16->float, scale,
+# mix-add) does genuine float arithmetic confirmed real in the original
+# binary (real movaps/cvtdq2ps/mulps/addps SSE2 code there -- this project's
+# scalar reimplementation is functionally, not byte-, equivalent), which
+# would otherwise pull in unresolvable libgcc soft-float helpers
+# (__mulsf3/__addsf3/__floatsisf) under the kernel's own -msoft-float
+# default -- confirmed via a throwaway -m32 -mregparm=3 -msoft-float compile
+# before this override was added (batch 26).
+CFLAGS_wave_sample_convert.o := -mhard-float -msse2 -mfpmath=sse
 
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
@@ -257,6 +269,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/drum_kit_data.cpp \
        src/engine/playback_buffer_events.cpp \
        src/engine/playback_event_methods.cpp \
+       src/engine/wave_sample_convert.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -316,7 +329,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_message_processor \
          verify/test_load_balancer_static verify/test_performance_vars_set_is_dying \
          verify/test_drum_kit_data verify/test_playback_buffer_events \
-         verify/test_playback_event_methods
+         verify/test_playback_event_methods \
+         verify/test_wave_sample_convert
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -538,6 +552,9 @@ verify/test_playback_buffer_events: verify/test_playback_buffer_events.cpp src/e
 
 verify/test_playback_event_methods: verify/test_playback_event_methods.cpp src/engine/playback_event_methods.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_playback_event_methods.cpp src/engine/playback_event_methods.cpp -o $@
+
+verify/test_wave_sample_convert: verify/test_wave_sample_convert.cpp src/engine/wave_sample_convert.cpp include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_wave_sample_convert.cpp src/engine/wave_sample_convert.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

@@ -2122,3 +2122,110 @@ dependency: `USTGHDRUtils::ConvertWaveToSTGSamples(...)` (`.text+0xd37a0`,
 245B, a brand-new class) -- its own two prior co-blockers
 (`GetDispositionForReadAttempt`/`UpdateHDRBufferWaterMarks`) are both real
 now (this batch and sec 10.172 respectively).
+
+**Batch 26 specifics** (2026-07-06, sec 10.174, commit TBD): the user gave
+fresh explicit authorization to continue past batch 25. Re-verified state
+myself first (HEAD `81f7d55`, clean tree, bare-`{}` stub count 69, last
+section `10.173` -- matched the briefing). Ran on `kronosdev`
+(192.168.3.86), same environment as batches 21/24/25, this time WITH
+direct local access to `/home/share/Decomp/OA.ko_Decomp/OA.ko` (unlike
+batch 21 which lacked it, matching batch 24's later access).
+
+Picked up sec 10.173's own pre-scouted lead: `USTGHDRUtils::
+ConvertWaveToSTGSamples()` (`ProcessSubRate()`'s last remaining
+dependency). Fresh disassembly immediately turned up FIVE further plain-
+C-linkage (NOT C++ mangled -- confirmed via plain `nm`, not `nm -C`) leaf
+functions it dispatches through (`ByteSwapMono2ByteStream`/
+`ByteSwapStereo2ByteStream`/`ConvertMono2ByteWaveToSTGSamples`/
+`ConvertMono2ByteWaveToSISTGSamples`/`ConvertStereo2ByteWaveToSISTGSamples`)
+-- 6 functions total, all in a new `src/engine/wave_sample_convert.cpp`.
+Bare-`{}` stub count unchanged 69->69 (none of these 6 had a pre-existing
+stub); ONE new non-bare stub added (`Convert44100WaveToSTGSamples`,
+`{ return 0; }`, invisible to the bare-`{}` grep, sec 10.164 pattern).
+
+**Key finding: this batch's own 5 leaf functions are REAL SSE2 vector
+arithmetic (movaps/pshufd/cvtdq2ps/punpckhwd/punpcklwd/mulps/addps/
+pcmpgtw), yet were still tractable -- a DIFFERENT case from the
+already-deferred `CSetListEQ::SetBand()` SSE blocker (sec 10.162/10.170/
+10.173).** The distinguishing factor isn't "is it real vector arithmetic
+vs a wide copy" (both of these ARE genuine arithmetic) -- it's whether the
+function has any OTHER unresolved external dependency. `SetBand()` stays
+deferred because it ALSO calls unresolved `CSTGEQ::
+CalculatePeakingCoefficients()` + an external `am_exp2_ess` symbol; these
+5 leaf functions operate on a single self-contained local struct with NO
+other external call, so their per-element math (sign-extend int16->int32,
+convert to float, scale, optionally duplicate for mono->stereo widen,
+mix-add into existing dest) is fully reimplementable as an ordinary scalar
+loop with identical per-sample VALUES -- this project has never targeted
+byte-identical machine code, only KAT-backed functional correctness.
+Lesson for future batches with a similar "real SSE arithmetic" candidate:
+check for OTHER unresolved dependencies FIRST, don't reject on "it's real
+vector math" alone -- that's necessary but not sufficient grounds to defer.
+
+**Second finding, a NEW angle on the sec 10.117 float/`-msoft-float`
+gotcha**: even a plain scalar `float` multiply/add reimplementation (no
+x87/SSE asm needed at the source level at all) still pulls in unresolvable
+libgcc soft-float helpers (`__mulsf3`/`__addsf3`/`__floatsisf`) under this
+kernel build's own `-msoft-float` default -- confirmed via a throwaway
+`-m32 -mregparm=3 -msoft-float` compile BEFORE ever wiring the new file
+into the Makefile (a cheap, fast check worth doing as a matter of course
+for any new file with real float arithmetic, not just ones that "look"
+x87/SSE-heavy). Fixed the same established way:
+`CFLAGS_wave_sample_convert.o := -mhard-float -msse2 -mfpmath=sse`.
+
+**Third technique, worth reusing: decode `.rodata`/`.rodata.cst4`/
+`.rodata.asm` constants via a small Python `struct.unpack('<f', ...)`
+one-liner directly from `objdump -s` hex dumps, rather than hand-computing
+IEEE-754 bit patterns.** Found the per-format normalization table
+(`{0, 1/127, 1/32767, 1/8388607}` for 8/16/24-bit PCM, indexed by the
+already-named `CSTGAudioEvent::field1d`) and `allMinus3dB` (`0.70710677 =
+1/sqrt(2)`) this way -- fast, mechanical, and independently re-checkable
+by anyone re-reading the batch. Also caught (by re-deriving TWICE, sec
+10.151-style discipline) that the 24-bit inline path's two separate
+`readelf`-visible `.rodata.cst4` relocation SITES resolve to the exact
+SAME constant value (`1/8388607`) -- an early draft assumed two different
+constants purely from seeing two relocation entries; always dereference
+the actual CONTENT at each site, don't infer distinctness from relocation
+count alone.
+
+**Real, confirmed quirks faithfully preserved (not simplified away)**:
+(1) `ConvertWaveToSTGSamples()`'s return value is `(unsigned char)count`
+(the ORIGINAL input truncated to a byte) on every path except `count==0`
+and the 44100Hz-forward -- confirmed load-bearing at `ProcessSubRate()`'s
+own `movzbl %al,%eax` use as "samples consumed this call," implying every
+real caller keeps `count <= 255` (matching the fixed 4096-byte
+`sConvertBuffer` scratch area). (2) the 16-bit SSE converters mix-ADD into
+the existing dest buffer (confirmed real load-old-value-then-addps-then-
+store), while the 24-bit inline path OVERWRITES dest (no old-value load)
+-- a real format-dependent asymmetry, independently KAT-exercised both
+ways rather than assumed symmetric.
+
+**Toolchain/environment gotcha, none new this batch** -- `kronosdev`
+(192.168.3.86) continues to work exactly as documented in batches 21/24/25
+(local `/home/share`, local `/home/build/linux-kronos`, no SSH detour
+needed either for disassembly OR for the build/verify sequence).
+
+**Verification**: 69 verify/ binaries (up from 68, new
+`test_wave_sample_convert`), all exit 0 by real per-binary process exit
+code (never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times); 32 unresolved symbols;
+`.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 163,288
+bytes (up from 161,496). Commit TBD.
+
+**Deferred for a future batch, unchanged**: `CSTGEQ`'s five core math
+functions (still needs the verbatim-inline-asm-transcription approach).
+`USTGHDRUtils::Convert44100WaveToSTGSamples()` (`.text+0xd3270`, 1313B) --
+newly characterized this batch: a genuine fractional-phase-accumulator
+resampler (confirmed real 24.8 fixed-point phase step `0xeb3333` =
+44100/48000 exactly, plus a 4-tap history ramp-up gated by `event`'s own
+`+0x60`/`+0x61` byte counters), x87-stack-juggling-heavy (5 live FPU-stack
+values at once) across real branches -- same deferred category as
+`CSTGEQ`, not attempted this batch. `CSTGPlaybackBuffer::ProcessSubRate()`
+itself (`.text+0xd6660`, 860B) is now confirmed to have ZERO remaining
+EXTERNAL dependency, but its OWN 860-byte body is a substantial real-time
+state machine (5-outcome disposition dispatch, `CSTGDiskCostManager`
+water-mark update, a 4096-byte `sConvertBuffer` wraparound `rep movsl`
+copy, and a `TSTGArrayManager<CSTGPlaybackEvent>` free-list recycle
+matching `RemoveEvent()`'s own mechanics) -- deliberately left for its own
+dedicated future pass rather than rushed alongside this batch's already-
+substantial 6 DSP conversion functions.
