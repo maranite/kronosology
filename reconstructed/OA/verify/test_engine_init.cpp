@@ -125,7 +125,10 @@ void CSTGHDRManager::Initialize() { g_hdrManagerInitCalls++; }
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGHDRManager::ProcessCommands() {}
 
-MOCK_CTOR_ONLY(CSTGHDRMiniModel)
+/* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
+ * engine_init.cpp (already linked by this test). Its own MOCK_CTOR_ONLY
+ * counter here is removed as part of that promotion (never referenced by
+ * any assertion in this file -- confirmed via grep). */
 static int g_hdrMiniInitCalls;
 void CSTGHDRMiniModel::Initialize() { g_hdrMiniInitCalls++; }
 

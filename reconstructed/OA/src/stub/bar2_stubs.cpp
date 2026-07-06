@@ -170,10 +170,10 @@ void CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) {}
 void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
 void CSTGComPort::RTAIInterruptHandler(unsigned int, void *) {}
 CSTGCombi::CSTGCombi() {}
-CSTGControllerRTData::CSTGControllerRTData() {}
-/* CSTGControllerRTData::Initialize()/RequestAnalogInputPositions()
- * reconstructed for real, sec 10.88 -- see
- * src/engine/controller_rt_data_init.cpp. */
+/* CSTGControllerRTData::CSTGControllerRTData() is real now, sec 10.155 --
+ * see src/engine/controller_rt_data_ctor.cpp. CSTGControllerRTData::
+ * Initialize()/RequestAnalogInputPositions() reconstructed for real, sec
+ * 10.88 -- see src/engine/controller_rt_data_init.cpp. */
 void CSTGControllerRTData::OnExtModeKnobAssignChange(unsigned int) {}
 void CSTGControllerRTData::OnExtModeSetChange() {}
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) {}
@@ -190,16 +190,22 @@ void CSTGControllerRTData::ResetKnobsJumpCatch() {}
 void CSTGControllerRTData::ResetSlidersJumpCatch() {}
 void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
 void CSTGControllerRTData::SetControllerAssignment(void *, signed char, bool) {}
-CSTGControllerRTData *CSTGControllerRTData::sInstance;
+/* CSTGControllerRTData::sInstance storage now lives in
+ * src/engine/controller_rt_data_ctor.cpp, sec 10.155 (moved there
+ * alongside the real ctor, matching the CSTGFrontPanelSmoothers/
+ * CSTGHDRMiniModel precedent of homing sInstance storage in the same
+ * TU as the real ctor rather than here). */
 CSTGDrumKitData::CSTGDrumKitData() {}
 /* CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() is real now, sec
  * 10.153 -- see src/engine/front_panel_smoothers.cpp. */
 void CSTGGlobal::InitializePerformances() {}
-CSTGHDRMiniModel::CSTGHDRMiniModel() {}
+/* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
+ * src/engine/engine_init.cpp. */
 void CSTGHDRMiniModel::Initialize() {}
 unsigned int CSTGHeapManager::Alloc(unsigned int) { return 0; }
 /* CSTGHeldKeyList::Reset() reconstructed for real, sec 10.82 -- see
- * src/engine/global.cpp. */
+ * src/engine/global.cpp. CSTGHeldKeyList::CSTGHeldKeyList() is real now
+ * too, sec 10.155 -- see src/engine/slot_voice_data_ctor.cpp. */
 CSTGLFOTables::CSTGLFOTables() {}
 CSTGMIDIClockSync::CSTGMIDIClockSync() {}
 void CSTGMidiDispatcher::HandleController(unsigned char, unsigned char, unsigned char, int, int) {}
@@ -246,8 +252,11 @@ void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
 CSTGSamplingInterface::CSTGSamplingInterface() {}
 /* CSTGSequence::CSTGSequence() is real now, sec 10.153 -- see
  * src/engine/sequence_ctor.cpp. */
-CSTGSlotVoiceData::CSTGSlotVoiceData() {}
-/* CSTGSlotVoiceData::Initialize(unsigned short) is real now, sec
+/* CSTGSlotVoiceData::CSTGSlotVoiceData() is real now, sec 10.155 -- see
+ * src/engine/slot_voice_data_ctor.cpp (also its own newly-discovered
+ * embedded-sub-object dependencies, CSTGMidiCCFilter::Initialize() and
+ * CSTGHeldKeyList::CSTGHeldKeyList(), in the same file).
+ * CSTGSlotVoiceData::Initialize(unsigned short) is real now, sec
  * 10.150 -- see src/engine/global.cpp. Its own dependency,
  * CSTGChannelValues::Initialize(), is real now too, sec 10.151 -- see
  * src/engine/global.cpp. Its own storage and newly-discovered

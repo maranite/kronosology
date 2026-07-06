@@ -70,6 +70,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/smoother_init.o \
            src/engine/smoother_cancel.o \
            src/engine/controller_rt_data_init.o \
+           src/engine/controller_rt_data_ctor.o \
+           src/engine/slot_voice_data_ctor.o \
            src/engine/vector_manager.o \
            src/engine/vector_manager_init.o \
            src/engine/vector_eg_ctors.o \
@@ -193,6 +195,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
        src/engine/smoother_cancel.cpp \
+       src/engine/controller_rt_data_ctor.cpp \
+       src/engine/slot_voice_data_ctor.cpp \
        src/engine/alias_bank_convert.cpp \
        src/engine/midi_dispatcher.cpp \
        src/engine/vector_manager.cpp \
@@ -249,7 +253,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_audio_input_mixer \
          verify/test_alias_bank_convert verify/test_waveseq_generator \
          verify/test_audio_bus_manager verify/test_program_slot_ctor \
-         verify/test_sequence_ctor verify/test_smoother_cancel
+         verify/test_sequence_ctor verify/test_smoother_cancel \
+         verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -393,6 +398,12 @@ verify/test_smoother_init: verify/test_smoother_init.cpp src/engine/smoother_ini
 
 verify/test_smoother_cancel: verify/test_smoother_cancel.cpp src/engine/smoother_cancel.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_cancel.cpp src/engine/smoother_cancel.cpp -o $@
+
+verify/test_controller_rt_data_ctor: verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp include/oa_global.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp -o $@
+
+verify/test_slot_voice_data_ctor: verify/test_slot_voice_data_ctor.cpp src/engine/slot_voice_data_ctor.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_bank_memory.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_slot_voice_data_ctor.cpp src/engine/slot_voice_data_ctor.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_push_unsolicited_message: verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp include/oa_rtfifo_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_push_unsolicited_message.cpp src/engine/push_unsolicited_message.cpp -o $@

@@ -296,11 +296,43 @@ public:
 struct CSTGWaveSeqData {
 	void Initialize();
 };
+
+/*
+ * CSTGMidiCCFilter -- confirmed real (sec 10.155), a brand-new class:
+ * embedded within CSTGSlotVoiceData at +0x1db4 (confirmed via
+ * CSTGSlotVoiceData::CSTGSlotVoiceData()'s own call site, this pass --
+ * the outer ctor zeroes all 4 dwords of this sub-object immediately
+ * before calling Initialize() on it). A 128-bit (4-dword) MIDI
+ * CC-number bitmask. Initialize() (.text+0xd05b0, 45 bytes) confirmed:
+ * ORs in bits 0..119 of the mask (loop bound 0x78 == 120 -- a confirmed
+ * real "not quite the full 128 bits" bound, not a transcription
+ * rounding; the top 8 bits of the last dword are left however the
+ * caller already zeroed them). Own Set(const CSTGProgramSlot*)
+ * (.text+0xd05e0, 1206 bytes) is a much larger, not-yet-reconstructed
+ * sibling -- out of scope this pass.
+ */
+struct CSTGMidiCCFilter {
+	void Initialize();
+	unsigned int bits[4]; /* +0x0..+0xc */
+};
+
 struct CSTGSlotVoiceData {
 	/* Confirmed real (via relocation, called 32 times from
 	 * CSTGGlobal's own constructor, sec 10.56), declared explicitly
 	 * (not left to an implicit compiler-synthesized default) so that
-	 * construction links against the real confirmed symbol. */
+	 * construction links against the real confirmed symbol.
+	 *
+	 * CSTGSlotVoiceData::CSTGSlotVoiceData() (sec 10.155, `.text+0xb2fd0`,
+	 * 701 bytes) fully reconstructed -- see
+	 * src/engine/slot_voice_data_ctor.cpp for the full confirmed field
+	 * map (mutex pair, a 121-entry x 12-byte "voice slot" array at
+	 * +0x1488, the embedded CSTGMidiCCFilter at +0x1db4, the embedded
+	 * CSTGHeldKeyList at +0x1e80, two 0x6c00-byte AllocAligned buffers,
+	 * and several scattered scalar fields). Confirms two fields already
+	 * on record from EmergencyFreeAllVoices()/Steal() (sec 10.138/
+	 * 10.140): +0x44/+0x50 (the two linked-list heads those methods
+	 * operate on) are BOTH zeroed here too, independent cross-
+	 * confirmation of their real meaning. */
 	CSTGSlotVoiceData();
 
 	/*
@@ -640,10 +672,23 @@ struct CSTGProgramModeDrumTrackSlot : public CSTGProgramSlot {
 /*
  * CSTGHeldKeyList -- confirmed real (sec 10.78, via relocation from
  * CSTGGlobal::UpdateMIDIChannel, called on an address computed as
- * `(some pointer)+0x1e80`, likely a sub-object offset within a larger
- * class not independently recovered). Own layout not reconstructed.
+ * `(some pointer)+0x1e80` -- CONFIRMED this pass (sec 10.155) to be the
+ * embedded sub-object offset within CSTGSlotVoiceData, via that class's
+ * own ctor call site).
+ *
+ * CSTGHeldKeyList::CSTGHeldKeyList() (sec 10.155, `.text+0xa2470`, 96
+ * bytes) fully reconstructed -- see src/engine/slot_voice_data_ctor.cpp.
+ * Confirmed: builds a 128-node, 0x14-byte-stride array (next@+0x0,
+ * prev@+0x4, a self-pointer at +0xc, +0x10 zeroed -- matching Reset()'s
+ * own already-confirmed next/prev/count layout exactly, an independent
+ * cross-check of that method's own field map) followed immediately by a
+ * 12-byte head/tail/count trailer at +0xa00/+0xa04/+0xa08 (128*0x14 ==
+ * 0xa00, confirmed exact) -- total confirmed size 0xa0c bytes. A second,
+ * confirmed-real pass re-zeroes every node's own +0x0 a second time
+ * (functionally inert, preserved as a genuine double-write quirk).
  */
 struct CSTGHeldKeyList {
+	CSTGHeldKeyList();
 	void Reset();
 };
 

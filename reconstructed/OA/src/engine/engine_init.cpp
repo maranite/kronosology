@@ -168,6 +168,88 @@ CSTGRecordBuffer::CSTGRecordBuffer()
 	field3008 = 0;
 }
 
+/*
+ * CSTGHDRMiniModel::CSTGHDRMiniModel() (sec 10.155, `.text+0x1c7cf0`,
+ * 476 bytes) fully reconstructed. Confirmed via this file's own call
+ * site below (`AllocAligned(0xf60, 0x10)`): the ctor's own last write
+ * (+0xf5c, a dword) ends exactly at the confirmed 0xf60-byte object
+ * size, an independent cross-check the field map below is complete.
+ *
+ * No calls, no branches, no vtable install (no `_ZTV...CSTGHDRMiniModel`
+ * symbol exists in the ground truth -- this class is not polymorphic).
+ * Straight-line field zeroing plus FOUR confirmed intrusive-list
+ * sentinels, each: a head field (or, for the fourth, a 3-dword head
+ * cluster) zeroed, with a SEPARATE tail-pointer field elsewhere set to
+ * point AT that head -- the same "list initially empty, tail == &head"
+ * idiom already confirmed real for CSTGSmoother/CSTGFrontPanelSmoothers
+ * elsewhere in this project (sec 10.86/10.153). Three of the four heads
+ * are zeroed only AFTER their address is taken for the tail-pointer
+ * store (real, confirmed instruction order, reproduced verbatim).
+ */
+CSTGHDRMiniModel::CSTGHDRMiniModel()
+{
+	unsigned char *self = (unsigned char *)this;
+
+	*(unsigned int *)(self + 0xec8) = ToU32(self + 0xea4);
+	*(unsigned int *)(self + 0xea4) = 0;
+	*(unsigned int *)(self + 0xea8) = 0;
+
+	*(unsigned int *)(self + 0xef4) = ToU32(self + 0xed0);
+	*(unsigned int *)(self + 0xeac) = 0;
+	*(unsigned int *)(self + 0xec0) = 0;
+
+	*(unsigned int *)(self + 0xf20) = ToU32(self + 0xefc);
+	*(unsigned int *)(self + 0xec4) = 0;
+	*(unsigned int *)(self + 0xecc) = 0;
+
+	*(unsigned int *)(self + 0xeb4) = 0;
+	*(unsigned int *)(self + 0xeb0) = 0;
+	*(unsigned short *)(self + 0xeb8) = 0;
+	*(unsigned short *)(self + 0xeba) = 0;
+
+	*(unsigned int *)(self + 0xed0) = 0; /* cluster B's own head */
+	*(unsigned int *)(self + 0xed4) = 0;
+	*(unsigned int *)(self + 0xed8) = 0;
+	*(unsigned int *)(self + 0xeec) = 0;
+	*(unsigned int *)(self + 0xef0) = 0;
+	*(unsigned int *)(self + 0xef8) = 0;
+	*(unsigned int *)(self + 0xee0) = 0;
+	*(unsigned int *)(self + 0xedc) = 0;
+	*(unsigned short *)(self + 0xee4) = 0;
+	*(unsigned short *)(self + 0xee6) = 0;
+
+	*(unsigned int *)(self + 0xefc) = 0; /* cluster C's own head */
+	*(unsigned int *)(self + 0xf00) = 0;
+	*(unsigned int *)(self + 0xf04) = 0;
+	*(unsigned int *)(self + 0xf18) = 0;
+	*(unsigned int *)(self + 0xf1c) = 0;
+	*(unsigned int *)(self + 0xf24) = 0;
+	*(unsigned int *)(self + 0xf0c) = 0;
+	*(unsigned int *)(self + 0xf08) = 0;
+	*(unsigned short *)(self + 0xf10) = 0;
+	*(unsigned short *)(self + 0xf12) = 0;
+
+	/* Fourth sentinel: a 3-dword head (+0xf28/+0xf2c/+0xf30) with its
+	 * own tail pointer at +0xf4c. */
+	*(unsigned int *)(self + 0xf4c) = ToU32(self + 0xf28);
+	*(unsigned int *)(self + 0xf28) = 0;
+	*(unsigned int *)(self + 0xf2c) = 0;
+	*(unsigned int *)(self + 0xf30) = 0;
+
+	*(unsigned int *)(self + 0xf44) = 0;
+	*(unsigned int *)(self + 0xf48) = 0;
+	*(unsigned int *)(self + 0xf50) = 0;
+	*(unsigned int *)(self + 0xf38) = 0;
+	*(unsigned int *)(self + 0xf34) = 0;
+	*(unsigned short *)(self + 0xf3c) = 0;
+	*(unsigned short *)(self + 0xf3e) = 0;
+	*(unsigned int *)(self + 0xf58) = 0;
+	*(unsigned int *)(self + 0xf54) = 0;
+	*(unsigned int *)(self + 0xf5c) = 0;
+
+	CSTGHDRMiniModel::sInstance = this;
+}
+
 /* Raw indirect vtable dispatch, matching CCostProfile's own established
  * treatment (oa_setup_global_resources.h) -- used for the two confirmed
  * calls whose target's exact vtable layout isn't independently pinned
