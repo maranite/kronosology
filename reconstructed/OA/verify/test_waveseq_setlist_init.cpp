@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_waveseq_setlist_init.cpp  -  host-side known-answer test for
- * CSTGWaveSeqData::Initialize()/CSetListBank::Initialize() (sec 10.84).
+ * CSTGWaveSeqData::Initialize()/CSetListBank::Initialize() (sec 10.84),
+ * plus (batch 12) CSTGWaveSequence::CSTGWaveSequence()/CSetList::CSetList().
  */
 
 #include <cstdio>
 #include <cstring>
 #include <sys/mman.h>
 #include "oa_global.h"
+#include "oa_internal.h" /* placement operator new(size_t, void*) */
 
 static int g_fail;
 static void check_eq(const char *label, unsigned int got, unsigned int want)
@@ -79,6 +81,29 @@ int main(void)
 
 		check_eq("dispatched exactly 598 times", (unsigned int)g_slot7Calls, 0x256);
 		munmap(buf, size);
+	}
+
+	printf("[3] CSTGWaveSequence::CSTGWaveSequence()/CSetList::CSetList() --\n"
+	       "    vtable-install-only (batch 12): confirmed real via the\n"
+	       "    INLINED instructions at CSTGGlobal::CSTGGlobal()'s own\n"
+	       "    two array-construction loops (neither ctor has its own\n"
+	       "    standalone symbol in OA_real.ko)\n");
+	{
+		unsigned char waveSeqBuf[64];
+		memset(waveSeqBuf, 0xCC, sizeof(waveSeqBuf));
+		new (waveSeqBuf) CSTGWaveSequence();
+		check_eq("CSTGWaveSequence vtable ptr == &_ZTV16CSTGWaveSequence+8",
+			 *(unsigned int *)waveSeqBuf,
+			 (unsigned int)(unsigned long)(_ZTV16CSTGWaveSequence + 8));
+		check_eq("CSTGWaveSequence byte +4 untouched (poison)", waveSeqBuf[4], 0xCC);
+
+		unsigned char setListBuf[64];
+		memset(setListBuf, 0xCC, sizeof(setListBuf));
+		new (setListBuf) CSetList();
+		check_eq("CSetList vtable ptr == &_ZTV8CSetList+8",
+			 *(unsigned int *)setListBuf,
+			 (unsigned int)(unsigned long)(_ZTV8CSetList + 8));
+		check_eq("CSetList byte +4 untouched (poison)", setListBuf[4], 0xCC);
 	}
 
 	printf("=========================================================\n");

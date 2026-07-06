@@ -1145,6 +1145,24 @@ struct CSTGAudioInput {
 	void UseSettings();
 };
 struct CSTGDrumKitData { CSTGDrumKitData(); };
+/*
+ * CSTGWaveSequence::CSTGWaveSequence() -- NOT a standalone symbol in
+ * OA_real.ko (confirmed absent from the whole symbol table, unlike
+ * every other model/manager ctor in this project) -- fully INLINED at
+ * its one call site, CSTGGlobal::CSTGGlobal()'s own 598-entry array
+ * loop (`.text+0x3910`: `movl $0x8,(%ecx)` with relocation
+ * `_ZTV16CSTGWaveSequence`, see global_ctor.cpp). Real ctor effect is
+ * therefore fully confirmed and IS a real body now (see
+ * waveseq_setlist_init.cpp): the standard Itanium vtable-pointer
+ * install only (`_ZTV16CSTGWaveSequence+8`), nothing else -- every
+ * other byte global_ctor.cpp's own loop writes for each entry
+ * (+0x5/+0x13 zero bytes, the 64-entry inner zero-fill) is
+ * CSTGGlobal's OWN ctor code, not part of this sub-object's ctor.
+ * `_ZTV16CSTGWaveSequence` sized to its confirmed real 96 bytes
+ * (readelf, `vtable for CSTGWaveSequence`), not a generic 12-byte
+ * placeholder, since the true size is independently known here.
+ */
+extern "C" unsigned char _ZTV16CSTGWaveSequence[96];
 struct CSTGWaveSequence { CSTGWaveSequence(); };
 struct CSTGProgram { CSTGProgram(); };
 struct CSTGCombi { CSTGCombi(); };
@@ -1181,6 +1199,20 @@ struct CSTGSequence : public CSTGCombi { CSTGSequence(); };
  * resolving both at genuinely different offsets in the same call site
  * (`+0x293374c`, idx-only stride, vs. `CSetListSlot`'s own
  * `+0x2933750 + idx*0x834 + idx2*0x10`). */
+/*
+ * CSetList::CSetList() -- same "no standalone symbol, fully inlined"
+ * situation as CSTGWaveSequence::CSTGWaveSequence() just above: absent
+ * from the whole symbol table, fully inlined at its own one call site
+ * in CSTGGlobal::CSTGGlobal()'s 128-entry array loop (`.text+0x3a38`:
+ * `movl $0x8,(%ecx)` with relocation `_ZTV8CSetList`). Real ctor effect
+ * confirmed and now a real body (waveseq_setlist_init.cpp): vtable-
+ * pointer install only (`_ZTV8CSetList+8`) -- the loop's own 128-entry
+ * inner zero-fill and trailing byte are CSTGGlobal's OWN ctor code.
+ * `_ZTV8CSetList` sized to its confirmed real 96 bytes (readelf,
+ * `vtable for CSetList`), matching the CSTGWaveSequence precedent just
+ * above.
+ */
+extern "C" unsigned char _ZTV8CSetList[96];
 struct CSetList { CSetList(); void Activate(); };
 
 /*

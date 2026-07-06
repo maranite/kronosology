@@ -300,6 +300,18 @@ struct CSTGMidiQueue {
 	 * subsequent copy.
 	 */
 	unsigned int GetNumWritableBytes() const;
+
+	/*
+	 * Reset() (batch 12, `.text+0x40060`, 36 bytes) confirmed real: zeroes
+	 * the write cursor (`+0xc`) and all 4 reader cursors (`+0x10..+0x1f`,
+	 * matching this class's own already-confirmed "+0x10+i*4 reader i's
+	 * cursor" layout above) -- 5 dword stores total, nothing else. Does
+	 * NOT touch the capacity mask (`+0x8`) or the active reader count
+	 * (`+0x20`), a real, confirmed gap (every real caller reuses an
+	 * already-`Initialize()`'d ring, just rewinding both cursors back to
+	 * empty). See midi_queue.cpp.
+	 */
+	void Reset();
 };
 
 /*

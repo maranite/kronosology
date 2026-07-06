@@ -709,23 +709,30 @@ public:
 	 * per-instance state" conclusion above (drawn from the destructor
 	 * alone): the destructor simply doesn't happen to touch this
 	 * embedded `+0x138` sub-object, a confirmed real gap, not a
-	 * contradiction. **Deliberately NOT promoted to a real body in this
-	 * pass**: `test_global.cpp` already has two SEPARATE, independent
-	 * mocks/counters for this method and for `CSTGMidiQueueWriter::
-	 * Write` (~30 assertions across the file), and this method calling
-	 * through to that one for real would require rewiring every one of
-	 * them onto a single counter -- correctly out of scope for a
-	 * same-pass "small function batch," left as its own dedicated future
-	 * task rather than rushed.
+	 * contradiction. **Real body now, batch 12** (see
+	 * src/engine/midi_port_manager.cpp): the sec 10.145 concern above
+	 * (test_global.cpp's two separate mocks/counters needing rewiring)
+	 * turned out to be resolvable the same way `CSTGMidiQueueWriter::
+	 * Write()` itself was (sec 10.83) -- its own dedicated TU, not linked
+	 * by test_global.cpp/test_engine.cpp/test_global_ctor.cpp, so all
+	 * three files' existing mocks (for this method AND for `Write()`)
+	 * stay completely untouched; no rewiring needed after all.
 	 */
 	void WriteSTGMidiOutQueue(const unsigned char *data, unsigned int length);
 
-	/* NotifyNKS4TestMode() (.text+0xf5390, 115 bytes -- confirmed via
-	 * relocation from CSTGGlobal::SetNKS4TestModeFlag) confirmed real:
-	 * a table-driven lookup + up to 3 indirect calls through fields of
-	 * a not-yet-identified structure, substantially more involved than
-	 * this class's other confirmed methods -- deliberately deferred,
-	 * own body not reconstructed in this pass. */
+	/*
+	 * NotifyNKS4TestMode() (.text+0xf5390, 115 bytes -- confirmed via
+	 * relocation from CSTGGlobal::SetNKS4TestModeFlag) **real body now,
+	 * batch 12** (see src/engine/midi_port_manager.cpp): the "up to 3
+	 * indirect calls through fields of a not-yet-identified structure"
+	 * description above was written before this project's own
+	 * `CSTGMidiQueue` class existed (sec 10.63/10.82/10.150) -- a fresh
+	 * disassembly resolves the "structure" as the SAME `oa_heap_base()`/
+	 * `oa_heap_region()` idiom already established in oa_heap.h, and
+	 * the "indirect calls" as 4 DIRECT relocated calls to the real,
+	 * already-tiny `CSTGMidiQueue::Reset()` (batch 12, midi_queue.cpp),
+	 * not vtable dispatch at all.
+	 */
 	void NotifyNKS4TestMode();
 };
 

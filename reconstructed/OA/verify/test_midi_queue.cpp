@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_midi_queue.cpp  -  host-side known-answer test for
- * CSTGMidiQueue::GetNumWritableBytes() (sec 10.150). See
- * test_midi_queue_writer.cpp for CSTGMidiQueueWriter::Write() (sec
- * 10.83), the same shared ringCtl memory but a separate file/KAT.
+ * CSTGMidiQueue::GetNumWritableBytes() (sec 10.150) and Reset() (batch
+ * 12). See test_midi_queue_writer.cpp for CSTGMidiQueueWriter::Write()
+ * (sec 10.83), the same shared ringCtl memory but a separate file/KAT.
  */
 
 #include <cstdio>
@@ -84,6 +84,22 @@ int main(void)
 		ctl.readerCount = 0;
 		check_eq("GetNumWritableBytes() == 0 (always congested)",
 			 q->GetNumWritableBytes(), 0);
+	}
+
+	printf("[5] Reset() -- zeroes writeCursor + all 4 reader cursors,\n"
+	       "    leaves mask/readerCount untouched (confirmed real gap)\n");
+	{
+		memset(ctlPtr, 0xCC, sizeof(RingCtl));
+		ctl.mask = 0xf;
+		ctl.readerCount = 4;
+		q->Reset();
+		check_eq("writeCursor == 0", ctl.writeCursor, 0);
+		check_eq("readerPos[0] == 0", ctl.readerPos[0], 0);
+		check_eq("readerPos[1] == 0", ctl.readerPos[1], 0);
+		check_eq("readerPos[2] == 0", ctl.readerPos[2], 0);
+		check_eq("readerPos[3] == 0", ctl.readerPos[3], 0);
+		check_eq("mask untouched (0xf)", ctl.mask, 0xf);
+		check_eq("readerCount untouched (4)", ctl.readerCount, 4);
 	}
 
 	printf("=========================================================\n");

@@ -92,8 +92,14 @@ void CSTGStreamingFileReader::ProcessCommands() {}
 void CSTGSamplingDaemon::ProcessCommands() {}
 void CSTGMidiPortManager::Initialize() {}
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
-void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned int) {}
-void CSTGMidiPortManager::NotifyNKS4TestMode() {}
+/* CSTGMidiPortManager::WriteSTGMidiOutQueue()/NotifyNKS4TestMode() are
+ * real now, batch 12 -- see src/engine/midi_port_manager.cpp (its own
+ * dedicated TU, not linked by test_global.cpp/test_engine.cpp/
+ * test_global_ctor.cpp, each of which keeps its own pre-existing local
+ * mock for both symbols untouched -- same "give it its own TU"
+ * technique already used for CSTGMidiQueueWriter::Write, sec 10.83).
+ * NotifyNKS4TestMode()'s own newly-discovered dependency,
+ * CSTGMidiQueue::Reset(), is real now too -- see midi_queue.cpp. */
 /* CSTGVoiceAllocator::Initialize() is real now, sec 10.157 -- see
  * managers.cpp (also CSTGVoice::CSTGVoice(unsigned short), a brand-new
  * class this same pass gives its own full definition in oa_engine.h --
@@ -315,8 +321,12 @@ void CSTGVoiceAllocator::StealAllVoices() {}
  * for real, sec 10.84 -- see src/engine/global.cpp. */
 /* CSTGWaveSeqGenerator::CSTGWaveSeqGenerator()/Init() are real now, sec
  * 10.152 -- see src/engine/waveseq_generator.cpp. */
-CSTGWaveSequence::CSTGWaveSequence() {}
-CSetList::CSetList() {}
+/* CSTGWaveSequence::CSTGWaveSequence()/CSetList::CSetList() are real
+ * now, batch 12 -- see src/engine/waveseq_setlist_init.cpp (also their
+ * own confirmed real vtables, _ZTV16CSTGWaveSequence/_ZTV8CSetList,
+ * defined there). Neither ctor has its OWN standalone symbol in
+ * OA_real.ko -- both are fully inlined at their one call site in
+ * CSTGGlobal::CSTGGlobal(), see that file's own header comment. */
 void CSetList::Activate() {}
 /* CStartupFile::CStartupFile(const char*)/~CStartupFile() are real now,
  * sec 10.148 -- see src/engine/startup_file.cpp. */

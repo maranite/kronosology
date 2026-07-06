@@ -62,6 +62,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_dispatcher.o \
            src/engine/midi_queue_writer.o \
            src/engine/midi_queue.o \
+           src/engine/midi_port_manager.o \
            src/engine/audio_input_mixer.o \
            src/engine/waveseq_setlist_init.o \
            src/engine/alias_bank_init.o \
@@ -200,6 +201,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/slot_voice_data_ctor.cpp \
        src/engine/alias_bank_convert.cpp \
        src/engine/midi_dispatcher.cpp \
+       src/engine/midi_port_manager.cpp \
        src/engine/vector_manager.cpp \
        src/engine/vector_manager_init.cpp \
        src/engine/vector_eg_ctors.cpp \
@@ -248,7 +250,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_cost_profile verify/test_lfo_stepseq_quad verify/test_wave_seq_manager \
          verify/test_midi_dispatcher verify/test_vector_manager verify/test_vector_manager_init \
          verify/test_vector_eg_ctors verify/test_midi_queue_writer \
-         verify/test_midi_queue \
+         verify/test_midi_queue verify/test_midi_port_manager \
          verify/test_waveseq_setlist_init verify/test_alias_bank_init \
          verify/test_smoother_init verify/test_push_unsolicited_message \
          verify/test_startup_file verify/test_sk_stg_gate \
@@ -370,6 +372,9 @@ verify/test_midi_queue_writer: verify/test_midi_queue_writer.cpp src/engine/midi
 
 verify/test_midi_queue: verify/test_midi_queue.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_queue.cpp src/engine/midi_queue.cpp -o $@
+
+verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heap.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp -o $@
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp -o $@

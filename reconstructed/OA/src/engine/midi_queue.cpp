@@ -47,3 +47,28 @@ unsigned int CSTGMidiQueue::GetNumWritableBytes() const
 	unsigned int mask = *(const unsigned int *)(ringCtl + 0x8);
 	return (mask + 1) - worstBacklog;
 }
+
+/*
+ * Reset() (batch 12, `.text+0x40060`, 36 bytes) confirmed real via full
+ * disassembly: exactly 5 dword stores, no branches --
+ *   movl $0,0xc(%eax)   ; writeCursor = 0
+ *   movl $0,0x10(%eax)  ; readerCursor[0] = 0
+ *   movl $0,0x14(%eax)  ; readerCursor[1] = 0
+ *   movl $0,0x18(%eax)  ; readerCursor[2] = 0
+ *   movl $0,0x1c(%eax)  ; readerCursor[3] = 0
+ * `+0x8` (capacity mask) and `+0x20` (active reader count) are
+ * confirmed NOT touched -- a real, harmless gap: this rewinds an
+ * already-`Initialize()`'d ring back to empty, it doesn't reconfigure
+ * it. `this` IS the ringCtl block directly, same as
+ * GetNumWritableBytes() above (no `+0x0` wrapper indirection).
+ */
+void CSTGMidiQueue::Reset()
+{
+	unsigned char *ringCtl = (unsigned char *)this;
+
+	*(unsigned int *)(ringCtl + 0xc) = 0;
+	*(unsigned int *)(ringCtl + 0x10) = 0;
+	*(unsigned int *)(ringCtl + 0x14) = 0;
+	*(unsigned int *)(ringCtl + 0x18) = 0;
+	*(unsigned int *)(ringCtl + 0x1c) = 0;
+}
