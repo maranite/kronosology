@@ -1286,3 +1286,72 @@ entries); `CSTGPerformanceVars::EnterActivatingState()` (re-confirmed the
 EXACT sec 10.153 six-new-class cluster); `CSTGSlotVoiceData::
 UpdateGlobalTune(float)` (confirmed real vtable dispatch through
 `CSTGPatchMessageContext`, a repeat of the already-known blocker).
+
+**Batch 18 specifics** (2026-07-06, sec 10.165): a repeat of the sec
+10.149 "resumed mid-flight" situation, but this time NOT flagged by the
+orchestrator -- `git diff --stat`/`git status --short` at session start
+showed `bar2_stubs.cpp`/`oa_engine.h`/`oa_global.h`/`Makefile` already
+modified plus two fully-written untracked files
+(`src/engine/audio_input_use_settings.cpp`, `channel_values_reset.cpp`,
+both self-labeled "batch 18") with matching Makefile wiring and
+`verify/` KATs already in place. **Standing lesson reinforced: NEVER
+trust an orchestrator's/briefing's own claim of "confirmed clean tree"
+at face value -- always run `git diff --stat`/`git status --short`
+yourself as the very first step of any batch, even when told it's
+unnecessary.** Treated the found work as a legitimate continuation (sec
+10.149 precedent) rather than redoing the disassembly, but independently
+re-verified both files via a real rebuild before trusting them -- both
+held up with zero changes needed. Own new work layered on top: resolved
+sec 10.164's own explicitly-flagged priority recommendation, the
+`CLoadBalancer` cost-accounting cluster -- `CSTGSlotVoiceData::
+EnableSlot()`, `CLoadBalancer::BalanceStaticLoad()`, `CLoadBalancer::
+BalanceStaticLoadHelper(...)` all reconstructed, plus their own newly-
+discovered dependency `CSTGSlotVoiceData::GetPatchStaticCosts(...)`
+confirmed STILL genuinely blocked (real vtable dispatch through the
+`CIFXEffectSlot`/`CMFXEffectSlot` cluster, sec 10.157) and added as a new
+bare-`{}` stub. Stub count 74 -> 72 (net -2: three bare-`{}` removals
+from the resumed pair + this batch's own `BalanceStaticLoad`, minus one
+newly-added bare-`{}` for `GetPatchStaticCosts`).
+
+**Key technique this batch, worth reusing for any future gnarly
+control-flow function with no clean high-level "meaning"**:
+`BalanceStaticLoadHelper` (the hardest function reconstructed in this
+whole sweep so far) has two interleaved scan/advance re-entry points
+whose exact PURPOSE (why two separate output arrays are indexed by two
+INDEPENDENTLY-tracked scan positions) is not recoverable from the
+disassembly alone. Rather than force a plausible-sounding high-level
+narrative, it was transliterated as a literal instruction-level
+translation (named locals tracking specific registers/stack slots, e.g.
+`v34`/`v38`/`v1c`/`v3c`) -- THEN, critically, independently hand-traced
+THREE small `busCount` cases (0, 1, 2) by manually simulating the x86
+flag semantics ON PAPER before writing any KAT, and wrote the KAT's own
+expected values FROM that independent hand-trace, not from the C
+translation being tested. This caught a real transcription slip mid-
+derivation (an early draft assumed the "tail settles then busCount-exit"
+path reused `chosenPtr`/`distArrayA` the same way the "keep-advancing
+then busCount-exit" path does -- re-deriving `busCount==1` by hand a
+SECOND time, independently, exposed that BOTH exit paths actually target
+`distArrayB` via a saved index, never `distArrayA`) -- caught by the
+independent-re-derivation discipline itself, before ever running a KAT,
+not by a KAT failure. The `busCount==2` KAT case (deliberately chosen
+with monotonically-decreasing `distArrayB`) is what actually PROVES the
+translation is right rather than a plausible-but-wrong simplification --
+it's the one case where `bestIdx != scanIdx`, and it passed clean on the
+first real run. Lesson: for a function this intricate, do TWO
+independent things before trusting a mechanical transliteration -- (1)
+hand-derive at least 2-3 small cases on paper, not just 1, since a
+single traced case can "confirm" a subtly wrong generalization, and (2)
+choose at least one KAT case specifically designed to distinguish the
+right translation from the most plausible WRONG one (here: two outputs
+landing in the same vs. different array slots), not just cases that
+exercise the "happy path."
+
+**Second technique, a reused-successfully precedent**: `CSTGSlotVoiceData::
+GetTotalStaticCosts()` (already a deferred stub, sec 10.94) was
+freshly re-disassembled this batch on the theory it might just call the
+newly-reconstructed `GetPatchStaticCosts()` (which would have unblocked
+it for free) -- it does NOT; it independently INLINES the identical
+vtable-dispatch pattern at its own two call sites instead. Another
+confirmed instance of sec 10.163's "an inlined helper is not the same as
+a call to the shared helper" finding -- worth re-checking every time a
+sibling method LOOKS like it should just call a newly-real helper.

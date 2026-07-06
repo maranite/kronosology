@@ -1410,6 +1410,8 @@ public:
 	unsigned char _unrecovered[36];
 };
 
+struct CSTGSlotVoiceData;	/* forward decl, real definition in oa_global.h */
+
 /* Also real heap-`new`'d, same reasoning as CSTGAudioManager. */
 class CLoadBalancer {
 public:
@@ -1417,13 +1419,79 @@ public:
 	CLoadBalancer();
 	~CLoadBalancer();
 	void Initialize();	/* confirmed real, body not reconstructed, sec 10.58 */
-	/* BalanceStaticLoad() (confirmed real via a relocation from
-	 * CSTGPerformanceVars::FreeVoicelessDyingSlots, sec 10.110) --
-	 * confirmed real, deliberately deferred extern; own body not
-	 * reconstructed in this pass. */
+
+	/*
+	 * BalanceStaticLoad() (batch 18, `.text+0x61cb0`, 401 bytes, confirmed
+	 * via a relocation from CSTGPerformanceVars::FreeVoicelessDyingSlots,
+	 * sec 10.110) fully reconstructed -- see
+	 * src/engine/load_balancer_static.cpp. `this` is never dereferenced
+	 * except to pass straight through as BalanceStaticLoadHelper()'s own
+	 * `this` -- confirmed via a full disassembly, zero direct field
+	 * accesses on CLoadBalancer itself EXCEPT `fieldAt(0x8c)` (the
+	 * budget threshold, see BalanceStaticLoadHelper's own comment for
+	 * where that field lives structurally). Two phases: (1) walks
+	 * `CSTGGlobal::sInstance+0x29c9900` (the SAME list
+	 * `RunVoiceModelFeedback`/`FreeSlotVoiceData` use) accumulating
+	 * `BalanceStaticLoadHelper()` calls for every non-`+0x42`-flagged
+	 * payload whose `+0x28c4` mode is NEITHER 1 NOR 2 and whose
+	 * `+0x34`-program sub-object's `+0xd` subType IS 1 or 2 -- this
+	 * phase only ever ACCUMULATES into the running totals, never enables
+	 * anything. (2) walks the SAME 16-entry, 12-byte-stride
+	 * `CSTGGlobal::sInstance+0x29c990c` active-voice-data-node table
+	 * `UpdateAllActiveMIDIFilters`/`ResolveActiveVoiceDataNode` already
+	 * use (sec 10.142/10.163) -- for each qualifying payload (not dying,
+	 * mode EXACTLY 1, subType 1 or 2), computes
+	 * `payload->GetTotalStaticCosts()` and checks whether the running
+	 * totals-so-far PLUS this candidate's own cost fit within
+	 * `fieldAt(0x8c)`; if so, calls `payload->EnableSlot()` then feeds
+	 * this candidate's own cost into the SAME running-total arrays via
+	 * another `BalanceStaticLoadHelper()` call (so later candidates in
+	 * the same pass see the now-higher committed total) -- a genuine
+	 * greedy, budget-limited slot-enabling loop.
+	 */
 	void BalanceStaticLoad();
+
+	/*
+	 * BalanceStaticLoadHelper(CSTGSlotVoiceData*, unsigned long*,
+	 * unsigned long*, unsigned long*, unsigned long*) (batch 18,
+	 * `.text+0x61b80`, 297 bytes) fully reconstructed -- see
+	 * src/engine/load_balancer_static.cpp. `this` (CLoadBalancer*) is
+	 * received but never dereferenced by this function either -- purely
+	 * forwarded semantics live entirely in the 5 explicit params. For
+	 * EACH of exactly two "cost dimensions" (`busIndex` 0 then 1, NOT a
+	 * loop over `CSTGAudioManager::sInstance`'s own confirmed real
+	 * `+0x18` bus-count field -- that field is used only as the bound of
+	 * an INNER per-call scan, see below): calls
+	 * `candidate->GetPatchStaticCosts(busIndex, &out1, &out2)`, then
+	 * scans `distArrayA`/`distArrayB` (both caller-owned, `busCount`-
+	 * element arrays) to find `bestIdx` = argmin of `distArrayA[]`
+	 * (ties favor the higher index) via a direct `distArrayA[i]`
+	 * comparison scan, and INDEPENDENTLY `scanIdx` = the index the same
+	 * scan happens to have settled on when `distArrayB[]`'s own
+	 * strictly-decreasing run (as re-read directly from `distArrayB`,
+	 * NOT `distArrayA`) stops decreasing (or `busCount` is reached) --
+	 * confirmed via a full disassembly + hand-traced host KAT
+	 * (busCount 0/1/2) that `bestIdx` and `scanIdx` are genuinely
+	 * DIFFERENT indices whenever `busCount > 1` and `distArrayB` happens
+	 * to be monotonically decreasing all the way to its last element.
+	 * The exact higher-level PURPOSE of this two-signal split is not
+	 * independently determined -- reproduced as a literal, verified
+	 * mechanical transliteration of the real control flow (see the .cpp
+	 * file's own header comment), not a hand-simplified re-derivation.
+	 * Writes `candidate->fieldAt(0x28dc + busIndex) = (byte)bestIdx` and
+	 * `candidate->fieldAt(0x28de + busIndex) = (byte)scanIdx`, then
+	 * unconditionally: `distArrayA[bestIdx] += out1`,
+	 * `distArrayB[scanIdx] += out2`, `*sumOut1 += out1`, `*sumOut2 +=
+	 * out2`.
+	 */
+	void BalanceStaticLoadHelper(CSTGSlotVoiceData *candidate,
+				     unsigned long *distArrayA,
+				     unsigned long *distArrayB,
+				     unsigned long *sumOut1,
+				     unsigned long *sumOut2);
+
 	CEmergencyStealer emergencyStealer;	/* +0x00, confirmed embedded sub-object */
-	unsigned char _unrecovered[132];
+	unsigned char _unrecovered[132];	/* includes fieldAt(0x8c), the confirmed real budget threshold BalanceStaticLoad's own second phase compares against -- own precise meaning/units not independently determined, left inside this opaque blob rather than carved out, matching this project's established "raw offset into an opaque region" convention elsewhere (CSTGGlobal, etc). */
 };
 
 /* ---- CSTGEngine itself ---- */

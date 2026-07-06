@@ -166,7 +166,10 @@ extern "C" void SKMain_Initialize(void *) {}
  * dependencies (CSTGPan::CalculateMonoPanCoeffs, CBusChangeStateMachine::
  * StartBusChange, CSTGBusInfo::GetSignalSelectionForBusType) are all
  * real now, sec 10.151 -- see src/engine/audio_input_mixer.cpp. */
-void CSTGAudioInput::UseSettings() {}
+/* CSTGAudioInput::UseSettings() is real now, batch 18 -- see
+ * src/engine/audio_input_use_settings.cpp (its own dedicated translation
+ * unit; test_engine.cpp/test_global.cpp/test_global_ctor.cpp all keep
+ * their own pre-existing mocks for this symbol untouched). */
 /* Sec 10.97's own confirmed-real, deliberately deferred externs.
  * CSetListSlot::Activate is now real (sec 10.141). */
 /* SendPerfChangeToMidiOut is now real, sec 10.98 -- see
@@ -200,9 +203,21 @@ CSTGCombi::CSTGCombi() {}
 void CSTGControllerRTData::OnExtModeSetChange() {}
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) {}
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
-void CLoadBalancer::BalanceStaticLoad() {}
+/* CLoadBalancer::BalanceStaticLoad()/BalanceStaticLoadHelper(...) and
+ * CSTGSlotVoiceData::EnableSlot() are real now, batch 18 -- see
+ * src/engine/load_balancer_static.cpp. Their own fourth cluster sibling,
+ * CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long*,
+ * unsigned long*) const, is STILL confirmed real, deliberately deferred
+ * (real vtable DISPATCH through the not-yet-reconstructed
+ * CIFXEffectSlot/CMFXEffectSlot cluster, sec 10.157) -- calling into it
+ * from BalanceStaticLoadHelper is safe. */
+void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
-void CSTGChannelValues::Reset() {}
+/* CSTGChannelValues::Reset() is real now, batch 18 -- see
+ * src/engine/channel_values_reset.cpp (its own dedicated translation
+ * unit; test_engine.cpp/test_global.cpp/test_global_ctor.cpp all keep
+ * their own pre-existing mocks for this symbol untouched -- test_global.cpp's
+ * own mock is load-bearing call-tracking). */
 /* CSTGChannelValues::SetControllerValue() is real now, batch 15 -- see
  * src/engine/channel_values_set_controller_value.cpp. */
 /* Sec 10.101's own confirmed-real, deliberately deferred externs. */

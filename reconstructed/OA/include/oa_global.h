@@ -538,8 +538,55 @@ struct CSTGSlotVoiceData {
 	/* GetTotalStaticCosts(unsigned long*, unsigned long*) const (sec
 	 * 10.94, confirmed via relocation from CSTGGlobal::
 	 * StealDyingSlotVoiceDatasForCost) confirmed real, deliberately
-	 * deferred extern -- own body not reconstructed. */
+	 * deferred extern -- own body not reconstructed. Fresh disassembly
+	 * this pass (batch 18) confirms it independently INLINES the exact
+	 * same real vtable-dispatch pattern GetPatchStaticCosts() has as its
+	 * own standalone body (two `call *0x68(%edx)`-then-`call
+	 * *0x2x(%edx)` sequences through a per-slot `+0x38`-indexed
+	 * `CIFXEffectSlot`/`CMFXEffectSlot`-shaped table at `+0xb6b`), NOT a
+	 * call to GetPatchStaticCosts() itself -- another instance of this
+	 * project's own "an inlined helper is not the same as a call to the
+	 * shared helper" finding (sec 10.163). Still blocked on the same
+	 * not-yet-reconstructed effect-slot classes either way. */
 	void GetTotalStaticCosts(unsigned long *out1, unsigned long *out2) const;
+
+	/*
+	 * GetPatchStaticCosts(unsigned int, unsigned long*, unsigned long*)
+	 * const (batch 18, `.text+0xb5650`, 170 bytes, confirmed via
+	 * relocation from the newly-reconstructed
+	 * CLoadBalancer::BalanceStaticLoadHelper below) -- confirmed real,
+	 * deliberately deferred: `this->fieldAt(0x34)->UsesPatch(busIndex,
+	 * this->fieldAt(0x5))`-gated (a `CSTGProgramSlot::UsesPatch` call,
+	 * not yet reconstructed), then on a match does TWO separate real
+	 * vtable dispatches (`call *0x68(%edx)` then `call *0x24(%edx)` for
+	 * out1, `call *0x68(%edx)` then `call *0x28(%edx)` for out2) through
+	 * `this->fieldAt(0x38)[busIndexByte]`, a per-slot table at
+	 * `+0xb6b` -- the SAME `CIFXEffectSlot`x10+`CMFXEffectSlot` cluster
+	 * already blocking `CSTGProgram::CSTGProgram()` (sec 10.157). Real
+	 * vtable DISPATCH per the sec 10.153 "install vs dispatch" rule --
+	 * own body not reconstructed, left as a bare no-op stub in
+	 * bar2_stubs.cpp; calling into it from BalanceStaticLoadHelper is
+	 * safe (established "calling a still-deferred stub is fine"
+	 * precedent).
+	 */
+	void GetPatchStaticCosts(unsigned int busIndex, unsigned long *out1, unsigned long *out2) const;
+
+	/*
+	 * EnableSlot() (batch 18, `.text+0xb3b80`, 101 bytes, confirmed via
+	 * relocation from the newly-reconstructed
+	 * CLoadBalancer::BalanceStaticLoad below) fully reconstructed -- see
+	 * src/engine/load_balancer_static.cpp. No-op unless
+	 * `fieldAt(0x28c4)` (dword) is nonzero -- the SAME "cost-accounting
+	 * lock/reason" flag `FreeSlotVoiceData(bool)`/`BalanceStaticLoad`
+	 * already read (sec 10.164/batch 18); this method's own job is to
+	 * CLEAR it back to 0. Also sets bit 0x80 on `fieldAt(0x34)`'s own
+	 * sub-object `+0x45` byte, and sends a `PushUnsolicitedMessage` with
+	 * opcode `0x14`, param1 = `fieldAt(0x34)`'s own `+0x4` byte
+	 * (zero-extended), param2 = `1` -- same 20-byte tagged-message shape
+	 * already established in `OnExtModeKnobAssignChange`/
+	 * `OnExtModeSliderAssignChange` (sec 10.161, global.cpp).
+	 */
+	void EnableSlot();
 
 	/*
 	 * Steal() (sec 10.140, .text+0xb3c60, 56 bytes, confirmed via
