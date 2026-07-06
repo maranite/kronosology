@@ -2123,7 +2123,7 @@ dependency: `USTGHDRUtils::ConvertWaveToSTGSamples(...)` (`.text+0xd37a0`,
 (`GetDispositionForReadAttempt`/`UpdateHDRBufferWaterMarks`) are both real
 now (this batch and sec 10.172 respectively).
 
-**Batch 26 specifics** (2026-07-06, sec 10.174, commit TBD): the user gave
+**Batch 26 specifics** (2026-07-06, sec 10.174, commit `8ed19b3`): the user gave
 fresh explicit authorization to continue past batch 25. Re-verified state
 myself first (HEAD `81f7d55`, clean tree, bare-`{}` stub count 69, last
 section `10.173` -- matched the briefing). Ran on `kronosdev`
@@ -2210,7 +2210,7 @@ needed either for disassembly OR for the build/verify sequence).
 code (never log-grepped), both of two full clean-rebuild passes on
 `kronosdev` (byte-identical both times); 32 unresolved symbols;
 `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 163,288
-bytes (up from 161,496). Commit TBD.
+bytes (up from 161,496). Commit `8ed19b3`.
 
 **Deferred for a future batch, unchanged**: `CSTGEQ`'s five core math
 functions (still needs the verbatim-inline-asm-transcription approach).
