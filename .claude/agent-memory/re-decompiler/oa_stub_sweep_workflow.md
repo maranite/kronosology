@@ -1642,7 +1642,7 @@ session; the user's own standing rule (do not auto-continue past the
 current batch without a fresh request) still applies going into any
 future batch 22.
 
-**Batch 22 specifics** (2026-07-06, sec 10.170, commit TBD): the user
+**Batch 22 specifics** (2026-07-06, sec 10.170, commit 78649cc): the user
 gave fresh explicit authorization to continue past batch 21. Re-verified
 state myself first (HEAD `c6c3fb6`, clean tree, stub count 72, last
 section 10.169 -- matched the briefing). Picked `CSTGSmoother::
@@ -1762,7 +1762,4 @@ committing to a KAT, not attempted this batch either.
 **Verification**: 65 verify/ binaries (up from 63), all exit 0, both of
 two full clean-rebuild passes (byte-identical both times); 32 unresolved
 symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0 `R_386_GOTPC`;
-`OA.ko` 156,984 bytes (up from 153,844). Commit hash: see git log for
-the "batch 22" commit (recorded after this memory file was written, per
-this project's own established two-commit pattern for memory-hash
-fills).
+`OA.ko` 156,984 bytes (up from 153,844). Commit `78649cc`.
