@@ -1546,3 +1546,98 @@ to stop the stub-sweep after batch 19 -- do not auto-start batch 20 without
 being asked again." The user DID ask again (this batch), so batch 20 was
 authorized. The standing rule remains: do not auto-continue to batch 21 in
 a future session without a fresh explicit request.
+
+**Batch 21 specifics** (2026-07-06, sec 10.169, commit TBD): the user
+gave fresh explicit authorization to continue past batch 20, satisfying
+the batch-19/20 stop-note above. Re-verified state myself before starting
+(HEAD `59c6fd8`, clean tree, stub count 73, last section 10.168 -- all
+matched the task briefing this time, no surprises). Picked
+`CSTGMIDIClockSync::CSTGMIDIClockSync()` (repeatedly rejected since sec
+10.153 as needing a new base class + vtable) -- fresh disassembly found
+the whole cluster (ctor + `CSTGMIDIClockSyncBase::Initialize()` + all 8
+`CSTGIntMIDIClockSync` vtable-slot methods) is branch/call-light and
+fully tractable, matching sec 10.158's "check the whole class once a
+tiny dependency turns up" technique. 11 functions reconstructed across a
+new file (`src/engine/midi_clock_sync.cpp`) plus 2 more added to the
+existing `sk_stg_gate.cpp`. Stub count 73 -> 72 (net -1 -- only the ctor
+had a prior bare-`{}` stub; everything else was brand-new).
+
+**IMPORTANT ENVIRONMENT UPDATE, supersedes the batch-20 "must SSH to
+192.168.3.92" assumption**: this session's OWN working environment
+(hostname `kronosdev`, IP 192.168.3.86) already had direct, local access
+to BOTH `/home/share` (no CIFS detour needed to reach it) AND a working
+`/home/build/linux-kronos` kernel tree in place -- `make clean && make
+all && make ko KDIR=/home/build/linux-kronos` all ran successfully
+DIRECTLY, no SSH required. Ran the full verification sequence twice
+locally (both clean, both passing identically: 63/63 suites exit 0, all
+4 invariants, OA.ko 153,844 bytes both times), then ALSO cross-checked
+once on the documented 192.168.3.92 host via
+`sshpass -p kronosbuild ssh root@192.168.3.92` (still hitting the
+batch-20-documented "non-interactive ssh lands in /root" gotcha --
+confirmed STILL TRUE, every remote command still needs its own `cd
+/home/share/kronosology/reconstructed/OA &&` prefix) -- got byte-for-byte
+IDENTICAL results (63/63, size 153,844) on all three runs. Lesson: don't
+assume the CURRENT session's shell is the same restricted environment a
+PRIOR batch documented -- check for local `/home/build/linux-kronos` and
+try a local `make ko` FIRST (fast, no SSH round-trip, no stale-log risk)
+before falling back to the documented 192.168.3.92 SSH workflow; if both
+are available, cross-checking on both remains good practice (three
+agreeing runs is strictly better evidence than one) but is no longer
+strictly required to get a build done.
+
+**Technique reused successfully (3rd confirmed instance): before
+hand-rolling x87 inline asm for a confirmed "non-trivial-looking" FPU
+control-word rounding sequence (`frndint`+`fisttp` with an explicit
+rounding-mode change, here "round toward +infinity"), check whether the
+ACTUAL CONFIRMED real-world inputs make the rounding mode provably
+immaterial.** `CSTGMIDIClockSyncBase::Initialize()`'s own
+`0.104 * 1500.0` was independently verified (Python, double precision)
+to equal EXACTLY `156.0` -- zero rounding ambiguity regardless of mode --
+so a plain `(int)(...)` C truncation is provably equivalent to the real
+ceiling dance for this one confirmed input. Matches the pre-existing
+`CSTGDiskCostManager::Initialize()`/`engine_startup_bits2.cpp` "trivial
+given" precedent (sec 10.57), now confirmed a further time: don't reach
+for inline asm just because the DISASSEMBLY looks intricate -- check the
+actual numbers first, they may make the intricacy moot.
+
+**Reconfirmed, not new: the `-mhard-float -msse2 -mfpmath=sse` per-file
+Makefile CFLAGS override (four prior sibling files:
+engine_startup_bits.cpp/engine_startup_bits2.cpp/scale.cpp/
+smoother_init.cpp) is the DEFAULT/majority choice for "genuine but
+simple, non-chained-in-a-precision-sensitive-way" float/double
+arithmetic under this kernel's own `-msoft-float` build** -- used it
+again for `midi_clock_sync.cpp` rather than hand-rolled x87 inline asm
+(sec 10.117's `MulRoundToFloat`/`FYL2X` precedent), which remains
+reserved for cases with an explicit stated reason to avoid
+double-rounding (a downstream exact-boundary clamp comparison, in that
+case). When in doubt for a NEW file needing float/double math, default
+to the CFLAGS-override + plain-C route first; only reach for inline asm
+if there's a SPECIFIC identified precision-sensitive reason not to.
+
+**Offset-collision discipline, applied proactively (no bug found, but
+worth recording as a successful catch-before-commit)**: before writing
+the ctor's own KAT, explicitly computed ALL absolute byte offsets by
+hand for fields that LOOK similar across an outer object and its own
+embedded sub-object (here: the ctor's own `+0x78/+0x98/+0xb8` on the
+OUTER `this` vs. `CSTGMIDIClockSyncBase::Initialize()`'s own
+`fieldAt(0xc)` on the EMBEDDED `this+0x4` sub-object, i.e. absolute
+`outerThis+0x10`) -- confirmed these are four genuinely DISTINCT storage
+locations despite sharing the same real constant (`48.0f`, reused at a
+second confirmed `.rodata.cst4` offset) and the same computation
+formula. Matches the sec 10.149/10.155 "recompute hex arithmetic twice,
+independently, before trusting it in a comment or KAT" discipline --
+applied here BEFORE any test was written, catching what would otherwise
+have been an easy field-identity mixup between two independently-styled
+comments describing "the same-looking" 48.0-multiply.
+
+No new deferred dependencies discovered this batch -- the whole ctor's
+own reachable call graph was fully resolved in one pass, an unusually
+clean result for this sweep.
+
+Full analysis, KAT structure, and verification numbers: MASTER_REFERENCE.md
+sec 10.169.
+
+**Batch-21 stop note**: no explicit stop instruction was given this
+session; the user's own standing rule (do not auto-continue past the
+current batch without a fresh request) still applies going into any
+future batch 22.

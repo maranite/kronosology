@@ -10,6 +10,12 @@
  * CKGBankManager::ms_poInstance instead, confirming the real "no null
  * check on ms_poInstance" quirk is genuinely safe: dispatch with
  * `this == 0` never actually touches `this`.
+ *
+ * Section [8] (batch 21): SKSTGGate_GetInternalTempo()/CTimerManager::
+ * GetInternalTempo() -- the confirmed real `*(int*)(*(int**)this + 0x2c)`
+ * double-indirection shape (this[0] is itself a pointer to the real data
+ * holder), same "this is barely used directly" family as
+ * ShouldSyncExternalClock()'s own CKGBankManager reload above.
  */
 
 #include <cstdio>
@@ -78,6 +84,23 @@ int main(void)
 	*(int *)(bankMgr + 0x97c750) = 1;
 	bool r7 = SKSTGGate_ShouldSyncExternalClock();
 	check_eq("dispatch with this==0 still works (this is never read)", r7, true);
+
+	printf("\n[8] SKSTGGate_GetInternalTempo() / CTimerManager::GetInternalTempo() "
+	       "-- this[0] is itself a pointer, +0x2c off THAT is the tempo\n");
+	{
+		unsigned char innerBuf[0x30];
+		unsigned char outerBuf[0x8];
+		for (unsigned int i = 0; i < sizeof(innerBuf); i++)
+			innerBuf[i] = 0xcc;
+		*(int *)(innerBuf + 0x2c) = 12345;
+		*(unsigned char **)outerBuf = innerBuf;
+
+		CTimerManager::ms_poInstance = (CTimerManager *)outerBuf;
+		check_eq("GetInternalTempo reads *(this[0])+0x2c", SKSTGGate_GetInternalTempo(), 12345);
+
+		*(int *)(innerBuf + 0x2c) = -7;
+		check_eq("GetInternalTempo (negative value)", SKSTGGate_GetInternalTempo(), -7);
+	}
 
 	printf("=========================================================\n");
 	printf("RESULT: %s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");

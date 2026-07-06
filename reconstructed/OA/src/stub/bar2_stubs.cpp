@@ -253,7 +253,10 @@ void CSTGHDRMiniModel::Initialize() {}
  * src/engine/global.cpp. CSTGHeldKeyList::CSTGHeldKeyList() is real now
  * too, sec 10.155 -- see src/engine/slot_voice_data_ctor.cpp. */
 CSTGLFOTables::CSTGLFOTables() {}
-CSTGMIDIClockSync::CSTGMIDIClockSync() {}
+/* CSTGMIDIClockSync::CSTGMIDIClockSync() is real now, batch 21 -- see
+ * src/engine/midi_clock_sync.cpp (also its own newly-discovered
+ * dependencies, CSTGMIDIClockSyncBase::Initialize() and the complete
+ * CSTGIntMIDIClockSync class, same file). */
 void CSTGMidiDispatcher::HandleController(unsigned char, unsigned char, unsigned char, int, int) {}
 void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
 /* CSTGMidiQueue::AllocReader() reconstructed for real, sec 10.82 -- see
@@ -437,6 +440,18 @@ unsigned char _ZTV17CSTGPlaybackEvent[40];
  * and references it directly, same confirmed 40-byte size (nm -CS) as its
  * CSTGAudioEvent/CSTGRecordEvent/CSTGPlaybackEvent siblings above. */
 unsigned char _ZTV18CSTGStreamingEvent[40];
+/* _ZTV20CSTGIntMIDIClockSync -- needed now that CSTGMIDIClockSync::
+ * CSTGMIDIClockSync() is real (batch 21, midi_clock_sync.cpp) and
+ * installs it directly on its own embedded CSTGIntMIDIClockSync
+ * sub-object. Real confirmed 40-byte size (readelf), 8 real slots -- ALL
+ * 8 slot targets are themselves reconstructed for real in
+ * midi_clock_sync.cpp too, but nothing in this project dispatches
+ * through this vtable yet, so it stays a safe zero-filled placeholder
+ * per this project's established "install vs dispatch" rule (sec
+ * 10.153) -- see midi_clock_sync.cpp's own header comment for the real
+ * slot -> method mapping if a future pass ever needs to populate it. */
+extern "C" unsigned char _ZTV20CSTGIntMIDIClockSync[40];
+unsigned char _ZTV20CSTGIntMIDIClockSync[40];
 
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,
  * already set by setup_global_resources.cpp; definition (storage) not

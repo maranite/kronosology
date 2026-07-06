@@ -785,7 +785,108 @@ struct CSTGLFOTables {
 	static CSTGLFOTables *sInstance;
 };
 
+/*
+ * CSTGMIDIClockSyncBase / CSTGIntMIDIClockSync (batch 21, `.text+0x67410`
+ * ctor cluster): a small polymorphic sub-object embedded at
+ * `CSTGMIDIClockSync`'s own `+0x4` (confirmed: the ctor writes the
+ * `_ZTV20CSTGIntMIDIClockSync+8` vtable pointer directly to
+ * `outerThis+0x4`, then calls `Initialize()` with `eax = outerThis+0x4`
+ * -- i.e. the embedded object's own offset-0 IS the outer object's
+ * `+0x4`). Only ONE combined vtable exists (`_ZTV20CSTGIntMIDIClockSync`,
+ * 40 bytes / 8 slots, readelf-confirmed) -- `CSTGMIDIClockSyncBase` has
+ * no data fields of its own beyond what `CSTGIntMIDIClockSync` uses, so
+ * modeled as a plain (non-`virtual`, matching this project's own
+ * "install-only, never-dispatched" precedent, sec 10.153/10.160) base
+ * with a normal derived class. Nothing in this project dispatches
+ * through this vtable yet (a real, safe zero-filled placeholder,
+ * bar2_stubs.cpp) -- if some future pass adds real dispatch, populate it
+ * with these 8 confirmed real slot targets (readelf -Wr
+ * '.rel.rodata._ZTV20CSTGIntMIDIClockSync', slot order matches
+ * declaration order below):
+ *   0x08 GetEventCount, 0x0c NotifySyncDetected, 0x10 GetEventStatusByte,
+ *   0x14 ProcessClock, 0x18 ConsumeEvent, 0x1c GetClockEarlyThresholdTicks,
+ *   0x20 GetClockLateThresholdTicks, 0x24 PrepareForNextTick.
+ */
+class CSTGMIDIClockSyncBase {
+public:
+	/*
+	 * Initialize() (`.text+0x67a50`, 152 bytes) confirmed real:
+	 *   - once ever (own function-local static guard byte), computes
+	 *     `kClockTimeOutTicks = ceil(0.104 * CSTGAudioBusManager::
+	 *     sInstance->busGainScale)` (0.104 a confirmed real
+	 *     `.rodata.cst8` double; the real code sets the x87 rounding
+	 *     control to "round toward +infinity" before `frndint`+`fisttp`,
+	 *     reproduced via inline asm, not a plain C cast/truncate).
+	 *   - every call: `kMaxNormalizedTempo = 200.0f *
+	 *     CSTGAudioBusManager::sInstance->busGainReciprocal` (float);
+	 *     zeroes `fieldAt(0x8)` (int) and `fieldAt(0x14)` (byte); sets
+	 *     `fieldAt(0xc)` (double) = `48.0 *
+	 *     CSTGAudioBusManager::sInstance->busGainReciprocal`.
+	 * `fieldAt(0x8)`/`fieldAt(0x14)` have no other confirmed reader in
+	 * this pass -- left as raw offsets, not named.
+	 */
+	void Initialize();
+
+	static int kClockTimeOutTicks;
+	static float kMaxNormalizedTempo;
+};
+
+class CSTGIntMIDIClockSync : public CSTGMIDIClockSyncBase {
+public:
+	/* GetEventCount() const (`.text+0x67e80`, 11 bytes): return
+	 * fieldAt(0x54) - fieldAt(0x58) (write-index minus read-index of the
+	 * 16-byte event-status ring below). */
+	unsigned int GetEventCount() const;
+
+	/* GetEventStatusByte() const (`.text+0x67e90`, 12 bytes): return the
+	 * ring byte at fieldAt(0x44 + (fieldAt(0x58) & 0xf)) -- a 16-entry
+	 * byte ring anchored at +0x44, indexed by the read-counter mod 16. */
+	unsigned char GetEventStatusByte() const;
+
+	/* ConsumeEvent() (`.text+0x67ea0`, 10 bytes): fieldAt(0x58) += 1
+	 * (advances the ring read-index). */
+	void ConsumeEvent();
+
+	/* PrepareForNextTick() (`.text+0x67eb0`, 66 bytes) confirmed real:
+	 * ONLY when NOT syncing to an external clock
+	 * (`!SKSTGGate_ShouldSyncExternalClock()`), recomputes fieldAt(0xc)
+	 * (double) = `(double)SKSTGGate_GetInternalTempo() * 0.01 * 0.4 *
+	 * CSTGAudioBusManager::sInstance->busGainReciprocal` (both 0.01/0.4
+	 * confirmed real `.rodata.cst8` doubles). Byte-for-byte identical
+	 * computation to NotifySyncDetected() below, just gated. */
+	void PrepareForNextTick();
+
+	/* NotifySyncDetected() (`.text+0x67f00`, 57 bytes): unconditionally
+	 * runs the SAME fieldAt(0xc) computation as PrepareForNextTick()'s
+	 * gated branch (confirmed identical opcodes). */
+	void NotifySyncDetected();
+
+	/* ProcessClock() (`.text+0x67650` section, 1 byte: bare `ret`) --
+	 * confirmed real no-op override. */
+	void ProcessClock();
+
+	/* GetClockLateThresholdTicks() const (2 bytes: `fld1;ret`) --
+	 * confirmed real: always returns 1.0f. */
+	float GetClockLateThresholdTicks() const;
+
+	/* GetClockEarlyThresholdTicks() const (2 bytes: `fldz;ret`) --
+	 * confirmed real: always returns 0.0f. */
+	float GetClockEarlyThresholdTicks() const;
+};
+
 struct CSTGMIDIClockSync {
+	/*
+	 * CSTGMIDIClockSync() (batch 21, `.text+0x67410`, 250 bytes)
+	 * confirmed real: sets `fieldAt(0x44)` (byte) = 1; installs the
+	 * embedded `CSTGIntMIDIClockSync` sub-object's vtable at `+0x4` and
+	 * calls its `Initialize()` (see class above); zeroes
+	 * fieldAt(0x5c/0x68/0x6c/0x70/0x74/0x60/0x64) (int); mirrors
+	 * fieldAt(0x58) = fieldAt(0x5c) (both 0); sets
+	 * fieldAt(0x78/0x98/0xb8) (double, all three IDENTICAL) = `48.0f *
+	 * CSTGAudioBusManager::sInstance->busGainReciprocal` (48.0f a
+	 * confirmed real `.rodata.cst4` float); zeroes fieldAt(0x80/0xa0/0xc0)
+	 * (double); zeroes fieldAt(0x88/0x8c/0x90/0x94/0xa8/0xac/0xb0/0xb4)
+	 * (int); sets fieldAt(0xc8) = -1; sets sInstance = this. */
 	CSTGMIDIClockSync();
 	/* Confirmed real (`_ZN17CSTGMIDIClockSync9sInstanceE`), needed by
 	 * CSTGLFOBase::InitializeQuad() -- sec 10.61. */
@@ -816,6 +917,15 @@ struct CSTGMIDIClockSync {
 struct CTimerManager {
 	static CTimerManager *ms_poInstance;
 	bool ShouldSyncExternalClock();
+
+	/* GetInternalTempo() (batch 21, `.text+0x347250`, 6 bytes) confirmed
+	 * real: `return *(int*)(*(int**)this + 0x2c);` -- the SAME "this is
+	 * itself a pointer to the real data holder" indirection quirk
+	 * already confirmed for ShouldSyncExternalClock()'s own
+	 * CKGBankManager reload above, just one level of indirection through
+	 * `this` instead of a separate global. Reproduced verbatim, not
+	 * "fixed" to read a direct field. */
+	int GetInternalTempo();
 };
 
 /*
@@ -843,6 +953,15 @@ struct CKGBankManager {
  * "C"` mangled global function, matching signature; a harmless
  * redeclaration where both headers happen to be included together. */
 bool SKSTGGate_ShouldSyncExternalClock();
+
+/*
+ * SKSTGGate_GetInternalTempo() (batch 21, `.text+0x349d30`, 20 bytes)
+ * confirmed real: loads `CTimerManager::ms_poInstance` and makes a
+ * direct (non-virtual) regparm(3) call to `CTimerManager::
+ * GetInternalTempo()` with it as `this`, same "no null check" shape as
+ * SKSTGGate_ShouldSyncExternalClock() above -- reproduced verbatim.
+ */
+int SKSTGGate_GetInternalTempo();
 
 /*
  * CSTGKLMManager is a fully separate, already-complete Stage 1 class

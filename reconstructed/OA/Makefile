@@ -59,6 +59,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/cost_profile.o \
            src/engine/startup_file.o \
            src/engine/sk_stg_gate.o \
+           src/engine/midi_clock_sync.o \
            src/engine/lfo_stepseq_quad.o \
            src/engine/wave_seq_manager.o \
            src/engine/midi_dispatcher.o \
@@ -166,6 +167,13 @@ CFLAGS_scale.o := -mhard-float -msse2 -mfpmath=sse
 # otherwise pull in unresolvable libgcc soft-float/double helpers.
 CFLAGS_smoother_init.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: midi_clock_sync.cpp's own genuine (but confirmed
+# exact/unambiguous, batch 21) double-precision arithmetic in
+# CSTGMIDIClockSyncBase::Initialize()/CSTGMIDIClockSync::
+# CSTGMIDIClockSync()/RecomputeMIDIClockInterval() would otherwise pull
+# in unresolvable libgcc soft-float/double helpers.
+CFLAGS_midi_clock_sync.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -209,6 +217,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/cost_profile.cpp \
        src/engine/startup_file.cpp \
        src/engine/sk_stg_gate.cpp \
+       src/engine/midi_clock_sync.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -282,6 +291,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_waveseq_setlist_init verify/test_alias_bank_init \
          verify/test_smoother_init verify/test_push_unsolicited_message \
          verify/test_startup_file verify/test_sk_stg_gate \
+         verify/test_midi_clock_sync \
          verify/test_audio_input_mixer \
          verify/test_alias_bank_convert verify/test_waveseq_generator \
          verify/test_audio_bus_manager verify/test_program_slot_ctor \
@@ -392,6 +402,9 @@ verify/test_startup_file: verify/test_startup_file.cpp src/engine/startup_file.c
 
 verify/test_sk_stg_gate: verify/test_sk_stg_gate.cpp src/engine/sk_stg_gate.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_sk_stg_gate.cpp src/engine/sk_stg_gate.cpp -o $@
+
+verify/test_midi_clock_sync: verify/test_midi_clock_sync.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_midi_clock_sync.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp -o $@
 
 verify/test_lfo_stepseq_quad: verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp include/oa_engine.h include/oa_engine_init.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp -o $@

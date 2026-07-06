@@ -61,3 +61,22 @@ bool CTimerManager::ShouldSyncExternalClock()
 		return true;
 	return false;
 }
+
+/*
+ * SKSTGGate_GetInternalTempo() (batch 21, `.text+0x349d30`, 20 bytes):
+ * a plain non-virtual forwarder, see oa_engine_init.h.
+ */
+int SKSTGGate_GetInternalTempo()
+{
+	return CTimerManager::ms_poInstance->GetInternalTempo();
+}
+
+/*
+ * CTimerManager::GetInternalTempo() (batch 21, `.text+0x347250`, 6
+ * bytes): see oa_engine_init.h for the confirmed real
+ * `*(int*)(*(int**)this + 0x2c)` shape.
+ */
+int CTimerManager::GetInternalTempo()
+{
+	return *(int *)(*(unsigned char **)this + 0x2c);
+}
