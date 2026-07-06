@@ -1388,3 +1388,99 @@ specific line before assuming the build itself is broken -- and prefer
 appending new entries via a MIDDLE position (with a trailing `\` after
 them) rather than as the new last line, until/unless the whole file's
 line endings are normalized.
+
+**Batch 19 specifics** (2026-07-06, sec 10.167): session started with a
+STALE task briefing -- it claimed "last section was 10.165" and told
+this session to write sec 10.166, but `git log --oneline` (checked
+BEFORE trusting the briefing, per the standing "always re-derive current
+state yourself" rule) showed HEAD had already moved one commit past that
+to `ed5574d` (the CRLF bug-fix pass just above, its own now-existing sec
+10.166) that landed between the briefing being written and this session
+starting. Wrote this batch's own new section as **10.167** instead of
+blindly using the number the briefing suggested. Lesson: a numbered
+briefing snapshot is exactly as perishable as any other "confirmed clean
+tree" claim -- always check `git log`/the actual file's own last `###
+10.NNN` heading yourself before picking the next section number, not
+just before deciding whether the tree is clean.
+
+Picked `CSTGPerformanceVars::SetIsDying()` (478 bytes) plus 3 newly-
+discovered dependencies (`CSTGSlotVoiceData::SetIsDying`,
+`CSTGMIDIClockSync::DisableActivePerfClock`, `CSTGPerformance::SetIsDying`)
+-- 4 functions fully reconstructed, net stub count **+3** (72 -> 75: -1
+promoted, +4 newly-discovered deferred externs added for the four
+`OnPerformanceDeactivate`/`ClearUnsolicitedMessages` call targets). A
+clean example of "net stub count can legitimately go UP even while doing
+solid net-positive reconstruction work" -- don't be alarmed by an
+increasing count if the accounting is honestly explained (4 real
+functions landed, only 1 of which had a pre-existing bare-`{}` stub to
+remove).
+
+**Key technique this batch, a "size is not risk" case going the OTHER
+direction from sec 10.160**: the single SMALLEST remaining candidate by
+raw byte size, `CSTGAudioThread::AudioTickLoopRoutine()` (141 bytes), was
+checked FIRST specifically because of its tiny size -- and REJECTED,
+because full disassembly showed FOUR real vtable dispatches (`call
+*0xc(%edx)`/`call *0x18(%edx)` through THREE distinct sub-objects' own
+vtables: `this`, `this+0x28`, `this+0x4a8`). Sec 10.160 already
+established "big size doesn't mean risky" (a 910-byte ctor turned out
+branch-free); this batch's own finding is the mirror image -- "tiny size
+doesn't mean safe" either. The only reliable signal, in both directions,
+is grepping the disassembly for `call`/indirect-dispatch instructions
+BEFORE looking at byte count at all.
+
+**Second technique, reused successfully again**: cross-referencing an
+EARLIER, unrelated pass's own already-written header comments
+(`CSTGSlotVoiceData`'s `+0x40`/`+0x41` fields, already independently
+documented across THREE other methods -- `EmergencyFreeDyingSlotVoiceData`,
+`StealDyingSlotVoiceDatasForCost`, `UpdateAllActiveMIDIFilters`, `Steal`)
+confirmed this batch's own freshly hand-derived field meanings for
+`SetIsDying()` before writing a single line of code -- same technique as
+sec 10.157's own "re-read the target class's earlier pass" win, now on
+its second successful use.
+
+**Third technique: when two sibling call sites within the SAME function
+being reconstructed contain byte-for-byte identical instruction
+sequences (confirmed via `objdump`, not just "looks similar"), factor
+them into ONE shared static helper in the reconstruction rather than
+transliterating the block twice.** `SetIsDying()`'s own two branches
+(state=3 vs state=4 outcome) both run the exact same "front-panel
+active-manager count + maybe PushUnsolicitedMessage" block at two
+different `.text` addresses -- confirmed identical opcode-for-opcode, so
+a single C helper serves both call sites faithfully with no behavioral
+difference, and is far more readable than two copies.
+
+**Fourth technique, a THIRD confirmed instance of a recurring quirk
+(first two: `CSTGPerformanceVarsManager::AllocPerformanceVars()`,
+`CSTGPerformanceVars::NotifyAllKeysAndPedalsReleased()`, sec 10.164)**: a
+shared helper block's own internal guard can be confirmed UNREACHABLE
+specifically at ONE caller (not necessarily at every caller of that same
+block) when that caller's OWN entry guard already pins the exact byte
+the shared block's guard re-reads. `SetIsDying()`'s entry guard requires
+`self[0x23d1] == 2`, and nothing between that check and either of its
+own two calls into the shared helper writes to that byte -- so the
+helper's own `oldState <= 1` check is always false THERE, even though
+the exact same helper's guard is genuinely live at its OTHER two call
+sites (where the caller's own precondition on that byte is different or
+absent). Lesson: "is this guard reachable" is a per-CALL-SITE question,
+not a per-shared-helper-function question -- check the specific caller's
+own preceding control flow each time, don't assume a block's
+reachability transfers across every place it's reused.
+
+**No-short-circuit discipline, reinforced**: `SetIsDying()`'s own
+AND-fold over `AreAllKeysAndPedalsReleased()` results must NOT be
+written with C++ `&&` (which would short-circuit and skip the call once
+the accumulator goes false) -- the real x86 always evaluates every
+matching payload's call regardless of the running result. Used a plain
+`&` fold instead, and added a dedicated two-payload KAT section (first
+payload "not released" then second "released") that specifically fails
+if a `&&`-shaped mistranslation were substituted -- confirms the call
+count stays at 2, not short-circuited to 1.
+
+**Verification**: 61 verify/ binaries (up from 60), all exit 0, both of
+two full clean-rebuild passes; 32 unresolved symbols; `.gnu.linkonce.
+this_module` 0x148 bytes; 0 `R_386_GOTPC`; `OA.ko` 151,596 bytes (up from
+150,200). Commit `900c8a2`.
+
+The user has asked to stop the stub-sweep after this batch (batch 19) --
+do not automatically start batch 20 in a future session without being
+asked again.
