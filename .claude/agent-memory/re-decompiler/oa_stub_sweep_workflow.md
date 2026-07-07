@@ -2603,8 +2603,8 @@ already-real siblings, e.g. `CalculateStereoPanCoeffs()` to
 `DisableActivePerfClock`/batch 19, but this is unconfirmed speculation,
 not a checked fact).
 
-**Batch 30 specifics** (2026-07-07, sec 10.178, commit `<fill in after
-commit>`): user gave fresh explicit authorization with a specific priority
+**Batch 30 specifics** (2026-07-07, sec 10.178, commit `17b863a`): user
+gave fresh explicit authorization with a specific priority
 -- resolve the sec 10.177 `CSTGEQ` five-math-function cluster (the
 confirmed TRUE root blocker of the whole `CSetListEQ`/`CSTGEffectRack`
 subsystem). Re-verified state myself first (HEAD `2b85524`, clean tree,
