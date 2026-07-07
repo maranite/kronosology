@@ -2882,8 +2882,8 @@ still stubbed: `setup_stg_daemons`/`cleanup_stg_daemons`/
 `setup_stg_decrypt_daemons`/`signal_timed_out_daemons`,
 `load_global_resources`, the `rtwrap_*` RTAI layer.
 
-**Batch 34 specifics** (2026-07-07, sec 10.182): fourth init-path batch,
-took sec 10.181's pre-scoped lead. Promoted `stg_is_linux_context`
+**Batch 34 specifics** (2026-07-07, sec 10.182, commit `2867d5c`): fourth
+init-path batch, took sec 10.181's pre-scoped lead. Promoted `stg_is_linux_context`
 (@0x118db0, 29B) + `stg_log_startup_error` (@0x118e10, 99B, regparm3)
 from `bar2_stubs_c.cpp` into `src/init/startup_helpers.cpp`. Ran on
 `kronosdev` (192.168.3.86), live tree `/home/share/kronosology`, ground
