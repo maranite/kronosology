@@ -161,7 +161,12 @@ void stg_rtfifo_cleanup(void);
  * beyond their call sites. */
 void IncProgressBar(void);
 void SetInstalledOptions(int code);
-void stg_log_startup_error(int code);
+/* Real signature: takes the error-message string (each init_module()
+ * call site loads a `.rodata.str1.1` pointer, not an int code). Guarded
+ * by stg_is_linux_context(); both real in src/init/startup_helpers.cpp
+ * (batch 34, sec 10.182). */
+int stg_is_linux_context(void);
+void stg_log_startup_error(const char *msg);
 
 } /* extern "C" */
 

@@ -46,7 +46,8 @@ extern "C" int setup_stg_daemons() { return 0; }
 extern "C" void cleanup_stg_daemons() {}
 extern "C" int setup_stg_decrypt_daemons() { return 0; }
 extern "C" void signal_timed_out_daemons() {}
-extern "C" void stg_log_startup_error(const char *) {}
+/* stg_log_startup_error + its guard stg_is_linux_context promoted to real
+ * bodies in src/init/startup_helpers.cpp (batch 34, sec 10.182). */
 extern "C" int load_global_resources() { return 0; }
 
 /* ---- AT88 auth-chip wrapper layer (cm_ and nv2ac_ prefixed

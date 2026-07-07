@@ -1,11 +1,50 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * startup_helpers.cpp  -  four small init_module()-call-chain helper
+ * startup_helpers.cpp  -  small init_module()-call-chain helper
  * functions, promoted from their deliberately-inert placeholders in
  * src/stub/bar2_stubs_c.cpp to faithful reconstructions from the real
  * OA_322.ko disassembly.
  *
- * All four are on init_module()'s own confirmed call chain (sec 10.17)
+ * Batch 34 (sec 10.182) adds two more of the same shape, closing out
+ * init_module()'s error-reporting pair:
+ *
+ *   stg_is_linux_context  @0x118db0, 29 bytes:
+ *       call rt_whoami           ; R_386_PC32 rt_whoami -> RT_TASK* in eax
+ *       mov  0x1c(%eax),%eax     ; task->[0x1c]
+ *       cmp  $0x7fffffff,%eax    ; == RT_SCHED_LINUX_PRIORITY ?
+ *       sete %al ; movzbl %al,%eax
+ *     Asks RTAI whether the *current* task is the Linux servant rather
+ *     than a hard-real-time task: rt_whoami() returns the running
+ *     RT_TASK, and its priority word at +0x1c equals the sentinel
+ *     0x7fffffff (RT_SCHED_LINUX_PRIORITY) exactly when we are in normal
+ *     Linux context. `rt_whoami` is a genuine RTAI export -- undefined
+ *     (`U`) in the real OA.ko too, same family as the already-accepted
+ *     rt_printk/rtf_* externs -- so promoting this raises nm -u by one.
+ *     The prologue's `and $-16,%esp` stack-align is a compiler artifact
+ *     of the outermost call, not semantically load-bearing.
+ *
+ *   stg_log_startup_error  @0x118e10, 99 bytes, regparm3 (msg in EAX):
+ *       call stg_is_linux_context ; guard: only log from Linux context
+ *       test %eax; je ret
+ *       mov $3,%edx ; mov $"/tmp/startupErrorLog",%eax ; call CSTGFile_Open
+ *       test %eax; je ret          ; open-fail is a silent no-op
+ *       mov %eax,%esi              ; handle
+ *       mov %ebx(msg),%eax; call strlen
+ *       mov %eax,%ecx; mov %ebx,%edx; mov %esi,%eax; call CSTGFile_Write
+ *       mov %esi,%eax; call CSTGFile_Close
+ *     Appends the NUL-terminated message string to /tmp/startupErrorLog
+ *     (open mode 3), but only when running in Linux context; both a
+ *     non-Linux context and an open failure are silent no-ops (no
+ *     partial write, no close of a null handle). Its argument is a
+ *     `const char *` -- every init_module() call site loads
+ *     `.rodata.str1.1 + <offset>` into EAX (the offsets 0xa1/0xd7/...
+ *     the reconstruction previously modeled as bare ints; batch 34
+ *     resolves them to the real strings "cpu cap"/"memory error"/...).
+ *     Dependencies now all real: CSTGFile_Open/Write/Close
+ *     (src/init/file_io.cpp, sec 10.180/10.181), strlen (kernel export),
+ *     stg_is_linux_context (this file).
+ *
+ * All are on init_module()'s own confirmed call chain (sec 10.17)
  * and are individually tiny leaf/near-leaf functions -- exactly the
  * "smallest-first, self-contained, host-verifiable" batch shape this
  * project's stub sweep favours. Ground-truth sizes: init_cpp_support 1
@@ -67,6 +106,7 @@
  */
 
 #include "oa_setup_global_resources.h"   /* STGAPIFrontPanelStatus + STGAPI_OFF_* */
+#include "oa_internal.h"                  /* strlen */
 
 /* Anonymous .bss+0x20 hardware-probed installed-RAM word (see header
  * note). Zero-initialized BSS, exactly like the real global before the
@@ -104,4 +144,42 @@ extern "C" void SetInstalledOptions(int code)
 	unsigned char *status = STGAPIFrontPanelStatus::sInstance;
 	if (status != 0)
 		status[STGAPI_OFF_INSTALLED_OPTIONS] |= (unsigned char)code;
+}
+
+/* ---- batch 34: init_module()'s error-reporting pair ---- */
+
+/* RTAI: current running RT_TASK (or the Linux servant's shadow task).
+ * Undefined (`U`) in the real OA.ko as well; resolves at insmod against
+ * rtai_hal/rtai_sched. */
+extern "C" void *rt_whoami(void);
+
+/* CSTGFile_* VFS wrappers -- real bodies in src/init/file_io.cpp
+ * (declared locally here with matching signatures, same as
+ * init_module.cpp does). */
+extern "C" void *CSTGFile_Open(const char *path, int mode);
+extern "C" int   CSTGFile_Write(void *handle, const void *buf, unsigned int count);
+extern "C" int   CSTGFile_Close(void *handle);
+
+/* RTAI priority sentinel: a task scheduled at this "priority" is the
+ * Linux servant, i.e. we are NOT inside a hard-real-time task. */
+#ifndef RT_SCHED_LINUX_PRIORITY
+#define RT_SCHED_LINUX_PRIORITY 0x7fffffff
+#endif
+
+extern "C" int stg_is_linux_context(void)
+{
+	/* rt_whoami()->priority (word at +0x1c) == RT_SCHED_LINUX_PRIORITY */
+	return *(unsigned int *)((unsigned char *)rt_whoami() + 0x1c)
+	       == (unsigned int)RT_SCHED_LINUX_PRIORITY;
+}
+
+extern "C" void stg_log_startup_error(const char *msg)
+{
+	if (!stg_is_linux_context())
+		return;
+	void *handle = CSTGFile_Open("/tmp/startupErrorLog", 3);
+	if (handle == 0)
+		return;
+	CSTGFile_Write(handle, msg, (unsigned int)strlen(msg));
+	CSTGFile_Close(handle);
 }

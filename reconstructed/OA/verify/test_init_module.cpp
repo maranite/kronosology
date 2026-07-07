@@ -119,7 +119,7 @@ void stg_rtfifo_cleanup(void) { log_call("stg_rtfifo_cleanup"); }
 
 void IncProgressBar(void) { log_call("IncProgressBar"); }
 void SetInstalledOptions(int) { log_call("SetInstalledOptions"); }
-void stg_log_startup_error(int) { log_call("stg_log_startup_error"); }
+void stg_log_startup_error(const char *) { log_call("stg_log_startup_error"); }
 
 int gModuleParam10 = 0;
 int gModuleParam14 = 0;

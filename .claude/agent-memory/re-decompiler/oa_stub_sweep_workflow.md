@@ -2881,3 +2881,70 @@ promotable next: `stg_log_startup_error` (its own dependencies --
 still stubbed: `setup_stg_daemons`/`cleanup_stg_daemons`/
 `setup_stg_decrypt_daemons`/`signal_timed_out_daemons`,
 `load_global_resources`, the `rtwrap_*` RTAI layer.
+
+**Batch 34 specifics** (2026-07-07, sec 10.182): fourth init-path batch,
+took sec 10.181's pre-scoped lead. Promoted `stg_is_linux_context`
+(@0x118db0, 29B) + `stg_log_startup_error` (@0x118e10, 99B, regparm3)
+from `bar2_stubs_c.cpp` into `src/init/startup_helpers.cpp`. Ran on
+`kronosdev` (192.168.3.86), live tree `/home/share/kronosology`, ground
+truth `/home/share/Decomp/OA.ko_Decomp/OA.ko`.
+
+**KEY: the oa_export/ Ghidra table (`/home/share/Decomp/oa_export/`)
+uses an image base +0x10000 vs the ground-truth OA.ko.** Export lists
+`stg_is_linux_context@0x128db0`; real nm/objdump address is `0x118db0`.
+Its `functions.csv`/`symbols.csv`/`functions/<name>@<addr>.c` decomps are
+a fast way to get a function's C-level shape + prototype + calling
+convention (it correctly flagged `stg_log_startup_error` as `__regparm3
+(undefined4 param_1)` and `stg_is_linux_context` as `__cdecl bool`), but
+ALWAYS re-disassemble at the ground-truth address (subtract 0x10000) with
+`objdump -dr` before transcribing — the export's `func_0x00d2b190`-style
+unresolved callee names are useless; the real relocs (`rt_whoami`,
+`strlen`, `CSTGFile_*`) only show in `objdump -dr` on the real .ko.
+
+**Signature-fidelity gotcha, the real substance of this batch:**
+`stg_log_startup_error`'s real arg is a `const char *` (each init_module
+call site does `mov $.rodata.str1.1+off,%eax`). The reconstruction had
+modeled all 11 call sites as bare `int` offsets (`stg_log_startup_error(
+0xa1)`), the header said `int code`, the stub said `const char *` — C
+linkage + the 4-byte regparm ABI silently reconciled all three. Promoting
+the real body FORCES fixing this: resolved the offsets against
+`.rodata.str1.1` (fileoff 0x6b1a28 in ground truth; `readelf -S` for the
+section, then read the NUL-terminated string at base+off) to the real
+strings — 0xa1="cpu cap", 0xd7="memory error", 0xe4="proc error",
+0xef="pcmproc error", 0xfd="alloc resources", 0x12b="authorization",
+0x139="setup" (reused at BOTH step 10 and step 12), 0x192="audio threads",
+0x1a0="keybed", 0x1c0="UI fifo". Lesson: when a promoted stub's real
+signature disagrees with how existing callers (modeled as placeholders)
+invoke it, the promotion legitimately extends to fixing those call sites +
+the header + any test mock — this is a fidelity IMPROVEMENT, not scope
+creep, and leaving the int/char* mismatch would make the "faithful" claim
+false (the reconstruction's init_module would deref address 0xa1 if ever
+run in Linux context). Touched init_module.cpp (11 calls + 1 comment),
+oa_init.h, test_init_module.cpp's mock (`int`->`const char *`; log_call
+name-based assertions unaffected).
+
+**host-KAT approach for an RTAI-dependent predicate:** `stg_is_linux_context`
+calls extern `rt_whoami()` (RTAI, `U` in ground truth) then reads
+`+0x1c` (the RT_TASK priority word) and compares to the sentinel
+0x7fffffff (RT_SCHED_LINUX_PRIORITY). Rather than mock the whole
+predicate, the KAT mocks ONLY `rt_whoami` (returns a fake 0x40-byte task
+buffer whose `+0x1c` the test sets), so `stg_is_linux_context` AND
+`stg_log_startup_error` both execute for real on the host. CSTGFile_Open/
+Write/Close are recording mocks (real bodies in file_io.cpp, NOT linked
+into test_startup_helpers) — asserted the exact `/tmp/startupErrorLog`
+path, mode 3, strlen write-count, same-handle write->close threading, and
+the two silent-no-op paths (non-linux-context, open-fail).
+
+**nm -u 38 -> 39, NOT 40** despite adding both `rt_whoami` and `strlen`
+externs: `strlen` was ALREADY `U` (referenced by products.cpp/
+process_oacmd.cpp). The single genuinely-new undefined symbol is
+`rt_whoami`. Confirm a suspected "extra" external is actually new by
+`nm src/<other>.o | grep <sym>` before assuming the delta is wrong.
+`OA.ko` 170,264 -> 170,696 bytes, two clean passes byte-identical,
+linkonce 0x148, GOTPC 0, 74 verify/ binaries all exit 0.
+
+**Deferred:** `cleanup_cpp_support` (`.dtors` walk + `stg_cpp_exit`) is now
+the only small init-path leaf left. Bigger still-stubbed init subsystems:
+`setup_stg_daemons`/`cleanup_stg_daemons`/`setup_stg_decrypt_daemons`/
+`signal_timed_out_daemons` (RT-thread lifecycle), `load_global_resources`,
+`rtwrap_*` RTAI layer.

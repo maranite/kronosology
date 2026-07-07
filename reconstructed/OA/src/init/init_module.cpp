@@ -13,7 +13,7 @@
  * +0x2b`..`+0x83`) checks CPUID(eax=1)'s ecx bits 0 and 9 (commonly
  * SSE3/SSSE3, exact bit-to-feature mapping not independently verified in
  * this pass). If bit 9 is clear, OR bit 9 is set but bit 0 was clear, this
- * is a genuine HARD FAIL: `stg_log_startup_error(0xa1)` then jump straight
+ * is a genuine HARD FAIL: `stg_log_startup_error("cpu cap")` then jump straight
  * to the final cleanup tail (`cleanup_cpp_support` + return -1) -- no
  * other subsystem has been set up yet, so no cascade is needed. Only when
  * BOTH bits are set does execution continue to step 3. This is represented
@@ -169,7 +169,7 @@ int init_module(void)
 		 * nothing to restore and `current`/`originalCpuMask` haven't
 		 * even been read yet. A distinct, shallower failure label
 		 * from the rest of the cascade, not an oversight. */
-		stg_log_startup_error(0xa1);
+		stg_log_startup_error("cpu cap");	/* .rodata.str1.1+0xa1 */
 		goto fail_before_pin;
 	}
 
@@ -204,7 +204,7 @@ int init_module(void)
 	oa_debug_marker(5);
 	if (InitializeSTGHeap() != 0) {			/* step 5 */
 		printk("OA: InitializeSTGHeap failed\n" /* real text not resolved, offset 0xbe */);
-		stg_log_startup_error(0xd7);
+		stg_log_startup_error("memory error");	/* .rodata.str1.1+0xd7 */
 		goto fail_early;
 	}
 
@@ -212,21 +212,21 @@ int init_module(void)
 	oa_debug_marker(6);
 	if (InitSharedMemProcInterface() != 0) {	/* step 6 */
 		printk("OA: InitSharedMemProcInterface failed\n" /* real text not resolved, offset 0x78 */);
-		stg_log_startup_error(0xe4);
+		stg_log_startup_error("proc error");	/* .rodata.str1.1+0xe4 */
 		goto fail_heap;
 	}
 
 	oa_debug_marker(7);
 	if (InitPcmModProcInterface() != 0) {		/* step 7 */
 		printk("OA: InitPcmModProcInterface failed\n" /* real text not resolved, offset 0xa4 */);
-		stg_log_startup_error(0xef);
+		stg_log_startup_error("pcmproc error");	/* .rodata.str1.1+0xef */
 		goto fail_shmem;
 	}
 
 	oa_debug_marker(8);
 	if (setup_global_resources(gModuleParam10) != 0) {	/* step 8 */
 		printk("OA: setup_global_resources failed\n" /* real text not resolved, offset 0xcc */);
-		stg_log_startup_error(0xfd);
+		stg_log_startup_error("alloc resources");	/* .rodata.str1.1+0xfd */
 		goto fail_pcmproc;
 	}
 
@@ -236,7 +236,7 @@ int init_module(void)
 	int atmelResult = SetupAtmelForAuthorizations();	/* step 9 */
 		if (atmelResult != 0) {
 			printk("OA: SetupAtmelForAuthorizations failed, result=%d\n" /* real text not resolved, offset 0x10d */, atmelResult);
-			stg_log_startup_error(0x12b);
+			stg_log_startup_error("authorization");	/* .rodata.str1.1+0x12b */
 			goto fail_globalres;
 		}
 	}
@@ -244,7 +244,7 @@ int init_module(void)
 	oa_debug_marker(10);
 	if (setup_stg_decrypt_daemons() != 0) {	/* step 10 */
 		printk("OA: setup_stg_decrypt_daemons failed\n" /* real text not resolved, offset 0xf0 */);
-		stg_log_startup_error(0x139);
+		stg_log_startup_error("setup");	/* .rodata.str1.1+0x139 */
 		goto fail_globalres;
 	}
 	/* ~100-iteration settle delay for the decrypt daemons to come up,
@@ -272,7 +272,7 @@ int init_module(void)
 	oa_debug_marker(12);
 	if (setup_stg_daemons() != 0) {			/* step 12 */
 		printk("OA: setup_stg_daemons failed\n" /* real text not resolved, offset 0x15d */);
-		stg_log_startup_error(0x139);
+		stg_log_startup_error("setup");	/* .rodata.str1.1+0x139 (same string reused) */
 		goto fail_globalres;
 	}
 
@@ -280,13 +280,13 @@ int init_module(void)
 	oa_debug_marker(13);
 	if (CSTGAudioManager_StartAudioEngine() == 0) {	/* step 13 -- INVERTED convention, see note above */
 		printk("OA: CSTGAudioManager_StartAudioEngine failed\n" /* real text not resolved, offset 0x177 */);
-		stg_log_startup_error(0x192);
+		stg_log_startup_error("audio threads");	/* .rodata.str1.1+0x192 */
 		goto fail_daemons;
 	}
 
 	oa_debug_marker(14);
 	if (CSTGKeybedInterface_Startup() == 0) {	/* step 14 -- INVERTED convention */
-		stg_log_startup_error(0x1a0);
+		stg_log_startup_error("keybed");	/* .rodata.str1.1+0x1a0 */
 		goto fail_audio;
 	}
 
@@ -296,7 +296,7 @@ int init_module(void)
 	oa_debug_marker(16);
 	if (stg_rtfifo_init() != 0) {			/* step 16 */
 		printk("OA: stg_rtfifo_init failed\n" /* real text not resolved, offset 0x1a7 */);
-		stg_log_startup_error(0x1c0);
+		stg_log_startup_error("UI fifo");	/* .rodata.str1.1+0x1c0 */
 		CSTGDrumPadInterface_Cleanup();
 		CSTGKeybedInterface_Cleanup();
 		goto fail_audio;
