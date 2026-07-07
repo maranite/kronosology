@@ -2949,7 +2949,7 @@ the only small init-path leaf left. Bigger still-stubbed init subsystems:
 `signal_timed_out_daemons` (RT-thread lifecycle), `load_global_resources`,
 `rtwrap_*` RTAI layer.
 
-**Batch 35 specifics** (2026-07-07, sec 10.183): fifth init-path batch.
+**Batch 35 specifics** (2026-07-07, sec 10.183, commit `ee9cfb3`): fifth init-path batch.
 `cleanup_cpp_support` scouted + DEFERRED AGAIN (its `.dtors` section-symbol
 walk can't be faithfully bound to portable C in this crtstuff-less module
 build without a linker boundary symbol / in-section anchor; it's the
