@@ -40,14 +40,12 @@ extern "C" void CSTGDrumPadInterface_Initialize() {}
 extern "C" void CSTGDrumPadInterface_Cleanup() {}
 extern "C" void CSTGKeybedKeyDebounceFilter_Initialize() {}
 extern "C" void *CSTGSharedMemory_CreateMidiShareHeader() { return 0; }
-extern "C" unsigned int GetInstalledRAM() { return 0; }
-extern "C" void IncProgressBar() {}
 extern "C" void SCalibrationData_LoadCalibrationFile() {}
-extern "C" void SetInstalledOptions() {}
+/* GetInstalledRAM/IncProgressBar/SetInstalledOptions/init_cpp_support
+ * promoted to real bodies in src/init/startup_helpers.cpp (sec 10.179). */
 
 /* ---- Startup/daemon lifecycle helpers, confirmed real (init_module's
  * own confirmed call chain, sec 10.17 -- own bodies not reconstructed) ---- */
-extern "C" void init_cpp_support() {}
 extern "C" void cleanup_cpp_support() {}
 extern "C" int setup_stg_daemons() { return 0; }
 extern "C" void cleanup_stg_daemons() {}

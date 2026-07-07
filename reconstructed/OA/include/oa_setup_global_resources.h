@@ -195,6 +195,7 @@ struct CSTGHeapManager {
 #define STGAPI_OFF_PANEL_TYPE2          0x108e
 #define STGAPI_OFF_PANEL_SUBTYPE2       0x108f
 #define STGAPI_OFF_INSTALLED_RAM        0x0d30  /* GetInstalledRAM()'s result */
+#define STGAPI_OFF_INSTALLED_OPTIONS    0x1090  /* SetInstalledOptions() OR-target */
 #define STGAPI_OFF_FIXED_CONST          0x29118 /* confirmed 0x473b8000 */
 #define STGAPI_OFF_NKS4_HW_VERSION      0x29124
 #define STGAPI_OFF_NKS4_PANEL_KIND      0x29125

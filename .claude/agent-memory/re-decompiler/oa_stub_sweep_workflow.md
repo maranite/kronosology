@@ -24,7 +24,7 @@ no copying needed, just SSH over to run `make`.
 ```
 make clean && make all                          # host-side KATs, all must build+pass
 make ko KDIR=/home/build/linux-kronos            # actual .ko build
-nm -u OA.ko | wc -l                              # must be exactly 32
+nm -u OA.ko | wc -l                              # 33 as of batch 31 (was 32; grows as promoted internals reference more real externals)
 objdump -h OA.ko | grep -i linkonce              # .gnu.linkonce.this_module must be 0x148 bytes
 readelf -r OA.ko | grep -c R_386_GOTPC           # must be 0
 stat -c '%s' OA.ko                                # report exact byte size
@@ -2710,3 +2710,66 @@ Free()`, `CSTGEffectRackVars::ResetOnActivation()`/
 `ApplyDModTickDelay()`, `CSTGMIDIClockSync::EnableActivePerfClock()`,
 `CSTGSlotVoiceData::EmergencyFreeAllVoices()`, `CSTGPan::
 CalculateStereoPanCoeffs()`), none individually assessed yet.
+
+**Batch 31 specifics** (2026-07-07, sec 10.179): user redirected the
+sweep to focus specifically on the `init_module()` call chain ("get all
+dependent sources figured out for at least the initialization of
+OA.ko"). Ran on `kronosdev` (192.168.3.86) — I AM the build host now, no
+sshpass needed; local `/home/share/kronosology` (the ACTIVE tree, HEAD
+was `97e564a`/batch 30) + `/home/build/linux-kronos` + local ground-truth
+`/home/share/Decomp/OA.ko_Decomp/OA.ko`. NOTE: `/home/build/kronosology`
+is a STALE separate clone (was at `3dfec14`) — do NOT build there; the
+live tree is `/home/share/kronosology`.
+
+Promoted the four smallest self-contained init-path C helpers from
+`bar2_stubs_c.cpp` into a new `src/init/startup_helpers.cpp`:
+`init_cpp_support` (1-byte bare `ret`, confirmed no-op), `GetInstalledRAM`
+(reads anonymous `.bss+0x20` global → modeled as `gInstalledRAM`),
+`IncProgressBar` (forwards to external `COmapNKS4_IncProgressBar`),
+`SetInstalledOptions(int)` (ORs low byte into `sInstance+0x1090`, guarded
+on non-NULL — its old `()` stub silently dropped the arg the real fn
+uses). New KAT `verify/test_startup_helpers.cpp` (73 binaries now). Both
+clean passes byte-identical, `OA.ko` 169,144 bytes.
+
+**STANDING INVARIANT UPDATE — `nm -u OA.ko` is now 33, not 32.**
+`IncProgressBar` pulled in the genuinely-external `COmapNKS4_IncProgressBar`
+(`U` in ground truth too, OmapNKS4Module.ko, same family as the accepted
+`COmapNKS4Driver_*`). The "32" was never a hard ceiling — real OA.ko's own
+undefined set is 168; the count is just the subset referenced so far and
+grows monotonically as internal functions that call more externals get
+promoted. When a future batch promotes a stub that forwards to a real
+OmapNKS4/RTAI/kernel external, EXPECT the count to rise and verify the
+delta is exactly the intended external(s), don't treat >32 as a failure.
+
+**Gotcha this batch (cost two rebuilds): a literal `*/` inside a heavy
+provenance comment silently terminates the block comment early.** Wrote
+`COmapNKS4Driver_*/OmapNKS4OutputFifo_*` in a comment; the `_*/O`
+sequence closed the `/* */`, turning the rest of the comment into code
+and producing a cascade of bogus "missing terminating ' character" +
+"CSTGPerformance has not been declared" errors that LOOKED like a
+header-ecosystem problem but wasn't. When a promoted function's comment
+enumerates wildcard symbol families (`foo_*`, `bar_*`), never put two
+adjacent as `_*/`-forming text — space them (`foo_* / bar_*`). The tell:
+"missing terminating ' character" pointing at an apostrophe that is
+plainly inside a comment means the comment already ended upstream.
+
+**KAT header note:** `test_startup_helpers.cpp` needs BOTH
+`oa_setup_global_resources.h` (STGAPIFrontPanelStatus, GetInstalledRAM,
+IncProgressBar) AND `oa_init.h` (init_cpp_support, SetInstalledOptions) —
+both declare the shared C symbols inside `extern "C"` blocks so including
+both is conflict-free. Defined its own `unsigned char
+*STGAPIFrontPanelStatus::sInstance;` storage (same as every other panel-
+touching test) and a counting `COmapNKS4_IncProgressBar` mock;
+`gInstalledRAM` storage comes from `startup_helpers.cpp` itself.
+
+**Deferred, scoped for follow-up init-path batches** (each cascades new
+internal stubs): `cleanup_cpp_support` (`.dtors` walk + `stg_cpp_exit`,
+both need reconstructing; `.dtors` iteration is a linker construct, model
+representationally), `stg_log_startup_error` (needs `stg_is_linux_context`
++ real `CSTGFile_Open/Write/Close`). Bigger init-path subsystems still
+stubbed: `setup_stg_daemons`/`cleanup_stg_daemons`/
+`setup_stg_decrypt_daemons`/`signal_timed_out_daemons` (RT-thread
+lifecycle), `load_global_resources`, the whole `rtwrap_*` RTAI layer, and
+the `CSTGFile_*` VFS wrappers (Open 99 / Read 170 / Write 97 / Close 21 /
+Seek 55 / GetFileSize 22 bytes) — a coherent "file I/O primitives"
+cluster worth one dedicated batch.

@@ -117,6 +117,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/audio_start.o \
            src/init/rtfifo_init.o \
            src/init/cpu_affinity.o \
+           src/init/startup_helpers.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -292,7 +293,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/comport_init.cpp \
        src/init/audio_start.cpp \
        src/init/rtfifo_init.cpp \
-       src/init/cpu_affinity.cpp
+       src/init/cpu_affinity.cpp \
+       src/init/startup_helpers.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -345,7 +347,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_playback_event_methods \
          verify/test_wave_sample_convert \
          verify/test_playback_subrate \
-         verify/test_lfo_tables verify/test_eq_coefficients
+         verify/test_lfo_tables verify/test_eq_coefficients \
+         verify/test_startup_helpers
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -579,6 +582,9 @@ verify/test_lfo_tables: verify/test_lfo_tables.cpp src/engine/lfo_tables.cpp inc
 
 verify/test_eq_coefficients: verify/test_eq_coefficients.cpp src/engine/eq_coefficients.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_eq_coefficients.cpp src/engine/eq_coefficients.cpp -o $@
+
+verify/test_startup_helpers: verify/test_startup_helpers.cpp src/init/startup_helpers.cpp include/oa_setup_global_resources.h include/oa_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_startup_helpers.cpp src/init/startup_helpers.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
