@@ -2808,7 +2808,7 @@ fake-f_op-vtable KAT. Read also EOF-clamps count vs `i_size - f_pos`
 (64-bit add/adc/cmp). Once these two + `stg_is_linux_context` are real,
 `stg_log_startup_error` (needs Open+Write+Close) becomes promotable.
 
-**Batch 33 specifics** (2026-07-07, sec 10.181, commit TBD): third
+**Batch 33 specifics** (2026-07-07, sec 10.181, commit `af2fe87`): third
 init-path batch of the session. Picked up sec 10.180's own explicitly
 pre-scoped lead (`CSTGFile_Read`/`Write`, the `set_fs` pair) and, once
 disassembled, found the WHOLE rest of the `CSTGFile_*` family
