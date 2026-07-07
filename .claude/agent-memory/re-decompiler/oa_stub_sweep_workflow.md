@@ -2336,3 +2336,152 @@ bytes), fully characterized since batch 26, not attempted. With
 `ProcessSubRate()` now real, `CSTGPlaybackBuffer` has no more known
 unreconstructed methods of its own -- batch 28 will need a fresh
 `nm -S -C --size-sort` sweep rather than a pre-scouted single-class lead.
+
+**Batch 28 specifics** (2026-07-07, sec 10.176, commit `PENDING`): the user
+gave fresh explicit authorization to continue past batch 27. Re-verified
+state myself first (HEAD `9ad04ba`, clean tree, bare-`{}` stub count 69,
+last section `10.175` -- matched the briefing). Ran on `kronosdev`
+(192.168.3.86), same local `/home/share` + `/home/build/linux-kronos` +
+local `/home/share/Decomp/OA.ko_Decomp/OA.ko` access as prior batches.
+
+Sec 10.175 left no pre-scouted lead (`CSTGPlaybackBuffer` fully resolved),
+so did a fresh sweep of `bar2_stubs.cpp`'s own ~58 remaining bare-`{}`
+stubs. Freshly disassembled ~15 candidates (40-1600 bytes); most were
+confirmed BLOCKED with concrete new detail (full list in sec 10.176):
+the four remaining file-daemon `ProcessCommands()` siblings (all four
+individually confirmed real vtable/PTMF dispatch, closing out that
+cluster for good), `CSTGMidiPortManager::Initialize()` (16 real indirect
+calls), `CSTGEffectManager::RunEffects()`/`CSTGAudioBusManager::
+MixPerformanceOutputs()` (both transitively reach `CSetListEQ` via
+DIFFERENT chains -- `CSTGPerformance::RunEffects()` and
+`CSTGPerformanceVars::Free()` respectively -- strengthening the case
+that `CSetListEQ`/`CSTGEffectRack`/`CLoadBalancer::{Load,Unload}EffectCost`
+is worth a dedicated future-batch push), `CSTGMonitorMixer::RunMonitors()`
+(blocked by a whole separate 7-9-function per-channel-mode DSP kernel
+subsystem), `CSTGVoiceAllocator::DoPendingMoveVoices()`/`CSTGSlotVoiceData::
+RunVoiceModelFeedback()` (both confirmed real vtable dispatch).
+
+Picked the ONE genuinely tractable find: `CSTGLFOTables::CSTGLFOTables()`
+(2433 bytes) -- confirmed zero calls, zero vtable dispatch (no vtable at
+all for this class), the "safe by instruction class" category (sec
+10.160/10.161) just with ~9 distinct loop/table blocks instead of one
+flat table. Populates a `CSTGBankMemory::AllocAligned(0x1830,0x10)`
+object with ~15 LFO/step-sequencer waveform tables: phase ramps, a
+128-entry sine table (33-entry literal quarter table + mirror + negate,
+confirmed exact at all 4 quadrant boundaries vs `sinf(i*pi/64)`), a
+128-entry S-curve/tanh ramp reused 4 ways (fwd/rev/even/odd-half-res),
+an unidentified 110-entry envelope (no closed form found, reproduced
+verbatim), and four staircase quantization tables (3/4/4/6 levels, two
+with uneven 22/21/22/21/22/20 segments). Stub count 69 -> 68 (net -1).
+
+**Major new technique, an escalation of the sec 10.161/10.171/10.172
+"replay-script" family: when a function is too structurally intricate
+to hand-trace safely (not just too big), write a from-scratch x87-stack
++ x86-register MINI-INTERPRETER that mechanically replays the exact
+`objdump -dr` instruction+relocation stream over a real virtual buffer,
+rather than hand-deriving each loop's semantics.** Implemented every
+mnemonic this one function actually used (a small, closed set --
+mov/movl/lea/xor/sub/subl/cmp/je/jne/jl/jmp/push/pop plus fld/fld1/
+fldz/flds/fst/fsts/fstp/fstps/fadd/fadds/fsub/fsubs/fchs/fxch), NOT a
+generic x86 disassembler -- feasible specifically because the mnemonic
+set was small and closed. Cross-verified the interpreter's own output
+against independent hand-derivation for the first 3-4 blocks (exact
+match) before trusting it for the rest. This is a *tool*-level escalation
+of the established technique (prior batches wrote replay scripts to
+generate ground-truth *data* for an already-understood algorithm; this
+one used the replay to discover the algorithm's own structure in the
+first place, because the control flow -- not just the iteration count --
+was too varied to hand-simulate end to end safely).
+
+**Sharpened finding: resolving a `.rodata`/`.rodata.cst4` relocation by
+NAME (`objdump -s -j .rodata.cst4`) silently reads the WRONG bytes when
+the binary has thousands of same-named section instances.** This
+particular `.ko` (an unlinked-relocatable kernel module, `ld -r`-style)
+keeps EVERY input `.o`'s own `.rodata.cst4`/`.rodata` as a SEPARATE
+section instance, all sharing the same section NAME -- `readelf -S`
+shows 14000+ sections here. The only reliable way to resolve a specific
+relocation's target bytes: take `readelf -r --wide`'s packed `Info`
+field, shift right 8 bits to get the REAL symtab index (a decimal-vs-hex
+column-count trap: don't just read the printed "Sym.Value" or count rows
+in `readelf -s`), look that index up in `readelf --syms --wide` to get
+the section index (not a name), then `readelf -x <NUMBER>` (numeric
+section index, not name) to dump the correct instance's own bytes at
+that file offset. Getting this wrong reads plausible-looking but WRONG
+floats silently -- worth checking for on every future large-ctor batch
+that touches more than one or two `.rodata.cst4` relocations, since one
+`.rodata.cst4` name collision proved harmless here (all 7 relocations to
+that offset happened to share ONE symbol index, i.e. one section
+instance) but is not guaranteed to be harmless in general.
+
+**Major gotcha, a real bug caught ONLY by a full golden-buffer KAT, not
+by spot-checks: a multi-array loop where different arrays have
+DIFFERENT real lengths sharing the same nominal `k=0..N` loop bound
+will silently alias and clobber a sibling array's own first entry.**
+`mirror`/`negQuarter`/`negMirror` were all looped over the same `k=0..31`
+in an early draft, but `mirror` has only 31 REAL entries
+(`+0x690..+0x708`) -- its phantom 32nd write (`k=31`, landing on
+`+0x70c`) overwrites `negQuarter[0]`'s own correct `-0.0` with `+0.0`,
+since it runs LATER in loop iteration order. `verify/test_lfo_tables.cpp`
+embeds a `lfo_tables_golden.h` (1548 raw dwords, generated straight from
+the interpreter's own verified buffer, never copy-pasted from the
+production file) and diffs the constructed object dword-by-dword against
+it -- this caught the bug immediately by exact offset, plus a SECOND
+formula bug (`negMirror[k] = -kQuarterSine[32-k]`, not `31-k` as an
+early draft assumed by pattern-matching off `mirror`'s own formula) the
+same way. **New standing technique for any future batch reconstructing
+a ctor with several sibling arrays populated in one pass: compute each
+array's own real length/base independently and check for byte-range
+overlap BEFORE trusting a shared loop bound -- a full golden-buffer
+diff (not just hand-picked spot-check assertions) is the reliable way
+to catch this class of bug, since a spot-check list only catches it if
+it happens to name the exact aliased field.** Also caught, same
+mechanism: a genuine hand-transcription slip in the 110-entry envelope
+literal table (112 values pasted, several wrong in the middle) --
+caught first as a compile-time array-size mismatch, then confirmed via
+an independent regex-extraction-vs-ground-truth diff script before ever
+running the KAT.
+
+**Smaller finding, reconfirmed not "cleaned up"**: two of the 6-level
+staircase tables' "1/3"-ish segments use TWO DIFFERENT one-ULP-apart
+literal constants (`0x3eaaaaac` vs `0x3eaaaaaa`, `0xbeaaaaaa` vs
+`0xbeaaaaac`) at different positions in the SAME object -- confirmed
+real via the raw disassembly immediates directly, deliberately
+preserved exactly rather than unified to one value (same family as sec
+10.152's forward/reverse jump-table asymmetry).
+
+**Correction to this project's own "dup"/wraparound quirk family**: all
+9 "dup" self-referential fields in this object read a field ALREADY
+WRITTEN earlier in the SAME constructor (confirmed for every one, via
+the interpreter's own instruction-order tracking) -- NOT reads of
+uninitialized/zeroed bank memory as this project's usual fallback
+hypothesis (sec 10.156 family) would suggest, and as an initial guess
+assumed for two of them here before the true source field became
+obvious. Cleaner and fully self-contained; worth checking "is this
+really reading an earlier field in the same function" before reaching
+for the "assume zero-initialized CSTGBankMemory" explanation on any
+future multi-dup-field ctor.
+
+**Verification**: 71 verify/ binaries (up from 70, new
+`test_lfo_tables`, including a full 1548-dword byte-for-byte golden
+comparison, not just spot checks), all exit 0 by real per-binary process
+exit code (never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times -- `OA.ko` 167,320 bytes both
+runs); 32 unresolved symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0
+`R_386_GOTPC`. Commit `PENDING`.
+
+**Deferred for a future batch**: `CSTGEQ`'s five core math functions and
+`USTGHDRUtils::Convert44100WaveToSTGSamples()` (both unchanged). NEW:
+`CSetListEQ`/`CSTGEffectRack`/`CLoadBalancer::{Load,Unload}EffectCost`
+now confirmed reachable from THREE independent call chains
+(`SetBand()`, `CSTGPerformance::RunEffects()`,
+`CSTGPerformanceVars::Free()`) -- worth a dedicated future batch since
+resolving it would likely unblock `CSTGEffectManager::RunEffects()` and
+`CSTGAudioBusManager::MixPerformanceOutputs()` at once (both otherwise
+fully characterized: 4 of `MixPerformanceOutputs()`'s 6 direct
+dependencies are already trivially tractable, the other 2 are the
+`CSetListEQ`-reaching ones). `CSTGMonitorMixer::RunMonitors()` needs an
+entire separate per-channel-mode DSP kernel subsystem (7-9 new plain-C
+functions) -- out of scope for a quick pass. The four file-daemon
+`ProcessCommands()` siblings are now ALL individually confirmed blocked
+by real dispatch -- fully characterized, can be dropped from future
+"re-check individually" sweeps.

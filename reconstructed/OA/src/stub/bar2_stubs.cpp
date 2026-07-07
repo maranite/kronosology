@@ -264,7 +264,8 @@ void CSTGHDRMiniModel::Initialize() {}
 /* CSTGHeldKeyList::Reset() reconstructed for real, sec 10.82 -- see
  * src/engine/global.cpp. CSTGHeldKeyList::CSTGHeldKeyList() is real now
  * too, sec 10.155 -- see src/engine/slot_voice_data_ctor.cpp. */
-CSTGLFOTables::CSTGLFOTables() {}
+/* CSTGLFOTables::CSTGLFOTables() is real now, batch 28 -- see
+ * src/engine/lfo_tables.cpp. */
 /* CSTGMIDIClockSync::CSTGMIDIClockSync() is real now, batch 21 -- see
  * src/engine/midi_clock_sync.cpp (also its own newly-discovered
  * dependencies, CSTGMIDIClockSyncBase::Initialize() and the complete

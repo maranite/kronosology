@@ -778,6 +778,35 @@ struct CSTGPerformanceVars {
 	void FreeVoicelessDyingSlots();
 };
 
+/*
+ * CSTGLFOTables::CSTGLFOTables() is real now, batch 28 -- see
+ * src/engine/lfo_tables.cpp (`.text+0x12e260`, 2433 bytes, confirmed
+ * ZERO `call`/vtable-dispatch instructions anywhere -- same "safe by
+ * instruction class" category as CSTGSamplingInterface's ctor (sec
+ * 10.160) and CSTGCCInfo::sCCInfoTable (sec 10.161), just with several
+ * distinct loop shapes instead of one flat byte table). Populates a
+ * fixed 0x1830-byte object (`CSTGBankMemory::AllocAligned(0x1830, 0x10)`,
+ * engine_init.cpp) with ~15 lookup tables for LFO/step-sequencer
+ * waveform generation -- phase ramps, a 128-entry S-curve/tanh-like
+ * ramp table (from `.rodata`, reused four different ways: forward,
+ * reversed, and two interleaved even/odd half-resolution extractions),
+ * a 128-entry sine table (built from a 33-entry literal quarter-sine
+ * table + mirror + negate, matching the classic "quarter wave + symmetry"
+ * technique), an unidentified 110-entry envelope/window curve (no
+ * closed form found), and four "staircase" quantization tables (3, 4,
+ * 4, and 6 discrete levels respectively) likely backing a stepped/
+ * random LFO mode. `+0x408` is the field `CSTGLFOBase::InitializeQuad()`
+ * (`lfo_stepseq_quad.cpp`) already calls "lfoTables" -- the start of the
+ * plain 64-entry constant-1.0 fill array, not the sine/S-curve tables;
+ * a real, faithfully-preserved quirk (the pointer is just an address
+ * value passed elsewhere, not necessarily "the interesting table").
+ * Full derivation (every one of the ctor's ~6300 x86/x87 instructions,
+ * including a from-scratch mini x87-stack interpreter used to replay
+ * and cross-verify every table byte-for-byte, per this project's
+ * established "replay-script" technique for large branch-free
+ * functions, sec 10.161/10.171/10.172) documented in
+ * src/engine/lfo_tables.cpp's own header comment.
+ */
 struct CSTGLFOTables {
 	CSTGLFOTables();
 	/* Confirmed real (`_ZN13CSTGLFOTables9sInstanceE`), needed by

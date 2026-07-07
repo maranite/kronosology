@@ -104,6 +104,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/playback_event_methods.o \
            src/engine/wave_sample_convert.o \
            src/engine/playback_subrate.o \
+           src/engine/lfo_tables.o \
            src/init/init_module.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
@@ -192,6 +193,13 @@ CFLAGS_midi_clock_sync.o := -mhard-float -msse2 -mfpmath=sse
 # before this override was added (batch 26).
 CFLAGS_wave_sample_convert.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: lfo_tables.cpp's ctor does genuine plain-C float
+# arithmetic (phase-ramp multiplies/subtracts, sine-table negation) to
+# populate several lookup tables -- would otherwise pull in unresolvable
+# libgcc soft-float helpers under the kernel's own -msoft-float default
+# (batch 28).
+CFLAGS_lfo_tables.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -272,6 +280,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/playback_event_methods.cpp \
        src/engine/wave_sample_convert.cpp \
        src/engine/playback_subrate.cpp \
+       src/engine/lfo_tables.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
@@ -333,7 +342,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_drum_kit_data verify/test_playback_buffer_events \
          verify/test_playback_event_methods \
          verify/test_wave_sample_convert \
-         verify/test_playback_subrate
+         verify/test_playback_subrate \
+         verify/test_lfo_tables
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -561,6 +571,9 @@ verify/test_wave_sample_convert: verify/test_wave_sample_convert.cpp src/engine/
 
 verify/test_playback_subrate: verify/test_playback_subrate.cpp src/engine/playback_subrate.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_playback_subrate.cpp src/engine/playback_subrate.cpp -o $@
+
+verify/test_lfo_tables: verify/test_lfo_tables.cpp src/engine/lfo_tables.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_tables.cpp src/engine/lfo_tables.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
