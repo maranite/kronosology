@@ -2337,7 +2337,7 @@ bytes), fully characterized since batch 26, not attempted. With
 unreconstructed methods of its own -- batch 28 will need a fresh
 `nm -S -C --size-sort` sweep rather than a pre-scouted single-class lead.
 
-**Batch 28 specifics** (2026-07-07, sec 10.176, commit `PENDING`): the user
+**Batch 28 specifics** (2026-07-07, sec 10.176, commit `4e411ce`): the user
 gave fresh explicit authorization to continue past batch 27. Re-verified
 state myself first (HEAD `9ad04ba`, clean tree, bare-`{}` stub count 69,
 last section `10.175` -- matched the briefing). Ran on `kronosdev`
