@@ -3,7 +3,11 @@
  * test_load_balancer_static.cpp  -  KAT for batch 18's
  * src/engine/load_balancer_static.cpp: CSTGSlotVoiceData::EnableSlot(),
  * CLoadBalancer::BalanceStaticLoadHelper(...), and CLoadBalancer::
- * BalanceStaticLoad().
+ * BalanceStaticLoad(). Extended in batch 29 with section [6],
+ * CLoadBalancer::UnloadEffectCost(unsigned long) -- a separate,
+ * self-contained leaf found while assessing the (still genuinely
+ * intractable) CSetListEQ/CSTGEffectRack cluster, see MASTER_REFERENCE.md
+ * sec 10.177.
  *
  * Mocks CSTGSlotVoiceData::GetPatchStaticCosts()/GetTotalStaticCosts()
  * (both still deliberately-deferred stubs elsewhere -- their own real
@@ -76,6 +80,7 @@ static unsigned int addr32(void *p) { return (unsigned int)(unsigned long)p; }
 CSTGGlobal *CSTGGlobal::sInstance;
 CLoadBalancer *CLoadBalancer::sInstance;
 CSTGAudioManager *CSTGAudioManager::sInstance;
+CSTGCPUInfo *CSTGCPUInfo::sInstance;
 
 static int g_pushMsgCalls;
 static unsigned char g_lastMsg[0x14];
@@ -346,6 +351,42 @@ int main(void)
 		check_eq("cand3 (exceeds budget): +0x28c4 flag left untouched (still 1)", *(unsigned int *)(cand3 + 0x28c4), 1);
 		check_eq("GetTotalStaticCosts called exactly twice (both phase-2 table entries)", g_getTotalStaticCostsCalls, 2);
 		check_eq("EnableSlot's own PushUnsolicitedMessage fired exactly once (cand2 only)", g_pushMsgCalls, 1);
+	}
+
+	printf("\n[6] CLoadBalancer::UnloadEffectCost(unsigned long) -- batch 29\n");
+	{
+		unsigned char *cpuInfoBuf = mmap32(0x30);
+		local_zero(cpuInfoBuf, 0x30);
+		CSTGCPUInfo *cpuInfo = (CSTGCPUInfo *)cpuInfoBuf;
+		cpuInfo->cpuCount = 4;	/* confirmed real hardware max, sec 10.57 -> cpuIdx == 3 */
+		CSTGCPUInfo::sInstance = cpuInfo;
+
+		unsigned char *amBuf = mmap32(0x2000);
+		local_zero(amBuf, 0x2000);
+		CSTGAudioManager::sInstance = (CSTGAudioManager *)amBuf;
+
+		unsigned char *cpuRec = amBuf + 3 * 0x278;	/* cpuIdx == 3 */
+		*(unsigned int *)(cpuRec + 0x228) = 1000;	/* pre-existing raw accumulator, must be ADDED to */
+		*(unsigned int *)(cpuRec + 0x22c) = 2000;	/* pre-existing half-cost accumulator */
+		*(unsigned int *)(cpuRec + 0x234) = 5;		/* cursor -- read-only, must survive untouched */
+
+		/* prevSlot = (5+0xf)&0xf = 4; ringIdx = 0x9a+4+3*0x9e = 0x278;
+		 * ring address = amBuf + 0x10 + 0x278*4 = amBuf + 0x9f0 (this
+		 * lands inside the NEXT cpu's own 0x278-byte record region,
+		 * cpuIdx+1 -- confirmed algebraically: 0x9e*4 == 0x278 exactly,
+		 * so cpuIdx*0x9e dwords == cpuIdx*0x278 bytes, and the +0x9a*4
+		 * (==0x268) + 0x10 base together equal one more full 0x278
+		 * stride). */
+		unsigned char *ringSlot = amBuf + 0x9f0;
+		*(unsigned int *)ringSlot = 500;	/* pre-existing ring-history value */
+
+		CLoadBalancer *lb = (CLoadBalancer *)mmap32(sizeof(CLoadBalancer) + 0x200);
+		lb->UnloadEffectCost(9);	/* cost=9 -> (9>>1)+1 == 5 */
+
+		check_eq("UnloadEffectCost: cpuRec+0x228 (raw accum) == 1000+9", (long)*(unsigned int *)(cpuRec + 0x228), 1009);
+		check_eq("UnloadEffectCost: cpuRec+0x22c (half accum) == 2000+5", (long)*(unsigned int *)(cpuRec + 0x22c), 2005);
+		check_eq("UnloadEffectCost: cpuRec+0x234 (cursor) untouched", (long)*(unsigned int *)(cpuRec + 0x234), 5);
+		check_eq("UnloadEffectCost: ring slot == 500+5", (long)*(unsigned int *)ringSlot, 505);
 	}
 
 	printf("=========================================================\n");

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * load_balancer_static.cpp  -  batch 18: the "cost-accounting cluster"
+ * load_balancer_static.cpp  -  batch 18 (extended batch 29, see
+ * CLoadBalancer::UnloadEffectCost() near the end of this file): the
+ * "cost-accounting cluster"
  * first flagged (and rejected as a group) in sec 10.164 --
  * CLoadBalancer::BalanceStaticLoad() (`.text+0x61cb0`, 401 bytes),
  * CLoadBalancer::BalanceStaticLoadHelper(...) (`.text+0x61b80`, 297
@@ -296,4 +298,79 @@ void CLoadBalancer::BalanceStaticLoad()
 			busTotalsA, busTotalsB,
 			&committedA, &committedB);
 	}
+}
+
+/*
+ * CLoadBalancer::UnloadEffectCost(unsigned long) -- batch 29, `.text+0x62210`,
+ * 117 bytes. Confirmed via a full disassembly to be a fully self-contained
+ * leaf: ZERO `call` instructions anywhere in its body (neither direct nor
+ * vtable-indirect) -- the sec 10.160/10.161 "safe by instruction class"
+ * category, just smaller. `this` (eax on entry) is received but never
+ * dereferenced, exactly like BalanceStaticLoad() above -- every access
+ * routes through the two global singletons CSTGCPUInfo::sInstance and
+ * CSTGAudioManager::sInstance.
+ *
+ * Real semantics (confirmed instruction-by-instruction, plus a `readelf -x`
+ * decode of the function's own single `.rodata.cst4` constant, which
+ * resolves to exactly `0.5f`):
+ *
+ *   cpuIdx = CSTGCPUInfo::sInstance->cpuCount - 1
+ *
+ * (`cpuCount` is this project's own already-confirmed field, sec 10.57,
+ * clamped to a confirmed real-hardware max of 4 -- so `cpuIdx` is
+ * effectively a FIXED per-boot value across every call to this function,
+ * not a varying "current CPU" index. Its exact real-world meaning -- e.g.
+ * whether it always identifies one specific, RT-audio-dedicated CPU's own
+ * cost-accounting slot -- is not independently confirmed here, only the
+ * mechanical computation itself.)
+ *
+ * Two separate regions within CSTGAudioManager::sInstance's own
+ * already-documented opaque `_unrecovered_head[0xa44]` (oa_engine.h) get
+ * updated -- both fall safely inside that confirmed 0xa44 head (max
+ * touched byte, cpuIdx==3, is 0x93c):
+ *
+ *   (1) A per-CPU record at `AudioManager::sInstance + cpuIdx*0x278`:
+ *       `+0x228` (a raw running-cost accumulator) gets `cost` added
+ *       directly (unhalved); `+0x22c` (a second accumulator) gets
+ *       `(cost >> 1) + 1` added. The real code computes the halved term
+ *       via `fildll`/`fmuls 0.5f`/`fisttpl` (convert-to-double, multiply
+ *       by 0.5, truncate-toward-zero back to int) -- for a non-negative
+ *       integer input this is exactly equivalent to unsigned `cost / 2`
+ *       (== `cost >> 1`), so the plain integer shift is used here rather
+ *       than reintroducing float/double arithmetic (and the per-file
+ *       `-mhard-float` CFLAGS override that would otherwise require,
+ *       sec 10.174) for a computation that has no actual rounding
+ *       ambiguity.
+ *   (2) A flat, per-CPU 158-entry (0x9e) ring-history array based at
+ *       `AudioManager::sInstance + 0x10`: retroactively adds the SAME
+ *       `(cost >> 1) + 1` delta into the PREVIOUS ring slot -- computed
+ *       as `(cpuRec->+0x234 + 0xf) & 0xf`, a "cursor - 1, mod 16" idiom
+ *       (confirmed: `+0x234` is only ever READ here, never written) --
+ *       at absolute dword index `0x9a + prevSlot + cpuIdx*0x9e`.
+ *
+ * Modeled via raw byte-offset pointer arithmetic on
+ * `(unsigned char *)CSTGAudioManager::sInstance` rather than adding named
+ * fields to the class's own header: the offsets fall inside the ALREADY
+ * opaque `_unrecovered_head` blob, and no other reconstructed function
+ * names this exact 0x220-range/0x9e-ring region yet -- naming it fully is
+ * left for whichever future batch also reconstructs the blocked sibling
+ * LoadEffectCost() (see oa_engine.h) and/or this ring's own reader, so
+ * both ends can be named consistently at once.
+ */
+void CLoadBalancer::UnloadEffectCost(unsigned long cost)
+{
+	CSTGCPUInfo *cpuInfo = CSTGCPUInfo::sInstance;
+	unsigned int cpuIdx = cpuInfo->cpuCount - 1;
+
+	unsigned char *mgrBase = (unsigned char *)CSTGAudioManager::sInstance;
+	unsigned char *cpuRec = mgrBase + cpuIdx * 0x278;
+
+	*(unsigned int *)(cpuRec + 0x228) += (unsigned int)cost;
+
+	unsigned int halfCostPlus1 = (unsigned int)(cost >> 1) + 1;
+	*(unsigned int *)(cpuRec + 0x22c) += halfCostPlus1;
+
+	unsigned int prevSlot = (*(unsigned int *)(cpuRec + 0x234) + 0xf) & 0xf;
+	unsigned int ringIdx = 0x9a + prevSlot + cpuIdx * 0x9e;
+	*((unsigned int *)(mgrBase + 0x10) + ringIdx) += halfCostPlus1;
 }

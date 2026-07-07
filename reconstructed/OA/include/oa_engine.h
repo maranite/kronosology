@@ -1813,6 +1813,21 @@ public:
 				     unsigned long *sumOut1,
 				     unsigned long *sumOut2);
 
+	/*
+	 * UnloadEffectCost(unsigned long) (batch 29, `.text+0x62210`, 117
+	 * bytes) fully reconstructed -- see load_balancer_static.cpp. `this`
+	 * received but NEVER dereferenced (same shape as BalanceStaticLoad()
+	 * above) -- everything routes through CSTGCPUInfo::sInstance and
+	 * CSTGAudioManager::sInstance. Its sibling LoadEffectCost(unsigned
+	 * long) (`.text+0x62290`, 236 bytes) remains a confirmed-blocked
+	 * extern: it calls CCPUCostInfo::GetActualIdleEffectCycles(), which
+	 * has a real vtable DISPATCH reachable whenever
+	 * CSTGAudioManager::sInstance->+0x1c is nonzero (not a dead branch)
+	 * -- a genuine crash risk to promote with a placeholder vtable, not
+	 * mere complexity (sec 10.153 install-vs-dispatch rule).
+	 */
+	void UnloadEffectCost(unsigned long cost);
+
 	CEmergencyStealer emergencyStealer;	/* +0x00, confirmed embedded sub-object */
 	unsigned char _unrecovered[132];	/* includes fieldAt(0x8c), the confirmed real budget threshold BalanceStaticLoad's own second phase compares against -- own precise meaning/units not independently determined, left inside this opaque blob rather than carved out, matching this project's established "raw offset into an opaque region" convention elsewhere (CSTGGlobal, etc). */
 };

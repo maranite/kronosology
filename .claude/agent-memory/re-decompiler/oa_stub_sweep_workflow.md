@@ -2485,3 +2485,121 @@ functions) -- out of scope for a quick pass. The four file-daemon
 `ProcessCommands()` siblings are now ALL individually confirmed blocked
 by real dispatch -- fully characterized, can be dropped from future
 "re-check individually" sweeps.
+
+**Batch 29 specifics** (2026-07-07, sec 10.177, commit `<see git log,
+filled in below>`): the user gave fresh explicit authorization to
+continue past batch 28, with an explicit priority assignment: assess sec
+10.176's own flagged `CSetListEQ`/`CSTGEffectRack`/`CLoadBalancer::
+{Load,Unload}EffectCost` cluster FIRST, reject-with-reason if it's too
+big for one batch, and fall back to a fresh smallest-candidates sweep.
+Re-verified state myself first (HEAD `4ad026d`, clean tree, bare-`{}`
+stub count 68, last section `10.176` -- matched the briefing exactly).
+Ran on `kronosdev` (192.168.3.86), same local `/home/share` +
+`/home/build/linux-kronos` + local `/home/share/Decomp/OA.ko_Decomp/
+OA.ko` access as batches 21/24/25/26/28.
+
+**Did the assessment properly this time -- disassembled the SPECIFIC
+two-hop functions sec 10.176 named as the reach path
+(`CSTGPerformance::RunEffects(CSTGPerformanceVars*)`, `CSTGPerformanceVars::
+Free()`), not just re-read the prior batch's own summary.** Confirmed the
+cluster is genuinely intractable for one batch, with concrete new
+evidence: `CSetListEQ::Initialize()` (not just `SetBand()`) ALSO calls
+`CSTGEQ::CalculatePeakingBeta()` nine times -- meaning the already-deferred
+(since batch 22/23) `CSTGEQ` five-math-function cluster is the TRUE ROOT
+blocker of the ENTIRE `CSetListEQ`/`CSTGEffectRack` subsystem, not just
+`CSTGHDRMiniModel::Initialize()` as previously scoped. This is the single
+most valuable finding this batch -- a future batch attacking this cluster
+should start with `CSTGEQ`'s math functions specifically, since that's
+the one dependency gating multiple entry points at once. Full call-graph
+detail (every function named, byte size, and specific blocker) recorded
+in MASTER_REFERENCE.md sec 10.177 -- read it before re-doing this
+analysis; it supersedes sec 10.176's own vaguer "worth a dedicated push"
+framing with a concrete multi-batch scope estimate.
+
+**Lesson reinforced: when a "worth a dedicated future push" recommendation
+is inherited from a prior batch, actually disassemble the SPECIFIC
+functions it names as the reach path before deciding whether to attempt
+it or reject it again -- a summary-level "reachable via chain X" claim
+from a prior pass is not the same as having traced chain X yourself.**
+This also surfaced one incidental leaf while investigating the cluster:
+`CLoadBalancer::UnloadEffectCost(unsigned long)` (`.text+0x62210`, 117
+bytes) turned out to have ZERO calls of any kind (confirmed via full
+disassembly) -- its own sibling `LoadEffectCost()` is genuinely blocked
+(calls `CCPUCostInfo::GetActualIdleEffectCycles()`, which has a real,
+reachable vtable dispatch, sec 10.153 rule), but `UnloadEffectCost()`
+itself is safe. Promoted it standalone (own dedicated KAT section [6] in
+the EXISTING `verify/test_load_balancer_static.cpp`, since it belongs to
+the same `CLoadBalancer` class already homed in
+`load_balancer_static.cpp` and had zero pre-existing mocks anywhere to
+conflict with). Bare-`{}` stub count unchanged, 68 -> 68 (the symbol was
+never declared/stubbed in this project before this batch at all -- a
+"brand-new method, zero prior placeholder" accounting shape, same family
+as sec 10.170/10.174's flat-delta batches).
+
+**New technique, worth reusing: recognizing that a real x87
+`fildll`/`fmuls 0.5f`/`fisttpl` sequence reduces to a PLAIN INTEGER
+right-shift avoids the entire `-msoft-float` CFLAGS-override song and
+dance before it ever becomes a problem.** Decoded the function's own
+single `.rodata.cst4` constant via the sec 10.176-established
+symtab-index/section-index method (this `.ko`'s thousands of
+same-named `.rodata.cst4` instances make a name-based lookup silently
+read the wrong one) -- it resolves to exactly `0.5f`. Truncating
+`x*0.5` toward zero, for a non-negative integer `x`, is EXACTLY `x>>1`
+-- recognized this before writing any code, so `load_balancer_static.cpp`
+needed zero new float/double arithmetic and zero per-file
+`-mhard-float -msse2 -mfpmath=sse` Makefile override (sec 10.117/
+10.174/10.176's own recurring class of gotcha), unlike every prior batch
+that actually needed real float math. When a real disassembly's own
+float sequence is "convert an integer, multiply by a power-of-two
+constant, truncate," check whether it reduces to a plain integer
+shift/multiply BEFORE reaching for the CFLAGS-override fix -- it often
+does, and avoiding float entirely is strictly simpler and lower-risk
+than adding it correctly.
+
+**Swept ~10 more previously-unassessed "smallest remaining" bare-`{}`
+candidates independently of the cluster investigation** (full list with
+specific per-candidate blocking reason in MASTER_REFERENCE.md sec
+10.177): `CSetList::Activate()` (calls `CSetListEQ::SetBand()` 8x, the
+same already-blocked SSE+external-symbol function), `CSTGPianoModel::
+RescanPianoTypes()` (re-confirms the batch-7 `CSTGPianoTypes`/
+`CFileStream`/`CSTGPianoModelPatch`/`CPianoOsc` cluster, PLUS two real
+vtable dispatches not previously noted), `CSTGControllerInfo::
+SendUnsolicitedUIParam()` (2 real vtable dispatches),
+`CSTGSlotVoiceData::RunVoiceModelStaticFront/Back()` (both heavily
+vtable-dispatching, same family as the already-blocked
+`RunVoiceModelFeedback`), `CSTGVoiceAllocator::FreeVoice()` (fans into
+~9 classes plus 2 vtable dispatches), `CSTGVoiceAllocator::
+StealVoiceList()` (depends on the already-blocked
+`DoPendingMoveVoices()`), `CSTGControllerRTData::ResetKnobsJumpCatch()`
+(confirmed the same "5-sibling deeply-hashed-table cluster" as the
+already-blocked `SetAudioInSolo`/`ResetSendKnobsJumpCatch`, batch 10),
+`CSTGPerformanceVarsManager::Initialize()` (zero vtable dispatch but
+fans into 7 classes, one of which -- `CSetListEQ::Initialize()` -- is
+the same newly-identified `CSTGEQ`-blocked root as above).
+
+**Verification**: 71 verify/ binaries (unchanged -- extended the
+EXISTING `test_load_balancer_static` with a new KAT section rather than
+adding a new binary), all exit 0 by real per-binary process exit code
+(never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times -- `OA.ko` 167,452 bytes both
+runs, up from 167,320); 32 unresolved symbols; `.gnu.linkonce.
+this_module` 0x148 bytes; 0 `R_386_GOTPC`.
+
+**Deferred for a future batch**: `CSTGEQ`'s five core math functions
+(unchanged -- now confirmed the TRUE root blocker of the entire
+`CSetListEQ`/`CSTGEffectRack` cluster, not just `CSTGHDRMiniModel::
+Initialize()` -- start here for the next dedicated push on this
+cluster). `USTGHDRUtils::Convert44100WaveToSTGSamples()` (unchanged).
+`CLoadBalancer::LoadEffectCost()` (blocked by a real, reachable vtable
+dispatch in its own `GetActualIdleEffectCycles()` callee).
+`CSTGMonitorMixer::RunMonitors()` (unchanged). Several NEW
+not-yet-individually-assessed dependencies surfaced while scoping the
+cluster: `CSTGPerformance::Free()`, `CSTGEffectRackVars::
+ResetOnActivation()`/`ApplyDModTickDelay()`, `CSTGMIDIClockSync::
+EnableActivePerfClock()`, `CSTGSlotVoiceData::EmergencyFreeAllVoices()`,
+`CSTGPan::CalculateStereoPanCoeffs()` -- none individually checked yet
+for their own tractability (several look plausible by analogy to
+already-real siblings, e.g. `CalculateStereoPanCoeffs()` to
+`CalculateMonoPanCoeffs`/sec 10.151, and `EnableActivePerfClock()` to
+`DisableActivePerfClock`/batch 19, but this is unconfirmed speculation,
+not a checked fact).
