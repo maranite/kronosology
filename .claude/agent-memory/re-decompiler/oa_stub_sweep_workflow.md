@@ -2602,3 +2602,111 @@ already-real siblings, e.g. `CalculateStereoPanCoeffs()` to
 `CalculateMonoPanCoeffs`/sec 10.151, and `EnableActivePerfClock()` to
 `DisableActivePerfClock`/batch 19, but this is unconfirmed speculation,
 not a checked fact).
+
+**Batch 30 specifics** (2026-07-07, sec 10.178, commit `<fill in after
+commit>`): user gave fresh explicit authorization with a specific priority
+-- resolve the sec 10.177 `CSTGEQ` five-math-function cluster (the
+confirmed TRUE root blocker of the whole `CSetListEQ`/`CSTGEffectRack`
+subsystem). Re-verified state myself first (HEAD `2b85524`, clean tree,
+stub count 68, last section `10.177` -- matched). Ran on `kronosdev`
+(192.168.3.86), same local access as batches 21/24/25/26/28/29.
+**All five functions done in one pass** (not a partial subset) --
+`CalculateLowShelfBeta`/`CalculateHighShelfBeta`/`CalculatePeakingBeta`/
+`CalculatePeakingCoefficients`/`CalculateShelvingCoefficients`, new file
+`src/engine/eq_coefficients.cpp` + `CSTGEQ`/`STGEQCoefficients`/
+`eEQShelvingType` in `oa_global.h` (alongside `CSTGPan`). Stub count
+unchanged (68 -> 68 -- brand-new class, never had a `bar2_stubs.cpp`
+placeholder). Full derivation/verification in MASTER_REFERENCE.md sec
+10.178 -- read it before touching `CSTGEQ` again. Key points worth
+repeating here since they generalize beyond this one cluster:
+
+**The "whole-function verbatim x87 inline-asm transcription" technique
+(this batch's main methodological contribution) works, and is CHEAPER
+than it looks**: write ONE `asm volatile` block per function that copies
+the real disassembly's own mnemonics near-verbatim (only `.rodata.cst4`
+constants, stack-frame args, and the `(%esp)` scratch slot become named
+C memory operands) instead of hand-deriving a clean C expression for
+multi-register `fxch`-heavy math. Real branches become GNU-as numeric
+local labels (`1:`/`2:`, safely reused across sibling functions/asm
+blocks in the same TU -- confirmed: numeric labels resolve to the
+nearest `Nf`/`Nb` match in the given direction, no cross-function
+collision risk). A real compiler TAIL-MERGE in the original object code
+(two branches converging on shared cleanup code, one via its own inlined
+copy of the tail's first instruction + a skip-ahead jump, the other via
+a jump to the tail's true start) is safe to reproduce as a plain shared
+label both branches jump to directly -- the skipped instruction was
+idempotent (`fstp %st(0)`/`fstp %st(1)`) regardless of who executes it,
+confirmed by tracing both paths' FPU stack state independently rather
+than assuming the compiler's own code-layout choice was semantically
+load-bearing.
+
+**STANDING GOTCHA, worth its own top-level entry since it will bite any
+future x87 whole-function transcription, not just this cluster: the
+POPPING two-register x87 forms (`fsubp`/`fsubrp`/`fdivp`/`fdivrp
+%st,%st(i)`) have their regular-vs-reverse direction OPPOSITE to the
+non-popping `fsub %st(i),%st`/`fsubr %st(i),%st` forms (dest=ST0).**
+Non-popping (dest=ST0): `fsub %st(i),%st` = ST0-ST(i), `fsubr
+%st(i),%st` = ST(i)-ST0 (matches the "obvious" R-suffix-reverses-order
+reading). Popping (dest=ST(i)): `fsubp %st,%st(i)` = ST0-ST(i) (SOURCE
+minus DEST -- the "regular" non-R form is the one that reads
+backwards!), `fsubrp %st,%st(i)` = ST(i)-ST0 (DEST minus SOURCE). Same
+swap for `fdivp`/`fdivrp`. This is exactly backwards from what analogy
+with the non-popping forms would suggest, and it is NOT something to
+re-derive from memory a second time and trust -- confirmed this batch
+only via an actual hardware microtest (`flds`/`flds`/`fsubrp`/`fstps`
+with two known distinct constants, comparing both candidate formulas
+against the real CPU's own answer). A first-draft Python x87 emulator
+(used to independently generate KAT golden values) had this backwards,
+producing a sign-flipped-but-correct-MAGNITUDE result -- that specific
+symptom (right magnitude, wrong sign, in an all-algebraic no-branch-risk
+computation) is the reliable tell that a fsubp/fsubrp/fdivp/fdivrp
+direction is swapped, not a transcription slip elsewhere. The actual C++
+inline asm was never wrong in this batch (verbatim copy of the real
+objdump mnemonics throughout) -- only the INDEPENDENT Python oracle used
+to check it had the bug, caught by, then fixed via, a real KAT `FAILED`
+line plus a standalone microtest, not by staring at the Intel manual
+again.
+
+**Second reusable gotcha: don't round to float32 after every
+register-to-register op when writing a from-scratch x87 emulator for
+KAT-golden-value generation -- only round at the real hardware rounding
+POINTS (`fstps`/`fsts`, explicit single-precision stores).** An early
+draft rounded every intermediate result to float32 (an over-cautious
+carryover from a much simpler earlier primitive-wrapper style), which
+produced 1-ULP-off golden values on ~7 checks relative to the real
+compiled+executed asm -- real x87 hardware keeps register-to-register
+arithmetic in 80-bit extended precision and only narrows to 32-bit on an
+explicit store. Fixed by using Python's native double (53-bit mantissa,
+not a perfect stand-in for 80-bit/64-bit-mantissa extended precision,
+but far closer than float32) for all intermediate ops, rounding to
+float32 ONLY at `fstps`/`fsts`.
+
+**Third reusable point: hardware `fptan`/`fcos` are not bit-reproducible
+via a software `tan()`/`cos()` oracle -- classify KAT checks accordingly
+BEFORE writing them, not after chasing phantom failures.** Any output
+field whose OWN computation chain reads a transcendental result needs an
+epsilon-tolerant check; any field that's purely algebraic (confirmed via
+full disassembly to contain no `fcos`/`fptan` in its own dependency
+chain -- `CalculateShelvingCoefficients` has NONE at all, a fully
+algebraic function despite computing filter coefficients) can and should
+still be checked bit-exact. Don't blanket-apply epsilon tolerance to a
+whole function just because SOME of its fields are transcendental-derived.
+
+**Verification**: 72 verify/ binaries (up from 71, new
+`test_eq_coefficients`), all exit 0 by real per-binary process exit code
+(never log-grepped), both of two full clean-rebuild passes on
+`kronosdev` (byte-identical both times -- `OA.ko` 168,956 bytes both
+runs, up from 167,452); 32 unresolved symbols; `.gnu.linkonce.
+this_module` 0x148 bytes; 0 `R_386_GOTPC`.
+
+**Deferred for a future batch, unchanged**: `USTGHDRUtils::
+Convert44100WaveToSTGSamples()`, `CLoadBalancer::LoadEffectCost()`
+(blocked by a real reachable vtable dispatch), `CSTGMonitorMixer::
+RunMonitors()` (whole separate DSP subsystem). `CSetListEQ`/
+`CSTGEffectRack`/`CSetList` themselves are now UNBLOCKED AT THE ROOT
+(`CSTGEQ` is real) but still need their own dedicated future push, plus
+sec 10.177's other newly-identified dependencies (`CSTGPerformance::
+Free()`, `CSTGEffectRackVars::ResetOnActivation()`/
+`ApplyDModTickDelay()`, `CSTGMIDIClockSync::EnableActivePerfClock()`,
+`CSTGSlotVoiceData::EmergencyFreeAllVoices()`, `CSTGPan::
+CalculateStereoPanCoeffs()`), none individually assessed yet.

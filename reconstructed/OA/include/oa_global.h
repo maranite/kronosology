@@ -1281,6 +1281,89 @@ struct CBusChangeStateMachine {
 };
 
 /*
+ * STGEQCoefficients -- 5-float output struct written by
+ * CSTGEQ::CalculatePeakingCoefficients()/CalculateShelvingCoefficients()
+ * (batch 30, sec 10.178). Confirmed real: both real functions write
+ * exactly `(%reg)`/`+0x4`/`+0x8`/`+0xc`/`+0x10`, five packed floats, no
+ * gaps. Field ROLE (not just position) is a strong but NOT independently
+ * proven inference: five outputs from a filter-coefficient function
+ * strongly suggests the classic normalized biquad {b0,b1,b2,a1,a2} (a0
+ * implicit 1.0) layout, matching this project's own "named by position"
+ * precedent (`STGMonoPanCoeffs`, sec 10.151) -- but the actual per-branch
+ * formulas derived this batch do NOT line up sign-for-sign with the
+ * textbook RBJ cookbook peaking-EQ formulas (e.g. `a1`/`b1` end up
+ * OPPOSITE-signed for some branches here, not same-signed as the
+ * cookbook), so this is a customized/Korg-specific coefficient set, not
+ * a literal cookbook transcription. Named by position, semantics
+ * unconfirmed beyond that.
+ */
+struct STGEQCoefficients { float b0; float b1; float b2; float a1; float a2; };
+
+/*
+ * eEQShelvingType -- the third argument of
+ * CSTGEQ::CalculateShelvingCoefficients(), tested only as `eax==0` vs
+ * `eax!=0` in the real disassembly (batch 30). Strong (but not
+ * mechanically cross-checked against a real caller -- no caller is
+ * reconstructed yet) inference: this selects between the same two
+ * "shelf types" already named by the ground-truth mangled symbols
+ * `CalculateLowShelfBeta`/`CalculateHighShelfBeta`, so 0/nonzero are
+ * named accordingly here.
+ */
+enum eEQShelvingType { kEQLowShelf = 0, kEQHighShelf = 1 };
+
+/*
+ * CSTGEQ -- a plain static-method math-utility class (no fields, no
+ * vtable, matching `CSTGPan` above), confirmed via `nm -C OA.ko | grep
+ * CSTGEQ::` (only method symbols, no `vtable for`/`typeinfo for`).
+ * `CSetListEQ::Initialize()`/`SetBand()` (not yet reconstructed) call
+ * these -- sec 10.177 identified this whole 5-function cluster as the
+ * TRUE root blocker of the entire `CSetListEQ`/`CSTGEffectRack`
+ * subsystem (`CalculatePeakingBeta()` alone is called 9x from
+ * `CSetListEQ::Initialize()`). Batch 30 (sec 10.178) reconstructs all
+ * five via whole-function verbatim x87 inline-asm transcription (two of
+ * the five use real `fptan`; the coefficient functions do heavy
+ * multi-register x87 stack shuffling across real branches, not
+ * reducible to this project's single-input/output x87 primitive-wrapper
+ * convention, sec 10.117/10.151) -- see src/engine/eq_coefficients.cpp
+ * for the full per-function derivation, including a from-scratch Python
+ * x87-stack emulator used to numerically cross-check every branch of
+ * the two coefficient functions before transcribing them.
+ */
+struct CSTGEQ {
+	/* (`.text+0x247e0`, 34 bytes) beta = tan(2*pi*freq/48000 / 2). */
+	static float CalculateLowShelfBeta(float freq);
+	/* (`.text+0x24810`, 40 bytes) beta = tan((pi - 2*pi*freq/48000) / 2). */
+	static float CalculateHighShelfBeta(float freq);
+	/*
+	 * (`.text+0x24910`, 68 bytes) omega = freq*2*pi/48000, written to
+	 * *outOmega as a byproduct (confirmed real: `fsts (%eax)`, no pop,
+	 * before the register is reused for the tan() computation itself);
+	 * returns tan(min(omega/(2*bw), 1.49225652f)) -- the clamp constant
+	 * avoids the tan() singularity as its argument approaches pi/2.
+	 */
+	static float CalculatePeakingBeta(float freq, float bw, float *outOmega);
+	/*
+	 * (`.text+0x24960`, 160 bytes) three float inputs (position-named
+	 * `p0`/`p1`/`p2` -- `p2` is the one `fcos`'d internally, so it reads
+	 * as a raw angle, not a pre-computed cosine) + output struct.
+	 * Branches on `p0 >= 1.0`. See eq_coefficients.cpp for the full
+	 * per-branch derivation.
+	 */
+	static void CalculatePeakingCoefficients(float p0, float p1, float p2,
+	                                          STGEQCoefficients *out);
+	/*
+	 * (`.text+0x24840`, 199 bytes) branches on `gain >= 1.0` (2 cases)
+	 * crossed with `type == kEQLowShelf` (2 cases) -- 4 total paths, the
+	 * type-based pair converging on two shared tail blocks in the real
+	 * object code (a compiler tail-merge, reproduced here as two shared
+	 * asm labels rather than 4 duplicated tails -- behaviorally
+	 * identical, see eq_coefficients.cpp).
+	 */
+	static void CalculateShelvingCoefficients(float gain, float beta, eEQShelvingType type,
+	                                           STGEQCoefficients *out);
+};
+
+/*
  * CSTGBusInfo::GetSignalSelectionForBusType(int) (sec 10.151,
  * `.text+0x258a0`, 24 bytes) confirmed: a plain 2-entry `{1, 2}` lookup
  * table (raw `.rodata` ints, independently confirmed to carry NO
