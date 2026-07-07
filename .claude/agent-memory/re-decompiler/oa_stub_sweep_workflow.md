@@ -24,7 +24,7 @@ no copying needed, just SSH over to run `make`.
 ```
 make clean && make all                          # host-side KATs, all must build+pass
 make ko KDIR=/home/build/linux-kronos            # actual .ko build
-nm -u OA.ko | wc -l                              # 33 as of batch 31 (was 32; grows as promoted internals reference more real externals)
+nm -u OA.ko | wc -l                              # 36 as of batch 32 (32->33 batch31, ->36 batch32; grows as promoted internals reference more real externals)
 objdump -h OA.ko | grep -i linkonce              # .gnu.linkonce.this_module must be 0x148 bytes
 readelf -r OA.ko | grep -c R_386_GOTPC           # must be 0
 stat -c '%s' OA.ko                                # report exact byte size
@@ -2773,3 +2773,37 @@ lifecycle), `load_global_resources`, the whole `rtwrap_*` RTAI layer, and
 the `CSTGFile_*` VFS wrappers (Open 99 / Read 170 / Write 97 / Close 21 /
 Seek 55 / GetFileSize 22 bytes) — a coherent "file I/O primitives"
 cluster worth one dedicated batch.
+
+**Batch 32 specifics** (2026-07-07, sec 10.180): second init-path batch
+of the same session, continuing the user's "de-stub the init path"
+directive. Promoted the four non-`set_fs` `CSTGFile_*` VFS wrappers
+(`Open`/`Close`/`Seek`/`GetFileSize`) from `bar2_stubs_c.cpp` into new
+`src/init/file_io.cpp` + `verify/test_file_io.cpp` (74 binaries now).
+`nm -u` 33 -> 36 (added `filp_open`/`filp_close`/`generic_file_llseek`,
+all `U` in ground truth). Both clean passes byte-identical, `OA.ko`
+169,488 bytes.
+
+**Reusable: dual-platform IS_ERR.** For any reconstructed kernel
+pointer/error comparison against the top-4KB error band, write the
+threshold as `(unsigned long)-4096` (kernel `IS_ERR_VALUE` idiom), NOT a
+literal `0xfffff000`. It is bit-exact on `-m32` and simultaneously
+host-correct on the 64-bit KAT (real high heap pointers stay below
+`0xffff_ffff_ffff_f000`; small negative ERR_PTRs stay above it), so the
+IS_ERR path is host-testable with a plain `(void*)-13` mock return — no
+`mmap`-low-address trick. `filp_open`/`filp_close`/`generic_file_llseek`
+are regparm(3) (NOT asmlinkage — unlike printk), so plain `extern "C"`
+decls match under the module's `-mregparm=3` default.
+
+**Confirmed 2.6.32/x86-32 VFS offsets (needed again by the deferred
+Read/Write):** file +0xc dentry / +0x10 f_op / +0x20 f_mode / +0x24
+f_pos(loff_t); dentry +0x10 d_inode; inode +0x40 i_size(loff_t);
+file_operations +0x8 read / +0xc write. KAT builds fake byte-buffer
+structs to this layout so the identical source is off-target testable.
+
+**Deferred: `CSTGFile_Read`/`CSTGFile_Write`** — the `set_fs`
+(`esp & ~0x1fff` thread_info addr_limit save/restore) + `f_op->read/write`
+dispatch pair. NOT host-executable (clobbers live host stack); needs an
+opaque `set_fs` helper (init_module.cpp `current`-accessor precedent) +
+fake-f_op-vtable KAT. Read also EOF-clamps count vs `i_size - f_pos`
+(64-bit add/adc/cmp). Once these two + `stg_is_linux_context` are real,
+`stg_log_startup_error` (needs Open+Write+Close) becomes promotable.

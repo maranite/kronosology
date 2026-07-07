@@ -23,12 +23,12 @@
 #include "oa_crypto.h"
 
 /* ---- CSTGFile_* (file I/O primitives, already declared locally in
- * several callers -- redeclared here with matching signatures) ---- */
-extern "C" void *CSTGFile_Open(const char *, int) { return 0; }
-extern "C" int CSTGFile_Seek(void *, int, int) { return -1; }
+ * several callers -- redeclared here with matching signatures) ----
+ * Open/Close/Seek/GetFileSize promoted to real VFS wrappers in
+ * src/init/file_io.cpp (sec 10.180). Write/Read (the set_fs +
+ * f_op->read/write pair) and the higher-level FileExists/
+ * ReadFileIntoNewBuffer/FreeReadBuffer helpers remain stubbed. */
 extern "C" int CSTGFile_Write(void *, const void *, unsigned int) { return -1; }
-extern "C" int CSTGFile_Close(void *) { return 0; }
-extern "C" unsigned int CSTGFile_GetFileSize(void *) { return 0; }
 extern "C" int CSTGFile_Read(void *, void *, unsigned int) { return -1; }
 extern "C" int CSTGFile_FileExists(const char *) { return 0; }
 extern "C" unsigned char *CSTGFile_ReadFileIntoNewBuffer(const char *, unsigned int *outLen) { if (outLen) *outLen = 0; return 0; }
