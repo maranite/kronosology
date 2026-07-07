@@ -2467,7 +2467,7 @@ comparison, not just spot checks), all exit 0 by real per-binary process
 exit code (never log-grepped), both of two full clean-rebuild passes on
 `kronosdev` (byte-identical both times -- `OA.ko` 167,320 bytes both
 runs); 32 unresolved symbols; `.gnu.linkonce.this_module` 0x148 bytes; 0
-`R_386_GOTPC`. Commit `PENDING`.
+`R_386_GOTPC`. Commit `4e411ce`.
 
 **Deferred for a future batch**: `CSTGEQ`'s five core math functions and
 `USTGHDRUtils::Convert44100WaveToSTGSamples()` (both unchanged). NEW:
