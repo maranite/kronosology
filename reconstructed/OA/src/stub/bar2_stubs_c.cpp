@@ -41,11 +41,42 @@ extern "C" void SCalibrationData_LoadCalibrationFile() {}
 
 /* ---- Startup/daemon lifecycle helpers, confirmed real (init_module's
  * own confirmed call chain, sec 10.17 -- own bodies not reconstructed) ---- */
+/* cleanup_cpp_support @0x118... (ground truth OA.ko, 57 bytes) -- DEFERRED,
+ * fully disassembled (batch 34 scout) so the next attempt need not re-derive:
+ *
+ *     push %ebp; mov %esp,%ebp; and $-16,%esp; push %ebx; sub $0xc,%esp
+ *     mov  .dtors+4, %eax          ; R_386_32 .dtors  -> eax = .dtors[1]
+ *     test %eax,%eax ; je  L_exit  ; empty list -> straight to stg_cpp_exit
+ *     mov  $.dtors+4, %ebx         ; R_386_32 .dtors  -> ebx = &.dtors[1]
+ *   L_loop:
+ *     lea  0x4(%ebx),%ebx          ; advance to next slot
+ *     call *%eax                   ; call this destructor
+ *     mov  (%ebx),%eax ; test %eax,%eax ; jne L_loop
+ *   L_exit:
+ *     call stg_cpp_exit            ; R_386_PC32 (1-byte `ret` no-op)
+ *     epilogue; ret
+ *
+ * i.e. it walks the module's `.dtors` array from entry [1], calling each
+ * function pointer until it hits the 0 terminator, then calls stg_cpp_exit.
+ * The fini-side mirror of init_cpp_support (sec 10.179, a 1-byte `ret`).
+ *
+ * WHY STILL DEFERRED: the body references the `.dtors` SECTION symbol
+ * directly (`R_386_32 .dtors`), a linker construct. Faithfully binding a
+ * portable-C body to `.dtors` start in THIS freestanding kernel-module
+ * build (no crtstuff, so no `__DTOR_LIST__`) needs either a module linker-
+ * script boundary symbol or an in-section anchor -- the latter would ADD a
+ * `.dtors` entry and change semantics. It is the UNLOAD path (not needed to
+ * get OA.ko running), so promoting it correctly is a dedicated task, not a
+ * smallest-first stub. stg_cpp_exit itself is a trivial confirmed no-op
+ * (1-byte ret) but is only reachable through this function, so it rides
+ * along whenever cleanup_cpp_support is promoted. */
 extern "C" void cleanup_cpp_support() {}
 extern "C" int setup_stg_daemons() { return 0; }
 extern "C" void cleanup_stg_daemons() {}
 extern "C" int setup_stg_decrypt_daemons() { return 0; }
-extern "C" void signal_timed_out_daemons() {}
+/* signal_timed_out_daemons + its tick source GetSTGTickCount promoted to
+ * real bodies in src/init/stg_daemons.cpp + src/engine/tick_count.cpp
+ * (batch 35, sec 10.183). */
 /* stg_log_startup_error + its guard stg_is_linux_context promoted to real
  * bodies in src/init/startup_helpers.cpp (batch 34, sec 10.182). */
 extern "C" int load_global_resources() { return 0; }

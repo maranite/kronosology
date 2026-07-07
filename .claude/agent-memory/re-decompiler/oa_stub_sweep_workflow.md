@@ -2948,3 +2948,68 @@ the only small init-path leaf left. Bigger still-stubbed init subsystems:
 `setup_stg_daemons`/`cleanup_stg_daemons`/`setup_stg_decrypt_daemons`/
 `signal_timed_out_daemons` (RT-thread lifecycle), `load_global_resources`,
 `rtwrap_*` RTAI layer.
+
+**Batch 35 specifics** (2026-07-07, sec 10.183): fifth init-path batch.
+`cleanup_cpp_support` scouted + DEFERRED AGAIN (its `.dtors` section-symbol
+walk can't be faithfully bound to portable C in this crtstuff-less module
+build without a linker boundary symbol / in-section anchor; it's the
+unload path, not needed to boot). Its FULL disassembly is now captured in
+`bar2_stubs_c.cpp`'s own deferral note so the next attempt doesn't
+re-derive it. Retargeted to `signal_timed_out_daemons` (435B, the RT
+daemon watchdog, called from engine.cpp:121) which turned out clean and
+self-contained.
+
+**Reading a compiler-unrolled + out-of-line-hoisted loop back into a
+simple loop:** `signal_timed_out_daemons`' disasm looks scary (7 inline
+timeout checks, then 7 separate "kick" bodies AFTER the ret, with `jbe`
+back-edges re-entering the main scan) but is just
+`now=GetSTGTickCount(); for(i=0;i<7;i++) if((u32)(now-d[i].lastTick) >
+d[i].timeout){ d[i].lastTick=GetSTGTickCount(); rt_pend_linux_srq(
+d[i].srq);} `. The out-of-line fire bodies + `jbe` re-entries are the
+compiler's layout of independent per-iteration branches, NOT a data
+dependency between daemons — each daemon is independent, `now` (ebx) is
+loop-invariant. Don't over-model hoisted branch layout; recover the loop.
+Confirmed quirks to KEEP: unsigned strict `>` (`ja`/`jbe` — elapsed==
+timeout does NOT fire); wrapping 32-bit subtract; `now` read ONCE but each
+kick re-reads a FRESH tick to stamp lastTick (TWO GetSTGTickCount calls,
+not folded).
+
+**Daemon control-block struct**: 7-entry `.bss` array, base +0x1077d8,
+stride 0x60, fields +0x00 lastTick / +0x04 timeout / +0x0c srq (only these
+3 confirmed; rest is opaque 0x60-stride padding). Modeled as
+`STGDaemonWatch gStgDaemons[7]` in new `include/oa_daemons.h` +
+`src/init/stg_daemons.cpp`, with a `static_assert(sizeof==0x60)`. Shared
+with the still-stubbed `setup_stg_daemons` family (they populate
+timeout/srq) — zero-init for now = inert-but-faithful. This shared layout
+makes `setup_stg_daemons`/`setup_stg_decrypt_daemons` the natural next
+target.
+
+**Reconstruct an internal callee rather than leave it a dangling `U`:**
+`signal_timed_out_daemons` calls `GetSTGTickCount` (16B), which is `T`
+(internal) in ground truth — leaving it `U` would be a dangling internal
+symbol (insmod-unresolvable), unlike the legitimately-external
+`rt_pend_linux_srq` (RTAI, `U` in ground truth). So reconstructed it too:
+`return *(u32*)((char*)CSTGGlobal::sInstance + 0x29c9fa8)` (one dword above
+lfo_stepseq_quad.cpp's own +0x29c9fa0 read). Put it in its OWN TU
+(`src/engine/tick_count.cpp`, NOT global.cpp) so the watchdog KAT can mock
+it with a scripted tick sequence while its real body gets its own KAT —
+the sec-10.150 "split a shared dep across TUs when mock footprints differ"
+pattern. Result: nm -u 39 -> 40, the ONLY new external is rt_pend_linux_srq
+(GetSTGTickCount + signal_timed_out_daemons now `T`).
+
+**Host-KAT trick for a huge-offset singleton field** (GetSTGTickCount
+reads sInstance+0x29c9fa8, ~44MB in): DON'T allocate a 44MB fake object —
+set `sInstance = (base of a small local) - 0x29c9fa8` so `sInstance +
+0x29c9fa8` lands on the local, and drive the local. sInstance itself is
+never dereferenced, only the computed field address. **Compute that base
+via `uintptr_t` integer arithmetic, NOT pointer arithmetic off `&local`**
+— the latter trips GCC `-Warray-bounds` (it knows the local's size and
+flags the deliberately-out-of-object base as a fake overrun). The project
+has no `-Werror` so it's only noise, but the clean-build convention wants
+it gone.
+
+**Verification**: 2 new KATs (74 -> 76), byte-identical two-pass rebuild,
+`OA.ko` 170,696 -> 171,084 bytes, linkonce 0x148, GOTPC 0. New files:
+stg_daemons.cpp, tick_count.cpp, oa_daemons.h, test_stg_daemons.cpp,
+test_tick_count.cpp; edited oa_global.h (GetSTGTickCount decl), Makefile
+(2 objs + 2 SRC + 2 TESTS + 2 rules), bar2_stubs_c.cpp (1 stub removed).

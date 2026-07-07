@@ -1769,6 +1769,14 @@ public:
 	void ValidateParamChange(CSTGMessageContext &ctx, unsigned long paramId, const CValue &value);
 };
 
+/* GetSTGTickCount (ground-truth `GetSTGTickCount`, 16 bytes, extern "C") --
+ * returns the STG tick counter, a u32 field deep inside the CSTGGlobal
+ * singleton: `*(u32 *)((char *)CSTGGlobal::sInstance + 0x29c9fa8)` (adjacent
+ * to the +0x29c9fa0 field lfo_stepseq_quad.cpp already reads). Body in
+ * src/engine/tick_count.cpp (batch 35, sec 10.183); the daemon watchdog
+ * signal_timed_out_daemons() is its primary caller. */
+extern "C" unsigned int GetSTGTickCount(void);
+
 class CSTGGlobal {
 public:
 	static CSTGGlobal *sInstance;
