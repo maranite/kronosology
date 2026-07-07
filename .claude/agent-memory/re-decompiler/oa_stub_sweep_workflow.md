@@ -2807,3 +2807,77 @@ opaque `set_fs` helper (init_module.cpp `current`-accessor precedent) +
 fake-f_op-vtable KAT. Read also EOF-clamps count vs `i_size - f_pos`
 (64-bit add/adc/cmp). Once these two + `stg_is_linux_context` are real,
 `stg_log_startup_error` (needs Open+Write+Close) becomes promotable.
+
+**Batch 33 specifics** (2026-07-07, sec 10.181, commit TBD): third
+init-path batch of the session. Picked up sec 10.180's own explicitly
+pre-scoped lead (`CSTGFile_Read`/`Write`, the `set_fs` pair) and, once
+disassembled, found the WHOLE rest of the `CSTGFile_*` family
+(`FileExists`/`FreeReadBuffer`/`ReadFileIntoNewBuffer`) was small and
+tractable too -- did all 5 in one pass, closing the cluster out
+completely. Ran on `kronosdev` (192.168.3.86), same local access as
+every batch since 21. Implemented the `stg_set_fs`/`stg_restore_fs`
+opaque helper pair exactly as sec 10.180 anticipated: real bodies in
+`bar2_stubs_c.cpp` (genuine `esp & 0xffffe000` thread_info-locating
+inline asm, same host/target divergence pattern as
+`stg_get_current_task()`), host KAT gets its own safe mock (a fake
+"current addr_limit" global).
+
+**MAJOR new gotcha, a real KAT segfault (not a compiler warning) in a
+function UNRELATED to this batch's own new code
+(`CSTGFile_GetFileSize`, from batch 32): storing TWO real kernel struct
+pointer fields that are only 4 bytes apart in the REAL 32-bit struct
+as native 8-byte host pointers in the SAME fake buffer corrupts
+whichever is written FIRST, regardless of the actual address values
+involved (mmap32/low-address tricks do NOT fix this -- it's a pure
+byte-spacing overlap, not an address-range problem; verified this by
+worked-through math before concluding a proper fix was needed).** Hit
+TWICE in one batch: (1) the test's fake `file_operations`
+`read`@+0x8/`write`@+0xc (both needed simultaneously by NEITHER single
+call, so fixed via mutual exclusion -- `wire_read_fop()`/
+`wire_write_fop()`, only ONE ever populated per test fixture); (2)
+`struct file`'s `f_path.dentry`@+0xc/`f_op`@+0x10 -- BOTH genuinely
+needed simultaneously by a single `CSTGFile_Read` call, so mutual
+exclusion doesn't apply. Root-caused via `CSTGFile_GetFileSize`
+segfaulting in [1] of the KAT (a function this batch never touched) --
+adding the new `f_op` write at file+0x10 silently corrupted the
+pre-existing `dentry` pointer at file+0xc. **Proper fix (not a
+workaround): switched file_io.cpp's OWN pointer-field reads (`dentry`,
+`d_inode`, `f_op`) to this project's established `FromU32()` convention
+(explicit 32-bit read + zero-extend) instead of a native
+`unsigned char **` cast** -- identical behavior on the real `-m32`
+target (already 4-byte pointers there) and immune to this overlap
+class regardless of what future fields get added nearby. Correspondingly
+switched the test's `g_inode`/`g_dentry`/`g_fops` from plain static
+arrays to `mmap32()`-backed buffers (this project's own established
+convention) since their addresses now round-trip through a 32-bit
+truncation -- a plain static array's PIE-relocated address (observed:
+~0x555555550000) does NOT fit in 32 bits. **Standing rule reinforced:
+the MOMENT a host KAT needs to read/write more than one raw kernel/
+target pointer field within 8 bytes of each other, default to
+FromU32()/ToU32()+mmap32() for ALL of them from the start -- do not
+wait for a segfault to catch it, and remember the segfault may surface
+in a completely different, already-passing function that merely shares
+the same fake struct buffer.**
+
+**Confirmed real quirks (asymmetric NULL-guard, EOF-clamp cascade
+signed-high/unsigned-low compare + 32-bit-only clamped subtract,
+`ReadFileIntoNewBuffer`'s outLen-written-before-failure quirk,
+unconditional close-on-every-path) all preserved -- see MASTER_REFERENCE
+sec 10.181 for full detail, don't re-derive from scratch.**
+
+New external deps this batch: `vmalloc`/`vfree` (both confirmed `U` in
+ground truth). `nm -u OA.ko`: 36 -> **38**.
+
+**Verification:** 74 verify/ binaries (unchanged count -- extended
+`test_file_io.cpp` in place with 5 new sections, 78 checks total), all
+exit 0 by real per-binary exit code (TESTS list parsed fresh from the
+Makefile, not glob-trusted), two full clean-rebuild passes byte-identical
+(`OA.ko` 170,264 bytes both runs, up from 169,488).
+
+**Deferred, unchanged**: `cleanup_cpp_support` (`.dtors` walk). NEWLY
+promotable next: `stg_log_startup_error` (its own dependencies --
+`CSTGFile_Open`/`Write`/`Close` -- are now ALL real; only
+`stg_is_linux_context` remains unresolved for it). Bigger subsystems
+still stubbed: `setup_stg_daemons`/`cleanup_stg_daemons`/
+`setup_stg_decrypt_daemons`/`signal_timed_out_daemons`,
+`load_global_resources`, the `rtwrap_*` RTAI layer.

@@ -24,15 +24,10 @@
 
 /* ---- CSTGFile_* (file I/O primitives, already declared locally in
  * several callers -- redeclared here with matching signatures) ----
- * Open/Close/Seek/GetFileSize promoted to real VFS wrappers in
- * src/init/file_io.cpp (sec 10.180). Write/Read (the set_fs +
- * f_op->read/write pair) and the higher-level FileExists/
- * ReadFileIntoNewBuffer/FreeReadBuffer helpers remain stubbed. */
-extern "C" int CSTGFile_Write(void *, const void *, unsigned int) { return -1; }
-extern "C" int CSTGFile_Read(void *, void *, unsigned int) { return -1; }
-extern "C" int CSTGFile_FileExists(const char *) { return 0; }
-extern "C" unsigned char *CSTGFile_ReadFileIntoNewBuffer(const char *, unsigned int *outLen) { if (outLen) *outLen = 0; return 0; }
-extern "C" void CSTGFile_FreeReadBuffer(unsigned char *) {}
+ * The ENTIRE CSTGFile_* cluster is now real: Open/Close/Seek/
+ * GetFileSize (src/init/file_io.cpp, sec 10.180), and Read/Write/
+ * FileExists/ReadFileIntoNewBuffer/FreeReadBuffer (same file, sec
+ * 10.181). Nothing left to stub here. */
 
 /* ---- Misc hardware/init C functions, confirmed real (own bodies not
  * reconstructed) ---- */
@@ -134,6 +129,40 @@ extern "C" void *stg_get_current_task()
 	void *current_task;
 	asm volatile("mov %%fs:0x0, %0" : "=r"(current_task));
 	return current_task;
+}
+/*
+ * stg_set_fs/stg_restore_fs (sec 10.181): the per-CPU thread_info
+ * addr_limit save+set / restore pair -- this kernel's own inlined
+ * `set_fs(KERNEL_DS)`/`set_fs(old)` idiom, confirmed real at EVERY
+ * CSTGFile_Read/Write/ReadFileIntoNewBuffer call site in
+ * src/init/file_io.cpp as the identical `mov %esp,%reg; and
+ * $0xffffe000,%reg; mov 0x18(%reg),saved; movl $0xffffffff,0x18(%reg)`
+ * (set) / `mov saved,0x18(%reg)` (restore) instruction pairs (this
+ * kernel's THREAD_SIZE is 8KB, so `esp & ~0x1fff` locates the
+ * thread_info at the base of the current kernel stack; +0x18 is
+ * `addr_limit`). Same host/target divergence pattern as
+ * stg_get_current_task() just above: this is genuine, safe-to-compile
+ * inline asm that IS the real target behavior when this file links
+ * into the real .ko, but is not safely EXECUTABLE on a host test
+ * process (the computed address is live host stack memory, not a
+ * kernel thread_info) -- so file_io.cpp's own host KAT
+ * (verify/test_file_io.cpp) supplies its own separate, safe mock of
+ * both functions rather than linking this definition, exactly as
+ * verify/test_init_module.cpp already does for stg_get_current_task().
+ */
+extern "C" unsigned long stg_set_fs(unsigned long newLimit)
+{
+	unsigned long threadInfo;
+	asm volatile("mov %%esp, %0\n\tand $0xffffe000, %0" : "=r"(threadInfo));
+	unsigned long old = *(unsigned long *)(threadInfo + 0x18);
+	*(unsigned long *)(threadInfo + 0x18) = newLimit;
+	return old;
+}
+extern "C" void stg_restore_fs(unsigned long oldLimit)
+{
+	unsigned long threadInfo;
+	asm volatile("mov %%esp, %0\n\tand $0xffffe000, %0" : "=r"(threadInfo));
+	*(unsigned long *)(threadInfo + 0x18) = oldLimit;
 }
 extern "C" unsigned char stg_inb(unsigned int) { return 0; }
 extern "C" void stg_outb(unsigned int, unsigned char) {}
