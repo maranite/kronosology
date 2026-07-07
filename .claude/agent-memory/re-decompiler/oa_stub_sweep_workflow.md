@@ -2486,8 +2486,7 @@ functions) -- out of scope for a quick pass. The four file-daemon
 by real dispatch -- fully characterized, can be dropped from future
 "re-check individually" sweeps.
 
-**Batch 29 specifics** (2026-07-07, sec 10.177, commit `<see git log,
-filled in below>`): the user gave fresh explicit authorization to
+**Batch 29 specifics** (2026-07-07, sec 10.177, commit `a207584`): the user gave fresh explicit authorization to
 continue past batch 28, with an explicit priority assignment: assess sec
 10.176's own flagged `CSetListEQ`/`CSTGEffectRack`/`CLoadBalancer::
 {Load,Unload}EffectCost` cluster FIRST, reject-with-reason if it's too
