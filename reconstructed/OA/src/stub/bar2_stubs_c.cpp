@@ -137,15 +137,16 @@ extern "C" int load_global_resources() { return 0; }
  * cm_GetRandomBytes/cm_SetChallengeParams promoted to real bodies in
  * src/auth/atmel_primitives.cpp (batch 38, both small -- 15/18 bytes,
  * pure forwarder + pointer-cache respectively). cm_AuthenEncryptMAC
- * (real name `fFfFfFfFfFfF11`, .text+0x4f4210, 1575 bytes) SCOUTED and
- * kept DEFERRED: a genuine bit/byte-level cipher-MAC engine, calling a
- * shared helper (`bzzzzzzzzzzzt12`, .text+0x4f3d00) roughly once per
- * input byte across three separate buffers (c1/kin/iv) -- a real crypto
- * core, not a forwarder, disproportionate for a smallest-first pick;
- * needs a dedicated future batch (start by reconstructing
- * `bzzzzzzzzzzzt12` first, then walk fFfFfFfFfFfF11's full byte-loop
- * structure against it). */
-void cm_AuthenEncryptMAC(const unsigned char *, const unsigned char *, const unsigned char *, unsigned char *, unsigned char *) {}
+ * (real name `fFfFfFfFfFfF11`, .text+0x4f4210, 1575 bytes) is now real
+ * too (batch 43, src/auth/atmel_deax.cpp) -- its own shared per-byte
+ * helper (`bzzzzzzzzzzzt12`, .text+0x4f3d00) turned out to already have
+ * a hardware-validated reference implementation elsewhere in this
+ * project (AT88VirtualChip/chip_state.cpp's own `deax_step()`/
+ * `deax_compute_challenges()`, from the earlier AT88 hardware-extraction
+ * phase) -- ported rather than re-derived; see atmel_deax.cpp's own
+ * header comment for the full derivation and the two still-deferred
+ * sibling functions (`fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`) this does NOT
+ * cover. */
 int cm_ComputeChallenge(const unsigned char *, int, unsigned char *) { return -1; }
 int cm_ReadUserZone(int, int, unsigned char *) { return -1; }
 int cm_SetUserZone(int) { return -1; }

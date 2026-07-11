@@ -253,7 +253,52 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
  * unsigned long*) const, is STILL confirmed real, deliberately deferred
  * (real vtable DISPATCH through the not-yet-reconstructed
  * CIFXEffectSlot/CMFXEffectSlot cluster, sec 10.157) -- calling into it
- * from BalanceStaticLoadHelper is safe. */
+ * from BalanceStaticLoadHelper is safe.
+ *
+ * Batch 43 investigated this whole cluster in depth (per the task
+ * briefing's explicit ask, following up on batch 42's
+ * RunVoiceModelStaticFront/StaticBack/RunVoiceModelFeedback finding) and
+ * confirmed it is NOT yet tractable via the sec 10.185/10.193
+ * hand-crafted-vtable technique, for reasons materially different from
+ * (and larger than) the ten Model ctors this same technique already
+ * closed out: `readelf -SW` confirms a much bigger real hierarchy than
+ * previously assumed -- `CEffectSlotBase` (0x84/33 slots),
+ * `CEffectSlot` (0x88/34 slots), `CIFXEffectSlot` (0x88/34, same count
+ * as CEffectSlot -- no new virtuals of its own), `CMFXEffectSlot`
+ * (0x88/34), and a FOURTH, previously unflagged sibling,
+ * `CTFXEffectSlot` (0x88/34) -- plus a small 6-slot mixin,
+ * `CSTGEffectSlotMsgHandler`. `CIFXEffectSlot::CIFXEffectSlot()` itself
+ * (.text+0x8d0e0, 77 bytes) is small and mechanical (vtable-install +
+ * 9 field writes, no dispatch) -- confirmed tractable in isolation.
+ * `CMFXEffectSlot` has NO out-of-line ctor at all (fully inlined into
+ * `CSTGProgram::CSTGProgram()`'s own body -- 5 field writes per
+ * instance, 3 instances). The REAL blocker is `CSTGProgram::
+ * CSTGProgram()` (.text+0xa4c00, 328 bytes) itself: unlike the Model
+ * cluster's single base class, this ctor installs TWO separate vtable
+ * pointers at fixed offsets (`+0x0` = vtable-for-`CSTGPerformance`+8,
+ * `+0x4` = vtable-for-`CSTGEffectRack`+8) -- genuine C++ MULTIPLE
+ * inheritance, meaning `CSTGPerformance`/`CSTGEffectRack` (each their
+ * own 0x98/38-slot real vtable, `readelf` confirmed) would ALSO need
+ * correctly-shaped vtables, not just `CSTGProgram`'s own, before this
+ * ctor is safe -- a materially bigger structural lift than any single
+ * base class the hand-crafted-vtable technique has closed so far, and
+ * multiple-inheritance vtable layout (secondary-base thunks/`this`
+ * adjustment) has its own real correctness risk this project hasn't
+ * exercised yet. `ChangeProgram(CSTGProgram*)` (a separate stub, see
+ * below) was ALSO re-investigated as a possible smaller entry point:
+ * its own one vtable dispatch (`call *0xe0(%ecx)` on `this`'s OWN
+ * vtable, `_ZTV15CSTGProgramSlot`/its two derived siblings) resolves via
+ * `readelf -rW` to `CSTGProgramModeProgramSlot::GetChordSource() const`
+ * -- a real, tiny (27-byte base impl at .text+0xa95c0, 11-byte weak
+ * per-derived-class thunks), non-DSP getter, genuinely tractable BUT
+ * would require growing `g_programSlotVtable` (global.cpp, currently 10
+ * native-pointer slots, only slot 7 populated) out to at least 57
+ * slots to safely reach slot ~54 -- doable, just not attempted this
+ * batch given time already spent on the DEAX cipher work below. Full
+ * derivation (readelf output, exact slot offsets, symbol names) is
+ * recorded in the agent-memory workflow doc rather than repeated here;
+ * a future batch should start from THAT, not re-run this investigation
+ * from scratch. */
 void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 /* CSTGChannelValues::Reset() is real now, batch 18 -- see

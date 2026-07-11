@@ -32,9 +32,14 @@ int  cm_ComputeChallenge(const unsigned char *chipConfig, int sel, unsigned char
 void cm_GetRandomBytes(unsigned char *buf, int len);
 
 /* GPA key schedule: from challenge c1 + key kin + chip iv, derive 8-byte session keys
- * c2out/c3out (the cipher/encrypt session material). */
+ * c2out/c3out (the cipher/encrypt session material). `iv` is NOT const --
+ * confirmed real (batch 43, src/auth/atmel_deax.cpp): this call mutates
+ * iv in place (iv[0] is forced to 0xff, iv[1..7] are rewritten from the
+ * DEAX cipher state), which is why SetupAtmelForAuthorizations() reuses
+ * the same `iv` buffer, unmodified by itself, across both handshake
+ * rounds -- round 2 depends on round 1's mutation. */
 void cm_AuthenEncryptMAC(const unsigned char *c1, const unsigned char *kin,
-			 const unsigned char *iv,
+			 unsigned char *iv,
 			 unsigned char *c2out, unsigned char *c3out);
 
 /* Dispatch any pending chip I/O command (binary: nv2ac_dispatch_cmd @0x4f4c80). */

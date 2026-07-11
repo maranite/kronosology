@@ -128,6 +128,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/keybed_debounce.o \
            src/init/calibration_data.o \
            src/auth/atmel_primitives.o \
+           src/auth/atmel_deax.o \
            src/init/daemon_lifecycle.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
@@ -326,6 +327,7 @@ SRC := src/auth/klm_manager.cpp \
        src/init/keybed_debounce.cpp \
        src/init/calibration_data.cpp \
        src/auth/atmel_primitives.cpp \
+       src/auth/atmel_deax.cpp \
        src/init/daemon_lifecycle.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
@@ -391,7 +393,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_atmel_primitives \
          verify/test_calibration_data \
          verify/test_daemon_lifecycle \
-         verify/test_voice_models
+         verify/test_voice_models \
+         verify/test_atmel_deax
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -661,6 +664,9 @@ verify/test_daemon_lifecycle: verify/test_daemon_lifecycle.cpp src/init/daemon_l
 
 verify/test_voice_models: verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_atmel_deax: verify/test_atmel_deax.cpp src/auth/atmel_deax.cpp include/oa_atmel.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_atmel_deax.cpp src/auth/atmel_deax.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
