@@ -103,3 +103,14 @@ int KorgUsbMidiOutput(int, const void *, unsigned int) { return 0; }
 int KorgUsbMidiOutputCanSend(int) { return 1; }
 int KorgUsbRealtimeMidiOutput(int, const void *, unsigned int) { return 0; }
 int KorgUsbRealtimeMidiOutputCanSend(int) { return 1; }
+
+/* See korgusbaudio_stub.h's own header comment for the "wrong real-hardware
+ * home, pragmatic VM stand-in" discrepancy note. Trivial: just remembers
+ * the pointer (so a caller reading it back would see what it set), always
+ * reports success -- no real drum-pad hardware to register with in a VM. */
+static void *g_drumPadClientQueue;
+int USBMidiAccessory_SetDrumPadClient(void *queue)
+{
+	g_drumPadClientQueue = queue;
+	return 0;
+}

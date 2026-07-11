@@ -97,6 +97,38 @@ int  KorgUsbMidiOutputCanSend(int port);
 int  KorgUsbRealtimeMidiOutput(int port, const void *data, unsigned int length);
 int  KorgUsbRealtimeMidiOutputCanSend(int port);
 
+/*
+ * ADDED (2026-07-11): closes a gap found in a live boot test (kronosvm) --
+ * `insmod OA.ko` failed symbol resolution on 12 unknown symbols, one of
+ * which was this one, called by OA.ko's own `CSTGDrumPadInterface_
+ * Initialize()`/`_Cleanup()` (reconstructed/OA/src/init/drumpad_init.cpp,
+ * init_module step 15, a SOFT gate -- return value unchecked by its
+ * caller).
+ *
+ * IMPORTANT DISCREPANCY, left visible rather than silently papered over:
+ * this project's own earlier `readelf -sW` survey of the REAL
+ * KorgUsbAudioDriver.ko (see MASTER_REFERENCE.md, the KorgUsbAudioDriver.ko
+ * exported-surface investigation) explicitly confirmed
+ * `USBMidiAccessory_SetDrumPadClient`/`SetMidiInClient` are ABSENT from
+ * that binary's real exports -- on REAL hardware this symbol is resolved
+ * by a separate `USBMidiAccessory.ko` module, never reconstructed/stubbed
+ * anywhere in this project. There is currently no dedicated virtual
+ * stand-in for that module, so this symbol is added HERE purely as a
+ * pragmatic VM-boot-test convenience (this .ko is already in every test's
+ * load order, and the two modules cover closely related USB-MIDI-ish
+ * ground) -- NOT a claim that real KorgUsbAudioDriver.ko exports it. A
+ * future batch adding a real `USBMidiAccessory.ko` stand-in should move
+ * this declaration/definition/export there instead.
+ *
+ * Real signature confirmed via OA.ko's own drumpad_init.cpp disassembly
+ * comment: takes one `void *` (a receive-event-queue pointer to register,
+ * or NULL to unregister), returns int (real body's own return value is
+ * passed straight through by `CSTGDrumPadInterface_Initialize()`, so any
+ * non-crashing value is safe here since that call site's own result is
+ * itself soft/unchecked further up).
+ */
+int  USBMidiAccessory_SetDrumPadClient(void *queue);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

@@ -68,6 +68,16 @@ int main(void)
 		 KorgUsbRealtimeMidiOutput(0, "x", 1), 0);
 	check_eq("KorgUsbMidiDone() == 0", KorgUsbMidiDone(), 0);
 
+	printf("[6] USBMidiAccessory_SetDrumPadClient: trivial VM stand-in (see\n"
+	       "    korgusbaudio_stub.h's own header comment for the real-hardware-\n"
+	       "    home discrepancy this is deliberately papering over) -- always\n"
+	       "    reports success for both a real pointer and NULL (unregister)\n");
+	int dummyQueue;
+	check_eq("USBMidiAccessory_SetDrumPadClient(&dummyQueue) == 0",
+		 USBMidiAccessory_SetDrumPadClient(&dummyQueue), 0);
+	check_eq("USBMidiAccessory_SetDrumPadClient(NULL) == 0",
+		 USBMidiAccessory_SetDrumPadClient(0), 0);
+
 	printf("============================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

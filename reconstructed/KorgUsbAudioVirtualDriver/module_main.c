@@ -61,6 +61,7 @@ EXPORT_SYMBOL(KorgUsbMidiOutput);
 EXPORT_SYMBOL(KorgUsbMidiOutputCanSend);
 EXPORT_SYMBOL(KorgUsbRealtimeMidiOutput);
 EXPORT_SYMBOL(KorgUsbRealtimeMidiOutputCanSend);
+EXPORT_SYMBOL(USBMidiAccessory_SetDrumPadClient);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("No-op/always-ready stub for KorgUsbAudioDriver.ko's USB audio+MIDI "
