@@ -3219,3 +3219,107 @@ call sites first. Flagged for a future pass, not touched here (auditing
 every `stg_set_cpus_allowed` call site before changing its symbol
 visibility is real, separate work, out of scope for a `rtwrap_*`-focused
 batch).
+
+**Batch 38 specifics** (2026-07-11, sec 10.189, commit `d29895d`): the
+first batch to focus specifically on finishing `bar2_stubs_c.cpp`
+(12 bare-`{}` stubs left) per the task briefing's explicit priority,
+rather than a fresh `bar2_stubs.cpp` sweep. Picked all 12 up individually
+via `nm -S`/`objdump -dr` -- 9 tractable, 3 genuinely deferred with
+concrete scouted reasons now on record in `bar2_stubs_c.cpp` itself
+(cm_AuthenEncryptMAC's real cipher-MAC core; the 4-function daemon-
+lifecycle cluster; cleanup_cpp_support's unchanged .dtors blocker).
+Full per-function derivation in MASTER_REFERENCE sec 10.189 -- read it
+before re-touching any of these.
+
+**Reusable pattern: "this project's own descriptive alias vs. ground
+truth's obfuscated real name" is not a bug when `nm`/`grep` come up
+empty on the alias.** `cm_*`/`nv2ac_*` (oa_atmel.h) don't appear
+ANYWHERE in ground truth OA.ko by those names -- initially alarming,
+until checking `atmel_setup.cpp`'s own header comment revealed these
+are THIS PROJECT's chosen readable names for OA_real.ko's own
+obfuscated real symbols (`fFfFfFfFfFfF1C`, `sdflkjsvnd2s`, etc, the
+SAME family CLAUDE.md's "preserve obfuscated-but-real symbol names"
+rule already covers). Confirmed correct by disassembling the ALREADY-
+reconstructed caller (`SetupAtmelForAuthorizations`) and reading its own
+relocations -- they resolve to the obfuscated names, at addresses
+matching this project's own header-comment cross-references. When a
+symbol name a stub declares doesn't show up in ground truth `nm` at
+all, check whether it's this project's OWN alias for an obfuscated
+real name (grep the surrounding file's header comment / the class's
+own header for an existing name-mapping note) before assuming
+something is wrong.
+
+**New reusable technique: locating the REAL x86 instruction shape for a
+"no standalone symbol" primitive (sec 10.188's pattern) by disassembling
+ONE already-reconstructed real CALLER, not by guessing from the C-level
+abstraction's name.** `stg_inb`/`stg_outb`/`stg_local_irq_save`/
+`stg_local_irq_restore` have zero standalone ground-truth symbols
+(confirmed again, matching sec 10.188's finding for the same four) --
+resolved by disassembling `CSTGComPort::Initialize()` (an ALREADY-real
+2561-byte function that calls all four abstractions many times) and
+finding the literal `in`/`out`/`pushf;cli;...;popf` instructions
+inline. This confirmed the abstraction is exactly the universal x86
+port-I/O/IRQ-save-restore idiom (same as the kernel's own `inb`/`outb`/
+`local_irq_save` macros) -- NOT project-specific behavior needing
+per-call-site verification, so a SINGLE representative disassembly is
+sufficient evidence to write the real inline-asm bodies, unlike (say)
+a project-internal helper whose behavior could genuinely differ by
+call site. Rule of thumb: when a "no standalone symbol" primitive's
+semantics are architecturally universal (not OA-specific), one real
+caller's disassembly is enough; when they might be OA-specific
+behavior, check more than one call site before trusting a single
+sample.
+
+**New gotcha, a real cross-TU signature mismatch caught only by
+actively fixing it (not by any prior compile error, since the two
+mismatched declarations lived in TUs that never included each other):**
+`bar2_stubs_c.cpp`'s own erroneous local `stg_set_cpus_allowed(void*,
+unsigned int)` definition silently disagreed with `oa_init.h`'s
+ALREADY-correct `int stg_set_cpus_allowed(void*, unsigned long)`
+declaration for years of batches, undetected because `bar2_stubs_c.cpp`
+never included `oa_init.h`. Confirmed via `nm -u` on ground truth
+(genuinely `U`, not locally defined at all) that the fix is to DELETE
+the local definition entirely, not reconcile the two signatures --
+this is the correct treatment whenever a function batch 37's "check
+`nm -u` first" rule confirms is a real external: don't just fix the
+call-site/header signature mismatch, remove the incorrect LOCAL BODY
+that shouldn't exist in the first place. A stub file defining a body
+for a symbol ground truth leaves genuinely `U` is a distinct, worse
+class of bug than a signature mismatch between two declarations of a
+real internal function (the latter is usually harmless on this ABI per
+sec 10.154's own precedent; the former makes our own `T`/`U` symbol
+visibility diverge from ground truth's, silently masking what should
+be a real insmod-time external dependency).
+
+**Reconfirmed (3rd time, matching sec 10.179/10.188): grep new/edited
+comment text for a literal `*/` before the first build, not after an
+error.** `drumpad_init.cpp`'s draft header comment
+("KorgUsbMidi*/USBMidiAccessory_SetMidiInClient") formed exactly this
+trap again -- caught this time by a proactive grep pass over every new
+file's comments before the first compile attempt (added a step: `grep
+-n '\*/' <new files> | grep -v '^\S*:[0-9]*:\s*\*/\s*$'` to filter out
+legitimate own-line comment-closers and flag anything else), not by
+waiting for the error. Worth making this grep a standing pre-build step
+for every future batch that writes new header-comment prose listing
+adjacent symbol/type names.
+
+**Verification**: 4 new dedicated KATs (78 -> 82 verify/ binaries),
+byte-identical two-pass clean rebuild (`OA.ko` 172,436 -> 173,292
+bytes), linkonce 0x148, GOTPC 0, `nm -u` 55 -> 58 (get_random_bytes,
+USBMidiAccessory_SetDrumPadClient, stg_set_cpus_allowed -- all three
+independently confirmed `U` in ground truth before accepting). New
+files: drumpad_init.cpp, keybed_debounce.cpp, calibration_data.cpp,
+atmel_primitives.cpp + their 4 test files; edited bar2_stubs_c.cpp,
+setup_global_resources.cpp (+call site), oa_setup_global_resources.h,
+test_setup_global_resources.cpp (mock signature only), Makefile.
+
+**Deferred for a future batch**: `bar2_stubs.cpp`'s own 67 bare-`{}`
+stubs untouched this batch (explicit priority was finishing
+`bar2_stubs_c.cpp` first) -- next batch's natural default is a fresh
+smallest-first sweep of THAT file. Within `bar2_stubs_c.cpp`: only 3
+bare stubs remain (cleanup_cpp_support, cleanup_stg_daemons,
+cm_AuthenEncryptMAC), all with concrete scouted blockers now on
+record -- see sec 10.189 for the daemon-lifecycle cluster's full call
+graph (SetupDaemon/rtwrap_pthread_create are the true root blockers)
+and cm_AuthenEncryptMAC's cipher-core assessment (needs
+bzzzzzzzzzzzt12 reconstructed first).
