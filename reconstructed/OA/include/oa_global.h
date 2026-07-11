@@ -1570,6 +1570,100 @@ public:
  */
 extern "C" unsigned char _ZTV16CSTGWaveSequence[96];
 struct CSTGWaveSequence { CSTGWaveSequence(); };
+
+/*
+ * CIFXEffectSlot::CIFXEffectSlot() (batch 44, `.text+0x8d0e0`, 77 bytes)
+ * confirmed real: standard Itanium vtable-pointer install
+ * (`_ZTV14CIFXEffectSlot+8`) plus a handful of confirmed scalar field
+ * writes (+0x4/+0x5/+0x6 zero bytes, +0x8 word = 1, +0x9a zero byte,
+ * +0x98/+0x99 zero bytes, +0x9b byte = 0x19, +0x9c float = 64.0f,
+ * +0xa0/+0xa4 zeroed dwords) -- no dispatch, no further sub-object
+ * construction. `CIFXEffectSlot`'s own real vtable is 0x88 bytes (34
+ * slots, `readelf`/`nm -CS` confirmed) -- left zero-filled per this
+ * project's established "install vs dispatch" rule (sec 10.153): every
+ * caller that would genuinely DISPATCH through this vtable (`CSTGEffectRack::
+ * GetTotalAlgorithmCost` via `CEffectSlotBase::GetAlgorithmCost`,
+ * `CSTGEffectManager::RunEffects`, etc) remains an untouched bare-`{}`
+ * stub in this project as of this batch, so nothing reachable ever
+ * reads a function pointer out of it yet. Declared opaque (no named
+ * fields), matching `CSTGProgramSlot`/`CSTGToneAdjust`'s own established
+ * convention -- only the ctor's own writes are modeled. `CSTGProgram::
+ * CSTGProgram()` (see below) places twelve of these back-to-back at a
+ * confirmed real 0xa8-byte stride.
+ */
+extern "C" unsigned char _ZTV14CIFXEffectSlot[0x88];
+struct CIFXEffectSlot { CIFXEffectSlot(); };
+
+/*
+ * CSTGVectorMotion::CSTGVectorMotion() (batch 44, `.text+0x73090`, 76
+ * bytes) confirmed real: vtable-pointer install (`_ZTV16CSTGVectorMotion+8`),
+ * nine confirmed zeroed bytes at +0x4/+0x5/.../+0xb then a scattered
+ * set (+0x2e/+0x38/+0x42/+0x4c/+0x56, stride 10 apart), plus FOUR
+ * confirmed dword writes of the same packed constant `0x3b810204` at
+ * +0x15/+0x19/+0x1d/+0x21 (stride 4 -- real, not float; matches this
+ * project's own "raw packed constant, not a float" precedent already
+ * used for `CSTGProgramSlot`'s own +0x35 field). No dispatch. Own
+ * vtable 0x60 bytes (24 slots) -- zero-filled placeholder, same "install
+ * vs dispatch" reasoning as `CIFXEffectSlot` above (nothing reconstructed
+ * in this project dispatches through it).
+ */
+extern "C" unsigned char _ZTV16CSTGVectorMotion[0x60];
+struct CSTGVectorMotion { CSTGVectorMotion(); };
+
+/*
+ * CSTGProgram::CSTGProgram() (batch 44, `.text+0xa4c00`, 328 bytes)
+ * confirmed real -- see src/engine/program_ctor.cpp for the full
+ * derivation. Genuine C++ MULTIPLE inheritance: installs TWO base
+ * vtable pointers at +0x0 (`_ZTV15CSTGPerformance+8`) and +0x4
+ * (`_ZTV14CSTGEffectRack+8`), each a confirmed real 0x98/0x60-byte
+ * vtable (readelf/nm -CS) -- both left zero-filled placeholders per
+ * this project's established "install vs dispatch" rule: EVERY
+ * already-real, already-linked caller that would eventually dispatch
+ * through either vtable (`CSTGPerformanceVars::EnterActivatingState`
+ * via `CSTGEffectRack::GetTotalAlgorithmCost`, `CSTGSlotVoiceData::
+ * GetPatchStaticCosts`/`GetTotalStaticCosts`/`RunVoiceModelStaticFront`/
+ * `StaticBack`/`RunVoiceModelFeedback`, `CSetListEQ::Initialize`,
+ * `CSTGEffectManager::RunEffects`) remains a bare-`{}` stub in this
+ * project as of this batch -- independently re-confirmed batch 44 via a
+ * project-wide grep before promoting this ctor (see MASTER_REFERENCE.md
+ * sec 10.195 for the full caller-by-caller audit). Installs its OWN
+ * derived vtable (`_ZTV11CSTGProgram+8`, 0x98 bytes) over the
+ * `CSTGPerformance` base pointer near the end (standard Itanium
+ * "derived ctor overwrites the vtable ptr the base ctor just installed"
+ * pattern), same technique the ten `CSTGVoiceModel`-derived Model ctors
+ * already established (sec 10.193/batch 42), just applied to TWO base
+ * vtables instead of one -- confirming the sec 10.185 policy DOES
+ * extend to this multiple-inheritance shape, contrary to batch 43's own
+ * (correctly cautious, but as it turns out not load-bearing) concern.
+ */
+extern "C" unsigned char _ZTV15CSTGPerformance[0x98];
+extern "C" unsigned char _ZTV14CSTGEffectRack[0x60];
+extern "C" unsigned char _ZTV11CSTGProgram[0x98];
+/* CMFXEffectSlot/CTFXEffectSlot/CSTGEffectBalance/CSTGCommonEffectLFO
+ * have NO out-of-line ctor at all in ground truth (confirmed via a
+ * whole-symbol-table grep, zero hits) -- each is fully inlined as a
+ * handful of direct field writes inside `CSTGProgram::CSTGProgram()`'s
+ * own body (matching the `CSTGWaveSequence`/`CSetList` "no standalone
+ * symbol" precedent, sec 10.159), so only their vtable placeholders are
+ * needed here, no struct/ctor declarations. */
+extern "C" unsigned char _ZTV14CMFXEffectSlot[0x88];
+extern "C" unsigned char _ZTV14CTFXEffectSlot[0x88];
+extern "C" unsigned char _ZTV17CSTGEffectBalance[0x60];
+extern "C" unsigned char _ZTV19CSTGCommonEffectLFO[0x60];
+/* CSTGParamsOwner/CSTGStepSeqBase/CSTGCommonStepSeq similarly have no
+ * separate ctor CALLED from CSTGProgram::CSTGProgram() -- their vtable
+ * pointers are written directly via raw offset arithmetic (see
+ * program_ctor.cpp), not via a placement-new sub-object construction.
+ * `CSTGParamsOwner`'s own class is already declared further below in
+ * this file (confirmed real via `CSTGGlobal::ValidateParamChange`,
+ * sec 10.92) -- only its vtable placeholder is new here.
+ * `CSTGStepSeqBase`/`CSTGCommonStepSeq` are declared in oa_engine_init.h
+ * (their own static `Initialize()`/`sSubRateParams` pool-holder
+ * members, sec ~10.170) -- likewise, only the vtable placeholders (a
+ * DIFFERENT concern from those static members) are added here. */
+extern "C" unsigned char _ZTV15CSTGParamsOwner[0x60];
+extern "C" unsigned char _ZTV15CSTGStepSeqBase[0xc];
+extern "C" unsigned char _ZTV17CSTGCommonStepSeq[0x6c];
 struct CSTGProgram { CSTGProgram(); };
 struct CSTGCombi { CSTGCombi(); };
 /*
@@ -1670,7 +1764,24 @@ struct CSetList { CSetList(); void Activate(); };
  * deliberately deferred extern -- own body not reconstructed. Real
  * `ePerfSwitch` enum modeled as `int` (project convention).
  */
+extern "C" unsigned char _ZTV18CSTGControllerInfo[0x60];
 struct CSTGControllerInfo {
+	/*
+	 * CSTGControllerInfo::CSTGControllerInfo() (batch 44, `.text+0x90cb0`,
+	 * 71 bytes) confirmed real: vtable-pointer install
+	 * (`_ZTV18CSTGControllerInfo+8`) plus seventeen confirmed zeroed
+	 * bytes at +0x4..+0x13 (contiguous run, one instruction per byte in
+	 * the real disassembly) -- no dispatch. Own vtable 0x60 bytes (24
+	 * slots), zero-filled placeholder (same "install vs dispatch"
+	 * reasoning as the sibling classes above -- `SetPerfSwitch`/
+	 * `SendUnsolicitedUIParam`/`OnPerformanceDeactivate` below are all
+	 * non-virtual, confirmed via direct PC32 relocations, so nothing
+	 * dispatches through this vtable either). Confirmed real object
+	 * size 0x14 (20) bytes, independently cross-checked against
+	 * `CSTGProgram::CSTGProgram()`'s own stride to the next embedded
+	 * sub-object (`CSTGAudioInput` at +0xae7 == +0xad3 + 0x14 exactly).
+	 */
+	CSTGControllerInfo();
 	void SetPerfSwitch(int perfSwitch, bool value);
 
 	/*

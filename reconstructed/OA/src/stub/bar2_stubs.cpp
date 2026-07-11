@@ -298,7 +298,33 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
  * derivation (readelf output, exact slot offsets, symbol names) is
  * recorded in the agent-memory workflow doc rather than repeated here;
  * a future batch should start from THAT, not re-run this investigation
- * from scratch. */
+ * from scratch.
+ *
+ * UPDATE (batch 44, sec 10.195): `CSTGProgram::CSTGProgram()` itself IS
+ * now real (see src/engine/program_ctor.cpp) -- batch 43's own
+ * `readelf -SW` vtable-size estimate above turned out to be wrong for
+ * `CSTGEffectRack` (a direct `nm -CS` re-check this batch found it is
+ * 0x60/24 slots, not 0x98/38 -- that larger number belonged to
+ * `CSTGPerformance`, a different class also needed here), and a fresh,
+ * exhaustive project-wide grep for every already-real caller of
+ * `CSTGProgram`/`CSTGCombi`/`CSTGPerformance`/`CSTGEffectRack`/
+ * `CIFXEffectSlot`/`CMFXEffectSlot`/`CTFXEffectSlot` confirmed NONE of
+ * them genuinely dispatch through any of these classes' vtables today
+ * (every path that eventually would is itself still a bare-`{}` stub:
+ * `EnterActivatingState`, `GetPatchStaticCosts` right below,
+ * `RunVoiceModelStaticFront`/`StaticBack`/`RunVoiceModelFeedback`,
+ * `CSetListEQ::Initialize`, `CSTGEffectManager::RunEffects`) -- making
+ * the sec 10.185/10.193 hand-crafted-vtable technique safe to apply
+ * here too, just with TWO base vtables instead of one, exactly as this
+ * comment's own prior batch speculated might be possible. `CSTGCombi::
+ * CSTGCombi()` (same shape, different sub-object list -- 15 embedded
+ * `CSTGProgramSlot`s instead of the `CSTGCommonLFO`/`CSTGToneAdjust`
+ * tail) is DELIBERATELY NOT done this batch, left for a future batch
+ * using this same now-established technique. `GetPatchStaticCosts`/
+ * `RunVoiceModelStaticFront`/`StaticBack`/`RunVoiceModelFeedback`/
+ * `GetTotalStaticCosts` immediately below remain correctly deferred --
+ * THEIR OWN bodies are what would genuinely dispatch through these
+ * vtables, a real crash risk until reconstructed for real. */
 void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 /* CSTGChannelValues::Reset() is real now, batch 18 -- see
@@ -380,7 +406,14 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * src/engine/engine_init.cpp. Needs its own confirmed 40-byte vtable
  * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its
  * siblings. */
-CSTGProgram::CSTGProgram() {}
+/* CSTGProgram::CSTGProgram() is real now, batch 44 (sec 10.195) -- see
+ * src/engine/program_ctor.cpp. Resolves the multiple-inheritance
+ * cluster this file's own comment near GetPatchStaticCosts documents
+ * batch 43 investigating and deferring -- see that comment (just below)
+ * for what's STILL deferred (CSTGCombi::CSTGCombi() and everything that
+ * actually DISPATCHES through the now-real-but-still-zero-filled
+ * CSTGPerformance/CSTGEffectRack/CIFXEffectSlot/CMFXEffectSlot/
+ * CTFXEffectSlot vtables). */
 /* CSTGProgramModeProgramSlot/CSTGProgramModeDrumTrackSlot's own ctors +
  * Initialize()/OnUpdateGlobalMidiChannel/OnUpdateProgramDrumTrackMidiChannel
  * all reconstructed for real, sec 10.81/10.125/10.133 -- see

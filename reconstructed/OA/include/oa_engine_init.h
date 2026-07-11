@@ -1239,7 +1239,28 @@ struct CSTGEPModel : public CSTGVoiceModel { CSTGEPModel(); static CSTGEPModel *
 struct STGLFOSubRateParams { unsigned char _unrecovered[0x250]; };
 struct STGStepSeqSubRateParams { unsigned char _unrecovered[0x100]; };
 
+/*
+ * CSTGCommonLFO::CSTGCommonLFO() (batch 44, `.text+0x89950`, 64 bytes)
+ * confirmed real -- an INSTANCE ctor for the same real C++ class as the
+ * static `Initialize()`/`sSubRateParams` pool-holder members just below
+ * (confirmed same mangled class name; C++ freely mixes static and
+ * instance members in one class, and `CSTGProgram::CSTGProgram()`
+ * places one instance of this class at a confirmed real fixed offset,
+ * `+0xb74` -- see src/engine/program_ctor.cpp). Genuine nested multiple
+ * inheritance, same shape as `CSTGProgram` itself one level up: installs
+ * TWO vtable pointers of its OWN, both into the SAME `_ZTV13CSTGCommonLFO`
+ * symbol (0x7c bytes, confirmed via `nm -CS`) at two different
+ * sub-offsets -- +0x0 = vtable+8, +0x4 = vtable+0x6c -- plus eleven
+ * confirmed zeroed/packed-zero scalar fields (+0xd dword, +0x11/+0x1a/
+ * +0x1b/+0x20/+0x26/+0x2b/+0x30 bytes, +0x22/+0x27/+0x2c dwords). No
+ * dispatch anywhere in this ctor's own body. Left as a zero-filled
+ * placeholder vtable per this project's established "install vs
+ * dispatch" rule -- nothing reconstructed in this project reads a
+ * function pointer out of it.
+ */
+extern "C" unsigned char _ZTV13CSTGCommonLFO[0x7c];
 struct CSTGCommonLFO {
+	CSTGCommonLFO();
 	static void Initialize();
 	/* Confirmed real (.bss, `_ZN13CSTGCommonLFO14sSubRateParamsE`):
 	 * a single CSTGBankMemory::AllocAligned(0x4a00, 0x10) pool of 32
