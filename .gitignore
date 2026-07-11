@@ -32,3 +32,6 @@ reconstructed/*/verify/test_*
 !reconstructed/*/verify/test_*.c
 !reconstructed/*/verify/test_*.cpp
 !reconstructed/*/verify/test_*.py
+
+# Claude memories
+.claude/*
