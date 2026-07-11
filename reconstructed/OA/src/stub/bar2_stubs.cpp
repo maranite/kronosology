@@ -194,7 +194,12 @@ void CSTGAudioThread::AudioTickLoopRoutine() {}
  * function -- irrelevant here since this project never links against
  * OA_real.ko directly, only needs its own call sites to agree). */
 extern "C" void SKMain_Run() {}
-void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() {}
+/* CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() is
+ * real now, batch 53 -- see src/engine/tone_adjust_descriptors.cpp
+ * (also homes the three newly-discovered STGProgramParams/
+ * STGCommonStepSeqParams/CSTGParamDescriptor::sTypical99ToFloatParamDesc
+ * external data-table stand-ins and the new STGToneAdjustCommonParams
+ * 37-entry table storage). */
 /* CSTGMultisampleBankManager::Initialize()/CSTGPCMPrecacheManager::
  * Initialize() are both real now, sec 10.149/10.144 -- see
  * setup_global_resources.cpp. */

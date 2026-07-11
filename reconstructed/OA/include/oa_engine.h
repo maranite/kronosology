@@ -51,8 +51,59 @@
  * constructor below. */
 class CSTGToneAdjustDescriptor {
 public:
+	/*
+	 * Reconstructed for real, batch 53 -- see
+	 * src/engine/tone_adjust_descriptors.cpp for the full confirmed
+	 * shape (three lazy-init 0x34-byte descriptors plus the always-
+	 * rerun 37-entry `STGToneAdjustCommonParams` table).
+	 */
 	static void InitializeCommonToneAdjustDescriptors();
 };
+
+/*
+ * CSTGParamDescriptor::sTypical99ToFloatParamDesc (`.bss+0x106d60`, 0x34
+ * bytes) -- a DIFFERENT not-yet-reconstructed global, populated by its
+ * own separate global constructor (out of scope). Only its ADDRESS is
+ * used anywhere in this project so far (by
+ * InitializeCommonToneAdjustDescriptors() above) -- storage lives in
+ * tone_adjust_descriptors.cpp. C++-mangled name matches the real
+ * `_ZN19CSTGParamDescriptor26sTypical99ToFloatParamDescE` symbol, per
+ * this project's "preserve obfuscated-but-real symbol names" convention.
+ */
+struct CSTGParamDescriptor {
+	static unsigned char sTypical99ToFloatParamDesc[0x34];
+};
+
+/*
+ * STGProgramParams (0xbc8 bytes) / STGCommonStepSeqParams (0x2a4 bytes)
+ * -- two more not-yet-modeled external tables (confirmed real via `nm`,
+ * plain global-namespace C++ objects with no mangling, matching the
+ * already-established `STGAPIFrontPanelStatus`-style convention).
+ * Storage lives in tone_adjust_descriptors.cpp.
+ */
+extern unsigned char STGProgramParams[0xbc8];
+extern unsigned char STGCommonStepSeqParams[0x2a4];
+
+/*
+ * STGToneAdjustCommonParams (`.bss+0x301e0`, 0x250 = 37 * 0x10 bytes) --
+ * see tone_adjust_descriptors.cpp for the full per-entry field
+ * derivation. Storage lives there too.
+ */
+/* `ptr32` is a packed 32-bit field (ToU32/FromU32 convention), NOT a
+ * native C++ pointer -- a native `unsigned char*` here would be 8 bytes
+ * on this 64-bit host but 4 bytes on the real 32-bit target, silently
+ * growing the struct to 0x18 bytes (24) instead of the real, confirmed
+ * 0x10 (16) and shifting every field after it -- caught via a real
+ * `sizeof()` KAT failure before landing on this fix, matching this
+ * project's established `CSTGMidiQueueWriter`/`CSTGAudioInputMixerBase`
+ * precedent for exactly this class of field. */
+struct STGToneAdjustParamEntry {
+	unsigned int ptr32;
+	unsigned char b4, b5, b6, b7;
+	unsigned int f8;
+	unsigned int fc;
+};
+extern STGToneAdjustParamEntry STGToneAdjustCommonParams[37];
 
 /*
  * CSTGVoiceModelManager's constructor (.text+0x1a9950, 143 bytes) confirmed:
