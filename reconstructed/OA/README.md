@@ -864,6 +864,36 @@ time, so a missing companion module fails immediately with "unknown
 symbol." `STGGmp.ko` (also already reconstructed) covers the `__gmpz_*`
 auth-math dependency the same way.
 
+### VM Boot Test — Module Load Order (2026-07-11, `MASTER_REFERENCE.md` sec 10.208 has the full derivation)
+
+A real `kronosvm` boot test found `insmod OA.ko` failing on 12 unresolved
+symbols even after `AT88VirtualChip.ko`/`OmapNKS4VirtualDriver.ko`/
+`KorgUsbAudioVirtualDriver.ko` all loaded successfully — the load
+sequence used simply never loaded `STGEnabler.ko`/`STGGmp.ko` at all, and
+two of the three virtual-driver modules were each missing one export.
+Both gaps are now closed (`STGGmp.ko` built for real for the first time,
+`COmapNKS4_GetProgressBarPercent` added to `OmapNKS4VirtualDriver.ko`,
+`USBMidiAccessory_SetDrumPadClient` added to `KorgUsbAudioVirtualDriver.ko`
+— see sec 10.208 for the full derivation of each). The correct load order
+for any future VM boot test:
+
+1. RTAI core: `rtai_hal.ko` → `rtai_smp.ko` (or `rtai_sched.ko`, sec
+   10.39's noted substitute) → `rtai_sem.ko` → `rtai_ndbg.ko` →
+   `rtai_fifos.ko` — `STGEnabler.ko` itself needs real RTAI symbols
+   (`rt_linux_use_fpu`/`rt_set_oneshot_mode`/`start_rt_timer`).
+2. `STGEnabler.ko` — the `stg_*` shim layer (`stg_set_cpus_allowed`,
+   `stg_cpumask_of_cpu`, etc.).
+3. `STGGmp.ko` — the `__gmpz_*`/`mpz_*`/`mpn_*` bignum symbols
+   `cm_ComputeChallenge` needs.
+4. `AT88VirtualChip.ko` — `stgNV2AC_sync_cmd`/`stgNV2AC_sync_read_cmd`.
+5. `OmapNKS4VirtualDriver.ko` — the `COmapNKS4*`/`OmapNKS4OutputFifo_*`/
+   `SetupNKS4Calibration` family.
+6. `KorgUsbAudioVirtualDriver.ko` — `KorgUsbAudio*`/`KorgUsbMidi*`/
+   `USBMidiAccessory_SetDrumPadClient`.
+7. `OA.ko` — last. Modules 2–6 have no dependencies on each other or on
+   OA.ko (confirmed via `nm -u` on each), so their relative order among
+   themselves doesn't matter — only "after 1, before 7" is load-bearing.
+
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec
 10.36):
