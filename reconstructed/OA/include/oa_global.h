@@ -451,6 +451,10 @@ struct CSTGMidiCCFilter {
 	unsigned int bits[4]; /* +0x0..+0xc */
 };
 
+struct CSTGProgramSlot;	/* forward decl, real definition further below (needed by Setup() below) */
+struct CSTGProgram;	/* forward decl, real definition further below (needed by Setup() below) */
+struct CSTGChannelValues;	/* forward decl, real definition in oa_engine_init.h (needed by Setup() below) */
+
 struct CSTGSlotVoiceData {
 	/* Confirmed real (via relocation, called 32 times from
 	 * CSTGGlobal's own constructor, sec 10.56), declared explicitly
@@ -657,6 +661,24 @@ struct CSTGSlotVoiceData {
 	 * `CSTGRecordTrack::StandbyRec()` precedent, sec 10.162).
 	 */
 	void UpdateMIDIFilterAndResendAllCCs();
+
+	/*
+	 * Setup(CSTGProgramSlot*, CSTGProgram*, const CSTGChannelValues*)
+	 * (batch 47, `.text+0xb7250`, 0xe44/3652 bytes) -- confirmed real
+	 * regparm(3) signature (this=eax, arg1=edx=slot, arg2=ecx=program,
+	 * arg3=[stack]=channelValues -- a genuine 4th argument beyond
+	 * regparm(3)'s 3 register slots) via `CSTGProgramSlot::
+	 * ChangeProgram()`'s own real call site (global.cpp) and a SECOND
+	 * confirmed real caller, `CSTGProgramSlot::
+	 * LoadCombiTrackForPerformanceChangeEv` (not reconstructed in this
+	 * project, out of scope). Confirmed real, deliberately deferred:
+	 * substantially larger "load a program into a voice" DSP/parameter
+	 * setup routine, out of scope per the sec 10.185 audio-DSP policy --
+	 * own no-op body in bar2_stubs.cpp, matching the established
+	 * reconstruct-caller-DSP-stub-callee pattern (ChangeProgram() itself
+	 * is the caller reconstructed for real this batch).
+	 */
+	void Setup(CSTGProgramSlot *slot, CSTGProgram *program, const CSTGChannelValues *channelValues);
 };
 struct CSTGProgram;	/* forward decl, real definition further below */
 
@@ -690,32 +712,37 @@ struct CSTGToneAdjust {
  * a real C++ base (not a manual-offset raw-pointer trick) since single
  * inheritance keeps the derived classes' own already-confirmed field
  * offsets unchanged (Itanium ABI places the base sub-object at offset
- * 0). `IsActive()`/`AccessActiveSlotVoiceData()`/`ChangeProgram()` are
- * confirmed real (via direct, non-virtual PC32 relocations from
- * CSTGProgramModeDrumTrackSlot::ChangeDrumTrackProgram and the not-yet-
- * reconstructed OnUpdateGlobalMidiChannel/OnUpdateProgramDrumTrackMidiChannel)
- * but deliberately deferred externs -- own bodies not reconstructed in
- * this pass.
+ * 0). `IsActive()`/`AccessActiveSlotVoiceData()` are confirmed real (via
+ * direct, non-virtual PC32 relocations from CSTGProgramModeDrumTrackSlot::
+ * ChangeDrumTrackProgram and the not-yet-reconstructed
+ * OnUpdateGlobalMidiChannel/OnUpdateProgramDrumTrackMidiChannel) but
+ * deliberately deferred externs -- own bodies not reconstructed in this
+ * pass. `ChangeProgram()` is now real too (batch 47, see its own
+ * declaration below).
  *
  * CSTGProgramSlot::CSTGProgramSlot() itself (sec 10.153, `.text+0xabf80`,
  * 219 bytes) is confirmed real now -- see program_slot_ctor.cpp. Installs
  * this class's OWN real vtable (`_ZTV15CSTGProgramSlot`, zero-filled
  * placeholder -- never dispatched by anything reconstructed here, only
  * ever by the two derived ctors, which unconditionally OVERWRITE this
- * field right afterward with `g_programSlotVtable[2]` -- a confirmed
- * real, functionally-inert redundancy, not a conflict), zeroes ~30
- * confirmed byte/dword fields, and placement-constructs an embedded
- * `CSTGToneAdjust` sub-object at `this+0x7f` (see that class above).
+ * field right afterward with their own class-specific
+ * `g_programModeProgramSlotVtable[2]`/`g_programModeDrumTrackSlotVtable[2]`
+ * (batch 47 split these out of a single shared `g_programSlotVtable`,
+ * see global.cpp's own comment) -- a confirmed real, functionally-inert
+ * redundancy, not a conflict), zeroes ~30 confirmed byte/dword fields,
+ * and placement-constructs an embedded `CSTGToneAdjust` sub-object at
+ * `this+0x7f` (see that class above).
  *
  * DRIVE-BY FIX (batch 45): this placeholder was declared as only 12
  * bytes, but a direct `nm -CS` re-check (not `readelf -SW`) finds the
  * REAL vtable is 0xf0 bytes (240, 60 slots) -- the same class of
  * too-short-hand-crafted-vtable risk sec 10.186 found for `CCostProfile`.
- * Harmless today (nothing reconstructed dispatches through it --
- * `ChangeProgram`'s own `call *0xe0(*this)` remains a bare-`{}` stub),
- * corrected now (batch 45 adds sixteen MORE placement-new instances of
- * this exact class in `combi_ctor.cpp`) to remove the landmine for
- * whichever future batch promotes `ChangeProgram`. No file under verify/
+ * Harmless at the time (nothing reconstructed dispatched through it yet)
+ * but corrected then (batch 45 was about to add sixteen MORE
+ * placement-new instances of this exact class in `combi_ctor.cpp`) to
+ * remove the landmine for whichever future batch promoted `ChangeProgram`
+ * -- exactly this batch (47), which needed the correctly-sized slot 56
+ * (byte offset 0xe0/0xe8) this fix made available. No file under verify/
  * has its own local copy of this symbol (confirmed via `grep -rln`).
  */
 extern "C" unsigned char _ZTV15CSTGProgramSlot[0xf0];
@@ -794,6 +821,21 @@ struct CSTGProgramSlot {
 	void *AccessActiveSlotVoiceData() const;
 	bool HasActiveSlotVoiceData() const;
 	bool HasActiveVoices() const;
+
+	/*
+	 * ChangeProgram(CSTGProgram*) (batch 47, `.text+0xac530`, 300 bytes)
+	 * is now real -- see global.cpp for the full confirmed shape
+	 * (finalizes all smoothers, builds a scratch local `CSTGChannelValues`,
+	 * looks up this slot's own previous active voice data via
+	 * `ResolveActiveVoiceDataNode()` above and, if found, dispatches a
+	 * REAL vtable slot -- `ProcessPreviousSVDOnProgramChange`, see
+	 * `CallVtableSlot56`/the two real per-class implementations in
+	 * global.cpp -- to decide whether to carry its channel values
+	 * forward, stores `newProgram` at `+0x5`, then hands off to
+	 * `CSTGGlobal::GetFreeSlotVoiceData()` (already real) and the two
+	 * confirmed-real-but-deliberately-deferred DSP callees `Setup()`/
+	 * `CompleteLoadProgram()` below).
+	 */
 	void ChangeProgram(CSTGProgram *newProgram);
 
 	/*
@@ -807,6 +849,20 @@ struct CSTGProgramSlot {
 	 * e.g. `PreprocessPerformanceChange`, sec 10.95).
 	 */
 	unsigned char GetProperMidiChannel() const;
+
+	/*
+	 * CompleteLoadProgram(CSTGSlotVoiceData*) (batch 47, `.text+0xac1d0`,
+	 * 0x35b/859 bytes) -- confirmed real regparm(3) (this=eax=slot,
+	 * arg1=edx=slotVoiceData) via `ChangeProgram()`'s own real call site
+	 * above and a SECOND confirmed real caller, `CSTGProgramSlot::
+	 * LoadCombiTrackForPerformanceChangeEv` (not reconstructed in this
+	 * project, out of scope). Confirmed real, deliberately deferred --
+	 * substantially larger than `ChangeProgram()` itself and out of scope
+	 * per the sec 10.185 audio-DSP policy -- own no-op body in
+	 * bar2_stubs.cpp, matching the established reconstruct-caller-DSP-
+	 * stub-callee pattern.
+	 */
+	void CompleteLoadProgram(CSTGSlotVoiceData *slotVoiceData);
 };
 
 /*
@@ -828,11 +884,26 @@ static inline void CallVtableSlot7(void *obj)
 	fn(obj);
 }
 
-/* Test-overridable vtable placeholder used by both derived ctors below
- * -- see its own definition in global.cpp for why host tests that
- * exercise Initialize()'s real vtable dispatch must repoint this at an
- * mmap(MAP_32BIT)'d buffer first. */
-extern void **g_programSlotVtable;
+/* Test-overridable, per-class vtable placeholders used by each derived
+ * ctor below -- see their own definitions in global.cpp for why host
+ * tests that exercise Initialize()'s (or, since batch 47, ChangeProgram()'s)
+ * real vtable dispatch must repoint these at mmap(MAP_32BIT)'d buffers
+ * first. Split from a single shared `g_programSlotVtable` in batch 47
+ * once slot 56 (ChangeProgram()'s own real `ProcessPreviousSVDOnProgramChange`
+ * dispatch) needed to differ per class -- every other slot, including
+ * slot 7, is unaffected by the split. */
+extern void **g_programModeProgramSlotVtable;
+extern void **g_programModeDrumTrackSlotVtable;
+
+/* The two real per-class slot-56 implementations (global.cpp) -- exposed
+ * (not `static`) so a host test that needs a fresh, correctly-sized,
+ * mmap32'd vtable buffer of its own (rather than relying on the
+ * file-scope default arrays' own address, which is not guaranteed to
+ * survive 32-bit truncation once a prior scenario's own mmap32'd
+ * override has been unmapped) can install these exact real function
+ * pointers directly. See test_global.cpp's own [54] scenario. */
+bool ProgramSlot_ProcessPreviousSVDOnProgramChange(void *self, CSTGSlotVoiceData *svd);
+bool ProgramModeProgramSlot_ProcessPreviousSVDOnProgramChange(void *self, CSTGSlotVoiceData *svd);
 
 struct CSTGProgramModeProgramSlot : public CSTGProgramSlot {
 	/* Confirmed real (via relocation, called from CSTGGlobal's own
@@ -3360,6 +3431,23 @@ public:
 	 * near-NULL hazard above) -- a genuine potential infinite loop in
 	 * the original firmware, not a defect introduced by this
 	 * reconstruction.
+	 *
+	 * UPDATE (batch 47): the return value is a small (~0x40-byte)
+	 * free-list/active-list bookkeeping NODE, confirmed via
+	 * `ChangeProgram()`'s own real disassembly (oa_global.h ->
+	 * global.cpp) dereferencing the returned pointer's own `+0x8` field
+	 * to reach the ACTUAL `CSTGSlotVoiceData*` payload -- the SAME
+	 * node/payload split already established for
+	 * `ResolveActiveVoiceDataNode()` (global.cpp), now confirmed a
+	 * second, independent time via this completely different table/
+	 * free-list family. This function's own `CSTGSlotVoiceData*` return
+	 * type is a pre-existing, harmless type looseness (nothing before
+	 * batch 47 ever dereferenced the return value's own fields, and
+	 * `test_global.cpp`'s own [38] scenario already mocks the returned
+	 * node at exactly its real small size, ~0x40 bytes, not a full
+	 * `CSTGSlotVoiceData`) -- left as-is rather than renamed, to avoid
+	 * unnecessary churn; `ChangeProgram()` is simply the first real
+	 * caller to know to read the extra `+0x8` indirection.
 	 */
 	CSTGSlotVoiceData *GetFreeSlotVoiceData();
 

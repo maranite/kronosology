@@ -331,7 +331,30 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
  * `StaticBack`/`RunVoiceModelFeedback`/`GetTotalStaticCosts` immediately
  * below remain correctly deferred -- THEIR OWN bodies are what would
  * genuinely dispatch through these now-real-but-still-zero-filled
- * vtables, a real crash risk until reconstructed for real. */
+ * vtables, a real crash risk until reconstructed for real.
+ *
+ * UPDATE (batch 47): `ChangeProgram(CSTGProgram*)` itself is now real too
+ * -- see global.cpp. CORRECTION of this comment's own batch-43 claim
+ * above: a fresh, independent `readelf -r` re-derivation this batch found
+ * `call *0xe0(%ecx)` does NOT resolve to `GetChordSource() const` as
+ * speculated -- it resolves to `ProcessPreviousSVDOnProgramChange
+ * (CSTGSlotVoiceData*)`, a DIFFERENT real virtual (confirmed via each
+ * class's own `_ZTV*` relocation table read directly, not inferred).
+ * That function turned out to call only ALREADY-REAL siblings
+ * (`CSTGSlotVoiceData::SetIsDying()`/`FreeSlotVoiceData(bool)`, both real
+ * since sec 10.140/batch 17) -- no DSP callee at all, unlike this
+ * cluster's other members. The two per-class vtable slots (previously a
+ * single SHARED `g_programSlotVtable`, safe only because nothing past
+ * slot 7 was ever read) were split into `g_programModeProgramSlotVtable`/
+ * `g_programModeDrumTrackSlotVtable` so slot 56 can hold each class's own
+ * real target (an override for the program-mode slot, the base impl for
+ * the drum-track slot, confirmed different via `readelf -r`). The two
+ * callees `ChangeProgram()` DOES still call for real
+ * (`CSTGSlotVoiceData::Setup()`/`CSTGProgramSlot::CompleteLoadProgram()`,
+ * 3652/859 bytes) are genuine "load a program into a voice" DSP/setup
+ * routines, confirmed via their own disassembly -- both stubbed
+ * immediately below, matching the reconstruct-caller-DSP-stub-callee
+ * pattern (`ChangeProgram()` itself is the caller, now fully real). */
 void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 /* CSTGChannelValues::Reset() is real now, batch 18 -- see
@@ -432,8 +455,15 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * see src/engine/program_slot_ctor.cpp. */
 /* IsActive()/AccessActiveSlotVoiceData()/HasActiveSlotVoiceData()/
  * HasActiveVoices() reconstructed for real, sec 10.142 -- see
- * src/engine/global.cpp. */
-void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
+ * src/engine/global.cpp. CSTGProgramSlot::ChangeProgram(CSTGProgram*) is
+ * real now too, batch 47 -- see global.cpp (also the two new real vtable
+ * slot-56 implementations, ProgramSlot_/ProgramModeProgramSlot_
+ * ProcessPreviousSVDOnProgramChange, and the g_programModeProgramSlotVtable/
+ * g_programModeDrumTrackSlotVtable split, same file). Its own two
+ * confirmed-real, deliberately deferred DSP/setup callees (own bodies not
+ * reconstructed in this pass): */
+void CSTGSlotVoiceData::Setup(CSTGProgramSlot *, CSTGProgram *, const CSTGChannelValues *) {}
+void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *) {}
 /* CSTGRecordBuffer::CSTGRecordBuffer() is real now, sec 10.148 -- see
  * src/engine/engine_init.cpp (also corrects a real bug that promotion
  * uncovered: this class's true size is 0x301c bytes, not the 0x38 this

@@ -1744,47 +1744,98 @@ void CSTGAudioInput::OnUseGlobalSettingsChanged()
  */
 
 /*
- * CSTGProgramSlot's own real vtable (confirmed 240 bytes/58 slots via
- * readelf against OA_real.ko's `_ZTV26CSTGProgramModeProgramSlot`/
- * `_ZTV28CSTGProgramModeDrumTrackSlot`, both classes' own vtable data
- * is confirmed real but not independently reconstructed) is genuinely
- * DISPATCHED THROUGH by Initialize() below (CallVtableSlot7) -- unlike
- * this project's other not-yet-reconstructed vtables, this one can't
- * stay zeroed (a null slot-7 call would crash). Modeled with NATIVE
- * pointer width (not a byte-precise 32-bit-target layout) since
- * CallVtableSlot7 itself uses native `void**` indexing and this
- * placeholder is purely a dispatch target, never read at a fixed byte
+ * CSTGProgramSlot's own real vtable (confirmed 0xf0 bytes/60 slots via
+ * `nm -CS` against OA_real.ko's `_ZTV26CSTGProgramModeProgramSlot`/
+ * `_ZTV28CSTGProgramModeDrumTrackSlot`, matching the `_ZTV15CSTGProgramSlot`
+ * size fix batch 45/sec 10.196 already applied) is genuinely DISPATCHED
+ * THROUGH by Initialize() below (CallVtableSlot7) AND, as of this batch,
+ * by ChangeProgram() (CallVtableSlot56, see further below) -- unlike this
+ * project's other not-yet-reconstructed vtables, this one can't stay
+ * zeroed at either slot (a null call would crash). Modeled with NATIVE
+ * pointer width (not a byte-precise 32-bit-target layout) since both
+ * CallVtableSlotN helpers use native `void**` indexing and these
+ * placeholders are purely dispatch targets, never read at a fixed byte
  * offset by anything else -- this keeps host test builds (8-byte
  * pointers) and the real -m32 Kbuild target (4-byte pointers) both
  * correct without needing two different layouts.
  *
- * `g_programSlotVtable` is a POINTER (not the array itself), defaulted
- * to a static fallback array below -- on the real -m32 Kbuild target
- * this static array's own address is naturally 32-bit (the whole
- * process/module lives under 4GB there), so ToU32/FromU32 round-trip
- * losslessly and the default is exactly correct. On a 64-bit HOST test
- * build, a plain `static` array's address is NOT guaranteed to survive
- * that same 32-bit truncation (PIE executables routinely place static
- * data above 4GB) -- host tests that actually exercise Initialize()'s
- * real vtable-slot-7 dispatch must repoint this at an
- * `mmap(MAP_32BIT)`'d buffer first (see test_global.cpp's own [15]
- * scenario for the pattern), matching this project's own established
- * "mmap32 for anything a packed-32-bit field must address" convention.
+ * UPDATE (this batch): the real vtables for CSTGProgramModeProgramSlot and
+ * CSTGProgramModeDrumTrackSlot are CONFIRMED DIFFERENT at slot 56 (byte
+ * offset 0xe0 from the installed vtable pointer) -- readelf -r against
+ * each class's own `_ZTV*` relocation table shows CSTGProgramModeProgramSlot
+ * resolving to its own override, `ProcessPreviousSVDOnProgramChange`
+ * (.text+0xb9760), while CSTGProgramModeDrumTrackSlot resolves to the BASE
+ * CSTGProgramSlot::ProcessPreviousSVDOnProgramChange (.text+0xab030,
+ * confirmed NOT overridden by the drum-track class). A single shared
+ * `g_programSlotVtable` (as this project used through batch 46, when
+ * nothing dispatched past slot 7) can no longer represent both classes
+ * correctly -- split into two class-specific arrays below. Every OTHER
+ * slot (including slot 7) keeps the exact same inert-trap treatment as
+ * before; only slot 56 differs per class.
  */
 static void ProgramSlotVtableTrap(void *) { /* deliberately inert */ }
+
+/* CallVtableSlot56's own Fn shape (see further below); forward-declared
+ * here so both per-class static arrays can reference the two real
+ * ProcessPreviousSVDOnProgramChange implementations by address.
+ * Deliberately NOT `static` (unlike ProgramSlotVtableTrap) and also
+ * declared `extern` in oa_global.h -- test_global.cpp's own [54] KAT
+ * needs to install these exact real function pointers into its OWN
+ * mmap32'd, correctly-sized vtable buffers (the file-scope default
+ * arrays' own address can't survive 32-bit truncation on a 64-bit host
+ * once a prior scenario's own mmap32'd override has been munmap'd --
+ * same "move this into a shared header once a sibling needs it" step
+ * already used for atmel_deax.cpp's bzzzzzzzzzzzt11/12, sec 10.197). */
+bool ProgramSlot_ProcessPreviousSVDOnProgramChange(void *self, CSTGSlotVoiceData *svd);
+bool ProgramModeProgramSlot_ProcessPreviousSVDOnProgramChange(void *self, CSTGSlotVoiceData *svd);
+
 /* Index 0/1 = offset-to-top/RTTI header (skipped by _vtablePtr below,
  * per the standard Itanium "vtable pointer already points past the
- * header" convention); indices 2..9 are virtual slots 0..7, so slot 7
- * (the only one CallVtableSlot7/Initialize() actually reaches) lands
- * at physical index 9 -- needs at least 10 elements. */
-static void *g_programSlotVtableStatic[10] = {
-	0, 0,
-	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap,
-	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap,
-	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap,
-	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap,
+ * header" convention); indices 2..9 are virtual slots 0..7 (slot 7 is
+ * the one CallVtableSlot7/Initialize() reaches); index 2+56=58 is
+ * virtual slot 56 (the one CallVtableSlot56/ChangeProgram() reaches) --
+ * needs 60 elements total (2 header + 58 real virtual slots, matching
+ * the confirmed 0xf0-byte/60-slot real vtable exactly). */
+#define PROGRAM_SLOT_VTABLE_TRAPS \
+	0, 0, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap, (void *)ProgramSlotVtableTrap, \
+	(void *)ProgramSlotVtableTrap /* index 57 = virtual slot 55 */
+
+static void *g_programModeProgramSlotVtableStatic[60] = {
+	PROGRAM_SLOT_VTABLE_TRAPS,
+	(void *)ProgramModeProgramSlot_ProcessPreviousSVDOnProgramChange, /* index 58 = virtual slot 56 */
+	(void *)ProgramSlotVtableTrap, /* index 59 = virtual slot 57 */
 };
-void **g_programSlotVtable = g_programSlotVtableStatic;
+static void *g_programModeDrumTrackSlotVtableStatic[60] = {
+	PROGRAM_SLOT_VTABLE_TRAPS,
+	(void *)ProgramSlot_ProcessPreviousSVDOnProgramChange, /* index 58 = virtual slot 56 (base impl, not overridden) */
+	(void *)ProgramSlotVtableTrap, /* index 59 = virtual slot 57 */
+};
+#undef PROGRAM_SLOT_VTABLE_TRAPS
+void **g_programModeProgramSlotVtable = g_programModeProgramSlotVtableStatic;
+void **g_programModeDrumTrackSlotVtable = g_programModeDrumTrackSlotVtableStatic;
 
 /*
  * CSTGProgramModeProgramSlot::CSTGProgramModeProgramSlot()
@@ -1797,7 +1848,7 @@ void **g_programSlotVtable = g_programSlotVtableStatic;
 CSTGProgramModeProgramSlot::CSTGProgramModeProgramSlot()
 {
 	unsigned char *base = (unsigned char *)this;
-	*(unsigned int *)base = ToU32((unsigned char *)&g_programSlotVtable[2]);
+	*(unsigned int *)base = ToU32((unsigned char *)&g_programModeProgramSlotVtable[2]);
 	base[0x4] = 0;
 }
 
@@ -1811,7 +1862,7 @@ CSTGProgramModeProgramSlot::CSTGProgramModeProgramSlot()
 CSTGProgramModeDrumTrackSlot::CSTGProgramModeDrumTrackSlot()
 {
 	unsigned char *base = (unsigned char *)this;
-	*(unsigned int *)base = ToU32((unsigned char *)&g_programSlotVtable[2]);
+	*(unsigned int *)base = ToU32((unsigned char *)&g_programModeDrumTrackSlotVtable[2]);
 	*(unsigned int *)(base + 0xe8) = 0;
 	base[0x4] = 1;
 }
@@ -3769,6 +3820,222 @@ bool CSTGProgramSlot::HasActiveVoices() const
 	unsigned short a = *(unsigned short *)(payload + 0x4c);
 	unsigned short b = *(unsigned short *)(payload + 0x58);
 	return (unsigned short)(a + b) != 0;
+}
+
+/*
+ * CSTGProgramSlot::ProcessPreviousSVDOnProgramChange(CSTGSlotVoiceData*)
+ * (.text+0xab030, 81 bytes) -- confirmed real virtual slot 56 BASE
+ * implementation (installed directly, unoverridden, into
+ * `_ZTV28CSTGProgramModeDrumTrackSlot`'s own slot 56 -- confirmed via
+ * readelf -r against that vtable's own relocation table, which resolves
+ * straight to this symbol rather than to any drum-track-specific
+ * override). Modeled as a plain free function matching CallVtableSlot56's
+ * own `Fn` shape (see below) rather than a real C++ virtual method --
+ * matching this whole class's own established "manual vtable-pointer
+ * field, no real C++ virtuals" convention (CallVtableSlot7 above). Never
+ * called directly by name anywhere in ground truth (confirmed via a
+ * project-wide relocation search) -- reached ONLY via vtable dispatch
+ * from ChangeProgram() below.
+ *
+ * Reuses the SAME confirmed real "voice count" pair (`+0x4c`/`+0x58`,
+ * summed as a 16-bit add) `CSTGProgramSlot::HasActiveVoices()` already
+ * established above -- an independent cross-confirmation of that pair's
+ * meaning, not a fresh guess: nonzero means the previous slot voice data
+ * still has voices sounding (mark it dying, set `+0x41` -- the SAME
+ * "being stolen" flag `Steal()`/`SetIsDying()` already established,
+ * oa_global.h's own `SetIsDying()` comment), zero means it's already
+ * silent (safe to free outright via `FreeSlotVoiceData(false)`). Both
+ * non-null-svd branches return true; only a null `svd` returns false
+ * (defensive -- ChangeProgram's own call site below only ever reaches
+ * this with a confirmed non-null payload, per its own node/payload gate).
+ */
+bool ProgramSlot_ProcessPreviousSVDOnProgramChange(void *selfVoid, CSTGSlotVoiceData *svd)
+{
+	(void)selfVoid;
+	if (!svd)
+		return false;
+	unsigned char *s = (unsigned char *)svd;
+	unsigned short voiceCount = (unsigned short)(*(unsigned short *)(s + 0x4c) +
+						      *(unsigned short *)(s + 0x58));
+	if (voiceCount != 0) {
+		svd->SetIsDying();
+		s[0x41] = 1;
+	} else {
+		svd->FreeSlotVoiceData(false);
+	}
+	return true;
+}
+
+/*
+ * CSTGProgramModeProgramSlot::ProcessPreviousSVDOnProgramChange(CSTGSlotVoiceData*)
+ * (.text+0xb9760, 23 bytes) -- confirmed real OVERRIDE, installed into
+ * `_ZTV26CSTGProgramModeProgramSlot`'s own slot 56 (same readelf -r
+ * cross-check as the base version above). A real, confirmed quirk,
+ * verified directly in the raw disassembly (not a transcription slip):
+ * this ALWAYS returns false, even on the branch that calls
+ * `SetIsDying()` -- the real code's final `xor eax,eax` is the
+ * unconditional fallthrough target of BOTH the null-svd and non-null-svd
+ * paths. Net effect at ChangeProgram's own call site: ordinary
+ * (non-drum-track) program slots never carry the previous slot's live
+ * channel-values snapshot forward across a program change; drum-track
+ * slots (base impl above) do, whenever a previous voice is still
+ * sounding.
+ */
+bool ProgramModeProgramSlot_ProcessPreviousSVDOnProgramChange(void *selfVoid, CSTGSlotVoiceData *svd)
+{
+	(void)selfVoid;
+	if (svd)
+		svd->SetIsDying();
+	return false;
+}
+
+/*
+ * Real vtable slot 56 dispatch (`call *0xe0(%ecx)` in ground truth,
+ * where %ecx is the object's own installed vtable pointer) -- same raw-
+ * indirect-dispatch treatment as CallVtableSlot7 above. Takes one
+ * explicit argument (the previous slot voice data payload, confirmed
+ * regparm(3) `this=eax, arg1=edx` at the real call site) and returns a
+ * bool in AL, both confirmed from ChangeProgram()'s own disassembly.
+ */
+static inline bool CallVtableSlot56(void *obj, CSTGSlotVoiceData *svd)
+{
+	typedef bool (*Fn)(void *, CSTGSlotVoiceData *);
+	unsigned int vtablePacked = *(unsigned int *)obj;
+	void **vtable = (void **)(unsigned long)vtablePacked;
+	Fn fn = (Fn)vtable[56];
+	return fn(obj, svd);
+}
+
+/*
+ * CSTGProgramSlot::ChangeProgram(CSTGProgram*) (.text+0xac530, 300 bytes)
+ * -- confirmed real, batch 47. Full disassembly (regparm(3): this=eax,
+ * arg1=edx=newProgram):
+ *
+ * 1. `CSTGSmoother::sInstance->FinalizeAllSmoothers()` -- confirmed real
+ *    (unconditional dereference of `sInstance`, no null check, matching
+ *    this project's own established "deliberately-deferred-with-
+ *    unconditional-dereference" idiom) -- FinalizeAllSmoothers() itself
+ *    remains a deliberately deferred no-op stub (bar2_stubs.cpp), which
+ *    is a safe callee here per the usual "calling a still-deferred stub
+ *    is fine" precedent.
+ * 2. Default-initializes a local 0x92c-byte scratch buffer (confirmed
+ *    the exact real size of `CSTGChannelValues`, sec 10.151/oa_engine_init.h)
+ *    -- the first 0x5a0 bytes (121 confirmed real 12-byte records) get a
+ *    real, confirmed per-record write pattern (+0x0/+0x4 dwords zeroed,
+ *    +0x8 word zeroed, +0xa byte set to 1, +0xb byte "keep garbage bits
+ *    except force bit0 set/bit1 clear"); ground truth emits this as a
+ *    120-iteration loop plus one manually-unrolled 121st record, folded
+ *    here into one 121-iteration loop since both forms are byte-for-byte
+ *    equivalent (confirmed by direct comparison of the unrolled tail
+ *    against the loop body -- a real compiler code-gen artifact, not a
+ *    semantic difference). The remaining 0x5a0..0x92c bytes are left as
+ *    genuine uninitialized stack garbage in ground truth too (never
+ *    written before either being fully overwritten by the copy below or
+ *    never being read at all) -- confirmed dead/don't-care, not modeled.
+ * 3. Looks up this slot's own active-voice-data node via the SAME
+ *    `CSTGGlobal::sInstance + 0x29c990c + fieldAt(4)*12` table
+ *    `ResolveActiveVoiceDataNode()` above already established (this
+ *    slot's own `+0x4` "kind" byte is the SAME index) -- confirmed via a
+ *    literal byte-for-byte match of the lookup sequence, not assumed.
+ *    If the node OR its own `+0x8` payload is null, the local buffer
+ *    stays discarded and `channelValues` (below) stays null (real
+ *    behavior: no previous slot voice data to carry anything from).
+ * 4. Otherwise: copies the payload's own `+0x1488` sub-object (the
+ *    payload's embedded `CSTGChannelValues`, matching the 0x92c copy
+ *    size exactly) into the local scratch buffer via an explicit byte
+ *    loop (no memcpy, matching this project's own established
+ *    freestanding-build convention, sec 10.56), THEN dispatches
+ *    `ProcessPreviousSVDOnProgramChange()` (CallVtableSlot56) on the
+ *    payload -- if it returns true, `channelValues` becomes the local
+ *    buffer (now holding the previous slot's live channel values);
+ *    otherwise it stays null. The buffer is unconditionally overwritten
+ *    BEFORE this bool is even checked either way -- confirmed real, not
+ *    a translation choice.
+ * 5. Stores `newProgram` at `this->+0x5` (an unaligned dword field --
+ *    this slot's own "current program" pointer, confirmed via the same
+ *    regparm(3) `edx` register carried live across steps 1/3/4).
+ * 6. `CSTGGlobal::sInstance->GetFreeSlotVoiceData()` -- confirmed real
+ *    (sec 10.100). ITS OWN return value is a small free-list/active-list
+ *    bookkeeping NODE (confirmed ~0x40 bytes via that function's own
+ *    disassembly and test_global.cpp's own [38] scenario, which mocks it
+ *    at exactly that size), NOT a full `CSTGSlotVoiceData` object despite
+ *    the function's existing `CSTGSlotVoiceData*` return-type annotation
+ *    (a harmless pre-existing type looseness -- nothing before this batch
+ *    ever dereferenced the return value's own fields). `ChangeProgram` is
+ *    the FIRST real caller to do so: it reads the node's own `+0x8` field
+ *    to get the ACTUAL `CSTGSlotVoiceData*` payload to operate on --
+ *    exactly the same node/payload split already established for
+ *    `ResolveActiveVoiceDataNode()` above, now confirmed a second,
+ *    independent time via this completely different table/free-list
+ *    family. NOT a bug in the existing `GetFreeSlotVoiceData()`
+ *    reconstruction (its own return value, and the `test_global.cpp`
+ *    scenario checking it, are both still correct) -- just the first
+ *    real call site to need the extra `+0x8` dereference.
+ * 7. `slotVoiceData->Setup(this, newProgram, channelValues)` (confirmed
+ *    real regparm(3): this=eax=slotVoiceData, arg1=edx=this(ProgramSlot),
+ *    arg2=ecx=newProgram, arg3=[stack]=channelValues -- a genuine 4th
+ *    argument beyond regparm(3)'s 3 register slots) then
+ *    `this->CompleteLoadProgram(slotVoiceData)` (confirmed real
+ *    regparm(3): this=eax=ProgramSlot, arg1=edx=slotVoiceData). BOTH are
+ *    confirmed real (via direct PC32 relocations, and independently
+ *    confirmed as a SECOND real caller exists too --
+ *    `CSTGProgramSlot::LoadCombiTrackForPerformanceChangeEv`, not
+ *    reconstructed in this project, out of scope) but substantially
+ *    large (0xe44/3652 bytes and 0x35b/859 bytes respectively) -- out of
+ *    scope per the sec 10.185 audio-DSP policy. This batch reconstructs
+ *    ChangeProgram() itself (the caller) for real and gives both callees
+ *    safe confirmed-real-but-deferred no-op stand-ins (bar2_stubs.cpp),
+ *    matching the established reconstruct-caller-DSP-stub-callee pattern
+ *    (sec 10.187 CSetListEQ::SetBand precedent). Ground truth's own
+ *    final `mov eax,edi` (returning the SlotVoiceData pointer) is
+ *    preserved in neither call site that reaches this function (both
+ *    confirmed to discard EAX immediately after the call) -- kept `void`
+ *    to match the pre-existing declaration, not independently re-verified
+ *    beyond the two call sites checked.
+ */
+void CSTGProgramSlot::ChangeProgram(CSTGProgram *newProgram)
+{
+	CSTGSmoother::sInstance->FinalizeAllSmoothers();
+
+	unsigned char localChannelValues[0x92c];
+	for (int i = 0; i < 121; i++) {
+		unsigned char *rec = localChannelValues + i * 0xc;
+		*(unsigned int *)(rec + 0x0) = 0;
+		*(unsigned int *)(rec + 0x4) = 0;
+		*(unsigned short *)(rec + 0x8) = 0;
+		rec[0xa] = 1;
+		rec[0xb] = (unsigned char)((rec[0xb] | 1) & ~2);
+	}
+
+	unsigned char *node = ResolveActiveVoiceDataNode(this);
+	void *channelValues = 0;
+	if (node) {
+		unsigned int payloadPacked = *(unsigned int *)(node + 0x8);
+		if (payloadPacked) {
+			unsigned char *payload = (unsigned char *)(unsigned long)payloadPacked;
+			const unsigned char *src = payload + 0x1488;
+			for (unsigned int i = 0; i < 0x92c; i++)
+				localChannelValues[i] = src[i];
+			/* Dispatches through THIS SLOT's own vtable (confirmed real
+			 * `ecx=[ebx]` i.e. `this->+0x0`, NOT the payload's) -- `this`
+			 * is the vtable source/class selector, `payload` is only the
+			 * explicit argument (regparm(3) this=eax=ProgramSlot,
+			 * arg1=edx=payload at the real call site). */
+			bool keepPrevious = CallVtableSlot56(this, (CSTGSlotVoiceData *)payload);
+			if (keepPrevious)
+				channelValues = localChannelValues;
+		}
+	}
+
+	unsigned char *self = (unsigned char *)this;
+	*(unsigned int *)(self + 0x5) = (unsigned int)(unsigned long)newProgram;
+
+	unsigned char *freeNode = (unsigned char *)CSTGGlobal::sInstance->GetFreeSlotVoiceData();
+	unsigned int svdPacked = *(unsigned int *)(freeNode + 0x8);
+	CSTGSlotVoiceData *svd = (CSTGSlotVoiceData *)(unsigned long)svdPacked;
+
+	svd->Setup(this, newProgram, (const CSTGChannelValues *)channelValues);
+	CompleteLoadProgram(svd);
 }
 
 /*

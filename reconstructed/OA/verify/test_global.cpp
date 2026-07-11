@@ -319,6 +319,45 @@ void CSTGSlotVoiceData::FreeSlotVoiceData(bool flag)
 	if (g_freeSlotVoiceDataHook)
 		g_freeSlotVoiceDataHook(this);
 }
+/* CSTGSlotVoiceData::SetIsDying()/Setup()/CSTGProgramSlot::
+ * CompleteLoadProgram() -- link-satisfying mocks with call counters/arg
+ * capture for ChangeProgram()'s own KAT ([46] below, batch 47). Setup()/
+ * CompleteLoadProgram() are both confirmed-real, deliberately-deferred
+ * DSP/setup callees (bar2_stubs.cpp, not linked into this binary) --
+ * mocked here so ChangeProgram()'s own observable behavior (which
+ * channelValues pointer it hands to Setup()) can be checked directly. */
+static int g_svdSetIsDyingCalls;
+void CSTGSlotVoiceData::SetIsDying() { g_svdSetIsDyingCalls++; }
+static int g_svdSetupCalls;
+static void *g_lastSetupThis, *g_lastSetupSlot, *g_lastSetupProgram;
+static const void *g_lastSetupChannelValues;
+/* ChangeProgram()'s own `channelValues` argument points at ITS OWN stack-
+ * local scratch buffer -- no longer valid once ChangeProgram() returns,
+ * so the content must be snapshotted HERE, synchronously during the
+ * call, not re-read from the (by-then-dangling) pointer afterward. */
+static unsigned char g_lastSetupChannelValuesSnapshot[0x92c];
+void CSTGSlotVoiceData::Setup(CSTGProgramSlot *slot, CSTGProgram *program,
+			      const CSTGChannelValues *channelValues)
+{
+	g_svdSetupCalls++;
+	g_lastSetupThis = (void *)this;
+	g_lastSetupSlot = (void *)slot;
+	g_lastSetupProgram = (void *)program;
+	g_lastSetupChannelValues = (const void *)channelValues;
+	if (channelValues) {
+		const unsigned char *p = (const unsigned char *)channelValues;
+		for (unsigned int i = 0; i < sizeof(g_lastSetupChannelValuesSnapshot); i++)
+			g_lastSetupChannelValuesSnapshot[i] = p[i];
+	}
+}
+static int g_completeLoadProgramCalls;
+static void *g_lastCompleteLoadProgramThis, *g_lastCompleteLoadProgramArg;
+void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *svd)
+{
+	g_completeLoadProgramCalls++;
+	g_lastCompleteLoadProgramThis = (void *)this;
+	g_lastCompleteLoadProgramArg = (void *)svd;
+}
 static int g_runVoiceModelStaticFrontCalls, g_runVoiceModelStaticBackCalls;
 static void *g_lastRunVoiceModelStaticThis;
 static unsigned int g_lastRunVoiceModelStaticParam;
@@ -361,7 +400,9 @@ void CSTGHDRManager::ProcessSamplerCommands() { }
  * via real `CSTGGlobal::sInstance+0x29c990c` table/node/payload state
  * in section [27b] below, not mocked. */
 CSTGProgramSlot::CSTGProgramSlot() {}
-void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
+/* CSTGProgramSlot::ChangeProgram() is real now (batch 47, global.cpp,
+ * which this file links directly) -- stale mock removed; see [54] below
+ * for its own real call-tracking KAT. */
 
 /* Mocks for RunVoiceModelFeedback/Initialize's own confirmed-real,
  * deliberately deferred dependencies (see oa_global.h). */
@@ -1075,10 +1116,15 @@ int main(void)
 		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own Initialize() is
 		 * now real and genuinely dispatches through ITS OWN (different)
 		 * vtable slot 7 -- a plain `static` placeholder array's address
-		 * isn't guaranteed to survive g_programSlotVtable's own 32-bit
-		 * truncation on a 64-bit host (PIE puts static data above 4GB),
-		 * so repoint it at an mmap32'd buffer before constructing either
-		 * sub-object (see oa_global.h's own comment on g_programSlotVtable). */
+		 * isn't guaranteed to survive g_programModeProgramSlotVtable/
+		 * g_programModeDrumTrackSlotVtable's own 32-bit truncation on a
+		 * 64-bit host (PIE puts static data above 4GB), so repoint both
+		 * at the SAME mmap32'd buffer before constructing either
+		 * sub-object (batch 47 split what used to be one shared
+		 * `g_programSlotVtable` into two class-specific globals so
+		 * ChangeProgram()'s own real slot 56 can differ per class -- this
+		 * scenario only exercises slot 7, so pointing both at one 10-slot
+		 * buffer reproduces the exact same behavior as before the split). */
 		void **programSlotVtableBuf = (void **)mmap32(10 * sizeof(void *));
 		typedef void (*Slot7TrapFn)(void *);
 		static int programSlotTrapCalls;
@@ -1088,7 +1134,8 @@ int main(void)
 		programSlotVtableBuf[1] = 0;
 		for (int i = 2; i < 10; i++)
 			programSlotVtableBuf[i] = (void *)programSlotTrap;
-		g_programSlotVtable = programSlotVtableBuf;
+		g_programModeProgramSlotVtable = programSlotVtableBuf;
+		g_programModeDrumTrackSlotVtable = programSlotVtableBuf;
 
 		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own Initialize() is
 		 * now real and genuinely dispatches through ITS OWN (different)
@@ -5544,6 +5591,193 @@ int main(void)
 		check_eq("SetBand still called 9 times", (unsigned int)g_setBandCalls, 9u);
 
 		munmap(mgr53, 0x3000);
+	}
+
+	printf("\n[54] CSTGProgramSlot::ChangeProgram (batch 47)\n");
+	{
+		memset(buf, 0, globalSize);
+		CSTGGlobal::sInstance = (CSTGGlobal *)buf;
+
+		unsigned char *smoother = mmap32(0x10);
+		CSTGSmoother::sInstance = (CSTGSmoother *)smoother;
+
+		/* ChangeProgram() genuinely dispatches through slot 56 (unlike
+		 * scenario [15]'s own slot-7-only Initialize() test) -- the
+		 * file-scope default vtable arrays' own address isn't guaranteed
+		 * to survive 32-bit truncation on a 64-bit host, AND scenario
+		 * [15] itself already repoints+munmaps the shared globals earlier
+		 * in this same run, so this scenario needs its own fresh,
+		 * correctly-sized (60-element) mmap32'd buffer per class,
+		 * installing the REAL slot-56 function pointers (exposed non-
+		 * `static` from global.cpp specifically for this) at physical
+		 * index 58. */
+		typedef void (*TrapFn)(void *);
+		TrapFn trap = [](void *) { };
+		void **pVt = (void **)mmap32(60 * sizeof(void *));
+		void **dVt = (void **)mmap32(60 * sizeof(void *));
+		for (int i = 0; i < 60; i++) {
+			pVt[i] = (void *)trap;
+			dVt[i] = (void *)trap;
+		}
+		pVt[58] = (void *)ProgramModeProgramSlot_ProcessPreviousSVDOnProgramChange;
+		dVt[58] = (void *)ProgramSlot_ProcessPreviousSVDOnProgramChange;
+		g_programModeProgramSlotVtable = pVt;
+		g_programModeDrumTrackSlotVtable = dVt;
+
+		/* Both real derived slot classes, constructed in-place at the
+		 * same CSTGGlobal-embedded offsets scenario [15] already uses
+		 * (0/1 discriminator byte set by their own real ctors). */
+		CSTGProgramModeProgramSlot *pSlot =
+			new (buf + 0x2977b1f) CSTGProgramModeProgramSlot();
+		CSTGProgramModeDrumTrackSlot *dSlot =
+			new (buf + 0x2977c08) CSTGProgramModeDrumTrackSlot();
+		CSTGProgram *fakeProgram = (CSTGProgram *)(unsigned long)0xcafef00du;
+
+		/* GetFreeSlotVoiceData()'s own single-element free list (same
+		 * shape as [38]'s own first sub-scenario) -- re-populated before
+		 * every ChangeProgram() call below since GetFreeSlotVoiceData()
+		 * consumes it. The node's own +0x8 field is BOTH GetFreeSlotVoiceData's
+		 * own internal "activeNode" bookkeeping target AND (per this
+		 * batch's own finding) ChangeProgram's real payload pointer --
+		 * point it at a fresh scratch CSTGSlotVoiceData-shaped buffer
+		 * each time. */
+		unsigned char *svdBuf = mmap32(0x2000);
+		unsigned char *freeNode = mmap32(0x40);
+		auto resetFreeList = [&]() {
+			memset(svdBuf, 0, 0x2000);
+			memset(freeNode, 0, 0x40);
+			/* GetFreeSlotVoiceData() returns `link` == freeNode+4 (matching
+			 * [38]'s own established shape), and reads its own "+0x8" field
+			 * (== freeNode+0xc from THIS buffer's own base) as the payload
+			 * pointer -- both its internal `activeNode` bookkeeping AND
+			 * ChangeProgram's own real payload read are the SAME field. */
+			*(unsigned int *)(freeNode + 0xc) = (unsigned int)(unsigned long)svdBuf;
+			unsigned int link = (unsigned int)(unsigned long)(freeNode + 4);
+			*(unsigned int *)(buf + 0x29c98f4) = link;
+			*(unsigned int *)(buf + 0x29c98f8) = link;
+			*(unsigned int *)(buf + 0x29c98fc) = 1;
+			*(unsigned int *)(buf + 0x29c9908) = 0;
+			*(unsigned int *)(buf + 0x29c9900) = 0;
+		};
+
+		/* This slot's own previous-active-voice-data node/payload table
+		 * (`CSTGGlobal::sInstance + 0x29c990c + idx*12`, the SAME table
+		 * ResolveActiveVoiceDataNode()/IsActive()/etc already established) --
+		 * idx 0 = program-mode slot, idx 1 = drum-track slot. */
+		unsigned char *prevNode = mmap32(0x40);
+		unsigned char *prevPayload = mmap32(0x2000);
+		auto setPrevActive = [&](unsigned int idx, unsigned short a, unsigned short b) {
+			memset(prevNode, 0, 0x40);
+			memset(prevPayload, 0, 0x2000);
+			*(unsigned int *)(prevNode + 8) = (unsigned int)(unsigned long)prevPayload;
+			*(unsigned int *)(buf + 0x29c990c + idx * 12) =
+				(unsigned int)(unsigned long)prevNode;
+			*(unsigned short *)(prevPayload + 0x4c) = a;
+			*(unsigned short *)(prevPayload + 0x58) = b;
+			for (unsigned int i = 0; i < 0x92c; i++)
+				prevPayload[0x1488 + i] = 0xAB; /* distinctive copy-source pattern */
+		};
+		auto clearPrevActive = [&](unsigned int idx) {
+			*(unsigned int *)(buf + 0x29c990c + idx * 12) = 0;
+		};
+
+		auto resetMocks = [&]() {
+			g_finalizeAllSmoothersCalls = 0;
+			g_svdSetIsDyingCalls = 0;
+			g_freeSlotVoiceDataCalls = 0;
+			g_lastFreeSlotVoiceDataFlag = false;
+			g_svdSetupCalls = 0;
+			g_lastSetupThis = g_lastSetupSlot = g_lastSetupProgram = 0;
+			g_lastSetupChannelValues = 0;
+			g_completeLoadProgramCalls = 0;
+			g_lastCompleteLoadProgramThis = g_lastCompleteLoadProgramArg = 0;
+		};
+
+		printf("  -- program-mode slot, no previous active voice data --\n");
+		clearPrevActive(0);
+		resetFreeList();
+		resetMocks();
+		pSlot->ChangeProgram(fakeProgram);
+		check_eq("FinalizeAllSmoothers called once", (unsigned int)g_finalizeAllSmoothersCalls, 1u);
+		check_eq("no previous node -> ProcessPreviousSVDOnProgramChange never dispatched "
+			 "(SetIsDying not called)", (unsigned int)g_svdSetIsDyingCalls, 0u);
+		check_eq("  ...(FreeSlotVoiceData not called either)",
+			 (unsigned int)g_freeSlotVoiceDataCalls, 0u);
+		check_eq("this+0x5 == newProgram",
+			 *(unsigned int *)((unsigned char *)pSlot + 0x5), 0xcafef00du);
+		check_eq("Setup called once", (unsigned int)g_svdSetupCalls, 1u);
+		check_eq("Setup's own `this` == freeNode+0x8 (GetFreeSlotVoiceData's real payload)",
+			 (unsigned int)(unsigned long)g_lastSetupThis, (unsigned int)(unsigned long)svdBuf);
+		check_eq("Setup's own slot arg == pSlot",
+			 (unsigned int)(unsigned long)g_lastSetupSlot, (unsigned int)(unsigned long)pSlot);
+		check_eq("Setup's own program arg == newProgram",
+			 (unsigned int)(unsigned long)g_lastSetupProgram, 0xcafef00du);
+		check_eq("Setup's own channelValues == NULL (no previous node)",
+			 (unsigned int)(unsigned long)g_lastSetupChannelValues, 0u);
+		check_eq("CompleteLoadProgram called once", (unsigned int)g_completeLoadProgramCalls, 1u);
+		check_eq("  ...own `this` == pSlot",
+			 (unsigned int)(unsigned long)g_lastCompleteLoadProgramThis,
+			 (unsigned int)(unsigned long)pSlot);
+		check_eq("  ...own arg == the same SlotVoiceData Setup got",
+			 (unsigned int)(unsigned long)g_lastCompleteLoadProgramArg,
+			 (unsigned int)(unsigned long)svdBuf);
+
+		printf("  -- program-mode slot, WITH previous active voice data: override "
+		       "always returns false regardless of voice count --\n");
+		setPrevActive(0, 3, 0); /* nonzero voice count */
+		resetFreeList();
+		resetMocks();
+		pSlot->ChangeProgram(fakeProgram);
+		check_eq("previous node found -> SetIsDying() called (nonzero voice count)",
+			 (unsigned int)g_svdSetIsDyingCalls, 1u);
+		check_eq("but CSTGProgramModeProgramSlot's own override always returns false "
+			 "-> Setup's channelValues stays NULL",
+			 (unsigned int)(unsigned long)g_lastSetupChannelValues, 0u);
+		clearPrevActive(0);
+
+		printf("  -- drum-track slot, previous active voice data WITH voices: "
+		       "base impl marks dying, carries channel values forward --\n");
+		setPrevActive(1, 5, 2); /* sum=7 != 0 */
+		resetFreeList();
+		resetMocks();
+		dSlot->ChangeProgram(fakeProgram);
+		check_eq("this+0x5 == newProgram (drum-track slot)",
+			 *(unsigned int *)((unsigned char *)dSlot + 0x5), 0xcafef00du);
+		check_eq("SetIsDying() called", (unsigned int)g_svdSetIsDyingCalls, 1u);
+		check_eq("FreeSlotVoiceData NOT called", (unsigned int)g_freeSlotVoiceDataCalls, 0u);
+		check_eq("prevPayload+0x41 set to 1 (the 'being stolen' flag)",
+			 prevPayload[0x41], 1u);
+		check_eq("base impl returns true -> Setup's channelValues is non-NULL",
+			 (unsigned int)(g_lastSetupChannelValues != 0), 1u);
+		if (g_lastSetupChannelValues) {
+			bool matches = true;
+			for (unsigned int i = 0; i < 0x92c; i++)
+				if (g_lastSetupChannelValuesSnapshot[i] != 0xAB)
+					matches = false;
+			check_eq("  ...and its content was really copied from prevPayload+0x1488 "
+				 "(0x92c bytes)", (unsigned int)matches, 1u);
+		}
+
+		printf("  -- drum-track slot, previous active voice data with NO voices: "
+		       "base impl frees it outright instead --\n");
+		setPrevActive(1, 0, 0); /* sum==0 */
+		resetFreeList();
+		resetMocks();
+		dSlot->ChangeProgram(fakeProgram);
+		check_eq("SetIsDying() NOT called", (unsigned int)g_svdSetIsDyingCalls, 0u);
+		check_eq("FreeSlotVoiceData(false) called instead", (unsigned int)g_freeSlotVoiceDataCalls, 1u);
+		check_eq("  ...with flag false", (unsigned int)g_lastFreeSlotVoiceDataFlag, 0u);
+		check_eq("base impl STILL returns true regardless -> channelValues non-NULL",
+			 (unsigned int)(g_lastSetupChannelValues != 0), 1u);
+		clearPrevActive(1);
+
+		munmap(prevNode, 0x40);
+		munmap(prevPayload, 0x2000);
+		munmap(freeNode, 0x40);
+		munmap(svdBuf, 0x2000);
+		munmap(smoother, 0x10);
+		munmap(pVt, 60 * sizeof(void *));
+		munmap(dVt, 60 * sizeof(void *));
 	}
 
 	munmap(buf, globalSize);

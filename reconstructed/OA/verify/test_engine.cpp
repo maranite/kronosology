@@ -188,6 +188,15 @@ void CSetListEQ::SetBand(unsigned int, float) { }
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) { }
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) { }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
+/* CSTGProgramSlot::ChangeProgram() is real now (batch 47, global.cpp,
+ * which this file links directly), reachable only via its own two new
+ * real vtable-slot-56 implementations (ProcessPreviousSVDOnProgramChange)
+ * and its own two confirmed-real, deliberately deferred DSP callees --
+ * trivial link-satisfying mocks, not exercised by this file's own tests
+ * (see test_global.cpp for the real call-tracking KAT). */
+void CSTGSlotVoiceData::SetIsDying() { }
+void CSTGSlotVoiceData::Setup(CSTGProgramSlot *, CSTGProgram *, const CSTGChannelValues *) { }
+void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *) { }
 /* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is real now (sec
  * 10.149, see managers.cpp, which this file links directly) -- no mock
  * here any more. Its own new real dependencies need trivial link-
@@ -316,7 +325,10 @@ void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
  * shared CSTGProgramSlot base class's own confirmed-real, deliberately
  * deferred dependencies still need link-satisfying mocks here. */
 CSTGProgramSlot::CSTGProgramSlot() {}
-void CSTGProgramSlot::ChangeProgram(CSTGProgram *) {}
+/* CSTGProgramSlot::ChangeProgram() is real now (batch 47, global.cpp,
+ * which this file links directly) -- stale mock removed (see the new
+ * link-satisfying mocks for its own callees, Setup()/CompleteLoadProgram()/
+ * SetIsDying(), added just above this constructor). */
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
 void CSTGPerformanceVarsManager::Initialize() {}
 /* CSTGControllerRTData::Initialize()'s own real body now lives in
