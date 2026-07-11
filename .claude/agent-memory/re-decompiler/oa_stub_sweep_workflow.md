@@ -3789,3 +3789,168 @@ both WELL PAST `CSTGVoiceModel`'s own confirmed 0x5c-byte/23-slot
 vtable size -- these are the SAME `CIFXEffectSlot`/`CMFXEffectSlot`
 cluster sec 10.157 already flagged as blocking `CSTGProgram::
 CSTGProgram()`, not unlocked by this batch's own work.
+
+**Batch 43 specifics** (2026-07-11, sec 10.194, commit TBD): two-pronged
+per the task briefing -- (1) investigate the `CIFXEffectSlot`/
+`CMFXEffectSlot` cluster (sec 10.157/10.193's blocker for
+`RunVoiceModelStaticFront/StaticBack/RunVoiceModelFeedback` and
+`CSTGProgram::CSTGProgram()`) for the same hand-crafted-vtable
+resolution that just closed the ten Model ctors; (2) `cm_AuthenEncryptMAC`
+(the last real stub in `bar2_stubs_c.cpp`, blocked since sec 10.189 on
+its own `bzzzzzzzzzzzt12` helper).
+
+**(1) Confirmed NOT tractable this batch, with much more concrete
+detail than before.** `readelf -SW`/`readelf -rW` found the real
+hierarchy is bigger than assumed: `CEffectSlotBase` (0x84/33 slots),
+`CEffectSlot` (0x88/34), `CIFXEffectSlot` (0x88/34, no new virtuals),
+`CMFXEffectSlot` (0x88/34), and a FOURTH, previously unflagged sibling
+`CTFXEffectSlot` (0x88/34), plus a 6-slot `CSTGEffectSlotMsgHandler`
+mixin. `CIFXEffectSlot::CIFXEffectSlot()` (77 bytes) is itself small and
+mechanical -- tractable in isolation. `CMFXEffectSlot` has NO
+out-of-line ctor (fully inlined into `CSTGProgram::CSTGProgram()`, 5
+field writes x3 instances). The real blocker: `CSTGProgram::
+CSTGProgram()` (328 bytes) installs TWO vtable pointers at fixed
+offsets (`+0x0`=`CSTGPerformance`+8, `+0x4`=`CSTGEffectRack`+8) --
+genuine C++ MULTIPLE inheritance, meaning both those base classes (each
+their own confirmed 0x98/38-slot vtable) would ALSO need
+correctly-shaped vtables first, a materially bigger lift than any
+single-base-class case the hand-crafted-vtable technique has closed so
+far, plus multiple-inheritance thunk/`this`-adjustment correctness this
+project hasn't reasoned about yet. **New reusable finding: a smaller
+adjacent stub, `CSTGProgramSlot::ChangeProgram(CSTGProgram*)` (300
+bytes), has only ONE vtable dispatch of its own (`call *0xe0(%ecx)` on
+`this`'s OWN vtable) which resolves via `readelf -rW` to
+`CSTGProgramModeProgramSlot::GetChordSource() const` -- a real, tiny
+(27-byte base impl, 11-byte weak per-derived thunks), non-DSP getter.
+This IS tractable, just requires growing the existing
+`g_programSlotVtable` (global.cpp, sec 10.153, currently only 10
+native-pointer slots with slot 7 populated) out to ~57 slots to safely
+reach slot ~54 -- not attempted this batch (time went to the DEAX work
+below), but a concrete, smaller next step distinct from the full
+`CSTGProgram` multi-inheritance problem.** Full derivation recorded in
+`bar2_stubs.cpp`'s own header comment near `GetPatchStaticCosts` --
+read that first, don't re-run readelf from scratch.
+
+**New technique/lesson: when a "smallest remaining" stub's own single
+vtable slot dispatch resolves (via readelf -rW) to a class's virtual
+method that ISN'T itself DSP -- but the vtable it lives on is a
+"grow an existing small native-pointer-indexed table" case (like
+`g_programSlotVtable`, sec 10.153's own `CallVtableSlot7` convention,
+NOT a byte-precise hand-crafted `_ZTVxxx` array) -- the fix is simply
+resizing that existing table and filling in ONE more index, not
+building a whole new vtable from scratch.** Cheaper than it looks;
+worth prioritizing over harder multi-inheritance cases when both are on
+the table.
+
+**(2) `cm_AuthenEncryptMAC` reconstructed for real -- a "don't
+re-derive, check for an existing validated port first" win.** Before
+hand-translating `bzzzzzzzzzzzt12` (402 bytes) from raw disassembly, a
+background research pass found this exact cipher ("DEAX") was ALREADY
+hardware-validated (real `b8_test.ko` AT88SC captures) and ported once
+before into `AT88VirtualChip/chip_state.cpp`'s own
+`deax_step()`/`deax_compute_challenges()` (see MASTER_REFERENCE's own
+DEAX cipher notes, sec ~10.19-10.20). Fresh, full disassembly of BOTH
+`bzzzzzzzzzzzt12` and `fFfFfFfFfFfF11` (`cm_AuthenEncryptMAC`'s real
+name, 1575 bytes) confirmed the driving loop is structurally identical
+to `deax_compute_challenges()` (same phases, same step counts), just
+with different parameter names -- cross-confirmed independently via
+`SetupAtmelForAuthorizations()`'s own already-real usage (`iv` read
+once from zone 0x50, reused unmodified across both rounds, matching
+`deax_compute_challenges()`'s own documented `p3` "input ... output:
+updated in place" contract exactly). **Reusable pattern: before
+hand-translating ANY gnarly bit-shuffle/state-machine function from raw
+disassembly, spend a background-agent pass searching the WHOLE repo
+(not just this project's own `reconstructed/` tree -- also
+`ARCHIVE/`, `KronosExtract/`, any sibling virtual-driver module) for an
+already-validated reference implementation before assuming none
+exists** -- this one turned a "genuine crypto core, disproportionate for
+one batch" (sec 10.189's own assessment) into a same-day, hardware-
+verified promotion.
+
+**Real signature-fidelity bug found and fixed**: `oa_atmel.h`'s
+pre-existing `cm_AuthenEncryptMAC` declaration had `iv` as `const
+unsigned char *` -- wrong, ground truth and the caller's own real usage
+both confirm `iv` is mutated in place. Fixed; caller already treated
+its own local array as non-const, so purely a signature correction.
+
+**New design-decision pattern, worth its own callout: promoting a
+"private-looking" piece of persistent state from function-local to
+file-scoped BEFORE anything else needs it, once you've confirmed OTHER
+real (not-yet-reconstructed) functions read that same state as a
+postcondition.** A whole-binary relocation scan (grep the raw
+disassembly for the exact `.bss` address range, not just the two
+functions being promoted) found TWO other real functions
+(`fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`) reading the SAME cipher state's
+final `gpa` byte as a continuing keystream -- ground truth's own
+equivalent lives in persistent `.bss`, so modeling it as a
+stack-local `DeaxState` (the "obviously correct" choice for a function
+that always re-inits it before use) would have been a real, silent
+fidelity regression the moment a future batch reconstructs either
+sibling. Fixed by making the state file-scoped instead (still fully
+re-initialized every `cm_AuthenEncryptMAC` call, so nothing about THIS
+function's own behavior changed) -- lesson: before deciding "this state
+is private, a stack-local is fine," grep the WHOLE binary for the exact
+memory range, not just the one function's own callers.
+
+**Verification bar raised, worth reusing when possible**: unlike most
+of this project's KATs (self-consistency against a hand-derived
+expectation), `test_atmel_deax.cpp` embeds THREE independent REAL
+hardware-captured test vectors (from the same prior AT88 extraction
+phase's own `b8_test.ko` runs) -- the fresh translation produces
+byte-exact matches against genuine AT88SC silicon output on all three,
+not just against another software port. When a function's own
+"reference" happens to have real hardware test vectors already
+captured somewhere in the repo, always embed the ACTUAL vectors in the
+new KAT rather than only cross-checking against the reference
+implementation's own output.
+
+**Real Kbuild staleness bug caught and fixed -- a NEW symptom of the
+sec 10.191 "clean host tests don't prove link-wide consistency" class,
+one level deeper: a stale, unrecompiled `.o` can leave a REAL dangling
+mangled-name reference in `nm -u` that looks exactly like a legitimate
+new external dependency.** First `make ko` succeeded (exit 0) but
+`nm -u OA.ko` showed 70 (not the expected 69) -- the extra entry was a
+mangled C++ symbol demangling to `cm_AuthenEncryptMAC`'s OLD (pre-fix,
+const-`iv`) signature. Root cause: `src/auth/atmel_setup.o` was stale
+(compiled before this batch's `oa_atmel.h` signature fix; Kbuild's own
+`.cmd` dependency tracking didn't trigger a recompile from a
+header-only change), so the final link combined a freshly-compiled
+`atmel_deax.o` (new mangled name) against a stale caller still emitting
+a reference to the old mangled name -- a real dangling symbol,
+syntactically indistinguishable from a genuine new external without
+cross-checking against ground truth's own `nm -u`. Fixed via `make
+ko-clean` + manually deleting every `*.o` before rebuilding. **Standing
+lesson, generalizing sec 10.191: whenever a batch changes a function's
+own C++ SIGNATURE (not just its body), a single non-clean `make ko` is
+not sufficient evidence -- force a full object-cache wipe (`ko-clean`
++ delete `*.o`) and recheck `nm -u`'s exact count/contents before
+trusting it, the same discipline already required for "multiple
+definition" errors applies equally to this "phantom stale-mangled-name
+unresolved symbol" symptom.**
+
+**Verification**: three full clean-rebuild passes (`make clean && make
+all`, then `make ko-clean` + delete all `*.o` + `make ko
+KDIR=/home/build/linux-kronos`), byte-identical all three (`OA.ko`
+183,752 bytes, up from 182,380; md5
+`545070a53e2662907f359f3af6240b75`). All 85 `verify/` binaries (up from
+84, new `test_atmel_deax`) exit 0 by real per-binary process exit code
+every pass -- caught a `while read` loop silently dropping the TESTS
+list's own last entry (a file with no trailing newline) on the first
+attempt; fixed by appending a trailing blank read or just re-verifying
+count against a fresh Python regex parse of the Makefile. `nm -u`
+unchanged at 69 after the staleness fix (cm_AuthenEncryptMAC introduces
+no new external). `.gnu.linkonce.this_module` still byte-exact `0x148`;
+0 `R_386_GOTPC`. `bar2_stubs.cpp` unchanged at 84 bare stubs (this
+batch's own work there was investigation/documentation only).
+`bar2_stubs_c.cpp` 2 -> 1 (only `cleanup_cpp_support`, an already-closed
+policy decision, remains).
+
+**Remaining candidates for a future batch**: the `CIFXEffectSlot`/
+`CMFXEffectSlot`/`CTFXEffectSlot`/`CSTGProgram`/`CSTGPerformance`/
+`CSTGEffectRack` multiple-inheritance cluster (this batch's survey is
+the starting point; `ChangeProgram`'s `GetChordSource`-via-
+`g_programSlotVtable`-resize path is the smallest concrete next step).
+`fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C` (the two DEAX-keystream-continuation
+siblings found but not reconstructed -- a validated `DeaxStep`/
+`DeaxState` reference now sits right next to them in `atmel_deax.cpp`).
+`CSTGPianoModel::RescanPianoTypes()` (unchanged, sec 10.153).
