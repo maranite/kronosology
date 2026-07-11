@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * module_main.c  -  OmapNKS4VirtualDriver.ko: a stand-in for
- * OmapNKS4Module.ko's own 8 exported symbols, for VM/foreign-hardware
+ * OmapNKS4Module.ko's own 9 exported symbols, for VM/foreign-hardware
  * boot testing only.
  *
  * WHY THIS EXISTS (Bar 2, 2026-07-02): OA.ko's own
- * setup_global_resources()/CSTGGlobal::UpdateXXX code calls 8 real
+ * setup_global_resources()/CSTGGlobal::UpdateXXX code calls 9 real
  * OmapNKS4Module.ko exports directly (COmapNKS4Driver_GetHardwareVersion/
  * GetOmapVersion/GetPSocVersion/Is88Key/SetTestMode,
  * OmapNKS4OutputFifo_WriteCommand, SetupNKS4Calibration -- CORRECTED
@@ -100,11 +100,23 @@ void SetupNKS4Calibration(void *panel, int flag) { (void)panel; (void)flag; }
  * must export too. Trivial no-op body, matching every other stub in this
  * file -- there is no real front-panel progress LED in a VM to tick. */
 void COmapNKS4_IncProgressBar(void) { }
+/* ADDED (2026-07-11): closes a gap found in a live boot test (kronosvm) --
+ * `insmod OA.ko` failed symbol resolution on 12 unknown symbols, one of
+ * which was this one, called by OA.ko's own `GetProgressBarValue()`
+ * forwarder (src/init/load_global_resources.cpp, init_module step 11,
+ * added in sec 10.204/batch 52 -- confirmed genuinely `U` in ground truth
+ * too via `nm -u`, same shape/precedent as `COmapNKS4_IncProgressBar`
+ * above). Real ground-truth caller clamps the return value via
+ * `(v > 0x30) ? 1 : (0x31 - v)`, always landing in [1..49] -- returning
+ * 0x30 here yields the minimal in-range countdown (1), the same
+ * "front panel already fully progressed, no real LED to tick in a VM"
+ * intent as IncProgressBar's own no-op body. */
+unsigned char COmapNKS4_GetProgressBarPercent(void) { return 0x30; }
 
 static int __init OmapNKS4VirtualDriverInit(void)
 {
 	printk(KERN_INFO "OmapNKS4VirtualDriver: loading (stand-in for "
-	       "OmapNKS4Module.ko's 8 exports -- see this file's own header)\n");
+	       "OmapNKS4Module.ko's 9 exports -- see this file's own header)\n");
 	return 0;
 }
 
@@ -124,7 +136,8 @@ EXPORT_SYMBOL(COmapNKS4Driver_SetTestMode);
 EXPORT_SYMBOL(OmapNKS4OutputFifo_WriteCommand);
 EXPORT_SYMBOL(SetupNKS4Calibration);
 EXPORT_SYMBOL(COmapNKS4_IncProgressBar);
+EXPORT_SYMBOL(COmapNKS4_GetProgressBarPercent);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 8 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
+MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 9 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
 MODULE_AUTHOR("Korg (reconstructed)");
