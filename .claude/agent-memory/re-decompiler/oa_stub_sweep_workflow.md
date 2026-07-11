@@ -4650,3 +4650,86 @@ easier `ProcessSamplerCommands()` turned out to be than sec 10.200's own
 framing suggested, these two are worth a genuinely fresh look (not just
 re-citing the old "still deferred" note) rather than assuming they're
 equally hard.
+
+**Batch 51 (2026-07-11, commit `f765043`, MASTER_REFERENCE sec 10.202):
+`CSTGHDRManager::ProcessPlaybackCommands()` reconstructed for real, plus
+two brand-new fully-real `CSTGFileOpener` methods and a new
+`signal_daemon()` helper.** Picked up batch 50's own suggested priority
+(the two still-deferred `ProcessCommands()` siblings). Same ring-consumer
+shape as `ProcessRecordCommands`/`ProcessSamplerCommands`, over the LAST
+undocumented ring (`CSTGHDRManager+0x18ad8`) -- this fully resolves the
+oa_engine.h ctor comment's "three AllocAligned rings" note across all
+three siblings now. Dispatches into two brand-new, ZERO-relocation real
+methods (`CSTGFileOpener::AddPlaybackEvent`/`AddRecordEvent`) that
+resolved a long-standing "real per-slot semantics not determined" gap in
+that class's own ctor comment: the ctor's "32 identical 16-byte slots"
+span is actually TWO 16-lane producer rings (playback at `+index*16`,
+record at `+index*16+0x100`) sharing ONE fixed fallback/overflow lane at
+`+0x200` (which is, by address arithmetic, simply slot 31 of the same
+32-slot span -- not a separate structure). Also added `signal_daemon()`,
+the single-entry sibling of the already-real `signal_timed_out_daemons()`
+watchdog, sharing its `gStgDaemons` table (stg_daemons.cpp).
+
+**Technique reinforced: when a function reuses a register across a long
+stretch of unrelated-looking code, trace it all the way back rather than
+assuming it's garbage/don't-care.** `ProcessPlaybackCommands()`'s tag==2
+handler calls `AddPlaybackEvent(event, producerIdx)` where the "index"
+argument is, register-for-register, the SAME ring's own current producer
+count (`ecx`, refreshed at every loop continuation point) -- an unusual
+but 100% real and confirmed value, not something to wave away as "probably
+unused" just because it looks semantically odd (an "index" argument that's
+actually a different ring's own bookkeeping counter). Reproduced exactly
+as traced.
+
+**Cleaner-than-batch-49-net-zero pattern held again**: both new
+`CSTGFileOpener` methods and `signal_daemon()` got real bodies directly
+(zero bar2_stubs.cpp entries added), because NOTHING in this batch's own
+call graph turned out to be a genuine DSP/hardware blocker -- the whole
+chain (`ProcessPlaybackCommands` -> `AddPlaybackEvent`/`AddRecordEvent`/
+`signal_daemon`/`SetCurrentReadEvent`/`RemoveEvent`) was already-real or
+newly-tractable. `bar2_stubs.cpp`: 81 -> 80, a genuine one-stub reduction.
+
+**`ProcessHDRRecord()` (the other sec 10.200/10.201-flagged sibling):
+investigated and precisely characterized, NOT reconstructed.** A
+16x-unrolled per-track audio-DSP peak-metering loop (`CSTGRecordTrack::
+ProcessSubRate`/`CSTGMonitorMixerChannel::GetMeterLevel`/`CSTGSampler::
+ProcessSubRate`, none reconstructed anywhere in this project) -- genuinely
+out of scope per the DSP policy, unlike its sibling. Lesson: "these two are
+worth a fresh look" (batch 50's own framing) does NOT mean both will turn
+out tractable -- investigate honestly and report the true split (one real,
+one precisely-blocked) rather than forcing symmetry.
+
+**Four own-draft KAT bugs this batch, all caught before trusting a pass,
+worth restating as a group since they cluster around the SAME lane-ring
+shape**: (1) forgetting `AddRecordEvent`'s own `+0x100` lane offset in a
+test setup -> NULL deref inside the shared `FileOpenerEnqueue()` helper;
+(2) an incidentally-chosen `readIdx` that equaled `(default writeIdx+1)%
+capacity`, silently routing a "normal enqueue" test into the FULL/overflow
+branch against an uninitialized fallback lane -> second NULL deref, same
+function, different cause; (3) setting a ring's `producer` count higher
+than the number of entries actually populated (since `producerIdx` here
+ALSO doubles as a real call argument, per the technique note above) ->
+the loop walked into zeroed "phantom" entries and crashed dereferencing a
+NULL event pointer inside the tag==0 handler; (4) a scripted-tick-sequence
+mock (`test_stg_daemons.cpp`) built for a TWO-call watchdog function,
+reused for a new ONE-call function (`signal_daemon`) without adjusting
+which sequence index gets read -- a correct assertion FAILURE (not a
+crash) caught this cleanly. General lesson: any new KAT for a "N lanes at
+`this+index*stride[+offset]`" ring family needs EVERY relevant field
+(base/write/read/capacity, and any producer-count-doubling-as-an-argument
+quirk) deliberately chosen to avoid coincidentally tripping a DIFFERENT
+code path than the one under test -- don't just zero-fill and hope.
+
+**Project-wide dispatch/mock audit**: grepped every `verify/*.cpp` for
+`ProcessPlaybackCommands`/`AddPlaybackEvent`/`AddRecordEvent`/
+`signal_daemon` before considering this done -- all four were entirely
+new symbols with zero pre-existing references anywhere, so nothing needed
+removal (a clean instance of the audit finding nothing to fix, same as
+batch 50's own ProcessSamplerCommands audit).
+
+**Gotcha reconfirmed**: `verify/*.cpp` (or `verify/ .cpp`, watch the
+literal `/` + `*` sequence) inside a `/* ... */` comment triggers
+`-Wcomment` ("/* within comment") because of the literal `/*` substring
+in "verify/*.cpp" -- reworded to "verify/ .cpp" (a space before the dot)
+to avoid it, same family as the already-documented "literal `*/`
+prematurely closing a comment" gotcha, just the mirror-image trigger.
