@@ -77,67 +77,15 @@ extern "C" void *CSTGSharedMemory_CreateMidiShareHeader() { return 0; }
  * (1-byte ret) but is only reachable through this function, so it rides
  * along whenever cleanup_cpp_support is promoted. */
 extern "C" void cleanup_cpp_support() {}
-/*
- * setup_stg_daemons/cleanup_stg_daemons/setup_stg_decrypt_daemons
- * (batch 38 scout, kept DEFERRED -- not just "not yet gotten to"):
- * disassembled setup_stg_decrypt_daemons (.init.text+0x43a, 285 bytes)
- * in full. It is NOT a simple populate-gStgDaemons[] loop (that struct,
- * sec 10.183, is the UNRELATED 7-entry/0x60-stride watchdog array) --
- * it pre-zeroes two fields (+0x10=0, +0x24=-1) across FOUR separate
- * 0x94-stride (148-byte) per-daemon control-block instances at a
- * DIFFERENT .bss base (0x107560), then calls a shared internal helper
- * (ground truth: `SetupDaemon`/its `.clone.0` variant, own real body
- * NOT yet reconstructed) four times with (index, name-string-ptr,
- * blockBase, priority, MainRoutine-function-pointer) for
- * Decrypt0..3MainRoutine, and on any failure calls
- * `cleanup_stg_decrypt_daemons` (a FOURTH not-yet-reconstructed
- * function). setup_stg_daemons (.init.text, 206 bytes) almost
- * certainly shares the same `SetupDaemon` helper for its own 7(?)
- * daemons.
- *
- * CORRECTION (batch 39): a prior pass (sec 10.189) guessed `SetupDaemon`
- * itself depends on `rtwrap_pthread_create`. Now that `rtwrap_pthread_
- * create` IS real (src/init/rtwrap.cpp, batch 39) this was checked by
- * actually disassembling `SetupDaemon.clone.0` (`.text+0x11ce30`, 305
- * bytes, confirmed `t` local/static in ground truth) -- the guess was
- * WRONG: `SetupDaemon` does NOT call `rtwrap_pthread_create`/
- * `rt_task_init` at all. It spins up the daemon via the plain Linux
- * `kernel_thread(fn=.text+0x11ccc0, arg=this, flags=0xe00)` (NOT an
- * RTAI real-time task), waits on an embedded `struct completion` at
- * `+0x34` (`wait_for_completion`, its own embedded `wait_queue_head_t`
- * at `+0x38` set up via `__init_waitqueue_head`) for the new kernel
- * thread to signal readiness, registers an RTAI SRQ via
- * `rt_request_srq(owner=arg3/ecx, handler=stack_arg@+0x18, 0)`, and
- * pre-initializes two more standalone `wait_queue_head_t`s at `+0x28`/
- * `+0x48`. Stores: `this[0]=arg2(edx)`, `this[0x8]=stack@+0x8`,
- * `this[0xc]=stack@+0xc`, `this[0x14]=msecs_to_jiffies(stack@+0x10)`,
- * `this[0x58]=stack@+0x14`, `this[0x5c]=stack@+0x18`, `this[0x1c]=0x32`,
- * `this[0x24]=srq id` (or -1 on `rt_request_srq` failure, in which case
- * returns -1 immediately without ever calling `kernel_thread`).
- * `kernel_thread` failure logs via `rt_printk` and returns -2;
- * `wait_for_completion` returning with `this[0x10]==0` ALSO logs +
- * returns -2 (a second, string-distinct failure message); success
- * stores the new thread's pid at `this[0x54]` and returns 0.
- *
- * Real blocker (revised): `SetupDaemon` itself is still unreconstructed
- * (now confirmed self-contained -- no `rtwrap_pthread_create`/RTAI-task
- * dependency at all), but needs FIVE new externs never yet declared
- * anywhere in this project (`kernel_thread`, `wait_for_completion`,
- * `__init_waitqueue_head`, `msecs_to_jiffies`, `rt_request_srq`, plus
- * `rt_printk` -- already used elsewhere) and the `.text+0x11ccc0`
- * kernel-thread entry trampoline (a SEPARATE not-yet-reconstructed
- * internal function, unrelated to `rtwrap_pthread_create`'s own
- * `.text+0x118e80` trampoline) plus the still-unconfirmed remainder of
- * the 0x94-stride per-daemon struct (fields beyond `+0x5c`, up to
- * whatever `.clone.0`'s own 0x94 stride implies is used elsewhere, e.g.
- * by the `.text+0x11ccc0` thread routine or `ProcessCommands()`-style
- * dispatch). Disproportionate for a smallest-first pick on its own;
- * a future batch should treat this as its own dedicated "daemon kernel-
- * thread lifecycle" push (start with `SetupDaemon` itself now that its
- * real algorithm is fully known, then `cleanup_stg_decrypt_daemons`). */
-extern "C" int setup_stg_daemons() { return 0; }
-extern "C" void cleanup_stg_daemons() {}
-extern "C" int setup_stg_decrypt_daemons() { return 0; }
+/* setup_stg_daemons/cleanup_stg_daemons/setup_stg_decrypt_daemons/
+ * cleanup_stg_decrypt_daemons -- the full daemon kernel-thread lifecycle,
+ * promoted to real bodies (batch 40, src/init/daemon_lifecycle.cpp).
+ * batch 39's own guess that a SINGLE shared `SetupDaemon.clone.0` helper
+ * serves BOTH the general and decrypt daemon clusters was WRONG -- ground
+ * truth actually has TWO separate helpers (`SetupDaemon.clone.0`, 7 args
+ * + SRQ registration, and `SetupDecryptDaemon.clone.0`, 5 args, no SRQ);
+ * see daemon_lifecycle.cpp's own header comment and include/oa_daemons.h
+ * for the full derivation. */
 /* signal_timed_out_daemons + its tick source GetSTGTickCount promoted to
  * real bodies in src/init/stg_daemons.cpp + src/engine/tick_count.cpp
  * (batch 35, sec 10.183). */

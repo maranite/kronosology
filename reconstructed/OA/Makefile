@@ -127,6 +127,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/keybed_debounce.o \
            src/init/calibration_data.o \
            src/auth/atmel_primitives.o \
+           src/init/daemon_lifecycle.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -322,7 +323,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/drumpad_init.cpp \
        src/init/keybed_debounce.cpp \
        src/init/calibration_data.cpp \
-       src/auth/atmel_primitives.cpp
+       src/auth/atmel_primitives.cpp \
+       src/init/daemon_lifecycle.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -385,7 +387,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_drumpad_init \
          verify/test_keybed_debounce \
          verify/test_atmel_primitives \
-         verify/test_calibration_data
+         verify/test_calibration_data \
+         verify/test_daemon_lifecycle
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -649,6 +652,9 @@ verify/test_atmel_primitives: verify/test_atmel_primitives.cpp src/auth/atmel_pr
 
 verify/test_calibration_data: verify/test_calibration_data.cpp src/init/calibration_data.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_calibration_data.cpp src/init/calibration_data.cpp -o $@
+
+verify/test_daemon_lifecycle: verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp include/oa_daemons.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
