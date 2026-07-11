@@ -3323,3 +3323,131 @@ record -- see sec 10.189 for the daemon-lifecycle cluster's full call
 graph (SetupDaemon/rtwrap_pthread_create are the true root blockers)
 and cm_AuthenEncryptMAC's cipher-core assessment (needs
 bzzzzzzzzzzzt12 reconstructed first).
+
+**Batch 39 specifics** (2026-07-11, sec 10.190, commit `691d978`): the
+briefing's explicit priority was investigating whether the `rtwrap_*`/
+daemon-lifecycle cluster is now more tractable since batch 37 made the
+whole `rtwrap_*` layer real. Extensively surveyed `bar2_stubs.cpp`'s 67
+remaining stubs (all size-tiers under ~600 bytes, ~15 candidates fully
+disassembled) and found the pool now saturated with genuine vtable-
+dispatch danger (sec 10.153's own criterion) or deep DSP-cluster
+dependencies -- none promoted from that file this batch (bar2_stubs.cpp
+stays at 67; full rejected-candidate list with per-function reasons in
+MASTER_REFERENCE sec 10.190, don't re-derive). Instead promoted
+`rtwrap_pthread_create` (already a non-bare `{ return 0; }` body in
+bar2_stubs_c.cpp, not counted in that file's own bare-`{}` tally of 3 --
+so this doesn't move either file's stub-count metric, but is real
+de-stubbing progress).
+
+**Real ABI bug found and fixed, a NEW angle on "check calling
+convention per function" not covered by any prior batch: within ONE
+family of RTAI externs (`rt_*`), ground truth's own header mixes
+regparm(3) (register-passed) and regparm(0) (stack-passed) functions,
+and you cannot infer which is which from the function's NAME or from
+"it's an RTAI primitive" -- you must check EACH one's own real call
+site(s).** Batch 37 assumed the whole `rtwrap_*` cluster's underlying
+`rt_*` externs were uniformly regparm(3) (this file's own
+`-mregparm=3` default, no attribute needed) -- wrong for 7 of them
+(`rt_sem_wait`/`rt_sem_wait_if`/`rt_sem_signal`/`rt_sem_delete`/
+`rt_typed_sem_init`/`rt_task_suspend`/`rt_task_resume`/
+`rt_set_runnable_on_cpuid` -- confirmed stack-passed via MULTIPLE
+independent real call sites each), correct for the rest
+(`rt_task_delete`/`rt_whoami`/irq quartet/`clear_debug_traps_in_rt_task`/
+`rt_task_init`). The tell in the disassembly: a register that's
+computed then immediately STORED to a stack slot right before the call
+(rather than left in the register) means that argument is genuinely
+stack-passed, not a compiler quirk -- if you see `mov X,(%esp)` /
+`mov X,0x4(%esp)` immediately preceding a `call` with NO subsequent use
+of the source register as a call-time value, that's the signal, even
+for a function with only 1-3 total args that would trivially fit in
+registers under the file's own default convention. Fixed by adding
+`__attribute__((regparm(0)))` to the extern declaration -- and,
+critically, ALSO to the matching host-KAT mock DEFINITION in the
+verify/ file, since a mismatched attribute between the two creates a
+real ABI disagreement even within one host binary (the mock, defined
+under this file's own `-mregparm=3` default without the override,
+would expect register args while the "real" declaration's caller code
+now passes them on the stack). This matters here specifically because,
+unlike sec 10.154's "our own ecosystem only needs to agree with
+itself" pointer-width precedent, these primitives are meant to run
+against REAL rtai_sched.ko on hardware -- a convention mismatch isn't
+cosmetic, it delivers garbage/uninitialized stack args to real kernel
+RT code.
+
+**Second real bug found: promoting a long-stubbed function out of its
+"always returns 0/NULL" state can surface a return-value POLARITY bug
+in an EXISTING, already-committed caller that was invisible while the
+stub always returned the same constant.** `CSTGThread::
+CreateRealTimeWithCPUAffinity` (cpu_affinity.cpp, committed before
+`rtwrap_pthread_create` was disassembled) checked
+`if (!createResult) return 0;` -- backwards from ground truth's real
+0=success polarity, confirmed independently from BOTH the callee's own
+body and the real caller's own disassembly (`test edi,edi; je
+<success-path>` -- jumps to success when zero). This was harmless
+while the stub always returned 0 (self-consistently looked like
+"always fails") AND the test's own mock had the SAME inverted polarity
+(two matching bugs canceling out, so the KAT passed despite both being
+wrong) -- exactly the kind of masked bug this project's "promote a
+stub, then check every existing caller's assumptions against the real
+body" discipline (sec 10.182/10.188) is meant to catch. Generalizes
+sec 10.182/10.188's "signature-fidelity forces fixing existing
+callers" precedent from argument-signature mismatches to RETURN-VALUE
+POLARITY mismatches -- same underlying principle (a promoted function's
+real ground-truth behavior disagreeing with how an existing caller was
+written is an in-scope fix, not scope creep), new specific shape.
+**Reusable check for future batches**: whenever a stub that always
+returned a single constant (0, NULL, -1, etc.) gets promoted to a real
+body with actual branching return values, explicitly re-verify EVERY
+existing caller's own success/failure branch condition against the
+newly-known real semantics -- a KAT passing before promotion is not
+evidence the caller's assumption was ever correct, only that it never
+got exercised against real variation.
+
+**Third bug, this batch's OWN new code, caught by a real KAT FAILED
+result (not proofreading): `rtwrap_pthread_create`'s three real
+target-struct fields (`task+0x5b0`/`+0x5b4`/`+0x5b8` -- start routine,
+thread arg, raw alloc pointer) are only 4 bytes apart, matching sec
+10.181's exact "two+ real kernel pointer fields within 8 bytes of each
+other" gotcha precisely.** First draft used native 8-byte `void*`
+writes for all three, corrupting neighbors on this 64-bit host. Fixed
+via this project's established `ToU32`/`FromU32` convention (defined
+once per-file, matching the `engine_init.cpp`/etc. precedent, NOT a
+shared header function). Applied consistently to `rtwrap_pthread_
+cancel`'s own PRE-EXISTING `+0x5b8` read too (can't leave one sibling
+field packed and the other native). **New sub-lesson: when a KAT needs
+to verify a packed-32-bit field's contents, you don't always need
+`mmap32()` for every buffer** -- only the SPECIFIC value that must
+survive a lossless FromU32(ToU32(x))==x round trip (e.g.
+`rtwrap_pthread_cancel`'s test, which compares a RECONSTRUCTED pointer
+against the original) needs its source object mmap32'd into the low
+4GB. A test that instead compares the SAME truncated 32-bit value on
+BOTH sides (`(unsigned int)*(unsigned int*)(field)` vs.
+`(unsigned int)(unsigned long)expectedPtr`) works correctly regardless
+of where the original object lives in the host's address space, since
+both sides go through identical truncation -- cheaper than mmap32 when
+you don't actually need the full pointer value to survive.
+
+**Fourth finding, a methodological lesson about trusting a prior
+batch's own "real blocker: X depends on Y" claim**: sec 10.189 guessed
+(without disassembling it) that `SetupDaemon` depends on
+`rtwrap_pthread_create`. Once `rtwrap_pthread_create` became real this
+batch, actually disassembling `SetupDaemon.clone.0` showed the guess
+was WRONG -- it uses plain `kernel_thread()`/`wait_for_completion()`/
+`rt_request_srq()`, no RTAI task creation at all. **Rule for future
+batches: the moment a previously-cited blocking DEPENDENCY becomes
+real, re-disassemble the BLOCKED function directly rather than trusting
+the old dependency claim** -- a "SetupDaemon depends on X" note written
+before X existed is a hypothesis, not a fact, and can be flat wrong once
+you can finally check it against ground truth. This is now recorded
+correctly (full field-by-field derivation) in bar2_stubs_c.cpp for the
+next attempt.
+
+**Verification**: 82 verify/ binaries (unchanged count, `test_rtwrap`/
+`test_cpu_affinity` extended in place), THREE full clean-rebuild passes
+byte-identical (not just two -- extra caution given the scope of the
+ABI/polarity fixes), `OA.ko` 173,628 bytes (up from 173,292), md5
+`7a9a0f7fc2ff3f63e68a53f9450b6ccb`. `nm -u` 58 -> 61 (`rtheap_alloc`/
+`rt_task_init`/`rt_task_resume`, all confirmed `U` in ground truth).
+linkonce 0x148, GOTPC 0. Bare-`{}` counts unchanged (`bar2_stubs.cpp`
+67, `bar2_stubs_c.cpp` 3) since `rtwrap_pthread_create` was already a
+non-bare stub before this batch.
