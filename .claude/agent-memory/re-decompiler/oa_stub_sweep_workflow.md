@@ -3954,3 +3954,132 @@ the starting point; `ChangeProgram`'s `GetChordSource`-via-
 siblings found but not reconstructed -- a validated `DeaxStep`/
 `DeaxState` reference now sits right next to them in `atmel_deax.cpp`).
 `CSTGPianoModel::RescanPianoTypes()` (unchanged, sec 10.153).
+
+**Batch 44 specifics** (2026-07-11, commit 1381746, MASTER_REFERENCE sec
+10.195): resolved the sec 10.194 `CSTGProgram`/`CSTGCombi`/
+`CIFXEffectSlot` multiple-inheritance cluster batch 43 deferred as "too
+large for one batch" -- `CSTGProgram::CSTGProgram()` promoted, plus 4
+new sub-object ctors (`CIFXEffectSlot`, `CSTGVectorMotion`,
+`CSTGControllerInfo`, `CSTGCommonLFO`). Stub count 84 -> 83 (net -1).
+
+**Key finding: a prior batch's own `readelf -SW` vtable-size claim was
+simply WRONG, and re-deriving it directly with `nm -CS --size-sort`
+unblocked the whole cluster.** Sec 10.194 stated `CSTGEffectRack`'s real
+vtable was 0x98/38 slots -- a fresh `nm -CS | grep "vtable for"` this
+batch found it's actually 0x60/24 slots; the 0x98 number belonged to
+`CSTGPerformance`, a DIFFERENT class in the same ctor. Every other
+vtable in the cluster was similarly small (0x60-0x98 range, nothing
+near what sec 10.194 feared). Lesson: when a prior batch's own deferral
+reasoning cites a specific size/slot-count as "too big," INDEPENDENTLY
+re-derive that number yourself (ideally via a different tool/method than
+whatever produced the original claim) before accepting the deferral --
+`readelf -SW`'s per-section symbol sizing and `nm -CS`'s per-symbol
+sizing can disagree, and only one of them was actually reading the
+right symbol here.
+
+**Second key finding, the one that actually made promoting the ctor
+SAFE, not just small: a project-wide grep for every already-real caller
+of the cluster's classes, read one by one, found NOTHING dispatches
+through any of these vtables today.** `grep -rln "CSTGProgram\b\|
+CSTGCombi\b\|CSTGPerformance\b\|CSTGEffectRack\b\|CIFXEffectSlot\|
+CMFXEffectSlot\|CTFXEffectSlot"` across src/+include/, then manually
+read every hit -- every eventual dispatcher (`EnterActivatingState`,
+`GetPatchStaticCosts`, `RunVoiceModelStaticFront`/`StaticBack`/
+`RunVoiceModelFeedback`, `CSetListEQ::Initialize`, `RunEffects`) is
+itself STILL a bare-`{}` stub, so nothing reachable ever reads a
+function pointer out of the newly-real-but-zero-filled vtables. This is
+the sec 10.153 "install vs dispatch" rule applied at PROJECT scope, not
+just within the one function being promoted -- the ctor's own body
+never dispatches (that part's easy to check), but a caller's caller
+several hops away easily could, and only a project-wide grep catches
+that. Do this check EVERY time before promoting a ctor that installs a
+vtable for a class with any non-trivial method surface, not just when a
+single obviously-suspicious caller comes to mind.
+
+**Nested multiple inheritance, one level deeper than `CSTGProgram`
+itself: `CSTGCommonLFO` (an object `CSTGProgram` embeds at a fixed
+offset) has its OWN two vtable pointers, both pointing into the SAME
+`_ZTV13CSTGCommonLFO` symbol at two different sub-offsets (`+8` and
+`+0x6c`).** Confirmed via disassembly, transcribed literally -- no need
+to semantically model "why" this class has two bases to get the byte
+writes right. Same technique, one level of recursion deeper.
+
+**A "no C++ modeling needed to be exact" realization, worth stating
+explicitly for future batches facing a similarly deep ctor tail:** the
+LAST ~150 bytes of `CSTGProgram::CSTGProgram()` install vtables for
+`CSTGParamsOwner`/`CSTGStepSeqBase`, zero 32 bytes, then OVERWRITE those
+same two vtable slots with `CSTGCommonStepSeq` (a real, confirmed
+"install base(s) then overwrite with the more-derived class" pattern
+one level deeper than `CSTGProgram`'s own base-vtable overwrite). Rather
+than trying to fully understand whether this is "really" nested
+multiple inheritance of some further sub-object, the safe and correct
+approach is: read the disassembly's own literal offsets and values, and
+transcribe them as raw `unsigned char*` writes in the exact same order
+-- the C++ class hierarchy semantics are irrelevant to byte-exactness.
+Seven classes in this cluster (`CMFXEffectSlot`/`CTFXEffectSlot`/
+`CSTGEffectBalance`/`CSTGCommonEffectLFO`/`CSTGParamsOwner`/
+`CSTGStepSeqBase`/`CSTGCommonStepSeq`) needed NO C++ struct declaration
+at all as a result -- only a vtable placeholder byte array and some
+raw-offset writes in the ctor doing the installing.
+
+**Adding an instance ctor to an EXISTING struct that previously only
+had static members is safe and is this project's own established
+convention, not a new pattern**: `CSTGCommonLFO`/`CSTGControllerInfo`
+both already existed in this project (as static-pool-holder /
+non-virtual-method-only opaque structs respectively) before this batch
+-- C++ freely mixes static and instance members in one class, and both
+real ground-truth symbols share the exact same mangled class name
+(confirmed via `nm -CS` before assuming this), so adding an instance
+ctor declaration to the pre-existing struct (rather than creating a
+second, conflicting declaration) was correct and uneventful.
+
+**A genuine own-draft KAT bug, same family as sec 10.153/10.155's own
+poison-pattern lessons but a NEW angle -- word-width, not bit-masking:**
+first test draft assumed `CIFXEffectSlot`'s own `+0x9` byte was an
+untouched gap; it's actually the UPPER byte of the confirmed `+0x8` WORD
+write (value 1, little-endian `01 00`), so it's genuinely zeroed too.
+Caught by a real `FAILED` line (`got 0x0, want 0xcc`), not by re-reading
+the disassembly a second time -- fixed the test's own expectation
+(switched to a probe at `+0x7`, independently re-confirmed as a true
+gap) rather than touching the reconstruction. Lesson: when marking an
+offset as an "untouched gap" next to a multi-byte (word/dword) write,
+double-check the write's own BYTE RANGE, not just its starting offset --
+a 2-byte write at `+0x8` covers `+0x8` AND `+0x9`, not just `+0x8`.
+
+**The `while read` "last line without trailing newline gets silently
+dropped" TESTS-list gotcha (already on record from batch 43, sec
+10.194's own note) recurred THIS BATCH TOO, independently, before this
+note was re-read.** First extraction of the `TESTS :=` block via a
+fresh Python regex parse produced a file whose last line (the newly
+added `test_program_ctor`) has no trailing newline (since it's the true
+end of the Makefile variable, no line-continuation backslash follows
+it) -- a plain `while read -r t; do ...; done < file` loop silently
+skipped that exact last entry, producing a clean "85/85 pass" report
+that had NEVER ACTUALLY RUN THE NEW TEST. Caught only by noticing the
+count (85) didn't match the expected count (86 = 85 + 1 new), not by
+any failure signal. **Strengthened lesson, now recorded TWICE**: after
+ANY list-extraction from the Makefile (regex, awk, whatever), the FIRST
+sanity check must be `wc -l` (or equivalent) cross-checked against
+"previous batch's own reported count + this batch's net stub/test
+delta" -- do this BEFORE running the loop, not after seeing a
+suspiciously-round pass count. Also: prefer `while IFS= read -r t || [
+-n "$t" ]; do ... done < file` (handles a missing trailing newline
+correctly) over a bare `while read` from now on, or simply append a
+trailing blank line to the extracted list file before looping.
+
+**Remaining candidates for a future batch**: `CSTGCombi::CSTGCombi()`
+(same now-established dual-vtable technique, 15 embedded
+`CSTGProgramSlot`s -- already real, sec 10.153 -- instead of
+`CSTGProgram`'s own `CSTGCommonLFO`/`CSTGToneAdjust` tail; the natural,
+concrete next step, not a fresh investigation). `CEffectSlotBase::
+GetAlgorithmCost`/`CSTGEffectRack::GetTotalAlgorithmCost` (both
+NON-virtual, confirmed reachable from `CSTGPerformanceVars::
+EnterActivatingState` -- found this batch while investigating that
+function as an alternate entry point, but `CSTGEffectRackVars`'s own
+~0x2160-byte layout, with 16 embedded sub-pointer arrays plus a nested
+double-loop over 0x26-count blocks, is a substantial new-struct
+derivation of its own, deliberately not attempted this batch).
+`ChangeProgram`/`GetChordSource` via growing `g_programSlotVtable` to
+57 slots (sec 10.194's own smaller alternate entry point into the same
+general area, still unexplored). `bar2_stubs.cpp`'s other 83 stubs
+otherwise unchanged from sec 10.194's own characterization.
