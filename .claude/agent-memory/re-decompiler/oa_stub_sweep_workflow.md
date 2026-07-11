@@ -4499,3 +4499,74 @@ either large multi-class DSP/vtable clusters or a dedicated future data-
 table-transcription push -- future batches may want to budget for that
 kind of dedicated push rather than expecting more quick "smallest-first"
 wins from this exact list.
+
+**Batch 49 (2026-07-11, commit `cbdb239`, MASTER_REFERENCE sec 10.200)**:
+picked `CSTGEffectManager::RunEffects()` (230 bytes, not individually
+surveyed by batch 48's own pass -- that pass focused on RE-checking
+already-flagged candidates, not a size-sorted sweep of the untouched
+remainder). Fanned out into two brand-new, never-before-referenced
+dependencies -- `CSTGPerformanceVarsManager::RunEffects()` (67 bytes) and
+`CSTGMIDIClockSync::GetFilteredTempoBPM(unsigned int) const` (108 bytes)
+-- both reconstructed for real alongside it. Net bar2_stubs.cpp count
+UNCHANGED at 82 (one stub removed for `CSTGEffectManager::RunEffects`,
+one new DSP stub added for `CSTGPerformance::RunEffects(CSTGPerformanceVars*)`,
+the genuine DSP callee `CSTGPerformanceVarsManager::RunEffects()`
+dispatches into) -- reported plainly as a net-zero delta rather than
+glossed over, per the standing "report the true delta" instruction;
+real reconstruction work still happened (3 functions promoted, 1 stale
+doc claim corrected to a confirmed fact).
+
+**Lesson: batch 48's "systematic re-survey" was of PREVIOUSLY-FLAGGED
+candidates, not a fresh size-sorted sweep of the whole remaining list.**
+Don't assume a prior batch's "re-survey" covered everything -- check
+whether it was scoped to a specific candidate list (often is, per that
+batch's own briefing) vs. a true fresh `nm -S -C --size-sort` pass over
+every remaining stub. This batch found a real, tractable, previously
+untouched function purely by doing the latter from scratch.
+
+**Satisfying cross-confirmation technique, worth repeating**: when a
+newly-reconstructed function's confirmed formula, evaluated at another
+already-documented function's own ctor-default state, reproduces an
+EXACT previously-"speculative" constant from that other function's own
+header comment (here: `GetFilteredTempoBPM`'s formula at
+`CSTGMIDIClockSync`'s ctor defaults == exactly 120.0, matching
+`CSTGEffectManager`'s own long-standing "120.0f, plausible-but-not-
+confirmed default tempo" flag) -- that's a strong, independent signal
+the reconstruction is right, not a coincidence. Worth doing this
+cross-check by hand (Python/calculator) whenever a new function touches
+a field another file already flagged as "plausible but unconfirmed."
+
+**mmap32 pointer-width gotcha, new instance**: `test_midi_clock_sync.cpp`
+had never needed `mmap32()` before this batch (no scenario had touched a
+packed-32-bit pointer FIELD before -- `CSTGMIDIClockSync::sInstance`
+itself is a native typed pointer, fine as a stack address; but
+`GetFilteredTempoBPM`'s own `fieldAt(0x60)` is a packed 32-bit field).
+First draft used a plain stack buffer for the "external clock object"
+and segfaulted (host address truncated to 32 bits, then reconstructed
+as a wild pointer on read -- faithfully reproducing the REAL target's
+own packed-pointer semantics, which is exactly why it crashed on a
+64-bit host). Fixed by porting `test_global.cpp`'s own `mmap(...,
+MAP_32BIT, ...)` helper into this file for the first time. Lesson
+restated once more: ANY packed-32-bit pointer FIELD a new KAT needs to
+populate with a "points at some other object" value needs mmap32'd
+storage, even in a test file that has used plain stack/local buffers
+safely for everything else so far -- check per-FIELD, not per-FILE.
+
+**MASTER_REFERENCE.md append point, corrected**: the older note above
+("append just before the trailing 'Preserve obfuscated-but-real symbol
+names' bullet list") is STALE -- that bullet list is mid-file (~line
+14361 as of batch 49), while sections through 10.199/10.200 are all
+appended at the file's own TRUE EOF (matches the current task-level
+instructions exactly). Always append at true EOF; ignore the older
+mid-file-insertion note above if it's ever consulted again.
+
+**New precisely-characterized (not yet pursued) blocker**:
+`CSTGHDRManager::ProcessSamplerCommands()`/`ProcessPlaybackCommands()`/
+`ProcessHDRRecord()` (the "three still-deferred siblings" sec 10.144 left
+uninvestigated) dispatch into a BRAND NEW `CSTGSampler` class
+(`StandbyDisk`/`Stop`/`Start`, confirmed via relocation, zero prior
+references anywhere in this project) via a `0x2c`-byte-stride command
+ring, same general shape/scope as the already-deferred file-daemon
+`ProcessCommands()` cluster -- a real future-batch candidate, not a
+same-pass win (only `ProcessSamplerCommands()` itself was disassembled
+this batch; the other two siblings still need their own look).
