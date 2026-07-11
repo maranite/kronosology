@@ -3619,3 +3619,80 @@ new real code (daemon lifecycle) was found to unblock any of them, but
 worth re-checking fresh in a future batch per the "don't trust a stale
 blocker claim" rule rather than assuming that finding still holds
 without re-checking.
+
+**Batch 41 specifics** (2026-07-11, sec 10.192, commit `f25860e`): took sec
+10.190/10.191's own flagged `CSetList::Activate()` + stubbed-`SetBand()`
+lead, plus resolved `cleanup_cpp_support` as a documented policy decision
+(no code change). `CSetList::Activate()` (266 bytes) reuses the existing
+`ResolveActivePerformanceVarsManagerRaw()` helper (same as its immediate
+sibling `CSetListSlot::Activate()`), writes a mute-gated gain float + a
+raw dword copy into an embedded `CSetListEQ` sub-object, then calls
+`SetBand()` nine times -- `SetBand()`'s own body is genuine SSE/x87
+EQ-coefficient DSP (same cluster as sec 10.177/10.178's `CSTGEQ`), so it
+got a no-op stub in `bar2_stubs.cpp`, identical treatment to
+`CSTGControllerInfo::SetPerfSwitch` (sec 10.187): real caller + confirmed-
+deferred no-op callee.
+
+**Recurring "missed mock promotion" gotcha, hit exactly as predicted by
+this very memory file**: ALL THREE `verify/*.cpp` files linking
+`global.cpp` (`test_engine`, `test_global`, `test_global_ctor`) already
+had their OWN flat `CSetList::Activate() {}` mock -- not because of
+anything in THIS batch, but because `CompletePerformanceActivation()`
+(real since sec 10.102) already calls it. `test_global.cpp`'s own mock
+was load-bearing (a call counter checked in its own `[40]` section).
+Removed all three, rewrote `test_global.cpp`'s `[40]` check to verify the
+REAL function's own side effects directly instead of a counter -- a
+strictly stronger integration check, in addition to a new dedicated `[53]`
+unit KAT. **Reinforced rule: grep the WHOLE verify/ directory for the
+exact symbol name before considering ANY promotion done, even when the
+CURRENT batch's own work doesn't obviously need a mock there** -- the
+mock can predate the promotion by dozens of sections, planted by an
+EARLIER caller's own promotion (here, batch/sec 10.102, ~40 sections
+before this one).
+
+**New technique: settling a "how do I model this vs. leave it deferred"
+question by checking whether the faithful behavior is CURRENTLY vacuous
+in THIS OWN project's build, not just in ground truth.** `cleanup_cpp_support`
+walks ground truth's `.dtors` array (C++ static-destructor teardown at
+module unload under `-fno-use-cxa-atexit`, no crtstuff). Building a
+portable-C `.dtors`-walk needs a linker-script boundary symbol GNU ld
+does NOT auto-synthesize for a dot-prefixed section name -- a real
+infra change to the shared Kbuild. Before assuming that's worth doing,
+checked `objdump -h OA.ko | grep dtors` / `readelf -x .dtors OA.ko` on
+THIS PROJECT'S OWN build (not ground truth) and found **no `.dtors`
+section exists at all** -- zero global C++ objects in this
+reconstruction currently have a non-trivial destructor. A walk over an
+empty list that falls through to a confirmed no-op (`stg_cpp_exit`) is
+bit-for-bit identical to the existing `{}` body, so the current no-op IS
+already the faithful behavior for this reconstruction's present state --
+not a placeholder. Resolved as a documented sec-10.185-style virtual-
+substitute DECISION (comment-only change, explicitly stating the future
+revisit condition: if a later batch gives some class a real non-trivial
+destructor, THIS build would then emit its own non-empty `.dtors`
+section and this no-op would silently skip it -- re-examine then).
+**Reusable pattern for future batches facing a similar "faithful
+transcription needs infra I don't want to add" call**: check whether the
+faithful behavior is CURRENTLY a no-op in this project's OWN build state
+(not ground truth's), which can turn "build risky new infra" into "just
+document why the existing simple stub is already correct, for now."
+
+**Stub-count metric note, not a discrepancy**: `bar2_stubs.cpp`'s bare-`{}`
+grep count stayed at exactly 67 (a real function promoted OUT, a new
+confirmed-deferred-DSP no-op stubbed IN, net zero on the metric despite
+real forward progress) -- same "doesn't move the metric but is real
+progress" shape as sec 10.190's `rtwrap_pthread_create`. `bar2_stubs_c.cpp`
+stays at 2 (`cleanup_cpp_support`'s own resolution this batch is a closed
+DECISION about an already-`{}` body, not a stub removal).
+
+**Verification**: three full clean-rebuild passes, byte-identical all
+three (`OA.ko` 176,824 bytes, up from 176,656; md5
+`3880e58e7967971811791a5f9421dd1d`). All 83 verify/ binaries exit 0 (real
+process exit code, all three passes). `nm -u` unchanged at 69 (both new
+symbols are locally-defined `T` in this build, matching ground truth's
+own `T` status for both). linkonce 0x148, GOTPC 0.
+
+**Remaining candidates for a future batch**: `cm_AuthenEncryptMAC` (needs
+`bzzzzzzzzzzzt12` first, unchanged). `bar2_stubs.cpp`'s own 67 stubs
+remain untouched by this batch's new code -- still saturated with
+genuine vtable-dispatch/DSP-cluster blockers per sec 10.190's survey;
+re-check fresh next time rather than trusting this note indefinitely.
