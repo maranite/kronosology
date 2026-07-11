@@ -3100,3 +3100,122 @@ sanity-check the extracted test count against the expected/previous
 count before trusting an "overall fail=0" result -- a truncated or
 mis-extracted list will happily report zero failures for whatever subset
 it actually ran.
+
+**Batch 37 specifics** (2026-07-11, sec 10.188, commit `cbc395e`): picked
+the WHOLE `rtwrap_*` RTAI wrapper cluster --
+22 of `bar2_stubs_c.cpp`'s 34 remaining bare-`{}` stubs sat in one
+contiguous ground-truth address range (`.text+0x118f00`..`0x1198a0`),
+found by `nm -S --size-sort` confirming every one was 3-73 bytes, then
+ONE `objdump -dr` dump covering the whole namespace at once -- same
+"check the dependency's whole class" efficiency win as sec 10.158's
+`CSTGHDRCircularBuffer`. New file `src/init/rtwrap.cpp` +
+`verify/test_rtwrap.cpp`. Stub count 34 -> 12 in `bar2_stubs_c.cpp`
+(net -22, bar2_stubs.cpp unchanged at 67; combined 101 -> 79).
+
+**Key finding: NOT every "RTAI-adjacent" stub is an RTAI-substitution
+case under the sec 10.185 policy, even when its name says `rtwrap_`.**
+Checked ground truth's own `nm -u` for every real primitive these 22
+wrappers call (`rt_sem_wait`, `rt_task_init`, `rtai_global_heap`, etc)
+BEFORE writing any code -- all confirmed `U` in ground truth OA.ko too,
+i.e. genuine external RTAI symbols the real binary ALSO never defines
+locally (resolved by rtai_hal.ko/rtai_sched.ko/rtai_lxrt.ko at insmod
+time on real hardware). The sec 10.185 "write a from-scratch substitute"
+clause is for when OA's OWN dispatch/scheduling logic blocks progress --
+there is none here, these are pure argument-marshaling forwarders.
+Correct treatment is identical to the pre-existing `CSTGFile_*` ->
+`filp_open`/`vmalloc` precedent: declare the real externals (they stay
+`U`, `nm -u` count rises as expected, resolved on real hardware), do NOT
+write a substitute implementation. Lesson for future batches: before
+reaching for the RTAI-substitution policy on ANY `rtwrap_*`/`rt_*`-named
+stub, check whether ground truth itself resolves the underlying
+primitive locally or leaves it `U` -- only a local (`T`) real
+implementation in ground truth would indicate OA's own substitutable
+scheduling logic; an `U` in ground truth means "just declare the extern,
+same as any other kernel/RTAI dependency," no substitute needed.
+
+**Signature-fidelity fix, same family as sec 10.182's
+`stg_log_startup_error` int/`const char *` correction**: two of the 22
+(`rtwrap_whoami`, `rtwrap_task_suspend`) had project-wide `void`/`void`
+0-arg signatures that were WRONG once the real body was examined --
+ground truth's real `rtwrap_task_suspend` takes 1 arg (forwarded to
+`rt_task_suspend`), and its one real caller
+(`CSTGAudioManager::ASKThreadRoutine`, already-real code) does `call
+rtwrap_whoami` immediately followed by `call rtwrap_task_suspend` with
+NO intervening instruction touching `%eax` -- i.e. `rtwrap_whoami`'s own
+return value (current task handle) IS `rtwrap_task_suspend`'s argument
+via IMPLICIT register passthrough (a self-suspend idiom), not two
+independent void calls. Promoting `rtwrap_task_suspend` to a real
+forwarding body while leaving the 0-arg signature would have passed
+whatever garbage sat in `%eax` at the call site -- confirmed worse than
+the prior stub (a harmless no-op) once real. Fixed both declarations
+(`void *rtwrap_whoami(void)`, `void rtwrap_task_suspend(void *task)`)
+plus the real caller's body (`void *me = rtwrap_whoami();
+rtwrap_task_suspend(me);`) and that caller's own isolated test file's
+local mock signatures. Lesson reinforced: whenever a promoted stub's
+real ground-truth signature disagrees with how an EXISTING (already-real)
+caller invokes it, fixing that caller is in-scope for the promotion, not
+scope creep -- and specifically watch for the "two back-to-back calls
+with no intervening register-clobbering instruction between them" tell
+that means an implicit passthrough, not two independent calls, ESPECIALLY
+when one call's C-level signature is currently `void` (no return
+consumed) and the very next call's C-level signature is currently 0-arg
+(nothing passed) -- that exact SHAPE (discarded return immediately
+followed by a suspiciously argument-free call) is worth re-disassembling
+the real caller for before assuming they're actually independent.
+
+**`rtwrap_pthread_cancel`'s struct-layout cross-reference, a "derive a
+sibling's field meaning from a NOT-YET-promoted function's own
+disassembly" pattern, not covered by any prior batch**: its only
+non-trivial real body (self-cancel via `rt_whoami()` when the argument
+is NULL, then `rtheap_free` a pointer stored at `task+0x5b8`) only makes
+sense by ALSO disassembling `rtwrap_pthread_create` (itself NOT one of
+this batch's 22, and still correctly deferred) to confirm that `+0x5b8`
+is exactly where `rtheap_alloc`'s raw return value gets stashed for
+later freeing. Confirmed this doesn't introduce a NEW wild-pointer risk
+in this reconstruction's own CURRENTLY REACHABLE call graph specifically
+because `rtwrap_pthread_create` itself still always returns NULL (its
+own pre-existing stub) -- meaning no caller in this build can currently
+obtain a non-NULL handle to pass to `rtwrap_pthread_cancel`, so every
+presently-reachable invocation takes the `rt_whoami()` self-cancel path,
+gated behind still-stubbed daemon-lifecycle code regardless. Lesson: when
+a stub's real body references a field whose MEANING is only established
+by a DIFFERENT, still-deferred sibling function's own disassembly, it's
+fine to promote the first one anyway as long as (a) the field-meaning
+cross-reference is independently confirmed via that sibling's own real
+bytes (not guessed), and (b) the current reconstruction's own reachable
+call graph is checked to confirm no LIVE path can feed the promoted
+function a value inconsistent with that meaning.
+
+**Gotcha hit AGAIN this batch (2nd/3rd occurrence of the sec 10.179
+"literal `*/` inside a provenance/family-listing comment silently ends
+the block comment early" class): two MORE instances, in two DIFFERENT
+files, both only caught by the required rebuild (not by proofreading).**
+`bar2_stubs_c.cpp`'s new header text ("`pthread_mutex_*/mutexattr_*`")
+and `test_audio_start.cpp`'s updated mock comment ("`void*/1-arg`") each
+independently formed an accidental `*/` comment-closer purely from
+listing adjacent wildcard-suffixed symbol-family names or type names
+back to back with a bare `/` between them, cascading into the exact same
+"missing terminating ' character" error shape sec 10.179 already
+documented. This is now a THIRD confirmed occurrence of this same
+mechanical trap (batch 31/sec 10.179 being the first) -- worth treating
+as a standing tripwire: after writing ANY comment that lists multiple
+`foo_*`/`bar_*`-style wildcard family names, or any `type*`/`type` pair,
+separated only by `/`, grep the new/edited comment text for a literal
+`*/` substring BEFORE the first rebuild attempt, not just after hitting
+the error.
+
+**Side-observation recorded but deliberately NOT fixed this batch (a
+pre-existing inconsistency, not introduced now): `stg_set_cpus_allowed`
+is confirmed `U` in ground truth OA.ko (a real external, correctly
+already in this project's pre-batch 40-unresolved-symbol count) but this
+reconstruction's own `bar2_stubs_c.cpp` DEFINES a local empty-body stub
+for it** -- meaning our OA.ko incorrectly makes it a defined (`T`)
+symbol where ground truth has `U`. Also: `stg_outb`/
+`stg_local_irq_restore`/`stg_inb`/`stg_local_irq_save` have NO standalone
+symbol anywhere in ground truth (fully inlined at call sites, sec
+10.159's "no standalone symbol" pattern) -- not a quick forwarder
+rewrite like the rest of this cluster, would need locating the inlined
+call sites first. Flagged for a future pass, not touched here (auditing
+every `stg_set_cpus_allowed` call site before changing its symbol
+visibility is real, separate work, out of scope for a `rtwrap_*`-focused
+batch).
