@@ -234,7 +234,10 @@ extern "C" void SKMain_Initialize(void *) {}
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) {}
 void CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) {}
 void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
-void CSTGComPort::RTAIInterruptHandler(unsigned int, void *) {}
+/* CSTGComPort::RTAIInterruptHandler is real now, batch 48 -- see
+ * src/init/comport.cpp (a thin forwarder to the already-real
+ * HandleInterrupt()/ComPortServiceLoop -- see oa_comport.h's own
+ * updated comment for the full derivation). */
 /* CSTGCombi::CSTGCombi() is real now, batch 45 -- see
  * src/engine/combi_ctor.cpp (resolves the sibling this file's own
  * GetPatchStaticCosts-area comment, and program_ctor.cpp's own header

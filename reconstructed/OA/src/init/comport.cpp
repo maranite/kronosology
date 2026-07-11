@@ -130,3 +130,22 @@ void CSTGComPort::HandleInterrupt()
 {
 	ComPortServiceLoop(this);
 }
+
+/*
+ * Confirmed real: the RTAI IRQ-callback trampoline `rtwrap_request_irq`
+ * is given (see oa_comport.h). `irq` is confirmed dead in the real
+ * disassembly (loaded, never read again) -- RTAI's own callback ABI
+ * requires the parameter even though this handler has no use for it.
+ * `dev` is the `this` pointer `Initialize()` originally registered (see
+ * comport_init.cpp). Forwards to the already-reconstructed
+ * `HandleInterrupt()`/`ComPortServiceLoop` above rather than
+ * re-deriving the identical loop a second time -- confirmed
+ * byte-for-byte the same body via full disassembly (same dummy-IIR
+ * read, same poll/drain/transmit branch shape, same two vtable
+ * dispatches).
+ */
+void CSTGComPort::RTAIInterruptHandler(unsigned int irq, void *dev)
+{
+	(void)irq;
+	static_cast<CSTGComPort *>(dev)->HandleInterrupt();
+}

@@ -242,12 +242,26 @@ public:
 	void SetDTR(bool assert);
 	bool IsHardwareTransmitterEmpty() const;
 
-	/* Confirmed real (via relocation, `_ZN11CSTGComPort20
-	 * RTAIInterruptHandlerEjPv`, WEAK linkage) -- `Initialize` takes
-	 * its ADDRESS to pass to `rtwrap_request_irq` as the callback, but
-	 * never calls it directly, so its own body isn't reconstructed
-	 * here (same treatment as the thread-entry-point functions in
-	 * oa_audio_start.h). */
+	/* Reconstructed for real, batch 48 -- see comport.cpp. Confirmed
+	 * real (via relocation, `_ZN11CSTGComPort20RTAIInterruptHandlerEjPv`,
+	 * WEAK linkage, its own dedicated 154-byte `.text._ZN...` section)
+	 * -- `Initialize` takes its ADDRESS to pass to `rtwrap_request_irq`
+	 * as the callback, with `this` forwarded back as `dev` (see the
+	 * `rtwrap_request_irq` comment above). Full disassembly shows the
+	 * body is byte-for-byte the SAME dummy-IIR-read/poll-drain-transmit
+	 * loop already modeled as the shared `ComPortServiceLoop` helper
+	 * behind `HandleInterrupt()` -- not merely similar, the same real
+	 * logic compiled a second time under RTAI's own IRQ-callback ABI.
+	 * `irq` is loaded into a register and never read again in the real
+	 * disassembly (confirmed dead here). This was originally deferred
+	 * (sec 10.153) purely out of caution over its two real vtable
+	 * dispatches (`OnByteReceived`/`GetByteToTransmit`) -- `keybed_
+	 * init.cpp`'s own `KeybedComPortStub` placement-construction (added
+	 * in a later batch) already makes a real, populated `CSTGComPort`
+	 * vtable routinely available and already dispatches through it via
+	 * `TriggerInterrupt()`, so forwarding to `HandleInterrupt()` here
+	 * carries no additional risk (reuse-existing-hardware-validated-
+	 * port technique, not a fresh re-derivation of the loop). */
 	static void RTAIInterruptHandler(unsigned int irq, void *dev);
 };
 

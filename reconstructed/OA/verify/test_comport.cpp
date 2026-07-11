@@ -254,6 +254,28 @@ int main(void)
 		check_eq("no bytes transmitted when capacity == 0", g_outbCalls, 0);
 	}
 
+	printf("\n[5] RTAIInterruptHandler() -- thin IRQ-callback forwarder to HandleInterrupt():\n");
+	{
+		/* Same RX-drain scenario as [4], but driven through the real
+		 * static IRQ-callback entry point instead of TriggerInterrupt(),
+		 * confirming it forwards (irq, dev) to dev->HandleInterrupt()
+		 * with no cli/sti wrapping of its own (matching the confirmed
+		 * real disassembly -- HandleInterrupt() itself has none either,
+		 * unlike TriggerInterrupt()). */
+		TestComPort port;
+		reset();
+		port.ioBase = g_baseIoPort;
+		port.txFifo.capacity = 4;
+		g_regs[5] = 0x1;  /* LSR bit0: Data Ready */
+		g_regs[0] = 0x77; /* the RX byte that will be read */
+		g_regs[2] = 1;    /* IIR: no interrupt pending, once re-checked */
+
+		CSTGComPort::RTAIInterruptHandler(/* irq (confirmed dead) */ 0xabc, &port);
+		check_eq("no irq_save/restore (unlike TriggerInterrupt)", g_irqSaveCalls, 0);
+		check_eq("OnByteReceived called at least once", port.onByteReceivedCalls >= 1, true);
+		check_eq("received the mocked RX byte", port.lastByteReceived, 0x77);
+	}
+
 	printf(g_fail ? "\nRESULT: %d check(s) FAILED\n" : "\nRESULT: all checks passed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

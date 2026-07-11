@@ -117,9 +117,9 @@ void stg_local_irq_restore(unsigned long) {}
 
 } /* extern "C" */
 
-/* Real symbol, address only taken by Initialize (never called) -- see
- * oa_comport.h's own note. A trivial body suffices for the link. */
-void CSTGComPort::RTAIInterruptHandler(unsigned int, void *) {}
+/* CSTGComPort::RTAIInterruptHandler is real now, batch 48 -- defined in
+ * comport.cpp (already linked into this test below), no mock needed
+ * here any more; a duplicate definition here would be a link error. */
 
 namespace {
 struct TestComPort : CSTGComPort {
