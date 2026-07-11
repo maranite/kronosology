@@ -80,7 +80,9 @@ CSTGGlobal::CSTGGlobal() {}
 void CSTGGlobal::Initialize() { g_globalInitCalls++; }
 
 static int g_sampleRateMonitorInitCalls;
-CSTGSampleRateMonitor *CSTGSampleRateMonitor::sInstance;
+/* CORRECTED (2026-07-10): sInstance is the real 1040-byte object, not a
+ * pointer -- see oa_setup_global_resources.h's own note. */
+CSTGSampleRateMonitor CSTGSampleRateMonitor::sInstance;
 void CSTGSampleRateMonitor::Initialize() { g_sampleRateMonitorInitCalls++; }
 
 static int g_askInitCalls;

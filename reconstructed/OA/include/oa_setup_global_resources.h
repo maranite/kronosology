@@ -330,13 +330,31 @@ struct CSTGFrontPanel {
 };
 
 struct CSTGSampleRateMonitor {
-	static CSTGSampleRateMonitor *sInstance;
+	/* CORRECTED (2026-07-10): real ground truth (nm -C OA.ko) has
+	 * `CSTGSampleRateMonitor::sInstance` as a 0x410 (1040)-byte `B`
+	 * (.bss) symbol, not a 4-byte pointer -- confirmed exactly by the
+	 * gap to the next .bss symbol (CSTGMIDIClockSync::sInstance sits
+	 * precisely 0x410 bytes after this one). `sInstance` IS the
+	 * singleton object, matching setup_global_resources.cpp's own call
+	 * site pattern of using `&CSTGSampleRateMonitor::sInstance` directly
+	 * as `this` (see sec 10.57 note on Initialize(), below) -- so this
+	 * struct must itself reserve the full 1040-byte real footprint,
+	 * not just the +0x8/+0xc..+0x40b fields Initialize() happens to
+	 * touch, or a plain `static CSTGSampleRateMonitor sInstance` would
+	 * only reserve sizeof(this struct)'s otherwise-empty 1 byte and
+	 * silently corrupt whatever global follows it in .bss -- the exact
+	 * bare-pointer-vs-object bug this fix closes, just reintroduced one
+	 * level down. Bytes before +0x8 aren't independently recovered, so
+	 * they're left as opaque padding alongside the confirmed region. */
+	unsigned char _raw[0x410];
+	static CSTGSampleRateMonitor sInstance;
+
 	/* CORRECTED (sec 10.57): NOT called with `this=0` -- the real
 	 * disassembly's `mov eax,0x0` immediately before this call carries
 	 * an R_386_32 relocation on `sInstance` itself, meaning the real
 	 * `this` is `&CSTGSampleRateMonitor::sInstance` (the singleton
-	 * POINTER's own address), the same confirmed "address of the
-	 * singleton pointer" idiom already independently confirmed for
+	 * object's own address), the same confirmed "address of the
+	 * singleton" idiom already independently confirmed for
 	 * `CSTGPerformanceVarsManager::Initialize()`. An earlier pass read
 	 * the raw "0x0" at face value without checking for a relocation on
 	 * it -- see setup_global_resources.cpp's own updated call site and

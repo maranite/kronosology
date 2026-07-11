@@ -97,7 +97,10 @@ CSTGCPUInfo *CSTGCPUInfo::sInstance;
  * this pass (only Initialize(), below) -- its `sInstance` static
  * storage is defined here anyway since setup_global_resources.cpp's
  * own corrected call site (sec 10.57) now takes its address. */
-CSTGSampleRateMonitor *CSTGSampleRateMonitor::sInstance;
+/* Real .bss layout: sInstance IS the 1040-byte object (not a pointer) -- see
+ * the struct's own note in oa_setup_global_resources.h for why the bare-pointer
+ * form corrupted the adjacent managers.cpp singleton block. */
+CSTGSampleRateMonitor CSTGSampleRateMonitor::sInstance;
 
 CSTGFrontPanel::CSTGFrontPanel()
 {

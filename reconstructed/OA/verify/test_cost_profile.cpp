@@ -34,7 +34,11 @@ CStartupFile::CStartupFile(const char *name)
 }
 CStartupFile::~CStartupFile() { g_startupFileDtorCalls++; }
 
-extern "C" unsigned char _ZTV12CCostProfile[16];
+/* Real, external-linkage forwarder cost_profile.cpp installs into vtable
+ * slot 2 (see its own header comment / MASTER_REFERENCE fix): declared
+ * here too so this KAT can confirm it's what actually gets dispatched,
+ * not just that some non-null pointer sits there. */
+extern "C" int _ZN12CStartupFile4LoadEv(void *self) __attribute__((regparm(3)));
 
 int main(void)
 {
@@ -51,9 +55,27 @@ int main(void)
 	check_eq("CStartupFile ctor arg == \"CostProfile\"",
 		 (long)(strcmp(g_startupFileName, "CostProfile") == 0), 1);
 
-	printf("\n[2] vtable pointer\n");
-	check_eq("_vtablePtr == &_ZTV12CCostProfile + 8",
-		 (long)cp->_vtablePtr, (long)(void *)(_ZTV12CCostProfile + 8));
+	printf("\n[2] vtable pointer / slot dispatch (2026-07-10 fix)\n");
+	/* CORRECTED (2026-07-10): _vtablePtr no longer points at GCC's
+	 * auto-synthesized `_ZTV12CCostProfile` (too short -- only 2
+	 * destructor slots, since the header declares no other virtuals),
+	 * it points into a hand-built table matching the REAL vtable's
+	 * relocation layout instead. A pointer-identity check against the
+	 * now-irrelevant auto-vtable is no longer the right test; what
+	 * actually matters (and is exactly what
+	 * setup_global_resources.cpp's own call site does) is that
+	 * `_vtablePtr[2]` -- the slot indexed at module-load time --
+	 * dispatches to a real, non-null function, and that function
+	 * behaves like the real CStartupFile::Load() (honest "file absent"
+	 * return of 9 in this VM build), not a wild call into adjacent
+	 * .rodata. */
+	typedef int (*VtableSlot2Fn)(void *);
+	VtableSlot2Fn slot2 = ((VtableSlot2Fn *)cp->_vtablePtr)[2];
+	check_eq("_vtablePtr[2] is non-null (no wild call)", (long)(slot2 != 0), 1);
+	check_eq("_vtablePtr[2] == the real CStartupFile::Load forwarder",
+		 (long)(void *)slot2, (long)(void *)&_ZN12CStartupFile4LoadEv);
+	check_eq("dispatching _vtablePtr[2](cp) == 9 (file absent, honest no-op)",
+		 (long)slot2(cp), 9);
 
 	printf("\n[3] sInstance\n");
 	check_eq("sInstance == this", (long)(CCostProfile::sInstance == cp), 1);

@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * module_main.c  -  OmapNKS4VirtualDriver.ko: a stand-in for
- * OmapNKS4Module.ko's own 6 exported symbols, for VM/foreign-hardware
+ * OmapNKS4Module.ko's own 8 exported symbols, for VM/foreign-hardware
  * boot testing only.
  *
  * WHY THIS EXISTS (Bar 2, 2026-07-02): OA.ko's own
- * setup_global_resources()/CSTGGlobal::UpdateXXX code calls 7 real
+ * setup_global_resources()/CSTGGlobal::UpdateXXX code calls 8 real
  * OmapNKS4Module.ko exports directly (COmapNKS4Driver_GetHardwareVersion/
  * GetOmapVersion/GetPSocVersion/Is88Key/SetTestMode,
  * OmapNKS4OutputFifo_WriteCommand, SetupNKS4Calibration -- CORRECTED
  * 2026-07-04, was previously missing SetTestMode entirely, a genuine
  * gap that would have surfaced as a real "Unknown symbol in module"
- * kernel error the moment OA.ko's own SetNKS4TestModeFlag path ran).
- * The REAL OmapNKS4Module.ko (already 100%
+ * kernel error the moment OA.ko's own SetNKS4TestModeFlag path ran;
+ * ADDED 2026-07-08, COmapNKS4_IncProgressBar, see note below). The REAL
+ * OmapNKS4Module.ko (already 100%
  * reconstructed, see reconstructed/OmapNKS4Module/) can't be used to
  * satisfy this in a VM: its own real init_module() hard-requires a real
  * RTAI SRQ AND blocks waiting for a genuine USB NKS4 front-panel board to
@@ -81,11 +82,29 @@ int OmapNKS4OutputFifo_WriteCommand(int command) { (void)command; return 1; }
  * passes a literal 0 for the second. See oa_setup_global_resources.h
  * for the full confirmed shape. */
 void SetupNKS4Calibration(void *panel, int flag) { (void)panel; (void)flag; }
+/* ADDED (2026-07-08): closes the gap found while re-attempting the Bar 2
+ * boot test -- OA.ko's IncProgressBar() forwarder (src/init/
+ * startup_helpers.cpp, sec 10.179/10.182) calls this by name, and it was
+ * simply missing from this stub, so insmod OA.ko failed symbol
+ * resolution before init_module() could even run.
+ *
+ * `COmapNKS4_IncProgressBar` is a REAL, DISTINCT exported symbol in the
+ * genuine OmapNKS4Module.ko -- not a typo for COmapNKS4Driver_IncProgressBar
+ * above. Confirmed via `nm RestoreDVD_SystemMNT/mnt/sbin/OmapNKS4Module.ko`:
+ * both `COmapNKS4Driver_IncProgressBar` (0x5510, plain global T, no
+ * __ksymtab entry -- internal to that module only) and
+ * `COmapNKS4_IncProgressBar` (0x74e0, WITH its own __ksymtab_/__kstrtab_
+ * entries -- genuinely EXPORT_SYMBOL'd) exist side by side in the real
+ * binary. OA.ko's own disassembly (see startup_helpers.cpp's own ground
+ * truth comment) calls the latter, so that's the exact name this stub
+ * must export too. Trivial no-op body, matching every other stub in this
+ * file -- there is no real front-panel progress LED in a VM to tick. */
+void COmapNKS4_IncProgressBar(void) { }
 
 static int __init OmapNKS4VirtualDriverInit(void)
 {
 	printk(KERN_INFO "OmapNKS4VirtualDriver: loading (stand-in for "
-	       "OmapNKS4Module.ko's 7 exports -- see this file's own header)\n");
+	       "OmapNKS4Module.ko's 8 exports -- see this file's own header)\n");
 	return 0;
 }
 
@@ -104,7 +123,8 @@ EXPORT_SYMBOL(COmapNKS4Driver_Is88Key);
 EXPORT_SYMBOL(COmapNKS4Driver_SetTestMode);
 EXPORT_SYMBOL(OmapNKS4OutputFifo_WriteCommand);
 EXPORT_SYMBOL(SetupNKS4Calibration);
+EXPORT_SYMBOL(COmapNKS4_IncProgressBar);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 7 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
+MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 8 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
 MODULE_AUTHOR("Korg (reconstructed)");
