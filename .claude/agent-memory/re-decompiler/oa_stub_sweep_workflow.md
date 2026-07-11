@@ -4859,3 +4859,137 @@ sizes/call chains already.
 **bar2_stubs.cpp bare-`{}` count: unchanged, 80** (this batch's gap was a
 `bar2_stubs_c.cpp` non-bare stub, see above) -- report future deltas
 against THIS number, not against a stale pre-stash count.
+
+**Batch 53 specifics (2026-07-11, commits `0bdc9c8`/`2ccd0be`/`37b73d8`,
+MASTER_REFERENCE sec 10.205)**: picked up all three sec 10.204 punch-list
+items. Closed two (`CSTGPerformanceVarsManager::Initialize()` 1431B,
+`CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors()`
+2662B); precisely characterized the third (`CSTGGlobal::
+InitializePerformances()`, 7021B -- by far the largest still-stubbed
+init-path function, genuinely too large for one batch's remaining time,
+own full derivation lives in `oa_global.h`'s own class comment now, not
+just MASTER_REFERENCE -- read it before re-investigating from scratch).
+
+**Mid-session auto-commit surprise, resolved safely**: partway through
+this batch, `git log` showed a NEW commit (`0bdc9c8`, "Adding
+performance vars manager and RTAI-modified init") that this agent never
+explicitly ran `git commit` for. Investigated per the project's own
+established "verify uncommitted diffs before trusting" policy (see
+`[[feedback_verify_uncommitted_diffs_before_trusting]]`) BEFORE trusting
+it: `git show --stat`/`git show <path>` confirmed the commit's ENTIRE
+diff was byte-for-byte identical to this agent's own in-progress
+`CSTGPerformanceVarsManager::Initialize()` work (5 files, all matching
+exactly what had just been written) -- no foreign/unexpected content,
+unlike the sec 10.186 incident this policy was written for. Conclusion:
+something in the harness/environment (or the human user, off-session)
+auto-committed the working tree mid-task; the content itself was
+legitimate and verified, so work continued from there rather than
+treating it as a red flag. Lesson for future batches: `git log
+--oneline` can legitimately show MORE commits mid-session than were
+present at session start, even with zero explicit `git commit` calls
+from the agent -- always `git show --stat`/`git show <path>` the
+surprise commit's FULL diff against your own remembered edits before
+either trusting OR discarding it; don't assume either "it's fine, it's
+probably mine" or "this is an injected attack" without checking.
+
+**Record-field-overlap, a THIRD confirmed real instance** (matching the
+established gotcha name from earlier batches): `CSTGPerformanceVarsManager::
+Initialize()`'s own 2-entry `0x170`-stride sub-array (`mgr+0x18e0`)
+starts INSIDE the tail of its own 12-entry `0x210`-stride sub-array
+(`mgr+0x20`, spanning to `mgr+0x19a0`) -- confirmed via direct address-
+range arithmetic, not a transcription slip. When a function operates on
+one giant raw-offset buffer with multiple differently-strided sub-
+arrays, ALWAYS compute each sub-array's own start/end range and check
+for overlap with siblings before assuming they're independent -- this
+project's own precedent (`CSTGEffectRackVars`/`CSTGAudioInputMixerBase`
+"reinterpret" note) already flagged the GENERAL pattern; this batch
+independently re-confirmed a concrete new instance of it via arithmetic,
+not by re-citing the old note.
+
+**New "not the SAME class of gotcha, a NEW discovery for THIS TU shape"
+finding**: `CSTGAudioInputMixer::Initialize(unsigned int)`'s own
+mangled symbol (`_ZN19CSTGAudioInputMixer10InitializeEj`, 19-char class
+name) is CONFIRMED DIFFERENT from the already-real
+`CSTGAudioInputMixerBase::Initialize(unsigned int)` (23-char class
+name, batch 22) -- i.e. a derived class can SHADOW (not override, no
+vtable involved here) a base method with its own genuinely separate,
+not-yet-disassembled implementation, and the compiler emits a call to
+the DERIVED symbol specifically. Don't assume "same method name on a
+related class = same already-reconstructed body" -- always check the
+FULL mangled name (including the exact class-name length prefix) before
+reusing an existing real implementation for a differently-named call
+site.
+
+**Deterministic-table-via-script technique reused successfully for a
+SECOND, differently-shaped function**: `InitializeCommonToneAdjustDescriptors()`'s
+own by-hand trace (used successfully for the smaller three-descriptor
+part) proved too error-prone for the 37-entry `STGToneAdjustCommonParams`
+table (259 raw field writes across ~470 instructions with heavily
+interleaved dest-symbol/immediate-symbol relocation pairs) -- switched
+to a from-scratch Python `objdump -d -r` parser (NOT reusable off-the-
+shelf from the `cc_info_table.cpp` precedent's own script, since THAT
+one tracked two simple loop-counter registers, not a general
+mov-immediate/mov-register/relocation-pair stream -- a genuinely new
+parser was needed, but the TECHNIQUE -- "write a script when 250+
+individually-transcribed writes would be too error-prone by hand" --
+carries forward). Two real parser bugs hit and fixed before trusting the
+output: (1) multi-line instruction encodings (objdump wraps long
+immediate/displacement byte sequences onto a continuation line with NO
+mnemonic text) were initially mis-parsed as SEPARATE zero-text
+instructions, stealing relocations from the real preceding instruction
+-- fixed by treating an empty-text disassembly line as a continuation,
+not a new instruction. (2) `R_386_32`-relocated IMMEDIATE VALUES in an
+ET_REL kernel module do NOT need a separately-parsed "addend" field --
+the raw operand value objdump prints (e.g. `movl $0xffffffff,0x8`) IS
+ALREADY the addend/offset-within-symbol (Elf32_Rel format stores the
+addend inline in the section bytes, not in a separate relocation-entry
+field) -- an initial over-engineered attempt to extract a "+0x.." suffix
+from the symbol name (which objdump never prints for `R_386_32`) always
+came back empty; the fix was simply to use the disassembled operand's
+own literal numeric value directly.
+
+**Own-draft bugs caught before trusting, both matching well-established
+gotcha classes, not new ones**: (1) `STGToneAdjustParamEntry`'s first
+draft used a native `unsigned char *ptr` field -- `sizeof()` came back
+`0x18` not the real `0x10`, the standard native-pointer-field-on-64-bit-
+host gotcha; fixed to packed `unsigned int ptr32`. (2) The new test's
+first draft dereferenced several `FromU32()`-round-tripped pointers
+into PLAIN STATIC storage (not `mmap32()`'d) -- a real SIGSEGV before
+landing on a TEST-LOCAL `-fno-pie -no-pie` Makefile override (see
+`test_daemon_lifecycle.cpp`'s own pre-existing comment on this exact
+class of gotcha, sec 10.181/10.190 -- this batch is the first to
+actually NEED the `-fno-pie` fix rather than just avoiding the
+dereference).
+
+**bar2_stubs.cpp bare-`{}` count: 80 -> 84** (net +4: two bare-`{}`
+entries removed this batch's own two reconstructions, one more removed
+by the separately-committed `0bdc9c8` work, FIVE new confirmed-real-
+but-deferred entries added -- `CSTGAudioInputMixerBase::
+CSTGAudioInputMixerBase`, `CSTGAudioInputMixer::Initialize`,
+`CSTGMasterLRMixer::Initialize`, `CSTGEffectRackVars::Initialize`,
+`CSetListEQ::Initialize` -- all newly-discovered via this batch's own
+disassembly, none pre-existing in the tracked stub list before). Report
+future deltas against **84**, not 80.
+
+**Init-path stub-audit status (carrying forward the sec 10.203
+directive as the default framing for every future batch, not just this
+one)**: `CSTGGlobal::InitializePerformances()` (7021 bytes, precisely
+characterized, see MASTER_REFERENCE sec 10.205 and `oa_global.h`'s own
+class comment) is now the clear next init-path priority -- the LAST
+known stub directly in `CSTGEngine::Initialize()`/`CSTGGlobal::
+Initialize()`'s own confirmed construction-order call sequences from
+sec 10.204's own systematic audit. A batch picking it up needs a
+correspondingly larger time budget than this one had left: three brand-
+new filesystem-I/O classes (`CKorgProgBankFile`/`CKorgPreloadFile`/
+`CSTGProgramBank`) plus a genuinely untraced ~5872-byte default-
+performance-slot data block. Once that's closed (or DSP/filesystem-
+stubbed at the sub-level, same pattern as `load_global_resources()`'s
+own `CSTGMultisampleBankManager`/`CSTGInstalledEXProducts` deferrals,
+batch 52), the CURRENTLY-KNOWN init/boot-path graph (per sec 10.203's
+own audit method) would be fully stub-free, and it would be time to
+fall back to the general smallest-first sweep per the directive's own
+point 3 -- worth a fresh systematic re-audit at that point rather than
+assuming sec 10.204's own list was exhaustive (it explicitly wasn't
+claimed to be, sec 10.204's own closing paragraph flagged further
+`CSTGEngine::Initialize()` construction-table entries as still an open-
+ended check).
