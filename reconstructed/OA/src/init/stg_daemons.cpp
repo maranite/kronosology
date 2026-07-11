@@ -52,3 +52,16 @@ extern "C" void signal_timed_out_daemons(void)
 		}
 	}
 }
+
+/*
+ * signal_daemon(daemonIndex) (batch 51, `.text+0x11d3c0`, 50 bytes) --
+ * see oa_daemons.h for the full derivation. Unconditional single-entry
+ * kick, no timeout check, no bounds check -- unlike the watchdog sweep
+ * above, this always fires.
+ */
+extern "C" void signal_daemon(unsigned int daemonIndex)
+{
+	STGDaemonWatch *d = &gStgDaemons[daemonIndex];
+	d->lastTick = GetSTGTickCount();
+	rt_pend_linux_srq(d->srq);
+}

@@ -98,6 +98,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/hdr_record_track.o \
            src/engine/hdr_manager_init.o \
            src/engine/hdr_sampler_commands.o \
+           src/engine/hdr_playback_commands.o \
+           src/engine/file_opener_events.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
@@ -311,6 +313,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/hdr_record_track.cpp \
        src/engine/hdr_manager_init.cpp \
        src/engine/hdr_sampler_commands.cpp \
+       src/engine/hdr_playback_commands.cpp \
+       src/engine/file_opener_events.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
@@ -416,7 +420,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_combi_ctor \
          verify/test_atmel_zone_io \
          verify/test_effect_manager_run_effects \
-         verify/test_hdr_sampler_commands
+         verify/test_hdr_sampler_commands \
+         verify/test_file_opener_events \
+         verify/test_hdr_playback_commands
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -593,6 +599,12 @@ verify/test_hdr_manager_init: verify/test_hdr_manager_init.cpp src/engine/hdr_ma
 
 verify/test_hdr_sampler_commands: verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp -o $@
+
+verify/test_file_opener_events: verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp -o $@
+
+verify/test_hdr_playback_commands: verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_daemons.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp -o $@
 
 verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp -o $@

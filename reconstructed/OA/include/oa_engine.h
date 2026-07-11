@@ -290,6 +290,7 @@ public:
 };
 
 struct CSTGPlaybackEvent;	/* forward decl, real definition in oa_engine_init.h */
+struct CSTGAudioEvent;		/* forward decl, real definition in oa_engine_init.h */
 
 /*
  * Real, fully-fleshed classes with many other confirmed methods
@@ -531,16 +532,50 @@ class CSTGHDRManager {
 public:
 	static CSTGHDRManager *sInstance;
 	CSTGHDRManager();
+	/*
+	 * ProcessHDRRecord() (`.text+0xd4940`, 1039 bytes) precisely
+	 * characterized (batch 51) but NOT reconstructed: a 16x-unrolled loop
+	 * over the confirmed `(CSTGPlaybackBuffer, CSTGRecordTrack)` pairs at
+	 * `+0x584`/`+0x5a4`, stride `0xc0` (same array `Initialize()` already
+	 * populates, see below). Per pair, confirmed via `.rel.text`
+	 * resolution: calls `CSTGRecordTrack::ProcessSubRate()`
+	 * (`.text+0xd7710`) then `CSTGMonitorMixerChannel::GetMeterLevel(bool)`
+	 * (`.text+0x71950`), clamps the returned level to `[0,0x7fff]`
+	 * (`cmovs`) and peak-holds it into a per-channel 16-bit watermark
+	 * table (`WORD [edi+0xf9e+i*2]`, `edi` a not-yet-identified global
+	 * loaded via relocation at function entry), while accumulating an
+	 * "any track active" flag from each `ProcessSubRate()` call's own
+	 * boolean result. A leading guard checks a `CSTGCostProfile`-shaped
+	 * global's `+0x684` field against literal 2 and, if NOT 2, additionally
+	 * calls `CSTGSampler::ProcessSubRate()` (`.text+0xd8b70`, the embedded
+	 * `+0x1190` sampler) and folds its own result in too. Genuine per-track
+	 * audio-DSP peak metering -- out of scope per the sec 10.185 policy,
+	 * and none of its three callees (`CSTGRecordTrack::ProcessSubRate`/
+	 * `CSTGMonitorMixerChannel::GetMeterLevel`/`CSTGSampler::
+	 * ProcessSubRate`) are reconstructed anywhere in this project yet
+	 * either -- promoting this caller would require promoting (or
+	 * DSP-stubbing) all three first. Left deferred for a future batch;
+	 * this comment supersedes the earlier "not yet individually
+	 * disassembled" framing (sec 10.200/10.201) with a precise blocker.
+	 */
 	void ProcessHDRRecord();
 	/*
 	 * ProcessCommands() (sec 10.144, `.text+0xd5dd0`, 41 bytes) confirmed:
 	 * calls these three confirmed-real siblings on `this`, in this exact
-	 * order. Two of the three are still not implemented in this pass (see
-	 * managers.cpp); ProcessSamplerCommands() is now real, batch 50 -- see
-	 * hdr_sampler_commands.cpp.
+	 * order. `ProcessSamplerCommands()` is real, batch 50 -- see
+	 * hdr_sampler_commands.cpp. `ProcessPlaybackCommands()` is real too,
+	 * batch 51 -- see hdr_playback_commands.cpp (a ring-buffer command
+	 * consumer over its own THIRD-and-last-undocumented ring, `+0x18ad8`,
+	 * dispatching onto `CSTGFileOpener::AddPlaybackEvent`/`AddRecordEvent`
+	 * (also real now, see below), `signal_daemon()` (oa_daemons.h), and
+	 * the already-real `CSTGPlaybackBuffer::SetCurrentReadEvent`/
+	 * `RemoveEvent`). `ProcessRecordCommands()` was already real, batch 15
+	 * -- see hdr_record_track.cpp (the stale ".text+.., confirmed real,
+	 * deferred" trailing comment below was a leftover from before that
+	 * batch landed, corrected here).
 	 */
-	void ProcessPlaybackCommands();	/* .text+0xd5950, confirmed real, deferred */
-	void ProcessRecordCommands();		/* .text+0xd5b20, confirmed real, deferred */
+	void ProcessPlaybackCommands();	/* .text+0xd5950, real, batch 51 -- see hdr_playback_commands.cpp */
+	void ProcessRecordCommands();		/* .text+0xd5b20, real, batch 15 -- see hdr_record_track.cpp */
 	/*
 	 * ProcessSamplerCommands() (batch 50, `.text+0xd5c50`, 380 bytes)
 	 * confirmed real -- see hdr_sampler_commands.cpp for the full
@@ -894,8 +929,7 @@ public:
  *   +0x00/+0x04/+0x08  header fields, zeroed (+0x0c untouched)
  *   +0x10..+0x20c      32 identical 16-byte "slots", each zeroing its own
  *                      +0/+4/+8 (that slot's +0xc left untouched) -- same
- *                      shape as the class-level header, repeated; real
- *                      per-slot semantics not determined in this pass
+ *                      shape as the class-level header, repeated
  *   +0x210/+0x214/+0x218  a ring buffer's base-pointer/write-index/
  *                         read-index, zeroed
  *   +0x21c             that ring buffer's capacity -- CONFIRMED NOT
@@ -915,13 +949,40 @@ public:
  * shared across the "file daemon" classes, not the uniform +0x00/+0x04/
  * +0x08-across-every-class theory floated when only the smaller daemons
  * (sec 10.14) had been looked at; each daemon's ring buffer lives at its
- * own offset, not a fixed one. Neither `ProcessCommands()` is implemented
- * here: both dispatch through vtables on objects of unrecovered types.
+ * own offset, not a fixed one. `ProcessCommands()` itself is NOT
+ * implemented here: it dispatches through vtables on objects of
+ * unrecovered types.
+ *
+ * `AddPlaybackEvent(CSTGAudioEvent*, unsigned int)`/`AddRecordEvent(
+ * CSTGAudioEvent*, unsigned int)` (batch 51, `.text+0x11a4f0`/
+ * `.text+0x11a570`, 111/103 bytes) ARE now real -- see
+ * src/engine/file_opener_events.cpp. These resolve the "real per-slot
+ * semantics not determined" gap left above: the 32 "slots" from +0x10..
+ * +0x20c are two 16-lane producer-side event queues addressed by the
+ * SAME `index` argument -- `AddPlaybackEvent` targets `this+index*16`,
+ * `AddRecordEvent` targets `this+index*16+0x100` (0x100 further into the
+ * SAME 32-slot span, i.e. lanes 16 apart, not a separate array). Each
+ * 16-byte lane is a plain 4-field ring (base ptr/write idx/read idx/
+ * capacity, same shape as every other ring in this codebase): if
+ * `(writeIdx+1) % capacity == readIdx` (lane full), the event is instead
+ * written into a FIXED fallback lane at `this+0x200` (which -- confirmed
+ * by address arithmetic, not asserted independently -- is exactly slot
+ * 31 of the same 32-slot ctor-zeroed span, `+0x10 + 31*0x10`) with NO
+ * bounds/fullness check of its own on that fallback lane (a real,
+ * faithfully-preserved silent-overwrite-on-double-overflow quirk).
+ * `index` itself is read but never validated by either method --
+ * `ProcessPlaybackCommands()`'s own real call sites (hdr_playback_
+ * commands.cpp) pass values whose meaning ranges from "this ring's own
+ * current producer index" to "a dereferenced field of a caller-supplied
+ * CSTGFileOpener*", confirmed via register-level tracing, not assumed to
+ * be a clean 0..15 channel number.
  */
 class CSTGFileOpener {
 public:
 	static CSTGFileOpener *sInstance;
 	CSTGFileOpener();
+	void AddPlaybackEvent(CSTGAudioEvent *event, unsigned int index);
+	void AddRecordEvent(CSTGAudioEvent *event, unsigned int index);
 	void ProcessCommands();
 	/* Confirmed real (called from CSTGEngine::Initialize(), sec 10.58),
 	 * body not reconstructed in this pass. */

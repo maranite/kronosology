@@ -104,16 +104,21 @@ void CSTGEffectManager::Initialize() {}
 /* ProcessCommands()/Initialize() (CSTGMonitorMixer/CSTGHDRFileWriter/
  * CSTGSamplingDaemon/CSTGFileCloser/CSTGCDWorker) are real now, sec
  * 10.144 -- see managers.cpp. ProcessCommands() calls three siblings;
- * one (ProcessSamplerCommands, batch 50) is now real too, see below --
- * two still deferred, stubbed below. */
-void CSTGHDRManager::ProcessPlaybackCommands() {}
+ * two (ProcessSamplerCommands batch 50, ProcessPlaybackCommands batch
+ * 51 -- see hdr_sampler_commands.cpp/hdr_playback_commands.cpp) are now
+ * real too -- one (ProcessHDRRecord) still deferred, stubbed below. */
 /* CSTGHDRManager::ProcessRecordCommands() is real now, batch 15 -- see
  * src/engine/hdr_record_track.cpp (also introduces CSTGRecordTrack::
  * Start()/Pause()/Stop(), StandbyRec() deliberately deferred).
  * CSTGHDRManager::ProcessSamplerCommands() is real now too, batch 50 --
  * see src/engine/hdr_sampler_commands.cpp (also introduces CSTGSampler::
  * StandbyDisk()/StandbyRAM()/Start(bool)/Stop(), all four confirmed real
- * but given deliberately deferred no-op bodies there, not here). */
+ * but given deliberately deferred no-op bodies there, not here).
+ * CSTGHDRManager::ProcessPlaybackCommands() is real now too, batch 51 --
+ * see src/engine/hdr_playback_commands.cpp. ProcessHDRRecord() itself
+ * remains deferred (below) -- a genuine per-track audio-DSP peak-meter
+ * loop, precisely characterized in oa_engine.h's own class comment but
+ * blocked on three still-unreconstructed DSP callees. */
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGMonitorMixer::RunMonitors() {}
 void CSTGFileOpener::Initialize() {}

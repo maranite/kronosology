@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * test_stg_daemons.cpp  -  host-side known-answer test for
- * signal_timed_out_daemons() (src/init/stg_daemons.cpp, sec 10.183).
+ * signal_timed_out_daemons() (src/init/stg_daemons.cpp, sec 10.183) and
+ * signal_daemon() (batch 51, same file).
  *
  * Links only src/init/stg_daemons.cpp. Mocks its two dependencies:
  *   - GetSTGTickCount(): returns a SCRIPTED tick sequence so the test
@@ -122,6 +123,26 @@ int main(void)
 	check_eq("only the genuinely-old-across-wrap daemon fired", g_pendCount, 1);
 	check_eq("...it was daemon[2]", g_pended[0], 0xB2);
 	check_eq("recent-across-wrap daemon[1] did NOT fire", gStgDaemons[1].lastTick, 0xFFFFFFF0u);
+
+	printf("[6] signal_daemon(): unconditional single-entry kick, no timeout check\n");
+	/* Unlike signal_timed_out_daemons()'s own "now" vs "reset" two-tick
+	 * shape, signal_daemon() calls GetSTGTickCount() exactly ONCE -- so
+	 * its lastTick stamp is whatever g_tickSeq[0] ("now") holds, not
+	 * "resetTick". Confirmed by this check itself (would fail loudly if
+	 * that assumption were ever wrong). */
+	reset(/*now=*/7777, 5000);
+	for (int i = 0; i < STG_DAEMON_COUNT; i++) {
+		gStgDaemons[i].lastTick = 990;   /* elapsed way under any timeout */
+		gStgDaemons[i].timeout  = 100;
+		gStgDaemons[i].srq      = 0x300 + i;
+	}
+	signal_daemon(4);
+	check_eq("exactly one srq pended despite no daemon being timed out", g_pendCount, 1);
+	check_eq("...it was daemon[4].srq", g_pended[0], 0x304);
+	check_eq("GetSTGTickCount called exactly once", g_tickCalls, 1);
+	check_eq("daemon[4].lastTick re-stamped to that one tick (7777)", gStgDaemons[4].lastTick, 7777);
+	check_eq("neighbour daemon[3].lastTick untouched", gStgDaemons[3].lastTick, 990);
+	check_eq("neighbour daemon[5].lastTick untouched", gStgDaemons[5].lastTick, 990);
 
 	printf("\n%s (%d failed checks)\n",
 	       g_fail ? "SOME CHECKS FAILED" : "all checks passed", g_fail);

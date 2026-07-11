@@ -205,6 +205,29 @@ extern "C" void rt_pend_linux_srq(unsigned int srq);
 /* The watchdog itself. */
 extern "C" void signal_timed_out_daemons(void);
 
+/*
+ * signal_daemon(daemonIndex) (batch 51, ground truth `signal_daemon`,
+ * `.text+0x11d3c0`, 50 bytes) -- the single-daemon counterpart to
+ * signal_timed_out_daemons()'s own full-table sweep: re-stamps ONE
+ * gStgDaemons[] entry's lastTick to "now" and pends its RTAI SRQ,
+ * on demand rather than only when the periodic watchdog notices a
+ * timeout. Confirmed real body (register-level, `objdump -dr`):
+ *   gStgDaemons[daemonIndex].lastTick = GetSTGTickCount();
+ *   rt_pend_linux_srq(gStgDaemons[daemonIndex].srq);
+ * (the `daemonIndex*0x60` stride -- `lea edx,[ebx+ebx*2]; shl edx,5`,
+ * i.e. `ebx*3*32` -- is byte-identical to STGDaemonWatch's own
+ * confirmed size, and the two field offsets used, ground-truth
+ * `0x1077d8`/`0x1077e4`, are exactly `gStgDaemons` base + 0x18/+0x24 --
+ * lastTick/srq, matching this header's own already-established layout
+ * exactly). First confirmed real caller: `CSTGHDRManager::
+ * ProcessPlaybackCommands()` (batch 51, see hdr_playback_commands.cpp),
+ * which always passes literal 0 (daemon index 0, "OAStreamingReader").
+ * No bounds check on `daemonIndex` -- faithfully unchecked, matching
+ * ground truth exactly (an out-of-range index would read/write past
+ * `gStgDaemons[STG_DAEMON_COUNT-1]`, same as the real target).
+ */
+extern "C" void signal_daemon(unsigned int daemonIndex);
+
 /* Daemon lifecycle (batch 40, src/init/daemon_lifecycle.cpp). Signatures
  * match ground truth's own init_module()/oa_init.h callers exactly. */
 extern "C" int  setup_stg_daemons(void);
