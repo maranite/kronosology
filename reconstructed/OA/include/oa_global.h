@@ -2955,8 +2955,76 @@ public:
 	 * header's own declarations above. */
 	void Initialize();
 
-	/* Confirmed real (via relocation from Initialize), own body not
-	 * reconstructed in this pass. */
+	/*
+	 * InitializePerformances() (`.text+0x67d0`, 7021 bytes -- BY FAR the
+	 * largest still-stubbed init-path function, sec 10.204/batch 53
+	 * investigation, own body NOT reconstructed this pass -- precisely
+	 * characterized instead, matching this project's "precisely
+	 * characterize, don't just re-cite" standard). Confirmed structure
+	 * via a full objdump -d -r + relocation trace (107 branches, only 9
+	 * distinct external call targets total -- genuinely call-light for
+	 * its size):
+	 *
+	 * 1. A confirmed ~23-24 iteration loop (`ebx` 0..0x16, exits at
+	 *    `ebx==0x17`) over `eSTGProgramBankId` values, each iteration:
+	 *    builds a filename via `snprintf` (two different format-string/
+	 *    id-offset branches depending on `ebx <= 0xf` vs `> 0xf` --
+	 *    likely two different bank-name numbering schemes, e.g. factory
+	 *    vs. user banks), constructs a stack-local `CKorgProgBankFile`
+	 *    (own vtable `_ZTV17CKorgProgBankFile`, confirmed real),
+	 *    `CSTGProgramBank::Initialize(eSTGProgramBankId, eSTGProgramBankType, bool)`,
+	 *    `CKorgPreloadFile::Load()`, then `CKorgPreloadFile::~CKorgPreloadFile()`
+	 *    -- a genuine FILE-LOADING loop (reads factory/preload program-
+	 *    bank files off the SSD), matching this project's already-
+	 *    established `CSTGMultisampleBankManager::StartupInitializeROMBank/
+	 *    RAMBank`-class "genuine filesystem subsystem, safe-default-
+	 *    deferred" precedent (batch 52, `load_global_resources.cpp`) --
+	 *    NONE of `CKorgProgBankFile`/`CKorgPreloadFile`/`CSTGProgramBank`
+	 *    are declared anywhere in this project yet (three brand-new
+	 *    classes needed). A confirmed per-bank bitmask update
+	 *    (`this->fieldAt(0x294f8) |= (1 << ebx)` on success, `&= ~(1 <<
+	 *    ebx)` and a retry-with-alternate-filename path on
+	 *    `CKorgPreloadFile::Load()` failure) also touches
+	 *    `STGAPIFrontPanelStatus::sInstance` -- confirmed real, not yet
+	 *    independently cross-checked against that class's own other
+	 *    confirmed fields.
+	 * 2. Immediately after the loop: `CSTGProgramBank::GetPatchSize()`
+	 *    (const) on the LAST bank touched, then a single `CSTGProgram::
+	 *    Initialize(eSTGProgramBankId, unsigned int, eSTGVoiceModelType)`
+	 *    call (voice model type argument confirmed literal `1`) --
+	 *    `CSTGProgram` already has a minimal ctor-only declaration in
+	 *    this header; `Initialize()` itself is a new method, not yet
+	 *    declared.
+	 * 3. The bulk of the function (`.text+0x6912` to `.text+0x7ffd`,
+	 *    ~5872 bytes, ~83% of the total, confirmed via the call-target
+	 *    scan to contain ZERO further external calls except ONE raw
+	 *    vtable dispatch, `call *0x58(%edx)`, matching this project's
+	 *    established "raw vtable-slot call" idiom for not-fully-typed
+	 *    virtual dispatch) -- a large, not-yet-traced loop/table
+	 *    building default performance/program-slot content, indexed via
+	 *    a confirmed `0xcf381`-byte stride (`imul $0xcf381, ...`)
+	 *    against a base at `this+0x1c77f10`-ish -- own iteration count
+	 *    and per-slot field layout NOT yet determined, a genuinely
+	 *    open-ended task for whichever batch picks this up next.
+	 * 4. A single, confirmed-real `CSTGGlobal::SubmitPerfChangeRequest(
+	 *    CSTGPerfChangeRequest&)` call at the very end (`.text+0x7ffd`)
+	 *    -- `SubmitPerfChangeRequest()` itself is ALREADY real (sec
+	 *    10.116, see global.cpp), so THIS caller's own eventual
+	 *    reconstruction would link against an already-real dependency
+	 *    for that one call site at least.
+	 *
+	 * Blocked on: three brand-new not-yet-declared classes
+	 * (`CKorgProgBankFile`/`CKorgPreloadFile`/`CSTGProgramBank`, all
+	 * genuine filesystem I/O, DSP-stub-callee-class candidates once
+	 * declared) plus a new `CSTGProgram::Initialize()` method, plus the
+	 * still-untraced ~5872-byte block 3 above. Substantially larger and
+	 * less tractable than either of this same batch's own two
+	 * completed targets (`CSTGPerformanceVarsManager::Initialize()`,
+	 * `CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors()`)
+	 * -- left for a future batch with a correspondingly larger time
+	 * budget, per the sec 10.185/10.203 policies' own explicit allowance
+	 * for partial-success outcomes on a function this size.
+	 */
 	void InitializePerformances();
 
 	/*
