@@ -4235,3 +4235,131 @@ any future stream-cipher-style round-trip test**:
 `CTFXEffectSlot`). `ChangeProgram`/`GetChordSource` via growing
 `g_programSlotVtable` to 57 slots (unrelated to and untouched by this
 batch). `CSTGPianoModel::RescanPianoTypes()` (unchanged, sec 10.153).
+
+**Batch 47 specifics** (2026-07-11, sec 10.198, commit TBD): closed
+`CSTGProgramSlot::ChangeProgram(CSTGProgram*)`, sec 10.194's own smaller
+alternate cluster entry point, still unexplored through batch 46 --
+`src/engine/global.cpp`. `bar2_stubs.cpp` bare-`{}` count 82 -> 83 (net
++1: removed the `ChangeProgram` bare stub, added TWO new bare-`{}` DSP
+stubs, `CSTGSlotVoiceData::Setup()`/`CSTGProgramSlot::
+CompleteLoadProgram()` -- both confirmed real, both genuinely large
+"load a program into a voice" setup routines, sec 10.185 out of scope --
+an honest, reported INCREASE, not a decrease, per the task briefing's own
+explicit allowance for this).
+
+**Headline finding: a PRIOR batch's own `readelf -rW` vtable-slot-target
+claim was simply wrong, and re-deriving it directly unblocked the whole
+function.** Sec 10.194 said `ChangeProgram`'s one vtable dispatch (`call
+*0xe0(%ecx)`) resolves to `GetChordSource() const`. A fresh, independent
+read of BOTH derived classes' own `.rel.rodata._ZTV*` relocation tables
+at the exact physical slot (58 = 2-header + 56, i.e. byte offset 0xe8
+from the vtable symbol's own start) found the REAL target is
+`ProcessPreviousSVDOnProgramChange(CSTGSlotVoiceData*)` -- a totally
+different virtual, whose own body (both the base impl and
+`CSTGProgramModeProgramSlot`'s own override) calls ONLY already-real
+siblings (`SetIsDying()`/`FreeSlotVoiceData(bool)`) with NO DSP callee at
+all, unlike what the `GetChordSource` guess would have implied. Same
+"a prior batch's own deferral/identification claim citing a specific
+number or symbol is a hypothesis, not a fact -- always re-derive
+yourself, ideally via the SAME tool the original claim used (here,
+`readelf -r` against the ACTUAL relocation table, not general reasoning
+about which getter 'sounds right')" lesson as sec 10.195's vtable-size
+correction, one level more specific (a wrong SYMBOL identification this
+time, not a wrong SIZE).
+
+**New technique: splitting a single shared vtable pointer into
+per-class ones the moment (and only the moment) they must genuinely
+differ.** `g_programSlotVtable` (sec 10.153, 10 slots, only slot 7
+populated, safely SHARED between `CSTGProgramModeProgramSlot`/
+`CSTGProgramModeDrumTrackSlot` because nothing dispatched past slot 7)
+became `g_programModeProgramSlotVtable`/`g_programModeDrumTrackSlotVtable`
+(60 slots each, matching the confirmed real `_ZTV15CSTGProgramSlot[0xf0]`
+size) once slot 56 needed to hold a DIFFERENT real function pointer per
+class. Every OTHER slot (including 7) is an unchanged inert trap in both
+arrays -- don't over-generalize "split the whole vtable," only the ONE
+slot that actually differs needs new content; the rest can stay
+identical copy-paste.
+
+**Two own-draft bugs in the ChangeProgram translation itself, both
+caught by a real SIGSEGV, not proofreading:**
+1. **A manually-dispatched "vtable" call's SOURCE OBJECT (whose own +0
+   field holds the vtable pointer) is not necessarily the same object as
+   the call's own EXPLICIT ARGUMENT.** Ground truth's `mov ecx,[ebx]`
+   (ebx=this, the ProgramSlot) right before `call [ecx+0xe0]` selects the
+   dispatch target via THIS SLOT's own class (exactly why the two
+   derived classes differ at slot 56), while EDX (the payload, set
+   several instructions earlier and confirmed untouched by the
+   intervening `rep movs`) is the plain argument. First draft wrongly
+   passed the PAYLOAD as both -- crashed calling through the payload's
+   own (zeroed, in the KAT) "+0" field misread as a function pointer.
+   General lesson: when a disassembly shows `mov ecx,[REG_A]` then `call
+   [ecx+OFFSET]` with a DIFFERENT register (REG_B) surviving as an
+   explicit argument, do NOT assume the callee's "self" and its "explicit
+   arg" are the same value just because both happen to be pointers of
+   the same class -- trace which SPECIFIC register feeds the `[REG+0]`
+   vtable read.
+2. **Off-by-4 reusing an established "node vs `link=node+4`" shape from
+   a DIFFERENT prior KAT.** `GetFreeSlotVoiceData()`'s own return value
+   is `link = freeNode+4` (test [38]'s own established shape, self-
+   pointer stored at `node1+0xc` so `link+8` resolves there) -- a fresh
+   KAT reusing this shape initially set `*(freeNode+8)` directly
+   (forgetting the `+4` indirection baked into `link`), landing one field
+   short of where `GetFreeSlotVoiceData`'s OWN internal code (and this
+   batch's OWN new `ChangeProgram` reader of the exact same field) both
+   expect the payload pointer. Fixed to `*(freeNode+0xc)`. Lesson: when
+   reusing an established node/link shape from a sibling KAT, copy the
+   EXACT field offset arithmetic, not just "roughly the same idea" --
+   the `node` vs `link` (`=node+N`) distinction is exactly the kind of
+   detail that silently shifts by a few bytes if reconstructed from
+   memory instead of copied.
+
+**A genuine LATENT bug in ALREADY-COMMITTED test code (not this batch's
+own new code), exposed by this batch's own newly-real populator being
+the first to re-exercise a code path an earlier scenario had left in a
+bad state:** scenario [15] (`test_global.cpp`, sec 10.81) repoints the
+(then-single, shared) vtable global at an mmap32'd buffer for its own
+slot-7 test, `munmap()`s it, and NEVER restores the global afterward --
+harmless for 30+ batches because nothing later ever constructed another
+instance of these classes needing real dispatch past slot 7. This
+batch's own new [54] scenario is the first to do so again, and initially
+crashed calling through the now-dangling/freed pointer. Do NOT fix this
+class of bug by having the earlier scenario "clean up after itself" back
+to the file-scope default array -- that default array's OWN address is
+not guaranteed to survive 32-bit truncation on a 64-bit host either
+(the ENTIRE reason mmap32 exists). The correct fix is for the LATER
+scenario to install its OWN fresh, correctly-sized mmap32'd buffer,
+which may require exposing previously-`static` (file-internal)
+implementation functions as plain externs with a header declaration
+(same "move it into a shared header once a sibling needs it" step as
+sec 10.197's `bzzzzzzzzzzzt11/12`) so the test can install the REAL
+function pointers rather than reimplementing a parallel mock of them.
+
+**Third own-draft KAT bug, same family as sec 10.197's own "stage the
+expected value in the mock's own input, not by writing into the output
+buffer" lesson, one step further: an OUTPUT buffer that is itself
+STACK-LOCAL inside the function under test cannot be read back safely
+AFTER that function returns.** `ChangeProgram`'s own `channelValues`
+argument to `Setup()` points at ITS OWN stack-local scratch array. A
+draft KAT captured only the pointer in the `Setup()` mock and tried to
+verify its content from the TEST's own code after `ChangeProgram()` had
+already returned (a popped stack frame) -- silently wrong content
+instead of a crash. Fixed by snapshotting the full buffer content
+SYNCHRONOUSLY INSIDE the mock, at the moment of the call, while the
+caller's stack frame is still live. General rule for any future KAT
+whose mock receives a pointer into the caller's own locals: snapshot
+by value inside the mock, never re-dereference the raw pointer after
+the call returns.
+
+**Remaining candidates for a future batch**: `GetPatchStaticCosts`/
+`RunVoiceModelStaticFront`/`StaticBack`/`RunVoiceModelFeedback`/
+`GetTotalStaticCosts` (unchanged, genuine vtable DISPATCH cluster).
+`CSTGSlotVoiceData::Setup()`/`CSTGProgramSlot::CompleteLoadProgram()`
+(this batch's own two new deferred DSP stubs, 3652/859 bytes -- a SECOND
+real caller, `CSTGProgramSlot::LoadCombiTrackForPerformanceChangeEv`,
+exists too, found via relocation search but not reconstructed).
+`CSTGPianoModel::RescanPianoTypes()` (unchanged, sec 10.153). The
+`ProcessCommands()`/`RunEffects` family (re-examined this batch,
+disassembled `CSTGHDRFileReader::ProcessCommands`, 118 bytes) --
+RE-CONFIRMED (not just re-quoted) still genuinely blocked by an
+unrecovered per-command function-pointer table, a real callback-queue
+pattern rather than a simple vtable.
