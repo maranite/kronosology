@@ -4733,3 +4733,129 @@ literal `/` + `*` sequence) inside a `/* ... */` comment triggers
 in "verify/*.cpp" -- reworded to "verify/ .cpp" (a space before the dot)
 to avoid it, same family as the already-documented "literal `*/`
 prematurely closing a comment" gotcha, just the mirror-image trigger.
+
+**STANDING PRIORITY CHANGE (2026-07-11, sec 10.203, applies to ALL future
+batches, not just batch 52): prioritize `init_module()`'s own transitive
+call graph (the `insmod`/boot/init path) over the general smallest-first
+`bar2_stubs.cpp` sweep and over deep runtime/audio-command-processing
+reconstruction.** Concretely, before picking a general smallest-first
+candidate: (1) check whether `init_module()`'s own call graph -- direct
+calls PLUS constructors reached via `CSTGGlobal::CSTGGlobal()`'s/
+`CSTGEngine::Initialize()`'s own placement-new chains PLUS any daemon/
+thread entry points *started* during init (their steady-state loop body
+being DSP/runtime work is fine to leave stubbed, per the sec 10.185
+policy -- only the START-of-thread call itself needs to be safe) --
+contains any remaining stub; (2) if so, THAT is this batch's priority,
+regardless of its size relative to the general sweep's smallest
+candidate; (3) only fall back to the general sweep once the
+currently-known init-path graph is confirmed stub-free; (4) periodically
+(not every batch) attempt a fresh VM boot test (sec 10.184 technique) to
+discover any init-path callees static tracing alone hasn't found yet.
+**Why**: the user wants confidence OA.ko will actually load/init
+correctly (to whatever extent the known `fs_base` bzImage-level blocker,
+sec 10.184, allows) as the primary goal -- deep runtime features the
+module would never reach anyway if init itself is broken are lower
+value than closing init-path gaps first.
+
+**Batch 52 (2026-07-11, MASTER_REFERENCE sec 10.204, commit `af6839d`):
+`load_global_resources()` reconstructed for real, closing the FIRST gap
+the new sec 10.203 priority ever found; three more found+characterized,
+not yet closed.** Started on the ORIGINALLY suggested priority
+(`ProcessHDRRecord()`, sec 10.185 pattern) and finished it completely
+(93/93 host tests passing, three clean rebuild passes) before a
+mid-batch message imposed the new sec 10.203 priority. Followed the
+directive's own explicit instruction for "already-finished-but-
+uncommitted" work: `git stash push -u` rather than either committing it
+(against the new instruction) or destroying it (wasteful given it was
+correct and complete) -- `stash@{0}`, message "batch52-abandoned:
+ProcessHDRRecord()...", fully recoverable via a plain `git stash pop` by
+a future batch that picks the runtime-feature priority back up. **New
+general technique worth remembering: when a mid-batch priority change
+lands on already-finished-but-uncommitted work, `git stash push -u` (not
+commit, not discard-for-real) is the right move -- preserves real,
+verified effort at zero ongoing cost while honestly complying with "don't
+commit this, pivot now."**
+
+**How the ONE init-path gap was found**: `init_module()`'s own DIRECT
+call graph (`src/init/init_module.cpp`, ~30 callees) was fully traced by
+hand -- every callee checked against whether it has a real body anywhere
+in this project. All but one already did. The gap:
+`load_global_resources()` (init_module step 11) was a bare `extern "C"
+int load_global_resources() { return 0; }` in `bar2_stubs_c.cpp` (batch
+38's own "kept DEFERRED" scout note) -- **a NON-bare stub shape** (it has
+`{ return 0; }` content, not literally `{}`), so it never counted toward
+`bar2_stubs.cpp`'s own bare-`{}` tally at all (the sec 10.164-established
+"hidden stub" gotcha, reconfirmed here from a fresh angle: **when
+auditing init-path reachability specifically, grep `bar2_stubs_c.cpp` and
+`bar2_stubs_auth.cpp` too, not just `bar2_stubs.cpp`'s bare-`{}` count --
+a `{ return 0; }`/`{ return -1; }`-shaped stub is just as much an
+init-path gap as a bare `{}` one, but invisible to the bare-`{}` tally.**
+
+**Reconstruction technique notes**: `load_global_resources()` itself
+(277 bytes, `nm -S`-confirmed -- the batch-38 scout's own "115 bytes"
+note was stale/truncated) was a clean, single-pass `.rel.text`
+relocation-resolution + disassembly job, same techniques as any other
+smallest-first pick. Its own callees split cleanly into "already real,
+just never wired up" (`CSTGKLMManager::AuthorizeBuiltins()` -- existed
+since an earlier batch, but the OLD stub never called it, so it was
+dead code from this call site's own perspective until this batch) vs.
+"genuinely new, deferred per sec 10.185" (`StartupInitializeROMBank`/
+`StartupInitializeRAMBank`/`ScanFileSystem`/`CSTGInstalledEXProducts::
+Initialize`, filesystem/ROM-scan subsystems, safe-default bodies added to
+`bar2_stubs_auth.cpp` -- the pre-existing, already-established home for
+this EXACT class pair's other deferred methods, found via a plain grep
+for sibling methods' definition sites rather than guessing a new file).
+
+**Real duplicate-symbol bug caught by `make ko`, not host tests**: an
+early draft DEFINED `gSystemIsInitialized` inside the new file instead of
+just declaring it `extern` -- this symbol was ALREADY defined in
+`src/engine/push_unsolicited_message.cpp` from an earlier batch (same
+`.bss+0x10725c` address, cross-confirmed via independent relocation
+traces from both call sites). Host-side `make all`/`verify` NEVER catches
+this class of bug (each `verify/*.cpp` binary links only ITS OWN chosen
+subset of `.cpp` files, so two real-but-independently-added global
+definitions never collide there) -- **only the full-project `make ko`
+link catches a duplicate global-data definition across TUs that no single
+host test binary ever combines**, reconfirming the standing "duplicate-
+global-definition/stale-object link errors only surface at a FULL `make
+ko` rebuild" gotcha from a fresh instance. General lesson for the new
+init-path-priority era specifically: init-path reconstruction is far more
+likely than runtime-feature work to reach into globals ALREADY owned by
+some other, unrelated-looking already-real file (this project's `.bss`
+symbols are shared across many small `src/init/`/`src/engine/` TUs by
+design) -- grep for an EXISTING DEFINITION (not just a declaration)
+before adding a new global, every time, even when the symbol "sounds
+like" it obviously belongs to the file you're writing.
+
+**Systematic init-path audit technique** (worth reusing for future
+batches continuing this priority): take `bar2_stubs.cpp`'s own remaining
+bare-`{}` function-name list (79 after this batch, was 80 before --
+unchanged by this batch's own fix since the fix lived in
+`bar2_stubs_c.cpp`, a DIFFERENT stub shape entirely) and grep every
+ALREADY-REAL source file (excluding `src/stub/`) for an actual call site
+of each name. This positively finds genuine init-path-reachable stubs
+(this batch found three: `CSTGToneAdjustDescriptor::
+InitializeCommonToneAdjustDescriptors()` 2662B via `CSTGVoiceModelManager`'s
+ctor -> `CSTGEngine::Initialize()` -> `setup_global_resources()` ->
+init step 8; `CSTGPerformanceVarsManager::Initialize()` 1431B and
+`CSTGGlobal::InitializePerformances()` 7021B, both via `CSTGGlobal::
+Initialize()` -> `setup_global_resources()` -> init step 8) AND
+positively RULES OUT plausible-sounding false leads (`CSTGMidiPortManager::
+Initialize()` -- confirmed via its own pre-existing class comment NOT in
+`CSTGEngine::Initialize()`'s confirmed ~44-entry construction table at
+all; `CSTGFileCloser::ProcessCommands()` -- confirmed part of the
+already-documented runtime-only file-daemon ring-buffer-consumer cluster;
+`CSTGAudioThread::AudioTickLoopRoutine()` -- confirmed a thread ENTRY
+POINT started during init (audio_start.cpp, step 13), matches the sec
+10.203 directive's own explicit thread-entry-point carve-out, safe as a
+bare no-op). All three genuine finds are LARGE (1.4KB-7KB, roughly the
+same size class as the already-deferred file-daemon `ProcessCommands()`
+cluster) and were left precisely characterized but NOT reconstructed
+this batch (time budget) -- HIGH PRIORITY for whichever batch picks up
+sec 10.203 next, per the new standing directive; don't re-discover them
+from scratch, `MASTER_REFERENCE.md` sec 10.204 has the exact addresses/
+sizes/call chains already.
+
+**bar2_stubs.cpp bare-`{}` count: unchanged, 80** (this batch's gap was a
+`bar2_stubs_c.cpp` non-bare stub, see above) -- report future deltas
+against THIS number, not against a stale pre-stash count.
