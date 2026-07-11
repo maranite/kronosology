@@ -706,8 +706,19 @@ struct CSTGToneAdjust {
  * real, functionally-inert redundancy, not a conflict), zeroes ~30
  * confirmed byte/dword fields, and placement-constructs an embedded
  * `CSTGToneAdjust` sub-object at `this+0x7f` (see that class above).
+ *
+ * DRIVE-BY FIX (batch 45): this placeholder was declared as only 12
+ * bytes, but a direct `nm -CS` re-check (not `readelf -SW`) finds the
+ * REAL vtable is 0xf0 bytes (240, 60 slots) -- the same class of
+ * too-short-hand-crafted-vtable risk sec 10.186 found for `CCostProfile`.
+ * Harmless today (nothing reconstructed dispatches through it --
+ * `ChangeProgram`'s own `call *0xe0(*this)` remains a bare-`{}` stub),
+ * corrected now (batch 45 adds sixteen MORE placement-new instances of
+ * this exact class in `combi_ctor.cpp`) to remove the landmine for
+ * whichever future batch promotes `ChangeProgram`. No file under verify/
+ * has its own local copy of this symbol (confirmed via `grep -rln`).
  */
-extern "C" unsigned char _ZTV15CSTGProgramSlot[12];
+extern "C" unsigned char _ZTV15CSTGProgramSlot[0xf0];
 struct CSTGProgramSlot {
 	/* +0x0..+0x3, real class has a vtable (Initialize() dispatches
 	 * through slot 7 -- .text+0x1c/4 -- not independently named in
@@ -1665,14 +1676,33 @@ extern "C" unsigned char _ZTV15CSTGParamsOwner[0x60];
 extern "C" unsigned char _ZTV15CSTGStepSeqBase[0xc];
 extern "C" unsigned char _ZTV17CSTGCommonStepSeq[0x6c];
 struct CSTGProgram { CSTGProgram(); };
+/*
+ * CSTGCombi::CSTGCombi() (batch 45, `.text+0x8fb40`, 730 bytes) confirmed
+ * real -- see src/engine/combi_ctor.cpp for the full derivation. Genuine
+ * C++ multiple inheritance, same two base vtables as CSTGProgram
+ * (`CSTGPerformance@+0x0`, `CSTGEffectRack@+0x4`), and the SAME sub-object
+ * list up through `CSTGAudioInput@+0xae7` byte-for-byte (all already real
+ * since batch 44) -- then diverges: overwrites +0x0 with its OWN derived
+ * vtable (`_ZTV9CSTGCombi+8`, confirmed real 0x9c/39 slots), then
+ * placement-constructs SIXTEEN embedded `CSTGProgramSlot` sub-objects at a
+ * confirmed real 0xe8-byte stride (`+0xb63..+0x18fb`), each patched
+ * afterward with its own zero-based index byte at +0x4, then one final
+ * zeroed byte at `+0x19e3` (immediately past the 16th slot's own extent --
+ * NOT a 17th sub-object, no ctor call there). Cross-checks cleanly against
+ * `CSTGSequence`'s own already-confirmed layout below: its `CSTGHDRTrack`
+ * array begins at `+0x19e7`, exactly 4 bytes after this ctor's own last
+ * write, consistent with `CSTGCombi`'s own object footprint ending right
+ * there and `CSTGSequence`'s derived tail picking up cleanly afterward.
+ */
+extern "C" unsigned char _ZTV9CSTGCombi[0x9c];
 struct CSTGCombi { CSTGCombi(); };
 /*
  * CSTGSequence::CSTGSequence() (sec 10.153, `.text+0xcbfd0`, 546 bytes)
  * confirmed real: calls the base `CSTGCombi::CSTGCombi()` first (Itanium
  * "base ctor first" pattern, matching CSTGProgramSlot's own derived-ctor
- * precedent -- `CSTGCombi` itself is STILL a deliberately-deferred no-op
- * stub, sec 10.13, so this base call is currently inert, not a
- * regression), installs its own vtable (`_ZTV12CSTGSequence`, zero-
+ * precedent -- `CSTGCombi::CSTGCombi()` is confirmed real too now, batch
+ * 45, see src/engine/combi_ctor.cpp), installs its own vtable
+ * (`_ZTV12CSTGSequence`, zero-
  * filled placeholder, never dispatched by anything reconstructed here),
  * then a confirmed real 44-byte-stride (`0x2c`) array of 16 embedded
  * "CSTGHDRTrack" sub-objects at `+0x19e7..+0x1c7b` (each: install its

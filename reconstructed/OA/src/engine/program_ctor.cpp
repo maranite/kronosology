@@ -51,11 +51,15 @@
  *
  * CSTGCombi::CSTGCombi() (a structurally near-identical sibling ctor,
  * same dual-vtable-install shape, same CIFXEffectSlot/CMFXEffectSlot/
- * CTFXEffectSlot/CSTGEffectBalance/CSTGCommonEffectLFO sub-objects, plus
- * 15 embedded CSTGProgramSlot instances instead of the ToneAdjust/
- * CommonLFO/StepSeq tail below) is NOT done this batch -- deliberately
- * left for a future batch to close out using this same now-established
- * technique, given the time already spent deriving this one.
+ * CTFXEffectSlot/CSTGEffectBalance/CSTGCommonEffectLFO sub-objects) was
+ * NOT done in this (batch 44) pass -- deliberately left for a future
+ * batch to close out using this same now-established technique, given
+ * the time already spent deriving this one.
+ *
+ * UPDATE (batch 45): now done -- see src/engine/combi_ctor.cpp. Turned
+ * out to have SIXTEEN embedded CSTGProgramSlot instances (a fresh
+ * disassembly count, not the "15" guessed above from memory alone),
+ * not the ToneAdjust/CommonLFO/StepSeq tail this file has.
  */
 
 #include "oa_global.h"

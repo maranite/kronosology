@@ -23,7 +23,10 @@
 #include "oa_internal.h" /* placement operator new(size_t, void*) */
 
 unsigned char _ZTV14CSTGToneAdjust[12];
-unsigned char _ZTV15CSTGProgramSlot[12];
+/* Sized to the real confirmed 0xf0-byte/60-slot vtable (nm -CS), fixed
+ * batch 45 -- see oa_global.h's own header comment on this symbol for
+ * why (was previously an undersized 12-byte placeholder). */
+unsigned char _ZTV15CSTGProgramSlot[0xf0];
 
 static unsigned int ToU32(void *p)
 {

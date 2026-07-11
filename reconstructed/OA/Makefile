@@ -86,6 +86,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_bus_manager.o \
            src/engine/program_slot_ctor.o \
            src/engine/program_ctor.o \
+           src/engine/combi_ctor.o \
            src/engine/sequence_ctor.o \
            src/engine/streaming_event_manager.o \
            src/engine/sampling_interface_ctor.o \
@@ -287,6 +288,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/audio_bus_manager.cpp \
        src/engine/program_slot_ctor.cpp \
        src/engine/program_ctor.cpp \
+       src/engine/combi_ctor.cpp \
        src/engine/sequence_ctor.cpp \
        src/engine/streaming_event_manager.cpp \
        src/engine/sampling_interface_ctor.cpp \
@@ -396,7 +398,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_calibration_data \
          verify/test_daemon_lifecycle \
          verify/test_voice_models \
-         verify/test_atmel_deax verify/test_program_ctor
+         verify/test_atmel_deax verify/test_program_ctor \
+         verify/test_combi_ctor
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -672,6 +675,9 @@ verify/test_atmel_deax: verify/test_atmel_deax.cpp src/auth/atmel_deax.cpp inclu
 
 verify/test_program_ctor: verify/test_program_ctor.cpp src/engine/program_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_program_ctor.cpp src/engine/program_ctor.cpp -o $@
+
+verify/test_combi_ctor: verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

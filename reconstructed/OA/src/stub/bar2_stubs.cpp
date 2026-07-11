@@ -235,7 +235,10 @@ void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, c
 void CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) {}
 void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
 void CSTGComPort::RTAIInterruptHandler(unsigned int, void *) {}
-CSTGCombi::CSTGCombi() {}
+/* CSTGCombi::CSTGCombi() is real now, batch 45 -- see
+ * src/engine/combi_ctor.cpp (resolves the sibling this file's own
+ * GetPatchStaticCosts-area comment, and program_ctor.cpp's own header
+ * comment, both explicitly deferred for a future batch). */
 /* CSTGControllerRTData::CSTGControllerRTData() is real now, sec 10.155 --
  * see src/engine/controller_rt_data_ctor.cpp. CSTGControllerRTData::
  * Initialize()/RequestAnalogInputPositions() reconstructed for real, sec
@@ -316,14 +319,18 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
  * `CSetListEQ::Initialize`, `CSTGEffectManager::RunEffects`) -- making
  * the sec 10.185/10.193 hand-crafted-vtable technique safe to apply
  * here too, just with TWO base vtables instead of one, exactly as this
- * comment's own prior batch speculated might be possible. `CSTGCombi::
- * CSTGCombi()` (same shape, different sub-object list -- 15 embedded
- * `CSTGProgramSlot`s instead of the `CSTGCommonLFO`/`CSTGToneAdjust`
- * tail) is DELIBERATELY NOT done this batch, left for a future batch
- * using this same now-established technique. `GetPatchStaticCosts`/
- * `RunVoiceModelStaticFront`/`StaticBack`/`RunVoiceModelFeedback`/
- * `GetTotalStaticCosts` immediately below remain correctly deferred --
- * THEIR OWN bodies are what would genuinely dispatch through these
+ * comment's own prior batch speculated might be possible.
+ *
+ * UPDATE (batch 45): `CSTGCombi::CSTGCombi()` is now real too -- see
+ * src/engine/combi_ctor.cpp. Same shape as CSTGProgram (shares its
+ * entire sub-object list through CSTGAudioInput@+0xae7 byte-for-byte),
+ * but a fresh disassembly (not the guess this comment previously carried)
+ * found SIXTEEN embedded `CSTGProgramSlot`s, not fifteen, at a confirmed
+ * 0xe8-byte stride, in place of CSTGProgram's own `CSTGCommonLFO`/
+ * `CSTGToneAdjust` tail. `GetPatchStaticCosts`/`RunVoiceModelStaticFront`/
+ * `StaticBack`/`RunVoiceModelFeedback`/`GetTotalStaticCosts` immediately
+ * below remain correctly deferred -- THEIR OWN bodies are what would
+ * genuinely dispatch through these now-real-but-still-zero-filled
  * vtables, a real crash risk until reconstructed for real. */
 void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
@@ -407,10 +414,11 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its
  * siblings. */
 /* CSTGProgram::CSTGProgram() is real now, batch 44 (sec 10.195) -- see
- * src/engine/program_ctor.cpp. Resolves the multiple-inheritance
- * cluster this file's own comment near GetPatchStaticCosts documents
- * batch 43 investigating and deferring -- see that comment (just below)
- * for what's STILL deferred (CSTGCombi::CSTGCombi() and everything that
+ * src/engine/program_ctor.cpp. CSTGCombi::CSTGCombi() is real now too,
+ * batch 45 -- see src/engine/combi_ctor.cpp. Resolves the multiple-
+ * inheritance cluster this file's own comment near GetPatchStaticCosts
+ * documents batch 43 investigating and batch 44/45 closing out -- see
+ * that comment (just below) for what's STILL deferred (everything that
  * actually DISPATCHES through the now-real-but-still-zero-filled
  * CSTGPerformance/CSTGEffectRack/CIFXEffectSlot/CMFXEffectSlot/
  * CTFXEffectSlot vtables). */
