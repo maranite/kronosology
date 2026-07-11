@@ -103,13 +103,17 @@ void CSTGEffectManager::Initialize() {}
  * hdr_manager_init.cpp. */
 /* ProcessCommands()/Initialize() (CSTGMonitorMixer/CSTGHDRFileWriter/
  * CSTGSamplingDaemon/CSTGFileCloser/CSTGCDWorker) are real now, sec
- * 10.144 -- see managers.cpp. ProcessCommands() calls three still-
- * deferred siblings, stubbed below. */
+ * 10.144 -- see managers.cpp. ProcessCommands() calls three siblings;
+ * one (ProcessSamplerCommands, batch 50) is now real too, see below --
+ * two still deferred, stubbed below. */
 void CSTGHDRManager::ProcessPlaybackCommands() {}
 /* CSTGHDRManager::ProcessRecordCommands() is real now, batch 15 -- see
  * src/engine/hdr_record_track.cpp (also introduces CSTGRecordTrack::
- * Start()/Pause()/Stop(), StandbyRec() deliberately deferred). */
-void CSTGHDRManager::ProcessSamplerCommands() {}
+ * Start()/Pause()/Stop(), StandbyRec() deliberately deferred).
+ * CSTGHDRManager::ProcessSamplerCommands() is real now too, batch 50 --
+ * see src/engine/hdr_sampler_commands.cpp (also introduces CSTGSampler::
+ * StandbyDisk()/StandbyRAM()/Start(bool)/Stop(), all four confirmed real
+ * but given deliberately deferred no-op bodies there, not here). */
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGMonitorMixer::RunMonitors() {}
 void CSTGFileOpener::Initialize() {}

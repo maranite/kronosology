@@ -535,12 +535,20 @@ public:
 	/*
 	 * ProcessCommands() (sec 10.144, `.text+0xd5dd0`, 41 bytes) confirmed:
 	 * calls these three confirmed-real siblings on `this`, in this exact
-	 * order. None of the three are implemented in this pass (see
-	 * managers.cpp).
+	 * order. Two of the three are still not implemented in this pass (see
+	 * managers.cpp); ProcessSamplerCommands() is now real, batch 50 -- see
+	 * hdr_sampler_commands.cpp.
 	 */
 	void ProcessPlaybackCommands();	/* .text+0xd5950, confirmed real, deferred */
 	void ProcessRecordCommands();		/* .text+0xd5b20, confirmed real, deferred */
-	void ProcessSamplerCommands();		/* .text+0xd5c50, confirmed real, deferred */
+	/*
+	 * ProcessSamplerCommands() (batch 50, `.text+0xd5c50`, 380 bytes)
+	 * confirmed real -- see hdr_sampler_commands.cpp for the full
+	 * derivation (a ring-buffer command consumer, same overall shape as
+	 * ProcessRecordCommands() above, dispatching onto the embedded
+	 * CSTGSampler at `+0x1190`).
+	 */
+	void ProcessSamplerCommands();
 	void ProcessCommands();
 	/*
 	 * Initialize() (batch 22, `.text+0xd41c0`, 1284 bytes) confirmed
@@ -710,7 +718,7 @@ public:
  * methoded class in the real binary -- StandbyRAM/StandbyDisk/
  * ProcessSubRate/CopyPretriggerDataForDiskMode/etc, sec 10.162's own
  * flagged blocker for `CSTGHDRManager::ProcessSamplerCommands()`).
- * Only `Initialize()` is reconstructed here -- confirmed via full
+ * `Initialize()` reconstructed batch 22 -- confirmed via full
  * disassembly to have exactly ONE external call
  * (`CSTGBankMemory::AllocAligned`), no dependency on any of this
  * class's own other (unreconstructed) methods, so it stands alone
@@ -721,10 +729,35 @@ public:
  * ring buffer, stored at `+0x17714` -- the SAME "capacity 0x61,
  * 4-byte-stride ring" shape already confirmed for
  * `CSTGRecordTrack::Initialize()`'s own `+0xc`/`+0x18` fields.
+ *
+ * StandbyDisk()/StandbyRAM()/Start(bool)/Stop() (batch 50) -- confirmed
+ * real, all four cross-confirmed via DIRECT relocation resolution (not
+ * just signature-shape guessing) as `CSTGHDRManager::
+ * ProcessSamplerCommands()`'s own four ring-buffer command targets --
+ * see hdr_sampler_commands.cpp for the full derivation, including the
+ * exact regparm(3) argument mapping from each ring entry's fields.
+ * Real sizes: StandbyDisk `.text+0xd7ba0` (0x20f/527 bytes),
+ * StandbyRAM `.text+0xd7a90` (0x110/272 bytes), Start(bool)
+ * `.text+0xd8690` (0x8f/143 bytes), Stop() `.text+0xd81d0` (0x154/340
+ * bytes). Genuine disk/RAM sampling-hardware standby setup and
+ * transport start/stop control on the still-unreconstructed rest of
+ * this enormous (~101KB+) class -- audio-DSP/hardware-adjacent, out of
+ * scope per the sec 10.185 policy. Deliberately deferred no-op bodies,
+ * given in their own dedicated TU (hdr_sampler_commands.cpp, NOT
+ * bar2_stubs.cpp) purely so that TU links standalone -- same treatment
+ * already established for `CSTGRecordTrack::StandbyRec()` (sec 10.162).
  */
 class CSTGSampler {
 public:
 	void Initialize();
+	void StandbyDisk(const char *name, unsigned int arg2, unsigned long arg3,
+			  int busId, int busType, int mode,
+			  unsigned long arg7, unsigned char arg8);
+	void StandbyRAM(short *arg1, short *arg2, unsigned long arg3,
+			 int busId, int busType, int mode,
+			 unsigned long arg7, unsigned char arg8);
+	void Start(bool);
+	void Stop();
 };
 
 /*

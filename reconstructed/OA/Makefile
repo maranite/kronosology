@@ -97,6 +97,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/message_processor.o \
            src/engine/hdr_record_track.o \
            src/engine/hdr_manager_init.o \
+           src/engine/hdr_sampler_commands.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
@@ -309,6 +310,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/message_processor.cpp \
        src/engine/hdr_record_track.cpp \
        src/engine/hdr_manager_init.cpp \
+       src/engine/hdr_sampler_commands.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
@@ -413,7 +415,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_atmel_deax verify/test_program_ctor \
          verify/test_combi_ctor \
          verify/test_atmel_zone_io \
-         verify/test_effect_manager_run_effects
+         verify/test_effect_manager_run_effects \
+         verify/test_hdr_sampler_commands
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -587,6 +590,9 @@ verify/test_smoother_ctor: verify/test_smoother_ctor.cpp src/engine/smoother_cto
 
 verify/test_hdr_manager_init: verify/test_hdr_manager_init.cpp src/engine/hdr_manager_init.cpp src/engine/hdr_record_track.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h include/oa_bank_memory.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_manager_init.cpp src/engine/hdr_manager_init.cpp src/engine/hdr_record_track.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_hdr_sampler_commands: verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp -o $@
 
 verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp -o $@
