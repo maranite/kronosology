@@ -4083,3 +4083,68 @@ derivation of its own, deliberately not attempted this batch).
 57 slots (sec 10.194's own smaller alternate entry point into the same
 general area, still unexplored). `bar2_stubs.cpp`'s other 83 stubs
 otherwise unchanged from sec 10.194's own characterization.
+
+**Batch 45 specifics** (2026-07-11, sec 10.196): closed out the exact
+`CSTGCombi::CSTGCombi()` target batch 44 flagged above as the natural
+next step. Confirmed via fresh full disassembly (`.text+0x8fb40`, 730
+bytes, straight-line, zero branches) that it shares `CSTGProgram`'s own
+two base vtables and its ENTIRE sub-object list byte-for-byte identical
+through `CSTGAudioInput@+0xae7` (all already real since batch 44, so
+zero new sub-object ctors needed this batch), then diverges: overwrites
+its own vtable slot with a BRAND NEW `_ZTV9CSTGCombi` (0x9c/39 slots,
+confirmed via `nm -CS`, a different symbol from `CSTGProgram`'s own),
+then placement-constructs SIXTEEN embedded `CSTGProgramSlot`s at a
+confirmed 0xe8-byte stride -- not fifteen, as this very memory file (and
+`bar2_stubs.cpp`'s own comment) had speculated from memory alone before
+this batch actually disassembled the function. **Lesson: a "the natural
+next step is X, same shape, N sub-objects" note written by a PRIOR
+batch that didn't actually disassemble the target yet is a hypothesis,
+not a confirmed count -- always re-derive the exact sub-object count
+from a fresh disassembly rather than trusting an earlier batch's own
+speculative header-comment arithmetic, even when that earlier batch was
+otherwise very thorough.** All three stale "15 CSTGProgramSlots"/
+"deferred" references (`bar2_stubs.cpp`, `program_ctor.cpp`, this file)
+were corrected alongside the real reconstruction, not left stale.
+
+**Drive-by fix, worth watching for again**: while re-verifying
+`CSTGProgramSlot`'s own vtable ahead of adding sixteen MORE placement-new
+instances of it, `nm -CS` found `_ZTV15CSTGProgramSlot` (sec 10.153's own
+hand-crafted placeholder) was only 12 bytes vs. the real 0xf0-byte/
+60-slot vtable -- the same "too-short hand-crafted vtable" class sec
+10.186 found and fixed for `CCostProfile`. Harmless today (its only real
+dispatcher, `ChangeProgram`, is still a bare-`{}` stub) but fixed anyway
+since this batch was directly adding more placement-new call sites for
+the exact class. **Whenever a batch is about to add MORE instances of an
+already-real sub-object class, it's a cheap, worthwhile moment to
+re-verify that class's own existing hand-crafted vtable size via `nm
+-CS` one more time before proceeding -- these placeholder-size bugs are
+otherwise invisible until the day something finally dispatches through
+them.**
+
+**New micro-gotcha, caught by a real compiler warning (not a
+reconstruction bug): the literal substring `verify/*.cpp` inside a C++
+comment trips GCC's `-Wcomment` ("/* within comment"), the mirror-image
+case of the standing "watch for a literal `*/` prematurely closing a
+comment" gotcha -- this time an unintentional comment-OPEN inside an
+already-open comment, not an unintentional close.** Three occurrences
+(two in this batch's new `combi_ctor.cpp` header comment, one in an
+`oa_global.h` drive-by-fix comment) were caught on the very first build
+and reworded (e.g. "no file under verify/ has its own local copy")
+rather than suppressed. Cheap to avoid going forward: don't write the
+glob pattern `*.cpp` directly after a `/` inside a `/* ... */` comment.
+
+**New KAT-linking technique, a deliberate variant on the
+`test_program_ctor.cpp` precedent, worth reusing whenever a new sibling
+ctor shares MOST of its sub-object list with an already-tested ctor in
+another file**: rather than re-mock `CIFXEffectSlot`/`CSTGVectorMotion`/
+`CSTGControllerInfo` (already real, defined in `program_ctor.cpp`) plus
+every shared `_ZTV*` symbol, `test_combi_ctor.cpp` links
+`program_ctor.cpp` directly ALONGSIDE `combi_ctor.cpp` -- this exercises
+the REAL sub-object field writes at `CSTGCombi`'s own offsets (stronger
+than a pure address-capture mock) while still needing only trivial
+pointer-capturing mocks for the few sub-object ctors that live in files
+NOT linked here (`CSTGAudioInput` in `global.cpp`, `CSTGToneAdjust`/
+`CSTGProgramSlot` in `program_slot_ctor.cpp`). Confirmed safe first via
+`grep -n "program_ctor.cpp" Makefile` -- only `test_program_ctor.cpp`
+itself already links that file, so no duplicate-definition risk from
+adding a second consumer.
