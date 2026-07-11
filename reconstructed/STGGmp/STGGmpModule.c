@@ -24,6 +24,19 @@
 #include <linux/bug.h>
 #include <linux/types.h>
 
+/* For section 5 below: real prototypes/renaming macros for the staged
+ * mpz_* / mpn_* arithmetic + generated-table symbols (gmp.h has the public
+ * mpz_* / mpn_add-family API; gmp-impl.h additionally has the "internal use"
+ * ones this project's own Makefile still stages -- kara_mul_n, toom3_* ,
+ * mul_fft* , dc_divrem_n, sb_divrem_mn, tal-reent's tmp_reentrant_alloc+free --
+ * plus the mp_bases/modlimb_invert_table extern declarations). Safe to
+ * include here: same ccflags-y (-I$(src)/gmp, __GMP_WITHIN_GMP,
+ * -fgnu89-inline, HAVE_CONFIG_H) as every other .c file the Makefile
+ * compiles into this module, so config.h/fib_table.h/mp_bases.h resolve
+ * identically. */
+#include "gmp.h"
+#include "gmp-impl.h"
+
 /* ========================================================================= *
  *  1. Kernel-backed GMP memory allocators
  *
@@ -157,6 +170,92 @@ const unsigned short **__ctype_b_loc(void)
 	return &ctype_b_ptr;
 }
 EXPORT_SYMBOL(__ctype_b_loc);
+
+/* ========================================================================= *
+ *  5. Export the staged GMP mpz_* / mpn_* arithmetic + generated-table
+ *     symbols this module's own Makefile compiles in.
+ *
+ *  GAP FOUND while closing a live boot-test blocker (2026-07-11, OA.ko's
+ *  own `insmod` failed with 9 unresolved `__gmpz_*` symbols): this file
+ *  previously only exported its own genuinely Korg-specific glue (sections
+ *  1-3 above) -- despite README.md's own "exports the full GMP C API it
+ *  uses" claim, NONE of the actual mpz_* / mpn_* arithmetic functions
+ *  compiled in from the staged GMP sources (see fetch-gmp.sh, Makefile's
+ *  STGGmp-objs) ever had their own EXPORT_SYMBOL. They were real, defined
+ *  (T) symbols inside STGGmp.o, just never added to the kernel's export
+ *  table -- so no other module (OA.ko included) could ever actually link
+ *  against them, exactly the failure mode the live boot test hit.
+ *
+ *  Exports every symbol this module's own Makefile currently stages/
+ *  compiles (confirmed via a real `nm STGGmp.ko` pass, not guessed from
+ *  the README's own file list) -- the public mpz_* / select-mpn_* API via
+ *  gmp.h's own name-rewrite macros (`#define mpz_add __gmpz_add` etc, so
+ *  EXPORT_SYMBOL(mpz_add) below genuinely exports `__gmpz_add`, matching
+ *  the compiled symbol name exactly) plus the "internal use" mpn_*
+ *  helpers/tables gmp-impl.h declares under the same rewrite convention
+ *  (`__MPN(name)` macro). `__gmp_digit_value_tab` has no rewrite macro in
+ *  either header (already named that way in dv_tab.c itself) -- hand-
+ *  declared directly. `__clz_tab` (mp_clz_tab.c) is DELIBERATELY not
+ *  exported here: confirmed via direct inspection to compile to ZERO
+ *  bytes on x86 (guarded by `COUNT_LEADING_ZEROS_NEED_CLZ_TAB`, which
+ *  x86's own longlong.h inline `bsr`-based count_leading_zeros macro never
+ *  needs) -- not a bug, matches real upstream GMP behavior on this CPU
+ *  family, and the real Korg-shipped x86 STGGmp.ko would have the same gap.
+ * ========================================================================= */
+
+extern const unsigned char __gmp_digit_value_tab[];
+
+EXPORT_SYMBOL(mpz_add);
+EXPORT_SYMBOL(mpz_add_ui);
+EXPORT_SYMBOL(mpz_clear);
+EXPORT_SYMBOL(mpz_gcdext);
+EXPORT_SYMBOL(mpz_init);
+EXPORT_SYMBOL(mpz_init_set_str);
+EXPORT_SYMBOL(mpz_init_set_ui);
+EXPORT_SYMBOL(mpz_invert);
+EXPORT_SYMBOL(mpz_mul);
+EXPORT_SYMBOL(mpz_mul_2exp);
+EXPORT_SYMBOL(mpz_powm);
+EXPORT_SYMBOL(_mpz_realloc);
+EXPORT_SYMBOL(mpz_set);
+EXPORT_SYMBOL(mpz_set_str);
+EXPORT_SYMBOL(mpz_sub);
+EXPORT_SYMBOL(mpz_tdiv_q);
+EXPORT_SYMBOL(mpz_tdiv_r);
+
+EXPORT_SYMBOL(mpn_add_n);
+EXPORT_SYMBOL(mpn_addmul_1);
+EXPORT_SYMBOL(mpn_submul_1);
+EXPORT_SYMBOL(mpn_sub_n);
+EXPORT_SYMBOL(mpn_lshift);
+EXPORT_SYMBOL(mpn_rshift);
+EXPORT_SYMBOL(mpn_mul);
+EXPORT_SYMBOL(mpn_mul_1);
+EXPORT_SYMBOL(mpn_mul_n);
+EXPORT_SYMBOL(mpn_mul_basecase);
+EXPORT_SYMBOL(mpn_sqr_basecase);
+EXPORT_SYMBOL(mpn_set_str);
+EXPORT_SYMBOL(mpn_tdiv_qr);
+EXPORT_SYMBOL(mpn_divrem_1);
+EXPORT_SYMBOL(mpn_divrem_2);
+EXPORT_SYMBOL(mpn_gcdext);
+EXPORT_SYMBOL(mpn_kara_mul_n);
+EXPORT_SYMBOL(mpn_kara_sqr_n);
+EXPORT_SYMBOL(mpn_toom3_mul_n);
+EXPORT_SYMBOL(mpn_toom3_sqr_n);
+EXPORT_SYMBOL(mpn_fft_best_k);
+EXPORT_SYMBOL(mpn_fft_next_size);
+EXPORT_SYMBOL(mpn_mul_fft);
+EXPORT_SYMBOL(mpn_mul_fft_full);
+EXPORT_SYMBOL(mpn_sb_divrem_mn);
+EXPORT_SYMBOL(mpn_dc_divrem_n);
+EXPORT_SYMBOL(mpn_divexact_by3c);
+
+EXPORT_SYMBOL(__gmp_tmp_reentrant_alloc);
+EXPORT_SYMBOL(__gmp_tmp_reentrant_free);
+EXPORT_SYMBOL(mp_bases);		/* -> __gmpn_bases */
+EXPORT_SYMBOL(modlimb_invert_table);	/* -> __gmp_modlimb_invert_table */
+EXPORT_SYMBOL(__gmp_digit_value_tab);
 
 /* ========================================================================= *
  *  4. Module init / exit  ("Korg GMP Shell")
