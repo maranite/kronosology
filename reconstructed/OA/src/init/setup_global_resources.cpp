@@ -195,7 +195,13 @@ int setup_global_resources(int param)
 		}
 	}
 
-	char calLoaded = SCalibrationData_LoadCalibrationFile();
+	/* Real ground truth calls this unconditionally with this=panel (no
+	 * separate null check right at this call site) -- but `panel` CAN
+	 * be null here (heap-alloc failure, see `panel` above), and every
+	 * OTHER dereference of `panel` in this same function is already
+	 * guarded the same way, so this guard is this file's own
+	 * established defensive convention, not a new departure. */
+	char calLoaded = panel ? SCalibrationData_LoadCalibrationFile(panel) : 0;
 	if (calLoaded) {
 		/* Real 3-way branch on `(panel[4] & 0xc) >> 2`: case 1 writes
 		 * panel_detected=1,type=0x1c,subtype=0x49 (matching the same

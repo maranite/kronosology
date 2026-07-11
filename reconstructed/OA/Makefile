@@ -123,6 +123,10 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/tick_count.o \
            src/engine/controller_info_perf_deactivate.o \
            src/init/rtwrap.o \
+           src/init/drumpad_init.o \
+           src/init/keybed_debounce.o \
+           src/init/calibration_data.o \
+           src/auth/atmel_primitives.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -206,6 +210,16 @@ CFLAGS_wave_sample_convert.o := -mhard-float -msse2 -mfpmath=sse
 # libgcc soft-float helpers under the kernel's own -msoft-float default
 # (batch 28).
 CFLAGS_lfo_tables.o := -mhard-float -msse2 -mfpmath=sse
+
+# Same reasoning again: keybed_debounce.cpp's CSTGKeybedKeyDebounceFilter_
+# Initialize() does one genuine plain-C float multiply chain (busGainScale
+# * 50.0f * 0.001f) to compute a debounce-window sample count -- would
+# otherwise pull in unresolvable libgcc soft-float/double helpers under the
+# kernel's own -msoft-float default (batch 38). The result has no
+# fractional part for this exact chain, so SSE2 vs the real x87 extended-
+# precision sequence is not a fidelity concern here (see that file's own
+# header comment).
+CFLAGS_keybed_debounce.o := -mhard-float -msse2 -mfpmath=sse
 
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
@@ -304,7 +318,11 @@ SRC := src/auth/klm_manager.cpp \
        src/init/stg_daemons.cpp \
        src/engine/tick_count.cpp \
        src/engine/controller_info_perf_deactivate.cpp \
-       src/init/rtwrap.cpp
+       src/init/rtwrap.cpp \
+       src/init/drumpad_init.cpp \
+       src/init/keybed_debounce.cpp \
+       src/init/calibration_data.cpp \
+       src/auth/atmel_primitives.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -363,7 +381,11 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_daemons \
          verify/test_tick_count \
          verify/test_controller_info_perf_deactivate \
-         verify/test_rtwrap
+         verify/test_rtwrap \
+         verify/test_drumpad_init \
+         verify/test_keybed_debounce \
+         verify/test_atmel_primitives \
+         verify/test_calibration_data
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -615,6 +637,18 @@ verify/test_controller_info_perf_deactivate: verify/test_controller_info_perf_de
 
 verify/test_rtwrap: verify/test_rtwrap.cpp src/init/rtwrap.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtwrap.cpp src/init/rtwrap.cpp -o $@
+
+verify/test_drumpad_init: verify/test_drumpad_init.cpp src/init/drumpad_init.cpp include/oa_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_drumpad_init.cpp src/init/drumpad_init.cpp -o $@
+
+verify/test_keybed_debounce: verify/test_keybed_debounce.cpp src/init/keybed_debounce.cpp include/oa_keybed_init.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_debounce.cpp src/init/keybed_debounce.cpp -o $@
+
+verify/test_atmel_primitives: verify/test_atmel_primitives.cpp src/auth/atmel_primitives.cpp include/oa_atmel.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_atmel_primitives.cpp src/auth/atmel_primitives.cpp -o $@
+
+verify/test_calibration_data: verify/test_calibration_data.cpp src/init/calibration_data.cpp
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_calibration_data.cpp src/init/calibration_data.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

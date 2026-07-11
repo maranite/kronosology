@@ -150,7 +150,7 @@ extern "C" void COmapNKS4Driver_GetPSocVersion(unsigned char *version, unsigned 
 { *version = 0x33; *revision = 0x44; }
 extern "C" unsigned char COmapNKS4Driver_GetHardwareVersion(void) { return 3; } /* avoid the SetupNKS4Calibration/IncProgressBar branch complexity */
 extern "C" int COmapNKS4Driver_Is88Key(void) { return 1; }
-extern "C" char SCalibrationData_LoadCalibrationFile(void) { return 0; } /* skip the 3-way branch for this smoke test */
+extern "C" char SCalibrationData_LoadCalibrationFile(unsigned char *) { return 0; } /* skip the 3-way branch for this smoke test; the real body now lives in src/init/calibration_data.cpp + its own dedicated verify/test_calibration_data.cpp (batch 38) */
 extern "C" void SetupNKS4Calibration(void *, int) {}
 extern "C" void SetupKeybedCalibration(void *) {}
 extern "C" void SCalibrationData_InitAll(void) {}

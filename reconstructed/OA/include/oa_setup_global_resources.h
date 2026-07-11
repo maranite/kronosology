@@ -421,7 +421,18 @@ int COmapNKS4Driver_Is88Key(void);
  * already-reconstructed real implementation (`void
  * COmapNKS4Driver_SetTestMode(int on) { ... (on != 0) ... }`). */
 void COmapNKS4Driver_SetTestMode(int testMode);
-char SCalibrationData_LoadCalibrationFile(void);
+/*
+ * SIGNATURE FIXED (batch 38): this project's earlier no-arg guess
+ * didn't match ground truth -- the real ground-truth symbol is the
+ * mangled C++ method `_ZN16SCalibrationData19LoadCalibrationFileEv`
+ * (.text+0x3f7c0, 156 bytes), whose implicit `this` (confirmed via its
+ * one real caller, setup_global_resources() @.text+0x1185eb: `mov
+ * eax,ebx; call ...`) is `panel` (STGAPIFrontPanelStatus::sInstance) --
+ * the SAME pointer already threaded through every neighboring panel
+ * field write in this function. See src/init/calibration_data.cpp for
+ * the full derivation.
+ */
+char SCalibrationData_LoadCalibrationFile(unsigned char *panel);
 /*
  * CORRECTED (2026-07-04): takes TWO params, not one -- confirmed via
  * the real call site (setup_global_resources.cpp's own step 8 tail,
