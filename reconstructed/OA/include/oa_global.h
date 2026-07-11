@@ -1857,7 +1857,26 @@ extern "C" unsigned char _ZTV19CSTGCommonEffectLFO[0x60];
 extern "C" unsigned char _ZTV15CSTGParamsOwner[0x60];
 extern "C" unsigned char _ZTV15CSTGStepSeqBase[0xc];
 extern "C" unsigned char _ZTV17CSTGCommonStepSeq[0x6c];
-struct CSTGProgram { CSTGProgram(); };
+struct CSTGProgram {
+	CSTGProgram();
+
+	/*
+	 * Initialize(eSTGProgramBankId, unsigned int, eSTGVoiceModelType)
+	 * (batch 54, `.text+0x68f8`-inlined call site inside `CSTGGlobal::
+	 * InitializePerformances()`, own body NOT disassembled this pass --
+	 * confirmed real via relocation only, `_ZN11CSTGProgram10InitializeE
+	 * 17eSTGProgramBankId19eSTGVoiceModelType`). `InitializePerformances()`
+	 * calls this exactly once, on the CSTGProgram sub-object at
+	 * `CSTGGlobal+0x2976e33`, with bankId=6 (a literal constant, NOT the
+	 * loop's own final bank index), patchSize=`CSTGProgramBank::
+	 * GetPatchSize()` on programBanks[6], voiceModelType=1. Enum types
+	 * not modeled (plain `unsigned int`, matching this project's
+	 * established convention for not-yet-modeled enums). Deferred body
+	 * (bar2_stubs.cpp) -- genuine per-program-slot initialization,
+	 * out of scope pending further tracing.
+	 */
+	void Initialize(unsigned int bankId, unsigned int patchSize, unsigned int voiceModelType);
+};
 /*
  * CSTGCombi::CSTGCombi() (batch 45, `.text+0x8fb40`, 730 bytes) confirmed
  * real -- see src/engine/combi_ctor.cpp for the full derivation. Genuine
@@ -2172,6 +2191,104 @@ public:
  * src/engine/tick_count.cpp (batch 35, sec 10.183); the daemon watchdog
  * signal_timed_out_daemons() is its primary caller. */
 extern "C" unsigned int GetSTGTickCount(void);
+
+/*
+ * CKorgPreloadFile / CKorgProgBankFile (batch 54, `CSTGGlobal::
+ * InitializePerformances()`'s own file-loading loop -- see that method's
+ * class comment above for the full call-site derivation). Three brand-
+ * new classes ground-truthed via `nm -CS` against the real `OA.ko`
+ * (every method below is a REAL, already-linked symbol in ground truth;
+ * only `Load()`'s own internal body -- genuine SSD file I/O -- is
+ * DSP/filesystem-stub-callee deferred, matching the `CSTGMultisampleBankManager::
+ * StartupInitializeROMBank/RAMBank` precedent, sec 10.185/batch 52):
+ *   `CKorgPreloadFile::CKorgPreloadFile(const char*)`   .text+0x44e40, 10B
+ *   `CKorgPreloadFile::~CKorgPreloadFile()` (D1/D2)      .text+0x44cc0,  7B
+ *   `CKorgPreloadFile::~CKorgPreloadFile()` (D0)         .text+0x44cd0, 21B
+ *   `CKorgPreloadFile::Load()`                           .text+0x44cf0,328B
+ *   `CKorgPreloadFile::Path()`                           .text+0x44e50,205B
+ *   `CKorgProgBankFile::CKorgProgBankFile(const char*)`  .text+0x44fe0, 40B
+ *   `CKorgProgBankFile::LoadData(CFileStream&)`          .text+0x44f20,185B
+ * Ctor bodies fully disassembled (both tiny) and reproduced byte-exact:
+ * `CKorgPreloadFile::CKorgPreloadFile(this=EAX, name=EDX)` (regparm(3)
+ * confirmed directly from `InitializePerformances()`'s own call site)
+ * installs `_ZTV16CKorgPreloadFile+8` at `+0x0` then stores `name` VERBATIM
+ * (a real pointer store, not a copy) at `+0x4` -- no buffer/strdup.
+ * `CKorgProgBankFile::CKorgProgBankFile(this=EAX->EBX, name=EDX)` calls
+ * the base ctor first (`CKorgPreloadFile::CKorgPreloadFile(this, name)`),
+ * THEN overwrites the vtable pointer with `_ZTV17CKorgProgBankFile+8`
+ * (standard Itanium derived-ctor-overwrites-base-vtable-ptr pattern,
+ * confirming a genuine, if unmodeled, virtual override exists -- likely
+ * `LoadData()`, real but NOT reconstructed here since `Load()` itself
+ * is fully deferred and never dispatches through it in this pass; not
+ * modeled as a C++ override to keep this class minimal, matching this
+ * project's "install vs dispatch" rule since nothing dispatches through
+ * it), THEN sets `+0x8 = 2` (a confirmed real literal constant -- NOT
+ * computed from `name` or any other argument). `InitializePerformances()`'s
+ * own failure path reads this SAME `+0x8` field back out (see its own
+ * class comment) -- since the deferred `Load()` stub never touches it,
+ * that read is only exercised in this pass by a KAT that overrides
+ * `Load()` to return failure.
+ * `CKorgPreloadFile::~CKorgPreloadFile()` (D1/D2, both fold to the same
+ * address, confirmed via `nm`, no virtual bases) does ONLY a vtable
+ * pointer reset, `_ZTV16CKorgPreloadFile+8` -- reproduced here simply by
+ * NOT declaring an explicit dtor at all and letting normal C++ RAII
+ * scoping do the equivalent (this project's own compiler emits the same
+ * shape automatically for a class with a virtual dtor and no other
+ * cleanup, exactly matching ground truth's own inlined destructor
+ * sequence at `InitializePerformances()`'s own call site).
+ * `Load()`'s own confirmed real vtable is 0x18 (24) bytes / 6 slots in
+ * ground truth (offset-to-top + RTTI + 4 function slots -- more than
+ * just a dtor, so `Path()`/`LoadData()` are very likely ALSO virtual
+ * there); this reconstruction's own vtable is deliberately smaller
+ * (dtor-only) since nothing in this project ever dispatches through any
+ * OTHER slot of it -- an explicitly flagged simplification under the
+ * established "install vs dispatch" rule, not a byte-exact claim.
+ */
+class CKorgPreloadFile {
+public:
+	CKorgPreloadFile(const char *name);
+	virtual ~CKorgPreloadFile();
+
+	/* DEFERRED (bar2_stubs.cpp): genuine SSD file I/O, safe-default
+	 * "succeeds" stub (matches the StartupInitializeROMBank/RAMBank
+	 * "run the intended success path by default" precedent). */
+	int Load();
+
+	void *_vtablePtr;	/* +0x0 */
+	const char *_name;	/* +0x4, the ctor's own raw pointer store */
+};
+
+class CKorgProgBankFile : public CKorgPreloadFile {
+public:
+	CKorgProgBankFile(const char *name);
+
+	unsigned int _field8;	/* +0x8, ctor-confirmed real literal constant `2` */
+};
+
+/*
+ * CSTGProgramBank (batch 54) -- confirmed real 23-entry array embedded
+ * in `CSTGGlobal`, stride `0x67603` bytes, base `CSTGGlobal+0x132e4d0`
+ * (`InitializePerformances()`'s own file-loading loop, see that
+ * method's class comment above). Ground-truthed methods (`nm -CS`):
+ *   `CSTGProgramBank::Initialize(eSTGProgramBankId,eSTGProgramBankType,bool)`  .text+0xa27f0, 151B
+ *   `CSTGProgramBank::ChangeBankType(eSTGProgramBankType)`                     .text+0xa2890, 135B
+ *   `CSTGProgramBank::InitializePrograms()`                                    .text+0xa2920, 135B
+ *   `CSTGProgramBank::GetPatchSize() const`                                    .text+0xa29b0,  17B
+ * Only `Initialize()`/`GetPatchSize()` are confirmed CALLED from
+ * `InitializePerformances()`; declared opaque (no named fields -- this
+ * project always reaches individual bank objects via raw
+ * `CSTGGlobal+0x132e4d0+bankId*0x67603` pointer arithmetic, matching the
+ * established `fieldAt()`-style convention for CSTGGlobal itself, never
+ * a real C++ array member), bodies DSP/filesystem-stub-callee deferred
+ * (genuine program-bank/patch management, out of scope). Both methods'
+ * REAL argument types are project-specific enums not modeled here (plain
+ * `unsigned int`, matching this project's established convention).
+ */
+class CSTGProgramBank {
+public:
+	void Initialize(unsigned int bankId, unsigned int bankType, bool flag);
+	unsigned int GetPatchSize() const;
+};
 
 class CSTGGlobal {
 public:
@@ -2957,75 +3074,154 @@ public:
 
 	/*
 	 * InitializePerformances() (`.text+0x67d0`, 7021 bytes -- BY FAR the
-	 * largest still-stubbed init-path function, sec 10.204/batch 53
-	 * investigation, own body NOT reconstructed this pass -- precisely
-	 * characterized instead, matching this project's "precisely
-	 * characterize, don't just re-cite" standard). Confirmed structure
-	 * via a full objdump -d -r + relocation trace (107 branches, only 9
-	 * distinct external call targets total -- genuinely call-light for
-	 * its size):
+	 * largest init-path function ever stubbed in this project) --
+	 * batch 54: PARTIALLY reconstructed for real. A full instruction-
+	 * level re-trace (going substantially deeper than sec 10.204/10.205's
+	 * own call-target-only scan) resolved the function into FOUR real
+	 * blocks plus ONE genuinely deferred block, in this exact order:
 	 *
-	 * 1. A confirmed ~23-24 iteration loop (`ebx` 0..0x16, exits at
-	 *    `ebx==0x17`) over `eSTGProgramBankId` values, each iteration:
-	 *    builds a filename via `snprintf` (two different format-string/
-	 *    id-offset branches depending on `ebx <= 0xf` vs `> 0xf` --
-	 *    likely two different bank-name numbering schemes, e.g. factory
-	 *    vs. user banks), constructs a stack-local `CKorgProgBankFile`
-	 *    (own vtable `_ZTV17CKorgProgBankFile`, confirmed real),
-	 *    `CSTGProgramBank::Initialize(eSTGProgramBankId, eSTGProgramBankType, bool)`,
-	 *    `CKorgPreloadFile::Load()`, then `CKorgPreloadFile::~CKorgPreloadFile()`
-	 *    -- a genuine FILE-LOADING loop (reads factory/preload program-
-	 *    bank files off the SSD), matching this project's already-
-	 *    established `CSTGMultisampleBankManager::StartupInitializeROMBank/
-	 *    RAMBank`-class "genuine filesystem subsystem, safe-default-
-	 *    deferred" precedent (batch 52, `load_global_resources.cpp`) --
-	 *    NONE of `CKorgProgBankFile`/`CKorgPreloadFile`/`CSTGProgramBank`
-	 *    are declared anywhere in this project yet (three brand-new
-	 *    classes needed). A confirmed per-bank bitmask update
-	 *    (`this->fieldAt(0x294f8) |= (1 << ebx)` on success, `&= ~(1 <<
-	 *    ebx)` and a retry-with-alternate-filename path on
-	 *    `CKorgPreloadFile::Load()` failure) also touches
-	 *    `STGAPIFrontPanelStatus::sInstance` -- confirmed real, not yet
-	 *    independently cross-checked against that class's own other
-	 *    confirmed fields.
-	 * 2. Immediately after the loop: `CSTGProgramBank::GetPatchSize()`
-	 *    (const) on the LAST bank touched, then a single `CSTGProgram::
-	 *    Initialize(eSTGProgramBankId, unsigned int, eSTGVoiceModelType)`
-	 *    call (voice model type argument confirmed literal `1`) --
-	 *    `CSTGProgram` already has a minimal ctor-only declaration in
-	 *    this header; `Initialize()` itself is a new method, not yet
-	 *    declared.
-	 * 3. The bulk of the function (`.text+0x6912` to `.text+0x7ffd`,
-	 *    ~5872 bytes, ~83% of the total, confirmed via the call-target
-	 *    scan to contain ZERO further external calls except ONE raw
-	 *    vtable dispatch, `call *0x58(%edx)`, matching this project's
-	 *    established "raw vtable-slot call" idiom for not-fully-typed
-	 *    virtual dispatch) -- a large, not-yet-traced loop/table
-	 *    building default performance/program-slot content, indexed via
-	 *    a confirmed `0xcf381`-byte stride (`imul $0xcf381, ...`)
-	 *    against a base at `this+0x1c77f10`-ish -- own iteration count
-	 *    and per-slot field layout NOT yet determined, a genuinely
-	 *    open-ended task for whichever batch picks this up next.
-	 * 4. A single, confirmed-real `CSTGGlobal::SubmitPerfChangeRequest(
-	 *    CSTGPerfChangeRequest&)` call at the very end (`.text+0x7ffd`)
-	 *    -- `SubmitPerfChangeRequest()` itself is ALREADY real (sec
-	 *    10.116, see global.cpp), so THIS caller's own eventual
-	 *    reconstruction would link against an already-real dependency
-	 *    for that one call site at least.
+	 * 1. REAL (this batch): a 23-iteration loop (`bankId` 0..22) over
+	 *    `eSTGProgramBankId`, each iteration, in this exact order:
+	 *    (a) builds a filename via `snprintf(buf, 11, fmt, ...)` into an
+	 *        11-byte buffer (confirmed exact via `nm -S` on the real
+	 *        `_ZZN17CKorgProgBankFile11GetFileNameE17eSTGProgramBankIdE3buf`
+	 *        symbol -- this snprintf logic is `CKorgProgBankFile::
+	 *        GetFileName(eSTGProgramBankId)` INLINED, not a real call to
+	 *        it): `bankId<=0xf` -> `"PROG%c.BIN"` with one vararg
+	 *        `(char)(bankId+0x41)` (banks 0-15 = PROGA.BIN..PROGP.BIN);
+	 *        `bankId>0xf` -> `"PROG%c%c.BIN"` with the SAME vararg value,
+	 *        `(char)(bankId+0x31)`, passed TWICE (banks 16-22 =
+	 *        PROGAA.BIN..PROGGG.BIN, a confirmed real doubled-letter
+	 *        asymmetry vs. the single-letter small-id path -- both format
+	 *        strings extracted byte-exact from `.rodata.str1.1+0x6d`/
+	 *        `+0x78`).
+	 *    (b) constructs a stack-local `CKorgProgBankFile(buf)`, calls
+	 *        `Load()` (inherited, non-virtual call site -- genuine
+	 *        filesystem I/O, DSP/filesystem-stub-callee per sec 10.185/
+	 *        batch-52 precedent, deferred body in bar2_stubs.cpp
+	 *        returning success); on failure (`Load()==0`) ONLY, captures
+	 *        the object's own `_field8` (ctor-confirmed constant `2`,
+	 *        see `CKorgProgBankFile`'s own class comment below) into
+	 *        `kBankInfo[bankId][0]`.
+	 *    (c) reads `kBankInfo[bankId][0]` (post any failure-overwrite)
+	 *        as `typeArg`, sets/clears bit `bankId` of a dword at
+	 *        `STGAPIFrontPanelStatus::sInstance+0x294f8` (SET when
+	 *        `typeArg==0`, CLEAR otherwise -- confirmed exact polarity,
+	 *        not a "success/failure" test as sec 10.205 guessed, see
+	 *        `kBankInfo`'s own initializer below), then calls
+	 *        `CSTGProgramBank::Initialize(bankId, typeArg,
+	 *        (bool)kBankInfo[bankId][1])` on the bank object at
+	 *        `this+0x132e4d0+bankId*0x67603` (a confirmed real 23-entry,
+	 *        `0x67603`-byte-stride array -- see `CSTGProgramBank`'s own
+	 *        comment below for the 24th-slot finding).
+	 *    (d) the `CKorgProgBankFile` local goes out of scope (its own
+	 *        real destructor -- confirmed via ground truth's own inlined
+	 *        vtable-pointer-reset + explicit `CKorgPreloadFile::
+	 *        ~CKorgPreloadFile()` call -- reproduced here simply by
+	 *        normal C++ RAII scoping, not hand-written).
+	 *    `kBankInfo` itself (`_ZZN10CSTGGlobal22InitializePerformancesEvE9kBankInfo`,
+	 *    a genuine function-LOCAL `static int[23][2]`, confirmed exact
+	 *    via `.data` dump at its own `nm`-confirmed 0xb8-byte/23-entry
+	 *    span) ground-truthed byte-exact from `.data+0x380`:
+	 *    `{1,0},{0,0},{1,0},{1,0},{1,0},{1,0},{0,1},{0,1},{0,1},{1,0},
+	 *    {1,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},{1,0},{1,0},
+	 *    {1,0},{0,0},{0,0}`.
+	 * 2. REAL (this batch): `CSTGProgramBank::GetPatchSize()` (const) on
+	 *    `programBanks[6]` specifically (NOT "the last bank touched" as
+	 *    sec 10.205 guessed -- independently re-derived via exact address
+	 *    arithmetic, `this+0x159a8e2` is EXACTLY `this+0x132e4d0+6*0x67603`),
+	 *    then `CSTGProgram::Initialize(6, patchSize, 1)` on the
+	 *    `CSTGProgram` sub-object at `this+0x2976e33` (literal bank id
+	 *    `6`, literal voice model type `1` -- both confirmed real
+	 *    immediates, not loop-carried).
+	 * 3. DEFERRED (NOT reconstructed this batch): `PopulateDefault
+	 *    ProgramSlotTemplates()` (below) -- `.text+0x6912` to
+	 *    `.text+0x7f75`, ~4200 bytes. Full re-trace (superseding sec
+	 *    10.205's "not yet traced ~5872-byte block", which turns out to
+	 *    have included block 4 below by mistake) confirms a genuine
+	 *    TWO-LEVEL NESTED LOOP, not unrolled/straight-line code:
+	 *      - OUTER: `outerIdx` 0..13 (14 iterations, `cmpl $0xe`),
+	 *        destination base `this+0x1c77f10 + outerIdx*0xcf381`
+	 *        (confirmed stride). A FIXED "prototype" object at
+	 *        `this+0x1c77f16` (unchanged across all 14 outer iterations)
+	 *        is read via ONE virtual dispatch per outer iteration
+	 *        (`call *0x58(%edx)`, `edx` = the prototype's own vtable
+	 *        pointer, `this`(eax) for the call = a per-iteration
+	 *        sub-pointer of the DESTINATION, not the prototype -- matches
+	 *        this project's established "raw vtable-slot call" idiom).
+	 *        RECORD-FIELD-OVERLAP finding (a 4th confirmed instance of
+	 *        this project's established gotcha class): `this+0x1c77f16`
+	 *        sits ONLY 6 bytes past `this+0x1c77f10` (outer iteration
+	 *        0's own destination base) and, independently, EXACTLY 1
+	 *        byte past `this+0x132e4d0+23*0x67603` -- i.e. the "prototype"
+	 *        is NOT a separate object at all, it is (almost exactly) a
+	 *        24th, never-file-loaded slot of the SAME 23-entry program-
+	 *        bank array block 1 populates (block 1's own loop only
+	 *        touches indices 0..22) -- confirmed via exact address
+	 *        arithmetic, not a guess.
+	 *      - INNER: `innerIdx` 1..0x7f (127 iterations, `cmpl $0x80`),
+	 *        walking `prototype+0x19e0 + innerIdx*0x19e7` (confirmed
+	 *        stride) -- for EACH inner iteration, dozens of individual
+	 *        byte/word/dword field copies from the prototype into the
+	 *        current outer destination (conditional `rep movsl`/tail-byte
+	 *        block copies gated by flag BITS read from the source, with
+	 *        far-forward skip branches when a bit is clear), PLUS a
+	 *        confirmed SELF-MUTATING quirk: the inner loop's own last
+	 *        instructions before looping back WRITE BACK into the
+	 *        prototype's own `+7` byte of the CURRENT inner-loop sub-
+	 *        object (`(proto_sub[7] & ~1) | (proto_sub[0x19e7]&1)`) --
+	 *        i.e. the "read-only" template is genuinely mutated as the
+	 *        loop runs, confirmed real via direct instruction reading,
+	 *        not a transcription error.
+	 *    Genuinely too large/interlocking (2 nested loops x dense
+	 *    per-field copies, ~300-500 individual instructions) for a
+	 *    reliable full-fidelity hand transcription in this batch's
+	 *    remaining time -- promoted to its own DSP/data-stub-callee
+	 *    method (`PopulateDefaultProgramSlotTemplates()`, deferred body
+	 *    in bar2_stubs.cpp) so `InitializePerformances()` ITSELF could be
+	 *    promoted out of the init-path stub list this batch, matching the
+	 *    `load_global_resources()`/`StartupInitializeROMBank`-class
+	 *    "reconstruct caller, DSP/filesystem-stub THIS specific callee"
+	 *    pattern (sec 10.185). A future batch with a large time budget
+	 *    should consider the `deterministic-table-via-script` technique
+	 *    (sec 10.161/batch 53) given the volume of individually-
+	 *    transcribed field writes involved.
+	 * 4. REAL (this batch, newly separated out from sec 10.205's block-3
+	 *    estimate): `.text+0x7f75`-`0x7fa6`, a SIMPLE (non-nested) 200-
+	 *    iteration loop (`cmp $0xc8`) over a DIFFERENT array,
+	 *    `this+0x27cd024`, stride `0x1cad` (7341 bytes) -- one virtual
+	 *    dispatch per item, SAME vtable slot `0x58` as block 3's own
+	 *    call, `this` for each call = `&array[i]` itself (a zero-
+	 *    explicit-argument call, confirmed via register tracing: only
+	 *    `eax`=object address is live at the call, `edx` is consumed
+	 *    fetching the vtable pointer, `ecx` unset). Modeled via this
+	 *    project's own established raw-vtable-dispatch idiom (see
+	 *    `klm_manager.cpp`'s `vcall()`/`stamp_object()` precedent).
+	 * 5. REAL (this batch): `.text+0x7fa8`-`0x7ffd`, a fully deterministic
+	 *    `CSTGPerfChangeRequest` construction (`tag=0, mode=0, value1=0,
+	 *    value2=0, source=3, field14=0, field18=0` -- every field a
+	 *    literal immediate, zero relocations) followed by the already-
+	 *    real `SubmitPerfChangeRequest(request)` (sec 10.116).
 	 *
-	 * Blocked on: three brand-new not-yet-declared classes
-	 * (`CKorgProgBankFile`/`CKorgPreloadFile`/`CSTGProgramBank`, all
-	 * genuine filesystem I/O, DSP-stub-callee-class candidates once
-	 * declared) plus a new `CSTGProgram::Initialize()` method, plus the
-	 * still-untraced ~5872-byte block 3 above. Substantially larger and
-	 * less tractable than either of this same batch's own two
-	 * completed targets (`CSTGPerformanceVarsManager::Initialize()`,
-	 * `CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors()`)
-	 * -- left for a future batch with a correspondingly larger time
-	 * budget, per the sec 10.185/10.203 policies' own explicit allowance
-	 * for partial-success outcomes on a function this size.
+	 * Net status: REAL end-to-end control flow except block 3, which is
+	 * a confirmed-safe (returns void, no wild calls) deferred no-op --
+	 * `InitializePerformances()` no longer appears in this project's
+	 * init-path stub audit; `PopulateDefaultProgramSlotTemplates()` is
+	 * the new, much more narrowly-scoped candidate for a future batch.
 	 */
 	void InitializePerformances();
+
+	/*
+	 * PopulateDefaultProgramSlotTemplates() -- see `InitializePerformances()`'s
+	 * own comment above (block 3) for the full derivation of what this
+	 * represents (`.text+0x6912`-`0x7f75` inside the real, monolithic
+	 * `InitializePerformances()` -- NOT a real standalone symbol in
+	 * ground truth, a batch-54 extraction to isolate the one genuinely
+	 * deferred sub-block). DSP/data-stub-callee: bare no-op in
+	 * bar2_stubs.cpp, out of scope pending either a dedicated future
+	 * batch or a deterministic-table-via-script pass.
+	 */
+	void PopulateDefaultProgramSlotTemplates();
 
 	/*
 	 * Two confirmed real, genuinely EMPTY handlers (sec 10.67) -- the

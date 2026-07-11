@@ -423,7 +423,21 @@ void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
  * src/engine/drum_kit_data.cpp. */
 /* CSTGFrontPanelSmoothers::CSTGFrontPanelSmoothers() is real now, sec
  * 10.153 -- see src/engine/front_panel_smoothers.cpp. */
-void CSTGGlobal::InitializePerformances() {}
+/* CSTGGlobal::InitializePerformances() is real now, batch 54 -- see
+ * src/engine/init_performances.cpp. Its own genuinely-deferred filesystem-
+ * I/O/DSP-stub-callee sub-parts follow, all newly declared this batch
+ * (oa_global.h): CKorgPreloadFile::Load() (genuine SSD file I/O),
+ * CSTGProgramBank::Initialize()/GetPatchSize() (genuine program-bank/
+ * patch management), CSTGProgram::Initialize() (genuine per-program-slot
+ * init), and PopulateDefaultProgramSlotTemplates() (the still-untraced
+ * two-nested-loop default-performance-data block -- see
+ * InitializePerformances()'s own class comment for the full derivation
+ * of what this represents). */
+int CKorgPreloadFile::Load() { return 1; }
+void CSTGProgramBank::Initialize(unsigned int, unsigned int, bool) {}
+unsigned int CSTGProgramBank::GetPatchSize() const { return 0; }
+void CSTGProgram::Initialize(unsigned int, unsigned int, unsigned int) {}
+void CSTGGlobal::PopulateDefaultProgramSlotTemplates() {}
 /* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
  * src/engine/engine_init.cpp. */
 void CSTGHDRMiniModel::Initialize() {}

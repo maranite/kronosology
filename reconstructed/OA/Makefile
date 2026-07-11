@@ -140,6 +140,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/load_global_resources.o \
            src/engine/performance_vars_manager_init.o \
            src/engine/tone_adjust_descriptors.o \
+           src/engine/init_performances.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -356,7 +357,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/daemon_lifecycle.cpp \
        src/init/load_global_resources.cpp \
        src/engine/performance_vars_manager_init.cpp \
-       src/engine/tone_adjust_descriptors.cpp
+       src/engine/tone_adjust_descriptors.cpp \
+       src/engine/init_performances.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -431,7 +433,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_hdr_playback_commands \
          verify/test_load_global_resources \
          verify/test_performance_vars_manager_init \
-         verify/test_tone_adjust_descriptors
+         verify/test_tone_adjust_descriptors \
+         verify/test_init_performances
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -729,6 +732,9 @@ verify/test_tone_adjust_descriptors: verify/test_tone_adjust_descriptors.cpp src
 	# keeps this binary's own static storage below 4GB so the round-trip
 	# is safe to dereference here.
 	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_tone_adjust_descriptors.cpp src/engine/tone_adjust_descriptors.cpp -o $@
+
+verify/test_init_performances: verify/test_init_performances.cpp src/engine/init_performances.cpp include/oa_global.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_performances.cpp src/engine/init_performances.cpp -o $@
 
 verify/test_voice_models: verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp -o $@
