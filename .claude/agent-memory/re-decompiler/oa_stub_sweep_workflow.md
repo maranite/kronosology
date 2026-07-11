@@ -3451,3 +3451,171 @@ ABI/polarity fixes), `OA.ko` 173,628 bytes (up from 173,292), md5
 linkonce 0x148, GOTPC 0. Bare-`{}` counts unchanged (`bar2_stubs.cpp`
 67, `bar2_stubs_c.cpp` 3) since `rtwrap_pthread_create` was already a
 non-bare stub before this batch.
+
+**Batch 40 specifics** (2026-07-11, sec 10.191, commit `6a48129`): took
+sec 10.190's own "daemon-lifecycle cluster" lead (fully scouted by batch
+39 but never implemented). Reconstructed the whole cluster in one pass:
+`SetupDaemon`/`SetupDecryptDaemon` (internal helpers), `setup_stg_daemons`/
+`cleanup_stg_daemons` (general 7-daemon cluster), `setup_stg_decrypt_daemons`/
+`cleanup_stg_decrypt_daemons` (decrypt 4-daemon cluster). New file
+`src/init/daemon_lifecycle.cpp` + `verify/test_daemon_lifecycle.cpp`.
+`bar2_stubs_c.cpp` bare-`{}` count 3 -> 2 (only `cleanup_stg_daemons` was
+bare among the 4 promoted; the other 3 were non-bare `{ return 0; }` or
+undefined-but-undeclared, so promoting them is real progress not
+reflected in the bare-`{}` grep metric -- same distinction sec 10.190
+already flagged for `rtwrap_pthread_create`).
+
+**Correction to a batch-39 claim (own prior-batch content, not stale
+external info): sec 10.190 guessed ONE shared `SetupDaemon.clone.0`
+helper serves BOTH daemon clusters -- WRONG.** Ground truth has TWO
+separate helpers: `SetupDaemon.clone.0` (`.text+0x11ce30`, 7 args, DOES
+register an RTAI SRQ via `rt_request_srq`) for the 7 general daemons, and
+`SetupDecryptDaemon.clone.0` (`.text+0x11c970`, 5 args, NO SRQ at all)
+for the 4 decrypt daemons. Found by cross-referencing
+`/home/share/Decomp/oa_export/` (a pre-existing Ghidra-analyzed decompile
+table, own image base +0x10000 over ground truth per sec 10.182's
+established correction) -- its `functions.csv` lists BOTH as separate
+local (`t`) symbols with DIFFERENT parameter counts, immediately visible
+without re-disassembling anything. Independently re-confirmed both via
+fresh `objdump -dr`. Lesson: even a careful prior batch's own
+"disassembled and confirmed" claim about a SPECIFIC symbol/relationship
+can still be wrong if it never actually diffed the ANALOGOUS decrypt-side
+call site's own real target -- always check whether a sibling function
+family (here, general vs. decrypt daemons) genuinely shares one helper or
+has independent near-twins, don't assume "shared helper" just because
+the CALLING PATTERN (index, name, priority, MainRoutine args) looks
+parallel.
+
+**STANDING GOTCHA, new this batch, applies to any future cross-section
+disassembly: naive `objdump -dr`-displayed target addresses for a call
+FROM `.init.text` INTO `.text` are NOT reliable, even though the exact
+same raw-byte-plus-displacement method IS reliable for `.text`-to-`.text`
+calls.** Both sections show `sh_addr=0` in the still-relocatable `OA.ko`
+(ET_REL) -- for a same-section call, the caller's own displayed address
+and the raw PC32 displacement combine correctly (both share the same
+`sh_addr=0` reference frame in a way that cancels out); for a
+cross-section call, they do NOT (confirmed by computing a
+self-contradictory sequence of 4 "targets" for what should be the SAME
+shared helper called 4 times from `setup_stg_decrypt_daemons`, each
+guess landing ~0x27-0x2b bytes apart rather than at one fixed address --
+and separately computing a target that landed inside a WRONG, unrelated
+function for another such call). **Fix: for any `.init.text` (or other
+non-`.text`-section) caller, don't trust the raw-byte guess -- cross-
+reference `/home/share/Decomp/oa_export/`'s own Ghidra-analyzed (properly
+relocated) decompile for that SPECIFIC caller's real callee names/args
+first, then independently re-verify the callee side (which, if it's a
+plain `.text`-internal function, IS safely disassemblable directly via
+`objdump -dr`).** This generalizes sec 10.182's own "oa_export uses a
+different image base, always re-disassemble at the real address" finding
+to a NEW, sharper class of danger: it's not just an address-offset
+issue, cross-section raw PC32 arithmetic is fundamentally unreliable in
+this file, not merely off by a constant.
+
+**Struct-layout sharpening of sec 10.183's `STGDaemonWatch` (batch 35):**
+that pass only knew fields at what it called the array's own
+`+0x00`/`+0x04`/`+0x0c` (lastTick/timeout/srq) because it only had
+`signal_timed_out_daemons`' own READS to go on -- this batch found the
+TRUE per-daemon struct starts 0x18 bytes EARLIER (confirmed via
+`setup_stg_daemons`' own real indexing base being exactly `gStgDaemons`'
+base minus `0x18`, AND via `SetupDaemon.clone.0` itself zeroing
+`this[+0x18]` and writing a confirmed-real `0x32` constant at `this[+0x1c]`
+that matches `timeout` exactly). **Extending a struct with NEW LEADING
+fields (before an existing named field) is always safe and requires zero
+changes to any existing caller/test, since C++ field-name access
+auto-recomputes the offset** -- distinct from (and safer than) inserting
+fields in the MIDDLE of an already-relied-upon byte range. Also corrects
+sec 10.190's own speculative guess that `this[+0x1c]=0x32` was a
+"priority" constant -- cross-referencing the NOW-KNOWN-to-be-the-same
+byte as sec 10.183's own `timeout` field settled it: it's the watchdog
+timeout, not a priority, confirmed by BOTH derivations landing on the
+identical byte.
+
+**Reused/extended "opaque address constant instead of a new stub"
+technique, generalized from ONE trampoline to a whole family:** the two
+kernel-thread entry trampolines AND 18 daemon-specific `MainRoutine`/
+`SRQHandler` functions (confirmed real `T`/`t` ground-truth symbols, `nm`)
+are all "store this address, never call it from code we reconstruct" --
+rather than manufacture 18 new placeholder stub bodies (which would have
+made bare-`{}` count go UP by 17 net, working against the whole batch's
+purpose), all 20 are modeled as `static void (*const Foo)(void) =
+(void(*)(void))0x11c...;` raw ground-truth address constants, exactly
+matching the pre-existing `RTWRAP_THREAD_TRAMPOLINE` pattern (`rtwrap.cpp`,
+batch 39). Rule of thumb: whenever a promoted function's real body only
+ever STORES another function's address (never dispatches through it),
+check whether that address can be modeled as an opaque constant instead
+of writing a new placeholder stub -- especially valuable when there are
+MANY such addresses (here, 20) that would otherwise inflate the stub
+count for zero behavioral benefit.
+
+**Real build-system gotcha, caught ONLY by the required `make ko` kernel
+build, NOT by any passing host `verify/` test:** a new global
+(`gStgDaemons`) whose storage ALREADY lives in a sibling TU
+(`stg_daemons.cpp`, sec 10.183) was ALSO defined in the new file
+(`daemon_lifecycle.cpp`) in the first draft -- compiles clean and every
+isolated `verify/` test passes (no single test links BOTH TUs together),
+but the real kernel `.ko` link (which combines every `OA-objs` entry)
+fails with a genuine `ld` "multiple definition of `gStgDaemons`" error.
+**STANDING LESSON, worth its own top-level callout: a clean `make objs
+verify` pass is NOT sufficient evidence that a new/shared global's
+storage placement is conflict-free across the WHOLE project -- only the
+real `make ko` link (combining every OA-objs TU) actually exercises
+full-project link consistency.** Do not skip or shortcut the `make ko`
+step even when host tests all pass; this is now the SECOND time (after
+sec 10.156's per-section mock gaps) that a host-test-clean state hid a
+real defect only the fuller build/link step caught. Fixed by making the
+new file consume the array via the header's own `extern` declaration
+only, and giving the newly-isolated `verify/test_daemon_lifecycle.cpp`
+its own LOCAL storage for `gStgDaemons` (matching the sec 10.158 "give an
+isolated test its own local storage for an extern it doesn't get for
+free" precedent) since that test deliberately links ONLY
+`daemon_lifecycle.cpp`, not `stg_daemons.cpp`.
+
+**New host-KAT gotcha (own-test bug, not a real-binary quirk): `(long)`-
+casting an `unsigned int` field holding a `-1` sentinel does NOT sign-
+extend -- it zero-extends, since the SOURCE type is unsigned.** A check
+comparing `(long)someUnsignedField` against literal `-1` silently fails
+(`got=4294967295 want=-1`) even though the field genuinely holds the bit
+pattern `0xFFFFFFFF`. Fix: cast through `(int)` FIRST (`(long)(int)field`)
+so the 32-bit `-1` bit pattern sign-extends correctly during the widen to
+a 64-bit `long`. A new variant of the established "packed-field pointer/
+integer-width" gotcha family (sec 10.156/10.181/10.190), but for a
+signed/unsigned WIDENING comparison rather than a pointer round-trip
+truncation -- worth checking for on ANY `unsigned int`/`unsigned long`
+field a KAT compares against a negative literal via a `(long)` (or wider
+signed-type) cast.
+
+**Freestanding-build gotcha re-hit (already established, easy to forget
+mid-batch): no `<cstring>`/libc in the `-ffreestanding -fno-builtin`
+TARGET build.** First draft used `#include <cstring>` + `memset()`;
+`make objs` failed immediately with "`bits/c++config.h`: No such file"
+(no `-m32` multilib libstdc++ headers under `-ffreestanding`). Fixed with
+a 4-line local `ZeroBytes()` byte-loop helper, matching
+`setup_global_resources.cpp`'s own pre-existing "memset-equivalent, no
+libc" convention. Caught immediately by the FIRST `make objs` attempt
+(not a subtle failure) -- but worth a standing reminder since this is now
+at least the second time a batch has reached for a libc header out of
+habit before remembering this project's own freestanding constraint.
+
+**Verification**: 83 verify/ binaries (up from 82, new
+`test_daemon_lifecycle`), all exit 0 by real per-binary process exit code
+(TESTS list re-extracted via the established `awk` state machine). THREE
+full clean-rebuild passes byte-identical (`OA.ko` 176,656 bytes, md5
+`e99fb0d706a94b03f43d6c5a7cdc6199`, up from 173,628/
+`7a9a0f7fc2ff3f63e68a53f9450b6ccb`). `nm -u` 61 -> 69 (8 new externs:
+`kernel_thread`, `wait_for_completion`, `wait_for_completion_timeout`,
+`__init_waitqueue_head`, `msecs_to_jiffies`, `rt_request_srq`,
+`rt_free_srq`, `__wake_up` -- a `comm -23` diff against ground truth's own
+`nm -u` list independently confirms ZERO extra/fake externals). linkonce
+0x148, GOTPC 0.
+
+**Remaining candidates, unchanged from sec 10.190**: `cm_AuthenEncryptMAC`
+(needs `bzzzzzzzzzzzt12` first), `cleanup_cpp_support` (`.dtors` walk,
+still blocked), `CSetList::Activate()` + a stubbed-no-op
+`CSetListEQ::SetBand()` (audio-DSP-out-of-scope candidate, viable per sec
+10.185 policy, not attempted this batch). `bar2_stubs.cpp`'s own 67
+stubs remain untouched and still saturated with genuine vtable-dispatch
+blockers per sec 10.190's own extensive survey -- none of THIS batch's
+new real code (daemon lifecycle) was found to unblock any of them, but
+worth re-checking fresh in a future batch per the "don't trust a stale
+blocker claim" rule rather than assuming that finding still holds
+without re-checking.
