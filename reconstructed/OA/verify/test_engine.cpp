@@ -20,10 +20,23 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <sys/mman.h>
 #include "oa_engine.h"
 #include "oa_global.h"
 #include "oa_engine_init.h"
 #include "oa_setup_global_resources.h"
+
+/* Batch 42: test [1] now stores its fake vtable/item addresses into
+ * CSTGVoiceModelManager's real (packed 32-bit) `+0x30` slot -- their own
+ * backing storage must therefore live in the low 4GB, same MAP_32BIT
+ * precedent already established by test_audio_input_mixer.cpp/
+ * test_managers.cpp (a plain `static` array in this PIE host binary is
+ * NOT guaranteed to land under 4GB). */
+static void *mmap32(unsigned long size)
+{
+	return mmap(0, size, PROT_READ | PROT_WRITE,
+		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+}
 
 /* Real kernel-only APIs and a not-yet-reconstructed static method, mocked
  * only so CSTGVoiceModelManager's constructor (used by test [1]) links on
@@ -349,8 +362,8 @@ int main(void)
 	 * with a fake vtable, so the real per-entry dispatch loop has
 	 * something valid to call through. */
 	unsigned char *vmmRaw = (unsigned char *)&vmm;
-	static void *vmmFakeItem[1];
-	static void *vmmFakeVtable[20];
+	void **vmmFakeItem = (void **)mmap32(sizeof(void *) * 1);
+	void **vmmFakeVtable = (void **)mmap32(sizeof(void *) * 20);
 	for (int i = 0; i < 20; i++)
 		vmmFakeVtable[i] = 0;
 	vmmFakeVtable[0x48 / 4] = (void *)VoiceModelSubRateTrap;
@@ -359,7 +372,16 @@ int main(void)
 	 * dispatches (sec 10.147) -- test [5] reuses this same vmm/entry. */
 	vmmFakeVtable[4 / 4] = (void *)VoiceModelDtorEntryTrap;
 	vmmFakeItem[0] = vmmFakeVtable;
-	*(void **)(vmmRaw + 0x30) = vmmFakeItem;
+	/* Batch 42 fix: +0x30 is a packed 32-bit (target-pointer-wide) slot,
+	 * NOT a native pointer -- the real ProcessSubRate/ProcessAudioRate/
+	 * ~CSTGVoiceModelManager() (managers.cpp) now correctly read it as
+	 * such (this exact mismatch is what CSTGVoiceModelManager::Register(),
+	 * newly real this batch, exposed: this array was always empty before,
+	 * so the width bug in both the write here AND the read there was
+	 * mutually self-consistent and never manifested). A native 8-byte
+	 * write here on this 64-bit host would only ever coincidentally work
+	 * before; now it must match the fixed 32-bit-wide read exactly. */
+	*(unsigned int *)(vmmRaw + 0x30) = (unsigned int)(unsigned long)vmmFakeItem;
 	*(short *)(vmmRaw + 0x58) = 1;
 	/* Heap-allocated and deliberately never destroyed within this test: the
 	 * real destructor (correctly, matching disassembly) does not null out

@@ -100,6 +100,27 @@ public:
  * before dispatching -- both facts confirmed directly from the
  * disassembly, not assumed to be uniform across all three methods.
  */
+/*
+ * Batch 42: `eSTGVoiceModelType`/`CSTGVoiceModel` -- see oa_engine_init.h
+ * for the full class (declared there, alongside the ten derived "Model"
+ * classes, its natural home). Only forward-declared here so
+ * `CSTGVoiceModelManager::Register`'s signature can name it; a pointer
+ * parameter never needs the complete type.
+ */
+enum eSTGVoiceModelType {
+	eVoiceModel_Off = 0,
+	eVoiceModel_PCM = 1,
+	eVoiceModel_AnalogSync = 2,
+	eVoiceModel_Organ = 3,
+	eVoiceModel_Plucked = 4,
+	eVoiceModel_MS20 = 5,
+	eVoiceModel_Polysix = 6,
+	eVoiceModel_VPM = 7,
+	eVoiceModel_Piano = 8,
+	eVoiceModel_EP = 9,
+};
+class CSTGVoiceModel;
+
 class CSTGVoiceModelManager {
 public:
 	static CSTGVoiceModelManager *sInstance;
@@ -107,6 +128,20 @@ public:
 	~CSTGVoiceModelManager();
 	void ProcessSubRate(unsigned int tick);
 	void ProcessAudioRate(unsigned int tick);
+	/*
+	 * Register(type, model) (batch 42, `.text+0x1a9a30`, 25 bytes)
+	 * confirmed real -- fully self-contained, mechanical bookkeeping:
+	 *   this[8 + type*4] = model;           // type-indexed direct table
+	 *   unsigned short n = this[+0x58];     // running append count
+	 *   this[0x30 + n*4] = model;           // append-ordered list
+	 *   this[+0x58] = n + 1;
+	 * The `+0x30`/`+0x58` pair is the SAME array/count `ProcessSubRate`/
+	 * `ProcessAudioRate`/`~CSTGVoiceModelManager` above already walk --
+	 * this is what populates it. The `+8`-based direct type table is
+	 * confirmed real but not otherwise consumed anywhere in this
+	 * reconstruction yet.
+	 */
+	void Register(eSTGVoiceModelType type, CSTGVoiceModel *model);
 	unsigned char _unrecovered[92];
 };
 

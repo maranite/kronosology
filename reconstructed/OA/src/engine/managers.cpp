@@ -457,12 +457,26 @@ CSTGVoiceModelManager::CSTGVoiceModelManager()
  * ProcessAudioRate(unsigned int)/ProcessSubRate(unsigned int) (sec
  * 10.137): see oa_engine.h for the full confirmed shape.
  */
+/*
+ * Batch 42 fix: `+0x30 + i*4` is a 4-byte (32-bit-target-pointer-wide)
+ * slot array, NOT native-pointer-wide -- a `void **` (8 bytes on this
+ * 64-bit host) read here would consume the NEXT entry's own low bytes
+ * as its upper 32 bits. Harmless on the real 32-bit target (`void*` is
+ * naturally 4 bytes there) and undetected until now because this array
+ * was always empty (`Register()`, the only thing that ever populates
+ * it, was itself still a stub) -- `voice_models.cpp`'s new real
+ * `Register()` makes this array genuinely non-empty for the first time,
+ * so this read path is newly exercised. Fixed using the same packed
+ * ToU32/FromU32 convention already established elsewhere in this file. */
+static unsigned int VMM_ToU32(void *p) { return (unsigned int)(unsigned long)p; }
+static unsigned char *VMM_FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
+
 void CSTGVoiceModelManager::ProcessAudioRate(unsigned int tick)
 {
 	unsigned char *p = (unsigned char *)this;
 	typedef void (*VtableSlot4cFn)(void *, unsigned int);
 	for (int i = 0; i < *(short *)(p + 0x58); i++) {
-		void *item = *(void **)(p + 0x30 + i * 4);
+		unsigned char *item = VMM_FromU32(*(unsigned int *)(p + 0x30 + i * 4));
 		void **vtable = *(void ***)item;
 		((VtableSlot4cFn)vtable[0x4c / 4])(item, tick);
 	}
@@ -472,7 +486,7 @@ void CSTGVoiceModelManager::ProcessSubRate(unsigned int tick)
 	unsigned char *p = (unsigned char *)this;
 	typedef void (*VtableSlot48Fn)(void *, unsigned int);
 	for (int i = 0; i < *(short *)(p + 0x58); i++) {
-		void *item = *(void **)(p + 0x30 + i * 4);
+		unsigned char *item = VMM_FromU32(*(unsigned int *)(p + 0x30 + i * 4));
 		void **vtable = *(void ***)item;
 		((VtableSlot48Fn)vtable[0x48 / 4])(item, tick);
 	}
@@ -491,7 +505,7 @@ CSTGVoiceModelManager::~CSTGVoiceModelManager()
 	unsigned short count = *(unsigned short *)(p + 0x58);
 
 	for (unsigned short i = 0; i < count; i++) {
-		void *item = *(void **)(p + 0x30 + i * 4);
+		unsigned char *item = VMM_FromU32(*(unsigned int *)(p + 0x30 + i * 4));
 		if (item) {
 			void **vtable = *(void ***)item;
 			((VtableSlot4Fn)vtable[4 / 4])(item);

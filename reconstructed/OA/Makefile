@@ -55,6 +55,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/engine_startup_bits.o \
            src/engine/engine_startup_bits2.o \
            src/engine/engine_init.o \
+           src/engine/voice_models.o \
            src/engine/managers.o \
            src/engine/cost_profile.o \
            src/engine/startup_file.o \
@@ -261,6 +262,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/engine_startup_bits.cpp \
        src/engine/engine_startup_bits2.cpp \
        src/engine/engine_init.cpp \
+       src/engine/voice_models.cpp \
        src/engine/managers.cpp \
        src/engine/cost_profile.cpp \
        src/engine/startup_file.cpp \
@@ -388,7 +390,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_keybed_debounce \
          verify/test_atmel_primitives \
          verify/test_calibration_data \
-         verify/test_daemon_lifecycle
+         verify/test_daemon_lifecycle \
+         verify/test_voice_models
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -655,6 +658,9 @@ verify/test_calibration_data: verify/test_calibration_data.cpp src/init/calibrat
 
 verify/test_daemon_lifecycle: verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp include/oa_daemons.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp -o $@
+
+verify/test_voice_models: verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

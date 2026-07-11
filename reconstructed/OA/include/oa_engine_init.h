@@ -1011,92 +1011,226 @@ struct CSTGKLMManager {
 };
 
 /*
- * Sec 10.147 addendum -- all ten Model ctors fully disassembled and
- * confirmed (picked up during a "smallest first" sweep of
- * bar2_stubs.cpp, since each is only 0x3a-0x50/58-80 bytes), but
- * DELIBERATELY NOT PROMOTED to real bodies in that pass, despite the
- * small byte count: unlike this same pass's three destructors (see
- * oa_engine.h/managers.cpp), these carry disproportionate STRUCTURAL
- * cost relative to their code size, the same class of judgment call
- * already flagged for `WriteSTGMidiOutQueue` (sec 10.145).
+ * Batch 42 (2026-07-11): the ten Model ctors PROMOTED to real bodies,
+ * superseding sec 10.147/10.154's own "deliberately NOT promoted,
+ * disproportionate structural cost" judgment -- see
+ * src/engine/voice_models.cpp for the full implementation. What
+ * actually changed since that verdict: `CSTGEngine::Initialize()`
+ * (engine_init.cpp) does `CallVtableSlot(new (...) CSTGXxxModel(), 2)`
+ * right after constructing each one, and sec 10.154 correctly flagged
+ * that promoting these ctors with a zero-filled placeholder vtable
+ * would be a confirmed NEW wild call (slot 2 == null) -- exactly the
+ * `CCostProfile` "too-short auto-vtable" bug class sec 10.186 already
+ * fixed once. The sec 10.185 audio-DSP policy resolves this cleanly:
+ * give each model a REAL, correctly-shaped vtable (matching ground
+ * truth's own confirmed 0x5c-byte / 23-slot layout, hand-built exactly
+ * like `kCCostProfileVtbl`) with the ONE slot any currently-reachable
+ * code actually dispatches (slot 2 = `Initialize()`) pointed at a real
+ * function -- for 9 of the 10 models that function is a confirmed-real,
+ * deliberately-out-of-scope audio-DSP no-op (per-model oscillator/
+ * parameter-table setup, 332-2097 bytes each); `CSTGOffModel::
+ * Initialize()` is genuinely 1 byte (`ret`) in ground truth, so it's
+ * reconstructed as real, not a stub. All 20 other slots stay null,
+ * safe because nothing in this project's own reachable call graph
+ * dispatches through them (see voice_models.cpp's own header comment
+ * for the ADDITIONAL wrinkle this batch found and also fixed --
+ * `ProcessSubRate`/`ProcessAudioRate`, slots 18/19, are ALSO reachable
+ * once `Register()` below is made real, so those get the same
+ * real-for-Off/no-op-for-the-rest treatment too).
  *
- * Confirmed shape, all ten (`.text+0x1c7a90`/`0x1abd10`/`0x1b1280`/
- * `0x1b8440`/`0x1cac10`/`0x1d4f10`/`0x1df8e0`/`0x1e8780`/`0x1f57a0`/
- * `0x1faa80` for Off/PCM/AnalogSync/Organ/Plucked/MS20/Polysix/VPM/
- * Piano/EP respectively):
- *   1. `EDX = N` (a per-class integer 0..9, in exactly this
- *      enumeration order) then a call to `CSTGVoiceModel::
- *      CSTGVoiceModel(eSTGVoiceModelType)` -- confirmed via its own
- *      real mangled relocation, `_ZN14CSTGVoiceModelC2E
- *      18eSTGVoiceModelType` -- a base-object-constructor (C2) call,
- *      i.e. `CSTGVoiceModel` is a genuine base class of all ten,
- *      confirmed real but its own full internal layout is NOT
- *      independently reconstructed anywhere in this project yet (only
- *      that it owns offsets `+0x00` (vtable ptr) through at least
- *      `+0x104`/`+0xe1`/`+0xe2`, since every derived ctor below writes
- *      those same three offsets as base-class state, not as its own
- *      newly-added fields).
- *   2. The derived class's OWN vtable pointer overwrite at `+0x00`
- *      (confirmed via relocation to be `_ZTVnnCSTGxxxModel+8`, not the
- *      literal small integer objdump's plain disassembly shows --
- *      the same "check the relocation before trusting the literal"
- *      catch already made repeatedly elsewhere in this project).
- *   3. `+0x104 = 0` (a plain literal zero, confirmed, all ten).
- *   4. `CSTGxxxModel::sInstance = this`.
- *   5. A per-class flag write at `+0xe1` (a byte) -- CONFIRMED
- *      genuinely per-class, not uniform: Off/PCM/AnalogSync/Polysix use
- *      `OR` (0x3f/0x7f/0x57/0xd7 respectively -- implying the base
- *      ctor already left meaningful bits there); Organ/MS20/Piano/EP
- *      use a plain `MOV` (0xc1/0xd7/0xd1/0xd1); Plucked/VPM read the
- *      byte first, mask off the low 7 bits (`AND 0xffffff80`), OR in
- *      `0x77`, and ALSO separately `OR +0xe2` with `0x1` -- Organ/MS20/
- *      EP also touch `+0xe2` (Organ: none; MS20: `OR 0x1`; EP: `OR
- *      0x2`) while the rest never touch `+0xe2` at all. Real per-bit
- *      meaning not determined -- plausibly per-model synthesis-engine
- *      capability flags, given the name and how each model gets its
- *      own distinct bit pattern, but not confirmed.
- *   6. `PCMModel`'s own `CSTGPCMModelPatch::HasWaveSeqInOscZone()
- *      const`, `AnalogSyncModel`/`OrganModel`'s own `QuickRelease
- *      (CSTGVoice&)`, and several other per-model `xxxModelPatch`
- *      sibling methods sit immediately after each ctor in the real
- *      binary (confirmed via their own symbol names) -- none examined
- *      or reconstructed in this pass, out of scope.
+ * `CSTGVoiceModel` base class -- confirmed real (`.text+0x1a9b10`,
+ * 338 bytes), genuinely mechanical, ZERO DSP or vtable-dispatch
+ * content of its own (only calls `CSTGBankMemory::AllocAligned`,
+ * `operator new[]`, and `CSTGVoiceModelManager::Register` -- all
+ * already-real or newly-reconstructed-this-batch primitives). Modeled
+ * via the SAME "opaque + raw offset writes onto `this`" convention as
+ * `CSTGHDRMiniModel` (engine_init.cpp) -- the class declares no data
+ * members beyond the leading vtable-pointer slot (needed so
+ * `CallVtableSlot`'s generic `*(void***)obj` dispatch is well-defined);
+ * every other field is written via raw byte offsets in the .cpp, never
+ * needing to match `sizeof(CSTGVoiceModel)` since every real instance
+ * is always placement-`new`'d onto a correctly-pre-sized
+ * `CSTGBankMemory::AllocAligned` allocation (0x108 bytes for 8 of the
+ * 10 models, 0x508 for Piano, 0x124 for EP -- Piano/EP's own extra
+ * tail bytes beyond the shared 0x108 base are untouched by any ctor,
+ * confirmed real gaps, matching this project's "opaque, not fabricated"
+ * convention).
  *
- * Reconstructing these ten for real would require: (a) a genuine
- * `CSTGVoiceModel` base class in THIS header ecosystem (oa_engine.h/
- * oa_global.h, not oa_types.h's own already-different `CSTGVoiceModel`
- * struct used by quad_list.cpp -- the two are deliberately never
- * included together, per this file's own top-of-file ODR note) with an
- * own not-yet-reconstructed base ctor forward (an `eSTGVoiceModelType`
- * enum tag purely for correct mangling, real enumerator names not
- * evidenced); (b) ten `_ZTVnnCSTGxxxModel[]` zero-initialized byte-array
- * vtable stand-ins, matching the established "extern C byte-array
- * trick" (sec 10.58/10.60/10.66, already used for `_ZTV16CSTGAudioManager`
- * etc. in bar2_stubs.cpp) rather than real derived-class virtual
- * functions, since neither base's nor any derived class's real vtable
- * slot layout is independently confirmed; (c) ten distinct per-class
- * flag-byte writes (not shareable via one helper, per point 5 above).
- * All doable, but a clearly SEPARATE, larger task from "reconstruct the
- * next handful of small stubs" -- left fully documented here (so a
- * future pass doesn't need to re-disassemble any of it) rather than
- * rushed or silently skipped.
+ * A NOTE on what's deliberately simplified vs ground truth, for
+ * fidelity-auditing purposes: the base ctor's own confirmed `+0x84..
+ * +0xd1` (78-byte) zero-fill is executed TWICE in the real disassembly
+ * (a genuine compiler-observed redundancy, not two different regions --
+ * both zero loops use the identical computed address range) -- collapsed
+ * to a single zero-fill here, matching this project's established
+ * "functionally-inert redundant write, preserved as one statement"
+ * precedent (e.g. `CSTGProgramSlot`'s own `+0x9`/`+0x30` double-zero,
+ * sec 10.153). The base ctor's OWN vtable-pointer write (it installs
+ * `_ZTV14CSTGVoiceModel` immediately before the derived ctor
+ * unconditionally overwrites it with the real derived vtable, the same
+ * "harmless overwrite" pattern as `CSTGProgramSlot`/`CSTGToneAdjust`)
+ * is likewise NOT reproduced -- nothing ever reads it in between, so
+ * modeling it changes no observable behavior.
+ *
+ * Field offsets below (all confirmed via direct disassembly of the base
+ * ctor, `.text+0x1a9b10`):
+ *   +0x00        vtable ptr (see above)
+ *   +0x84..+0xd1 zeroed (78 bytes, see note above)
+ *   +0xd4        packed ptr: `operator new[](channelCount*0xc)`, each
+ *                12-byte record zeroed (+0x0/+0x4/+0x8) -- `channelCount`
+ *                is `CSTGAudioManager::sInstance`'s own `+0x18` field
+ *                (an opaque count read raw, matching this project's
+ *                established convention for a not-yet-individually-named
+ *                singleton field -- see `oa_engine.h`'s own
+ *                `CSTGAudioManager::_unrecovered_head` comment, `+0x18`
+ *                falls inside that still-opaque blob).
+ *   +0xd8        unsigned short = 0xffff ("unset" sentinel)
+ *   +0xe0        byte = 0
+ *   +0xe1        byte = 0 (base default; every derived ctor overwrites
+ *                with its own per-model flag byte, see below)
+ *   +0xe2        byte &= 0xfc (clear low 2 bits; some derived ctors OR
+ *                extra bits back in afterward)
+ *   +0xe4        packed ptr: `AllocAligned(0x1a80, 0x80)`, zeroed
+ *   +0xe8        packed ptr: `AllocAligned(0x3300, 0x80)`, zeroed
+ *   +0xec        packed ptr: `AllocAligned(0xcc0, 0x10)` (NOT zeroed by
+ *                this ctor -- confirmed real gap, contents whatever
+ *                `AllocAligned` handed back)
+ *   +0xf0        unsigned short = 0
+ *   +0xf4        packed ptr: `AllocAligned(0x6a0, 0x10)` (also NOT
+ *                zeroed here, same confirmed real gap as +0xec)
+ *   +0xf8        unsigned short = 0
+ *   +0xfc        dword = 0
+ *   +0x100       dword = 0 (base ctor's own write)
+ *   +0x104       dword = 0 (EACH derived ctor's own write, confirmed via
+ *                disassembly to be absent from the base ctor -- kept
+ *                attributed to the derived ctors below for provenance,
+ *                even though the literal value is identical across all
+ *                ten)
+ * `CSTGVoiceModelManager::Register(type, this)` is called once, near
+ * the end of the base ctor (after +0xd4's array is built, before
+ * +0xd8/+0x100).
+ *
+ * Per-model flag-byte writes at `+0xe1`/`+0xe2` (all ten independently
+ * re-disassembled this batch, confirming sec 10.147's own earlier
+ * survey byte-for-byte): Off=OR 0x3f; PCM=OR 0x7f; AnalogSync=OR 0x57;
+ * Organ=MOV 0xc1; Plucked=(read,&0x80,|0x77),OR+0xe2,0x1;
+ * MS20=MOV 0xd7,OR+0xe2,0x1; Polysix=MOV 0xd7; VPM=(read,&0x80,|0x77),
+ * OR+0xe2,0x1; Piano=MOV 0xd1; EP=MOV 0xd1,OR+0xe2,0x2. Real per-bit
+ * meaning still not determined (plausibly per-model synthesis-engine
+ * capability flags) -- not needed to reproduce the confirmed byte
+ * values faithfully.
  */
-struct CSTGOffModel { CSTGOffModel(); };
-struct CSTGPCMModel { CSTGPCMModel(); };
-struct CSTGAnalogSyncModel { CSTGAnalogSyncModel(); };
-struct CSTGOrganModel { CSTGOrganModel(); };
-struct CSTGPluckedModel { CSTGPluckedModel(); };
-struct CSTGMS20Model { CSTGMS20Model(); };
-struct CSTGPolysixModel { CSTGPolysixModel(); };
-struct CSTGVPMModel { CSTGVPMModel(); };
-struct CSTGPianoModel {
+class CSTGVoiceModel {
+public:
+	CSTGVoiceModel(eSTGVoiceModelType type);
+	/* Mock/test-only convenience overload -- NOT a second ground-truth
+	 * constructor (ground truth has exactly one, confirmed via its own
+	 * single mangled symbol `_ZN14CSTGVoiceModelC2E18eSTGVoiceModelType`).
+	 * Added so verify/test_engine_init.cpp's own pre-existing MOCK_MODEL
+	 * macro (isolated per-model ctor mocks that predate this batch) can
+	 * still default-construct the now-real `CSTGVoiceModel` base without
+	 * pulling the real ctor's own dependencies (`CSTGBankMemory::
+	 * AllocAligned`, `operator new[]`, `CSTGAudioManager::sInstance`,
+	 * `CSTGVoiceModelManager::sInstance`) into that test -- the same
+	 * "isolated test needs its own lightweight seam" precedent already
+	 * used elsewhere in this project. Empty body, touches no fields;
+	 * every real (non-mock) derived ctor uses the parameterized overload
+	 * above instead. */
+	CSTGVoiceModel() {}
+	void *_vtablePtr;	/* +0x00 -- MUST stay the object's first word:
+				 * `CallVtableSlot`'s generic `*(void***)obj`
+				 * dispatch (engine_init.cpp) assumes it. */
+};
+
+/*
+ * `Initialize()` (vtable slot 2) / `ProcessSubRate(unsigned int)` (slot
+ * 18, `.text` offset +0x48) / `ProcessAudioRate(unsigned int)` (slot 19,
+ * +0x4c) -- the only three of each model's 21 real virtual methods any
+ * CURRENTLY-REACHABLE code in this reconstruction dispatches (slot 2 via
+ * `CallVtableSlot` right after construction; slots 18/19 via
+ * `CSTGVoiceModelManager::ProcessSubRate`/`ProcessAudioRate`, already
+ * real since sec 10.137, once `Register()` -- new this batch -- actually
+ * populates the array those two walk). All confirmed real in ground
+ * truth (`nm -C -S`); `CSTGOffModel`'s own three are confirmed literally
+ * 1 byte each (a bare `ret`) and are reconstructed for real (see
+ * voice_models.cpp); the other 27 (9 models x 3 methods) are confirmed
+ * substantial (up to ~2KB) genuine per-model DSP init/audio-tick bodies
+ * -- out of scope per the sec 10.185 policy, given safe no-op stand-ins
+ * in bar2_stubs.cpp (matching the `CSetListEQ::SetBand`/
+ * `CSTGControllerInfo::SetPerfSwitch` precedent). Declared here as
+ * `extern "C"` free functions (own vtable-slot signature, `void(*)(void*)`/
+ * `void(*)(void*,unsigned int)`), NOT C++ methods -- matching the
+ * `CStartupFile::Load`/`kCCostProfileVtbl` precedent (sec 10.186)
+ * exactly, since nothing in this project ever calls them via `.`/`->`
+ * syntax, only through a raw vtable-slot function pointer.
+ */
+extern "C" void OA_VoiceModel_Off_Initialize(void *self);
+extern "C" void OA_VoiceModel_Off_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick);
+
+/*
+ * The other nine models' own Initialize()/ProcessSubRate()/
+ * ProcessAudioRate() -- confirmed real, substantial (332-2097 bytes),
+ * genuine per-model DSP -- deliberately deferred, safe no-op bodies
+ * defined in bar2_stubs.cpp (matching the CSetListEQ::SetBand
+ * precedent, sec 10.192). Declared here only so voice_models.cpp can
+ * take their address for each model's own real vtable.
+ */
+extern "C" void OA_VoiceModel_PCM_Initialize(void *self);
+extern "C" void OA_VoiceModel_PCM_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_PCM_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_AnalogSync_Initialize(void *self);
+extern "C" void OA_VoiceModel_AnalogSync_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_AnalogSync_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Organ_Initialize(void *self);
+extern "C" void OA_VoiceModel_Organ_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Organ_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Plucked_Initialize(void *self);
+extern "C" void OA_VoiceModel_Plucked_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Plucked_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_MS20_Initialize(void *self);
+extern "C" void OA_VoiceModel_MS20_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_MS20_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Polysix_Initialize(void *self);
+extern "C" void OA_VoiceModel_Polysix_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Polysix_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_VPM_Initialize(void *self);
+extern "C" void OA_VoiceModel_VPM_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_VPM_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Piano_Initialize(void *self);
+extern "C" void OA_VoiceModel_Piano_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_Piano_ProcessAudioRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_EP_Initialize(void *self);
+extern "C" void OA_VoiceModel_EP_ProcessSubRate(void *self, unsigned int tick);
+extern "C" void OA_VoiceModel_EP_ProcessAudioRate(void *self, unsigned int tick);
+
+struct CSTGOffModel : public CSTGVoiceModel { CSTGOffModel(); static CSTGOffModel *sInstance; };
+struct CSTGPCMModel : public CSTGVoiceModel { CSTGPCMModel(); static CSTGPCMModel *sInstance; };
+struct CSTGAnalogSyncModel : public CSTGVoiceModel { CSTGAnalogSyncModel(); static CSTGAnalogSyncModel *sInstance; };
+struct CSTGOrganModel : public CSTGVoiceModel { CSTGOrganModel(); static CSTGOrganModel *sInstance; };
+struct CSTGPluckedModel : public CSTGVoiceModel { CSTGPluckedModel(); static CSTGPluckedModel *sInstance; };
+struct CSTGMS20Model : public CSTGVoiceModel { CSTGMS20Model(); static CSTGMS20Model *sInstance; };
+struct CSTGPolysixModel : public CSTGVoiceModel { CSTGPolysixModel(); static CSTGPolysixModel *sInstance; };
+struct CSTGVPMModel : public CSTGVoiceModel { CSTGVPMModel(); static CSTGVPMModel *sInstance; };
+struct CSTGPianoModel : public CSTGVoiceModel {
 	CSTGPianoModel();
+	/* NOTE: `sInstance`'s own STORAGE is defined in src/auth/process_oacmd.cpp
+	 * (as `char *`, that TU's own separate, pre-existing, incompatible
+	 * declaration ecosystem for this same class name -- see this
+	 * project's already-established "two incompatible CSTGPianoModel
+	 * declarations" note, oa_types.h's own forward decl). Declared
+	 * `static` here too (same mangled storage, `_ZN14CSTGPianoModel9sInstanceE`)
+	 * but DELIBERATELY NOT DEFINED in voice_models.cpp -- doing so would
+	 * be a real duplicate-definition link error at `make ko` (the two
+	 * ecosystems' storage is the SAME linker symbol despite the type
+	 * mismatch, matching the sec 10.154 `CSTGPCMPrecacheManager::Reset`
+	 * int/long precedent for tolerated cross-ecosystem type drift). */
+	static CSTGPianoModel *sInstance;
 	/* RescanPianoTypes() (Bar 2, confirmed real via the real binary's
 	 * own symbol table, own body not reconstructed) -- deliberately
 	 * deferred extern. */
 	void RescanPianoTypes();
 };
-struct CSTGEPModel { CSTGEPModel(); };
+struct CSTGEPModel : public CSTGVoiceModel { CSTGEPModel(); static CSTGEPModel *sInstance; };
 
 /* Opaque per-quad sub-rate parameter blocks -- real layouts not
  * reconstructed in this pass, only their confirmed sizes (matching the

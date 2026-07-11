@@ -43,17 +43,49 @@
  * fuller ones, already flagged sec 10.48) that cannot both be
  * included in one TU. */
 
-/* ---- Model classes (10 "instrument model" ctors, sec 10.13/10.57) ---- */
-CSTGOffModel::CSTGOffModel() {}
-CSTGPCMModel::CSTGPCMModel() {}
-CSTGAnalogSyncModel::CSTGAnalogSyncModel() {}
-CSTGOrganModel::CSTGOrganModel() {}
-CSTGPluckedModel::CSTGPluckedModel() {}
-CSTGMS20Model::CSTGMS20Model() {}
-CSTGPolysixModel::CSTGPolysixModel() {}
-CSTGVPMModel::CSTGVPMModel() {}
-CSTGPianoModel::CSTGPianoModel() {}
-CSTGEPModel::CSTGEPModel() {}
+/* ---- Model classes (10 "instrument model" ctors, sec 10.13/10.57) ----
+ * All ten ctors are real now, batch 42 -- see src/engine/voice_models.cpp
+ * (also the new CSTGVoiceModel base class + CSTGVoiceModelManager::Register,
+ * oa_engine_init.h/oa_engine.h). Each model's own Initialize()/
+ * ProcessSubRate()/ProcessAudioRate() (vtable slots 2/18/19 -- the only
+ * three of 21 real virtual methods any currently-reachable code in this
+ * project dispatches) are also real for CSTGOffModel (confirmed literally
+ * 1-byte `ret` bodies in ground truth, see voice_models.cpp); the same
+ * three methods on the other nine models are confirmed real, substantial
+ * (332-2097 bytes) genuine per-model DSP init/audio-tick bodies -- out of
+ * scope per the sec 10.185 policy, given the safe no-op stand-ins right
+ * below (matching the CSetListEQ::SetBand/CSTGControllerInfo::SetPerfSwitch
+ * precedent: the CALLER -- here, each model's own real ctor installing a
+ * correctly-shaped vtable, plus the already-real CSTGVoiceModelManager::
+ * ProcessSubRate/ProcessAudioRate dispatch loop -- is fully real; only the
+ * DSP callee itself is deferred). */
+extern "C" void OA_VoiceModel_PCM_Initialize(void *) {}
+extern "C" void OA_VoiceModel_PCM_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_PCM_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_AnalogSync_Initialize(void *) {}
+extern "C" void OA_VoiceModel_AnalogSync_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_AnalogSync_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Organ_Initialize(void *) {}
+extern "C" void OA_VoiceModel_Organ_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Organ_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Plucked_Initialize(void *) {}
+extern "C" void OA_VoiceModel_Plucked_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Plucked_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_MS20_Initialize(void *) {}
+extern "C" void OA_VoiceModel_MS20_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_MS20_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Polysix_Initialize(void *) {}
+extern "C" void OA_VoiceModel_Polysix_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Polysix_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_VPM_Initialize(void *) {}
+extern "C" void OA_VoiceModel_VPM_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_VPM_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Piano_Initialize(void *) {}
+extern "C" void OA_VoiceModel_Piano_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_Piano_ProcessAudioRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_EP_Initialize(void *) {}
+extern "C" void OA_VoiceModel_EP_ProcessSubRate(void *, unsigned int) {}
+extern "C" void OA_VoiceModel_EP_ProcessAudioRate(void *, unsigned int) {}
 void CSTGPianoModel::RescanPianoTypes() {}
 
 /* ---- Engine subsystem managers (engine.cpp, sec 10.13/10.58) ---- */
