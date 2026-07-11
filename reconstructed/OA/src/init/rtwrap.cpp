@@ -43,29 +43,99 @@
 
 extern "C" {
 
-/* Real RTAI externs this file forwards to -- all confirmed `U` in
- * ground truth OA.ko (never OA-internal). */
+/*
+ * Real RTAI externs this file forwards to -- all confirmed `U` in
+ * ground truth OA.ko (never OA-internal).
+ *
+ * CALLING-CONVENTION SPLIT, confirmed by disassembling every call site
+ * to each of these across rtwrap.cpp's own real bodies (batch 39):
+ * ground truth's OWN caller code passes some of these via plain
+ * register args (this OA.ko build's default `-mregparm=3`) and others
+ * via the STACK regardless of how few args they take -- i.e. ground
+ * truth's own RTAI header declared a SUBSET of these with an explicit
+ * `regparm(0)` (cdecl) override, presumably because rtai_sched.ko's
+ * LXRT scheduling primitives (semaphore wait/signal, task suspend/
+ * resume, set-runnable) go through a different real-time dispatch path
+ * than the plain administrative calls (task_delete, whoami, irq
+ * management, debug-trap toggling), which stay plain regparm(3).
+ * Evidence (each independently confirmed via >=1 real call site):
+ *   - STACK-passed in ground truth (`rt_typed_sem_init`, called from
+ *     `rtwrap_pthread_mutex_init` @.text+0x119410 with all 3 args
+ *     placed at [esp]/[esp+4]/[esp+8], none in eax/edx/ecx even though
+ *     3 args fit trivially in registers under regparm(3)): rt_sem_wait
+ *     (`rtwrap_pthread_join` @.text+0x1191e0), rt_sem_wait_if
+ *     (`rtwrap_pthread_mutex_destroy`/`rtwrap_pthread_join`), rt_sem_signal/
+ *     rt_sem_delete (`rtwrap_pthread_mutex_destroy` @.text+0x119450),
+ *     rt_typed_sem_init (as above + `rtwrap_pthread_create` @.text+0x1190f0),
+ *     rt_task_suspend/rt_task_resume (`rtwrap_task_suspend`/
+ *     `rtwrap_task_resume` @.text+0x119780/0x1197a0, single arg pushed
+ *     to `[esp]` rather than left in `eax`), rt_set_runnable_on_cpuid
+ *     (`rtwrap_set_runnable_on_cpuid` @.text+0x118f20, BOTH args at
+ *     `[esp]`/`[esp+4]`).
+ *   - REGISTER-passed (regparm(3), matches this file's un-annotated
+ *     default, NO bug): rt_whoami, rt_task_delete (`rtwrap_pthread_cancel`/
+ *     `rtwrap_pthread_join`, arg stays in `eax` through the call),
+ *     rt_shutdown_irq/rt_release_irq/rt_assign_irq_to_cpu/rt_startup_irq
+ *     (pure passthrough, arg never moved out of `eax`/`edx`),
+ *     clear_debug_traps_in_rt_task, rt_task_init (3 args register +
+ *     4 more on the stack -- textbook regparm(3) with >3 total args,
+ *     `rtwrap_pthread_create`'s own real body, see below).
+ * Getting this right matters here specifically because these
+ * primitives are resolved against the REAL rtai_sched.ko on real
+ * hardware (unlike a within-project-only mock), so a convention
+ * mismatch would silently deliver garbage/uninitialized-stack args to
+ * genuine kernel RT primitives instead of merely being an internal
+ * inconsistency.
+ */
 void *rt_whoami(void);
 int   rt_task_delete(void *task);
-int   rt_task_suspend(void *task);
-int   rt_sem_wait(void *sem);
-int   rt_sem_wait_if(void *sem);
-int   rt_sem_signal(void *sem);
-int   rt_sem_delete(void *sem);
-int   rt_typed_sem_init(void *sem, int value, int type);
-void  rt_set_runnable_on_cpuid(void *task, unsigned int cpuId);
+int   rt_task_suspend(void *task) __attribute__((regparm(0)));
+int   rt_task_resume(void *task) __attribute__((regparm(0)));
+int   rt_sem_wait(void *sem) __attribute__((regparm(0)));
+int   rt_sem_wait_if(void *sem) __attribute__((regparm(0)));
+int   rt_sem_signal(void *sem) __attribute__((regparm(0)));
+int   rt_sem_delete(void *sem) __attribute__((regparm(0)));
+int   rt_typed_sem_init(void *sem, int value, int type) __attribute__((regparm(0)));
+void  rt_set_runnable_on_cpuid(void *task, unsigned int cpuId) __attribute__((regparm(0)));
 void  clear_debug_traps_in_rt_task(void *task);
 int   rt_shutdown_irq(unsigned int irq);
 int   rt_release_irq(unsigned int irq);
 int   rt_assign_irq_to_cpu(unsigned int irq, unsigned int cpu);
 int   rt_startup_irq(unsigned int irq);
 void  rtheap_free(void *heap, void *ptr);
+/* rtheap_alloc/rt_task_init are both confirmed register-passed
+ * (regparm(3) default, no override) via `rtwrap_pthread_create`'s own
+ * real disassembly -- see that function's header comment below. */
+void *rtheap_alloc(void *heap, unsigned int size, int flags);
+int   rt_task_init(void *task, void (*entry)(long), long data,
+		    unsigned int stackSize, unsigned int priority,
+		    int usesFpu, void (*signalFn)(void));
 
 /* RTAI's own global heap descriptor (rtai_lxrt.ko), address-only use
  * here (passed straight through to rtheap_free) -- real size/layout
  * not independently determined, same "opaque placeholder" convention
  * as this project's other not-fully-modeled externals. */
 extern unsigned char rtai_global_heap[1];
+
+} /* extern "C" */
+
+/*
+ * This project's established pointer-width convention (sec 10.150 et
+ * al): `rtwrap_pthread_create`'s own real target task-control block
+ * packs THREE 32-bit pointer-sized fields only 4 bytes apart
+ * (task+0x5b0/+0x5b4/+0x5b8 -- start routine, thread arg, raw alloc
+ * pointer). A native 8-byte host `void*` write/read at any one of these
+ * overlaps its neighbor's own bytes on this 64-bit host (confirmed by a
+ * real KAT FAILED result during this batch, matching sec 10.181's own
+ * "two real kernel pointer fields within 8 bytes of each other" gotcha
+ * exactly) even though the real 32-bit target has no such overlap.
+ * ToU32/FromU32 (explicit 32-bit store/zero-extend load) sidesteps this
+ * unconditionally, on both the host KAT and the real `-m32` target.
+ */
+static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
+static void *FromU32(unsigned int v) { return (void *)(unsigned long)v; }
+
+extern "C" {
 
 /* ---- Simple direct forwarders (irq family + set_runnable/clear_debug_traps) ---- */
 
@@ -258,35 +328,122 @@ void rtwrap_task_suspend(void *task)
 }
 
 /*
+ * rtwrap_pthread_create(pthread_t *out, void *attr, void *(*start)(void*),
+ * void *arg) -- confirmed real (`.text+0x1190f0`, 238 bytes), batch 39.
+ * Promoted from its long-standing `{ return 0; }` stub (bar2_stubs_c.cpp)
+ * now that the real calling conventions for its own RTAI dependencies
+ * (rt_typed_sem_init/rt_task_init/rt_task_resume) are confirmed above.
+ *
+ * Real algorithm:
+ *   1. `raw = rtheap_alloc(&rtai_global_heap, 0x600, 0)`; if NULL,
+ *      returns -12 (0xfffffff4) immediately, `*out` untouched.
+ *   2. `task = (raw + 0x40) & ~0x3f` (round up to the next 64-byte
+ *      boundary -- the actual RT_TASK block lives inside the raw
+ *      allocation, not AT its start).
+ *   3. Stashes bookkeeping fields on the task block: `+0x5b8` = the RAW
+ *      alloc pointer (needed later ONLY to `rtheap_free` it -- this is
+ *      the exact field `rtwrap_pthread_cancel`'s own real body already
+ *      reads, sec 10.188/batch 37), `+0x5b0` = `start`, `+0x5b4` = `arg`,
+ *      `+0x8` = 0.
+ *   4. Reads `attr` (if non-NULL): `stackSize = *(unsigned int*)attr`
+ *      (attr+0x0, the SAME field `rtwrap_pthread_attr_setstacksize`
+ *      overwrites) and `priorityWord = *(unsigned int*)((char*)attr+0xc)`
+ *      (attr+0xc, the SAME field `rtwrap_pthread_attr_setrtpriority`
+ *      populates as `140 - priority`). If `attr` is NULL, uses the
+ *      confirmed real defaults `stackSize = 0x2000`,
+ *      `priorityWord = 0x3fffffff` (RTAI's lowest-priority sentinel).
+ *   5. `rt_task_init(task, (trampoline), (long)task, stackSize,
+ *      priorityWord, usesFpu=1 (hardcoded), signal=0/NULL (hardcoded))`.
+ *      On a NONZERO return: `rtheap_free(&rtai_global_heap, raw)`,
+ *      returns that error code unchanged, `*out` untouched.
+ *   6. On success (return 0): `rt_typed_sem_init(task+0x580, 0, 5)`
+ *      (a per-task semaphore, type 5 -- distinct from the mutex's
+ *      type-3 and cond's type-1 uses above), `rt_task_resume(task)`,
+ *      `*out = task`, returns 0.
+ *
+ * The `trampoline` entry point is a literal constant address,
+ * `.text+0x118e80` in ground truth -- a real internal function (`T`)
+ * this pass does NOT reconstruct (the actual RT thread entry point,
+ * presumably dispatching through the `start`/`arg` fields this
+ * function just stashed at task+0x5b0/+0x5b4 -- a separate, larger
+ * task). Modeled here as an opaque forward-declared function pointer
+ * constant (`RTWRAP_THREAD_TRAMPOLINE`): faithful either way, since
+ * this function only ever passes the address THROUGH to
+ * `rt_task_init` -- it never calls it directly itself, so leaving the
+ * trampoline unreconstructed doesn't change any of THIS function's own
+ * observable behavior. On the host KAT the trampoline is never
+ * invoked either (no real RTAI scheduler running it), so an opaque
+ * placeholder address is sufficient for both real hardware use
+ * (rt_task_init receives the correct real address unconditionally,
+ * regardless of whether that address's own target has been
+ * reconstructed yet) and host testing (the KAT only asserts what
+ * value gets passed to `rt_task_init`, not what it does).
+ *
+ * BUG FOUND AND FIXED while ground-truthing this function (batch 39):
+ * `CSTGThread::CreateRealTimeWithCPUAffinity()` (cpu_affinity.cpp,
+ * already-committed, reconstructed while this function was still a
+ * stub) tested this function's return value backwards
+ * (`if (!createResult) return 0;`, i.e. treated 0 as FAILURE) --
+ * harmless while `rtwrap_pthread_create` always returned 0 (every call
+ * looked like "immediate failure", self-consistently, matching that
+ * function's own then-correct description of the STUBBED behavior),
+ * but exactly inverted relative to ground truth's REAL polarity
+ * (0 = success), confirmed independently from BOTH sides: this
+ * function's own disassembly (esi, the return value, stays 0 only on
+ * the success path) AND the real caller's own disassembly
+ * (`.text+0x40a30`: `test edi,edi; je <success-path>` -- jumps to the
+ * debug-trap-install/CPU-pinning success path when the return value
+ * IS ZERO). See cpu_affinity.cpp's own fix + updated
+ * test_cpu_affinity.cpp mock polarity.
+ */
+static void *const RTWRAP_THREAD_TRAMPOLINE = (void *)0x118e80;
+
+void *rtwrap_pthread_create(void *out, void *attr, void *(*start)(void *), void *arg)
+{
+	void *raw = rtheap_alloc(&rtai_global_heap, 0x600, 0);
+	if (!raw)
+		return (void *)(long)-12;
+
+	unsigned char *task = (unsigned char *)(((unsigned long)raw + 0x40) & ~0x3ful);
+	*(unsigned int *)(task + 0x5b8) = ToU32(raw);
+	*(unsigned int *)(task + 0x5b0) = ToU32((void *)start);
+	*(unsigned int *)(task + 0x5b4) = ToU32(arg);
+	*(int *)(task + 0x8) = 0;
+
+	unsigned int stackSize = 0x2000;
+	unsigned int priorityWord = 0x3fffffff;
+	if (attr) {
+		stackSize = *(unsigned int *)attr;
+		priorityWord = *(unsigned int *)((unsigned char *)attr + 0xc);
+	}
+
+	int ret = rt_task_init(task, (void (*)(long))RTWRAP_THREAD_TRAMPOLINE,
+				(long)task, stackSize, priorityWord, 1, 0);
+	if (ret != 0) {
+		rtheap_free(&rtai_global_heap, raw);
+		return (void *)(long)ret;
+	}
+
+	rt_typed_sem_init(task + 0x580, 0, 5);
+	rt_task_resume(task);
+	*(void **)out = task;
+	return 0;
+}
+
+/*
  * Confirmed real (`.text+0x119280`): if `taskHandle` is NULL, cancels
  * the CALLING task instead (`rt_whoami()`), matching the real RTAI
  * "current task" self-reference idiom used throughout this cluster.
  * After `rt_task_delete`, frees the task's own rtwrap-allocation
- * bookkeeping pointer stored at task+0x5b8 -- this offset is the exact
- * same field `rtwrap_pthread_create`'s own (still-deferred) real body
- * populates with the raw `rtheap_alloc` pointer (ground-truthed from
- * that function's own disassembly: `mov %eax,0x5b8(%ebx)` right after
- * the alloc call, where %eax is rtheap_alloc's raw return and %ebx is
- * the 64-byte-aligned task block derived from it) -- so this is
- * self-consistent with that sibling's own real layout even though
- * `rtwrap_pthread_create` itself hasn't been promoted to a real body
- * yet. Not a new wild-pointer risk in this reconstruction's own
- * reachable call graph: `rtwrap_pthread_create` currently always
- * returns 0/NULL (bar2_stubs_c.cpp), so no caller in this build can
- * currently obtain a non-NULL `taskHandle` from it -- every real
- * invocation reachable today takes the `rt_whoami()` self-cancel path,
- * and (as documented in cpu_affinity.cpp/oa_cpu_affinity.h) that
- * caller's own chain is itself still gated behind still-stubbed
- * daemon-lifecycle code, so this dereference is not live on any
- * currently-exercised path -- only on real hardware with real RTAI and
- * a real `rtwrap_pthread_create`, exactly the intended operating
- * environment.
+ * bookkeeping pointer stored at task+0x5b8 -- confirmed self-consistent
+ * with `rtwrap_pthread_create`'s own real layout just above (same field,
+ * populated with the raw `rtheap_alloc` pointer).
  */
 void rtwrap_pthread_cancel(void *taskHandle)
 {
 	void *task = taskHandle ? taskHandle : rt_whoami();
 	rt_task_delete(task);
-	void *rawAlloc = *(void **)((unsigned char *)task + 0x5b8);
+	void *rawAlloc = FromU32(*(unsigned int *)((unsigned char *)task + 0x5b8));
 	rtheap_free(&rtai_global_heap, rawAlloc);
 }
 

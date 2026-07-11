@@ -14,6 +14,17 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <sys/mman.h>
+
+/* This project's established convention (sec 10.156/10.181): any test
+ * object whose address gets round-tripped through a packed 32-bit
+ * field (ToU32/FromU32 in rtwrap.cpp, batch 39) must live in the low
+ * 4GB, or the round trip silently truncates on this 64-bit host. */
+static void *mmap32(unsigned long size)
+{
+	return mmap(0, size, PROT_READ | PROT_WRITE,
+		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+}
 
 static int g_fail;
 static void check_eq(const char *label, long got, long want)
@@ -63,14 +74,49 @@ static unsigned int g_lastShutdownIrq, g_lastReleaseIrq, g_lastAssignIrq, g_last
 static int g_rtheapFreeCalls;
 static void *g_lastRtheapFreeHeap;
 static void *g_lastRtheapFreePtr;
+static int g_rtheapAllocCalls;
+static void *g_lastRtheapAllocHeap;
+static unsigned int g_lastRtheapAllocSize;
+static int g_lastRtheapAllocFlags;
+static void *g_rtheapAllocReturn;
+static int g_taskInitCalls;
+static void *g_lastTaskInitTask;
+static void *g_lastTaskInitEntry;
+static long g_lastTaskInitData;
+static unsigned int g_lastTaskInitStackSize;
+static unsigned int g_lastTaskInitPriority;
+static int g_lastTaskInitUsesFpu;
+static void *g_lastTaskInitSignal;
+static int g_taskInitReturn;
+static int g_taskResumeCalls;
+static void *g_lastTaskResumed;
 
+/*
+ * Batch 39 calling-convention fix: `rt_task_suspend`/`rt_sem_wait`/
+ * `rt_sem_wait_if`/`rt_sem_signal`/`rt_sem_delete`/`rt_typed_sem_init`/
+ * `rt_set_runnable_on_cpuid` are confirmed STACK-passed (regparm(0)) in
+ * ground truth, not this file's own default `-mregparm=3` -- see
+ * rtwrap.cpp's own header comment for the full derivation. These mock
+ * DEFINITIONS must carry the SAME attribute as rtwrap.cpp's own extern
+ * declarations of them, or the two TUs would disagree on which
+ * registers/stack slots carry the arguments (a real ABI mismatch, even
+ * though both live in this same host binary).
+ */
 void *rt_whoami(void) { g_rtWhoamiCalls++; return g_rtWhoamiReturn; }
 int rt_task_delete(void *task) { g_taskDeleteCalls++; g_lastTaskDeleted = task; return 0; }
+int rt_task_suspend(void *task) __attribute__((regparm(0)));
 int rt_task_suspend(void *task) { g_taskSuspendCalls++; g_lastTaskSuspended = task; return 0; }
+int rt_task_resume(void *task) __attribute__((regparm(0)));
+int rt_task_resume(void *task) { g_taskResumeCalls++; g_lastTaskResumed = task; return 0; }
+int rt_sem_wait(void *sem) __attribute__((regparm(0)));
 int rt_sem_wait(void *sem) { g_semWaitCalls++; g_lastSemWaited = sem; return 1; }
+int rt_sem_wait_if(void *sem) __attribute__((regparm(0)));
 int rt_sem_wait_if(void *sem) { g_semWaitIfCalls++; g_lastSemWaitedIf = sem; return g_semWaitIfReturn; }
+int rt_sem_signal(void *sem) __attribute__((regparm(0)));
 int rt_sem_signal(void *sem) { g_semSignalCalls++; g_lastSemSignaled = sem; return 0; }
+int rt_sem_delete(void *sem) __attribute__((regparm(0)));
 int rt_sem_delete(void *sem) { g_semDeleteCalls++; g_lastSemDeleted = sem; return 0; }
+int rt_typed_sem_init(void *sem, int value, int type) __attribute__((regparm(0)));
 int rt_typed_sem_init(void *sem, int value, int type)
 {
 	g_typedSemInitCalls++;
@@ -79,6 +125,7 @@ int rt_typed_sem_init(void *sem, int value, int type)
 	g_lastSemInitType = type;
 	return 0;
 }
+void rt_set_runnable_on_cpuid(void *task, unsigned int cpuId) __attribute__((regparm(0)));
 void rt_set_runnable_on_cpuid(void *task, unsigned int cpuId)
 {
 	g_setRunnableCalls++;
@@ -106,6 +153,30 @@ void rtheap_free(void *heap, void *ptr)
 	g_lastRtheapFreeHeap = heap;
 	g_lastRtheapFreePtr = ptr;
 }
+/* rtheap_alloc/rt_task_init are both confirmed register-passed
+ * (regparm(3), this file's own default) -- no attribute override. */
+void *rtheap_alloc(void *heap, unsigned int size, int flags)
+{
+	g_rtheapAllocCalls++;
+	g_lastRtheapAllocHeap = heap;
+	g_lastRtheapAllocSize = size;
+	g_lastRtheapAllocFlags = flags;
+	return g_rtheapAllocReturn;
+}
+int rt_task_init(void *task, void (*entry)(long), long data,
+		  unsigned int stackSize, unsigned int priority,
+		  int usesFpu, void (*signalFn)(void))
+{
+	g_taskInitCalls++;
+	g_lastTaskInitTask = task;
+	g_lastTaskInitEntry = (void *)entry;
+	g_lastTaskInitData = data;
+	g_lastTaskInitStackSize = stackSize;
+	g_lastTaskInitPriority = priority;
+	g_lastTaskInitUsesFpu = usesFpu;
+	g_lastTaskInitSignal = (void *)signalFn;
+	return g_taskInitReturn;
+}
 
 /* Declarations of the functions under test (matching rtwrap.cpp exactly). */
 void rtwrap_shutdown_irq(unsigned int irq);
@@ -130,6 +201,7 @@ void rtwrap_pthread_attr_destroy(void *attr);
 void *rtwrap_whoami(void);
 void rtwrap_task_suspend(void *task);
 void rtwrap_pthread_cancel(void *taskHandle);
+void *rtwrap_pthread_create(void *out, void *attr, void *(*start)(void *), void *arg);
 
 } /* extern "C" */
 
@@ -321,11 +393,15 @@ int main(void)
 		/* +0x5b8 raw-alloc-pointer field, per rtwrap_pthread_create's own
 		 * confirmed real layout -- allocate a buffer at least that big
 		 * (0x600, matching the real rtheap_alloc request size) plus room
-		 * for an 8-byte host pointer read at the tail of that offset. */
+		 * for the packed-32-bit pointer read at the tail of that offset.
+		 * The marker itself must live in the low 4GB (mmap32) since
+		 * rtwrap_pthread_cancel now reconstitutes it via FromU32 --
+		 * a plain stack address would silently truncate on this 64-bit
+		 * host (batch 39's own ToU32/FromU32 fix, see rtwrap.cpp). */
 		unsigned char taskBuf[0x600];
 		memset(taskBuf, 0xcc, sizeof(taskBuf));
-		unsigned char rawAllocMarker;
-		*(void **)(taskBuf + 0x5b8) = &rawAllocMarker;
+		unsigned char *rawAllocMarker = (unsigned char *)mmap32(1);
+		*(unsigned int *)(taskBuf + 0x5b8) = (unsigned int)(unsigned long)rawAllocMarker;
 
 		g_taskDeleteCalls = g_rtheapFreeCalls = g_rtWhoamiCalls = 0;
 		rtwrap_pthread_cancel(taskBuf);
@@ -334,12 +410,12 @@ int main(void)
 		check_ptr("...on the given handle", g_lastTaskDeleted, taskBuf);
 		check_eq("rtheap_free called once", g_rtheapFreeCalls, 1);
 		check_ptr("...heap == &rtai_global_heap", g_lastRtheapFreeHeap, &rtai_global_heap);
-		check_ptr("...ptr == the +0x5b8 marker", g_lastRtheapFreePtr, &rawAllocMarker);
+		check_ptr("...ptr == the +0x5b8 marker", g_lastRtheapFreePtr, rawAllocMarker);
 
 		unsigned char selfTaskBuf[0x600];
 		memset(selfTaskBuf, 0xcc, sizeof(selfTaskBuf));
-		unsigned char selfRawAllocMarker;
-		*(void **)(selfTaskBuf + 0x5b8) = &selfRawAllocMarker;
+		unsigned char *selfRawAllocMarker = (unsigned char *)mmap32(1);
+		*(unsigned int *)(selfTaskBuf + 0x5b8) = (unsigned int)(unsigned long)selfRawAllocMarker;
 		g_rtWhoamiReturn = selfTaskBuf;
 
 		g_taskDeleteCalls = g_rtheapFreeCalls = g_rtWhoamiCalls = 0;
@@ -347,10 +423,100 @@ int main(void)
 		check_eq("NULL handle: rt_whoami called once", g_rtWhoamiCalls, 1);
 		check_eq("NULL handle: rt_task_delete called once", g_taskDeleteCalls, 1);
 		check_ptr("...on rt_whoami()'s own return", g_lastTaskDeleted, selfTaskBuf);
-		check_ptr("...ptr == the self task's +0x5b8 marker", g_lastRtheapFreePtr, &selfRawAllocMarker);
+		check_ptr("...ptr == the self task's +0x5b8 marker", g_lastRtheapFreePtr, selfRawAllocMarker);
 	}
 
-	printf("\n[16] irq quartet -- direct forwards\n");
+	printf("\n[16] rtwrap_pthread_create -- alloc failure\n");
+	{
+		g_rtheapAllocCalls = g_taskInitCalls = 0;
+		g_rtheapAllocReturn = 0;
+		void *out = (void *)0xdeadbeef;
+		void *fakeStart = (void *)0x1;
+		void *rc = rtwrap_pthread_create(&out, 0, (void *(*)(void *))fakeStart, (void *)0x2);
+		check_eq("rtheap_alloc called once", g_rtheapAllocCalls, 1);
+		check_ptr("...heap == &rtai_global_heap", g_lastRtheapAllocHeap, &rtai_global_heap);
+		check_eq("...size == 0x600", (long)g_lastRtheapAllocSize, 0x600);
+		check_eq("...flags == 0", g_lastRtheapAllocFlags, 0);
+		check_eq("rt_task_init NOT called", g_taskInitCalls, 0);
+		check_eq("returns -12 (ENOMEM-like sentinel)", (long)(intptr_t)rc, -12);
+		check_ptr("*out left untouched", out, (void *)0xdeadbeef);
+	}
+
+	printf("\n[17] rtwrap_pthread_create -- rt_task_init failure frees the block\n");
+	{
+		unsigned char raw[0x700];
+		memset(raw, 0xcc, sizeof(raw));
+		g_rtheapAllocReturn = raw;
+		g_taskInitReturn = -5;
+		g_rtheapFreeCalls = g_typedSemInitCalls = g_taskResumeCalls = 0;
+		void *out = (void *)0xdeadbeef;
+		void *rc = rtwrap_pthread_create(&out, 0, 0, 0);
+		check_eq("rt_task_init called once", g_taskInitCalls, 1);
+		check_eq("rtheap_free called once", g_rtheapFreeCalls, 1);
+		check_ptr("...frees the RAW alloc pointer, not the aligned task", g_lastRtheapFreePtr, raw);
+		check_eq("rt_typed_sem_init NOT called", g_typedSemInitCalls, 0);
+		check_eq("rt_task_resume NOT called", g_taskResumeCalls, 0);
+		check_eq("returns rt_task_init's own error code", (long)(intptr_t)rc, -5);
+		check_ptr("*out left untouched", out, (void *)0xdeadbeef);
+	}
+
+	printf("\n[18] rtwrap_pthread_create -- full success, attr==NULL uses confirmed defaults\n");
+	{
+		unsigned char raw[0x700];
+		memset(raw, 0xcc, sizeof(raw));
+		unsigned char *task = (unsigned char *)(((unsigned long)raw + 0x40) & ~0x3ful);
+		g_rtheapAllocReturn = raw;
+		g_taskInitReturn = 0;
+		g_rtheapFreeCalls = g_typedSemInitCalls = g_taskResumeCalls = g_taskInitCalls = 0;
+		void *out = 0;
+		void *fakeStart = (void *)0x11111111;
+		void *rc = rtwrap_pthread_create(&out, 0, (void *(*)(void *))fakeStart, (void *)0x22222222);
+
+		check_eq("returns 0 on success", (long)(intptr_t)rc, 0);
+		check_ptr("*out == the aligned task pointer", out, task);
+		/* +0x5b0/+0x5b4/+0x5b8 are packed 32-bit fields only 4 bytes
+		 * apart (batch 39's ToU32/FromU32 fix, see rtwrap.cpp) -- compare
+		 * the SAME truncated 32-bit value on both sides rather than
+		 * round-tripping a full pointer (which would only be lossless if
+		 * `raw` itself were guaranteed to live in the low 4GB). */
+		check_eq("task+0x5b8 == raw alloc pointer (32-bit packed)",
+			 (long)(unsigned int)*(unsigned int *)(task + 0x5b8),
+			 (long)(unsigned int)(unsigned long)raw);
+		check_eq("task+0x5b0 == start routine (32-bit packed)",
+			 (long)(unsigned int)*(unsigned int *)(task + 0x5b0),
+			 (long)(unsigned int)(unsigned long)fakeStart);
+		check_eq("task+0x5b4 == arg (32-bit packed)",
+			 (long)(unsigned int)*(unsigned int *)(task + 0x5b4), 0x22222222);
+		check_eq("task+0x8 == 0", *(int *)(task + 0x8), 0);
+		check_ptr("rt_task_init: task == aligned pointer", g_lastTaskInitTask, task);
+		check_ptr("rt_task_init: entry == trampoline constant (.text+0x118e80)",
+			  g_lastTaskInitEntry, (void *)0x118e80);
+		check_eq("rt_task_init: data == (long)task", g_lastTaskInitData, (long)(intptr_t)task);
+		check_eq("rt_task_init: default stackSize == 0x2000", (long)g_lastTaskInitStackSize, 0x2000);
+		check_eq("rt_task_init: default priority == 0x3fffffff", (long)g_lastTaskInitPriority, 0x3fffffff);
+		check_eq("rt_task_init: usesFpu == 1 (hardcoded)", g_lastTaskInitUsesFpu, 1);
+		check_ptr("rt_task_init: signal == NULL (hardcoded)", g_lastTaskInitSignal, (void *)0);
+		check_ptr("rt_typed_sem_init: sem == task+0x580", g_lastSemInit, task + 0x580);
+		check_eq("rt_typed_sem_init: value == 0", g_lastSemInitValue, 0);
+		check_eq("rt_typed_sem_init: type == 5", g_lastSemInitType, 5);
+		check_ptr("rt_task_resume called with task", g_lastTaskResumed, task);
+		check_eq("rtheap_free NOT called (success path)", g_rtheapFreeCalls, 0);
+	}
+
+	printf("\n[19] rtwrap_pthread_create -- attr!=NULL overrides stackSize(+0x0)/priority(+0xc)\n");
+	{
+		unsigned char raw[0x700];
+		memset(raw, 0xcc, sizeof(raw));
+		g_rtheapAllocReturn = raw;
+		g_taskInitReturn = 0;
+		unsigned int attr[4] = { 0x4000, 0, 0, 99 };
+		void *out = 0;
+		rtwrap_pthread_create(&out, attr, 0, 0);
+		check_eq("rt_task_init: stackSize from attr+0x0", (long)g_lastTaskInitStackSize, 0x4000);
+		check_eq("rt_task_init: priority from attr+0xc", (long)g_lastTaskInitPriority, 99);
+	}
+
+	printf("\n[20] irq quartet -- direct forwards\n");
 	{
 		rtwrap_shutdown_irq(5);
 		check_eq("rt_shutdown_irq(5)", g_lastShutdownIrq, 5);

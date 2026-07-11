@@ -9,6 +9,26 @@
  * length stack allocation for the RTAI pthread-attr object (modeled
  * with `alloca()` to match the real disassembly's own technique
  * exactly, rather than a fixed-size guess).
+ *
+ * BUG FIX (batch 39): this function's own `rtwrap_pthread_create()`
+ * result check was inverted (`if (!createResult) return 0;`, i.e.
+ * treated a ZERO return as failure) -- harmless while
+ * `rtwrap_pthread_create` was still a stub always returning 0 (every
+ * call self-consistently looked like "immediate failure"), but exactly
+ * backwards relative to ground truth's REAL polarity (0 = success),
+ * now that `rtwrap_pthread_create` has a real body (src/init/rtwrap.cpp).
+ * Confirmed directly from THIS function's own real disassembly
+ * (`.text+0x40a9a` calls `rtwrap_pthread_create`, saves its return in
+ * `edi`, then `.text+0x40aa9: test edi,edi; je 0x40ac0` -- jumps to the
+ * debug-trap-install/CPU-pinning SUCCESS path when the return value IS
+ * ZERO; a nonzero return falls through to the early `return 0`/failure
+ * path instead), independently cross-checked against
+ * `rtwrap_pthread_create`'s own real body (returns 0 only after
+ * `rt_task_init` succeeds and `*out` has been written; returns a
+ * nonzero error/sentinel on every failure path, `*out` untouched).
+ * Fixed here to `if (createResult) return 0;`. The matching
+ * `test_cpu_affinity.cpp` mock's own success/failure return values were
+ * flipped to match (0 = success, nonzero = failure).
  */
 
 #include "oa_cpu_affinity.h"
@@ -40,7 +60,7 @@ char CSTGThread::CreateRealTimeWithCPUAffinity(void *(*entryFn)(void *), int pri
 	void *createResult = rtwrap_pthread_create(this, attr, entryFn, arg);
 	rtwrap_pthread_attr_destroy(attr);
 
-	if (!createResult)
+	if (createResult)
 		return 0;
 
 	debugTrapsInstalled = 1;

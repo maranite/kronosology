@@ -93,18 +93,48 @@ extern "C" void cleanup_cpp_support() {}
  * `cleanup_stg_decrypt_daemons` (a FOURTH not-yet-reconstructed
  * function). setup_stg_daemons (.init.text, 206 bytes) almost
  * certainly shares the same `SetupDaemon` helper for its own 7(?)
- * daemons. Real blocker: `SetupDaemon` itself is unreconstructed AND
- * depends on `rtwrap_pthread_create` actually working (still a stub,
- * `bar2_stubs_c.cpp` above -- returns NULL unconditionally), so even a
- * faithful `SetupDaemon` would be inert without that. This is a
- * multi-function (SetupDaemon + cleanup_stg_decrypt_daemons +
- * rtwrap_pthread_create's own real thread-trampoline target,
- * .text+0x118e80, already separately flagged in rtwrap.cpp) + new
- * 0x94-stride struct cluster -- correctly out of scope for a
- * smallest-first pass; a future batch should start with
- * `rtwrap_pthread_create` (already scoped in rtwrap.cpp's own header)
- * since every one of these daemon-lifecycle functions is downstream of
- * it working for real. */
+ * daemons.
+ *
+ * CORRECTION (batch 39): a prior pass (sec 10.189) guessed `SetupDaemon`
+ * itself depends on `rtwrap_pthread_create`. Now that `rtwrap_pthread_
+ * create` IS real (src/init/rtwrap.cpp, batch 39) this was checked by
+ * actually disassembling `SetupDaemon.clone.0` (`.text+0x11ce30`, 305
+ * bytes, confirmed `t` local/static in ground truth) -- the guess was
+ * WRONG: `SetupDaemon` does NOT call `rtwrap_pthread_create`/
+ * `rt_task_init` at all. It spins up the daemon via the plain Linux
+ * `kernel_thread(fn=.text+0x11ccc0, arg=this, flags=0xe00)` (NOT an
+ * RTAI real-time task), waits on an embedded `struct completion` at
+ * `+0x34` (`wait_for_completion`, its own embedded `wait_queue_head_t`
+ * at `+0x38` set up via `__init_waitqueue_head`) for the new kernel
+ * thread to signal readiness, registers an RTAI SRQ via
+ * `rt_request_srq(owner=arg3/ecx, handler=stack_arg@+0x18, 0)`, and
+ * pre-initializes two more standalone `wait_queue_head_t`s at `+0x28`/
+ * `+0x48`. Stores: `this[0]=arg2(edx)`, `this[0x8]=stack@+0x8`,
+ * `this[0xc]=stack@+0xc`, `this[0x14]=msecs_to_jiffies(stack@+0x10)`,
+ * `this[0x58]=stack@+0x14`, `this[0x5c]=stack@+0x18`, `this[0x1c]=0x32`,
+ * `this[0x24]=srq id` (or -1 on `rt_request_srq` failure, in which case
+ * returns -1 immediately without ever calling `kernel_thread`).
+ * `kernel_thread` failure logs via `rt_printk` and returns -2;
+ * `wait_for_completion` returning with `this[0x10]==0` ALSO logs +
+ * returns -2 (a second, string-distinct failure message); success
+ * stores the new thread's pid at `this[0x54]` and returns 0.
+ *
+ * Real blocker (revised): `SetupDaemon` itself is still unreconstructed
+ * (now confirmed self-contained -- no `rtwrap_pthread_create`/RTAI-task
+ * dependency at all), but needs FIVE new externs never yet declared
+ * anywhere in this project (`kernel_thread`, `wait_for_completion`,
+ * `__init_waitqueue_head`, `msecs_to_jiffies`, `rt_request_srq`, plus
+ * `rt_printk` -- already used elsewhere) and the `.text+0x11ccc0`
+ * kernel-thread entry trampoline (a SEPARATE not-yet-reconstructed
+ * internal function, unrelated to `rtwrap_pthread_create`'s own
+ * `.text+0x118e80` trampoline) plus the still-unconfirmed remainder of
+ * the 0x94-stride per-daemon struct (fields beyond `+0x5c`, up to
+ * whatever `.clone.0`'s own 0x94 stride implies is used elsewhere, e.g.
+ * by the `.text+0x11ccc0` thread routine or `ProcessCommands()`-style
+ * dispatch). Disproportionate for a smallest-first pick on its own;
+ * a future batch should treat this as its own dedicated "daemon kernel-
+ * thread lifecycle" push (start with `SetupDaemon` itself now that its
+ * real algorithm is fully known, then `cleanup_stg_decrypt_daemons`). */
 extern "C" int setup_stg_daemons() { return 0; }
 extern "C" void cleanup_stg_daemons() {}
 extern "C" int setup_stg_decrypt_daemons() { return 0; }
@@ -158,17 +188,18 @@ int nv2ac_enable_encrypt(unsigned char, const unsigned char *, const unsigned ch
  * rtwrap_whoami/task_suspend, rtwrap_pthread_cancel, and the irq
  * quartet) are now real bodies in src/init/rtwrap.cpp (batch 37) --
  * see that file's own header comment for the full ground-truth
- * derivation. Still deferred here: rtwrap_pthread_create (needs the
- * `.text+0x118e80` internal thread-trampoline target reconstructed
- * too, a larger task) and rtwrap_request_irq/rtwrap_set_debug_traps_
- * in_rt_task (both already have safe non-bare-`{}` stub bodies below,
- * not part of the "smallest remaining" bare-`{}` tally). */
+ * derivation. `rtwrap_pthread_create` is ALSO now a real body in
+ * src/init/rtwrap.cpp (batch 39 -- promoting it also uncovered and
+ * fixed a real return-value-polarity bug in cpu_affinity.cpp's own
+ * `CreateRealTimeWithCPUAffinity()`, see that function's header
+ * comment). Still deferred here: rtwrap_request_irq/rtwrap_set_debug_
+ * traps_in_rt_task (both already have safe non-bare-`{}` stub bodies
+ * below, not part of the "smallest remaining" bare-`{}` tally). */
 extern "C" unsigned int get_sizeof_rtwrap_pthread_attr(void) { return 64; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" int get_pthread_recursive_attr_constant(void) { return 1; }
 extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
-extern "C" void *rtwrap_pthread_create(void *, void *, void *(*)(void *), void *) { return 0; }
 extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return -1; }
 extern "C" int rtwrap_request_irq(unsigned int, void (*)(unsigned int, void *), void *, unsigned int) { return -1; }
 

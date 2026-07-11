@@ -11,6 +11,16 @@
  *       no debug-trap/CPU-pinning calls at all.
  *   [3] thread creation succeeds but debug-trap installation fails ->
  *       tears the thread back down (clear traps + cancel) and returns 0.
+ *
+ * POLARITY FIX (batch 39): `rtwrap_pthread_create`'s real ground-truth
+ * return convention is 0 = success / nonzero = failure (confirmed from
+ * BOTH its own real body, src/init/rtwrap.cpp, and its real caller's
+ * own disassembly, `.text+0x40a30` -- see cpu_affinity.cpp's header
+ * comment for the full derivation). This mock previously returned 0 for
+ * "failure" and an opaque nonzero value for "success" -- exactly
+ * backwards -- which went undetected because `CreateRealTimeWithCPU
+ * Affinity`'s own check was ALSO inverted at the time (two matching
+ * bugs canceling out). Both are now fixed together.
  */
 
 #include <cstdio>
@@ -55,7 +65,7 @@ void *rtwrap_pthread_create(void *this_, void *attr, void *(*entryFn)(void *), v
 	g_lastEntryFn = (void *)entryFn;
 	g_lastCreateArg = arg;
 	if (this_ == g_createShouldFail)
-		return 0;
+		return (void *)(long)-1; /* nonzero = failure (real polarity) */
 	/* Confirmed real: the actual function populates the caller's own
 	 * taskHandle field (+0x0) as a side effect -- CreateRealTimeWith
 	 * CPUAffinity reads it back via `this->taskHandle` afterward
@@ -63,7 +73,7 @@ void *rtwrap_pthread_create(void *this_, void *attr, void *(*entryFn)(void *), v
 	 * disassembly's own `mov eax,[esi]` re-read). Simulated here since
 	 * this mock stands in for that real function's own body. */
 	((CSTGThread *)this_)->taskHandle = (void *)0x1234;
-	return (void *)0x1234; /* opaque nonzero success indicator */
+	return 0; /* 0 = success (real polarity) */
 }
 
 static int g_attrDestroyCalls;
