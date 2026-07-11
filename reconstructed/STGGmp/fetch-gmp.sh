@@ -181,6 +181,145 @@ extern const unsigned short **__ctype_b_loc(void);
 #endif
 SHIM
 
+# mpz/set_str.c:127-128 (stock, unmodified upstream GMP) computes its
+# scratch-buffer size estimate ("xsize") as
+#   xsize = (((mp_size_t) (str_size / __mp_bases[base].chars_per_bit_exactly))
+#            / GMP_NUMB_BITS + 2);
+# -- chars_per_bit_exactly is a `double` (log(2)/log(base)), so this one
+# expression needs unsigned-to-double conversion (__floatunsidf),
+# double/double division (__divdf3), and double-to-int truncation
+# (__fixdfsi). Confirmed via a per-.o `nm -u` trace (MASTER_REFERENCE.md
+# sec 10.210) that this is the ONLY place anywhere in STGGmp.ko's
+# compiled object set that needs floating point at all -- a bare Linux
+# kernel module is never linked against libgcc's soft-float helpers, so
+# this expression alone made STGGmp.ko fail insmod outright with
+# "Unknown symbol __floatunsidf/__fixdfsi/__divdf3", one dependency
+# level upstream of the __gmpz_* symbols OA.ko itself needs directly.
+#
+# Save an unpatched copy first (used only by
+# verify/test_xsize_patch.c's own host-side baseline-vs-patched
+# comparison KAT -- NOT part of the kernel module's own object list,
+# harmless extra file).
+cp "$DEST/mpz/set_str.c" "$DEST/mpz/set_str.c.orig"
+
+echo ">> patching mpz/set_str.c: integer-only xsize estimate (no libgcc soft-float)"
+cat > "$DEST/stg_gmp_xsize.h" <<'SHIM'
+/* stg_gmp_xsize.h -- STGGmp.ko-only patch: integer-only, provably-safe
+ * replacement for stock GMP 4.2.1 mpz/set_str.c's `xsize` scratch-buffer
+ * size estimate. See fetch-gmp.sh's own comment (search "libgcc
+ * soft-float") for the full incident writeup; this header carries just
+ * the safety argument and the replacement itself.
+ *
+ * `xsize` is used ONLY as a pre-allocation hint (mpz/set_str.c's very
+ * next line: `MPZ_REALLOC (x, xsize)`) before the REAL digit-by-digit
+ * conversion (mpn_set_str(), mpn/set_str.c) computes the true limb count
+ * and writes directly into that pre-allocated `x->_mp_d` buffer with NO
+ * further bounds check or reallocation (confirmed by direct inspection
+ * of mpn/set_str.c -- it trusts the caller's allocation completely).
+ * This makes the correctness requirement precise and asymmetric: `xsize`
+ * may safely be an OVER-estimate (wastes a few words of scratch memory
+ * -- harmless) but must NEVER be an UNDER-estimate (mpn_set_str() would
+ * then write past the end of the allocated buffer -- real heap
+ * corruption, not just a wrong answer).
+ *
+ * Safety argument (no floating point, no new per-base table, correct
+ * for every base 2..62 stock GMP supports -- not hardcoded to base 10,
+ * even though base 10 is, as of this writing, the only base any real
+ * caller of __gmpz_init_set_str in this project actually passes --
+ * see reconstructed/OA/src/auth/atmel_challenge.cpp):
+ *
+ *   chars_per_bit_exactly == log(2)/log(base) (gmp-impl.h's own `struct
+ *   bases` comment), so the original expression computes
+ *   floor(str_size * log2(base)).
+ *
+ *   Every mp_bases[] entry's `chars_per_limb` field is DEFINED (same
+ *   struct's own header comment) as "the number of digits in the
+ *   conversion base that always fits in an mp_limb_t" -- i.e. by
+ *   construction, base**chars_per_limb <= 2**GMP_NUMB_BITS for every
+ *   entry in the table (mp_bases[] is a static generated table, not
+ *   computed at runtime -- this invariant is load-bearing and already
+ *   relied on elsewhere in GMP itself, e.g. mpn/set_str.c's own use of
+ *   chars_per_limb as a conversion block size). Taking log2 of both
+ *   sides of that invariant:
+ *
+ *       chars_per_limb * log2(base) <= GMP_NUMB_BITS
+ *       log2(base) <= GMP_NUMB_BITS / chars_per_limb
+ *
+ *   Substituting this upper bound for log2(base) in the original
+ *   expression can only ever make the result larger or equal, never
+ *   smaller -- i.e. it is a provably-safe over-estimate, computed with
+ *   plain integer division/multiplication only:
+ *
+ *       str_size * log2(base) <= str_size * GMP_NUMB_BITS / chars_per_limb
+ *
+ *   The helper below computes the right-hand side with the division
+ *   rounded UP (ceiling) and truncates to mp_size_t exactly as the
+ *   original's outer `(mp_size_t)` cast did -- both roundings are safe
+ *   in the "never smaller than the true real value" direction, so their
+ *   composition is too. Cross-checked against the real (host, real
+ *   libgcc) double-precision formula for every base 2..62 and str_size
+ *   0..4096 in verify/test_xsize_patch.c: never once smaller, and never
+ *   off by more than 1-2 GMP_NUMB_BITS-sized limbs of extra (harmless)
+ *   slack.
+ */
+#ifndef _STG_GMP_XSIZE_H
+#define _STG_GMP_XSIZE_H
+
+static inline mp_size_t
+stg_gmp_estimate_bits (size_t str_size, int base)
+{
+  int cpl = __mp_bases[base].chars_per_limb;
+  unsigned long bits_ub =
+    ((unsigned long) str_size * GMP_NUMB_BITS + (unsigned long) cpl - 1)
+    / (unsigned long) cpl;
+  return (mp_size_t) bits_ub;
+}
+
+#endif /* _STG_GMP_XSIZE_H */
+SHIM
+
+# Insert the shim #include right after "gmp-impl.h" (present exactly once,
+# real anchor in the real file -- fail loudly rather than silently no-op
+# if some future GMP point release restructures this file's includes).
+if ! grep -q '^#include "gmp-impl.h"$' "$DEST/mpz/set_str.c"; then
+    echo "ERROR: mpz/set_str.c's #include \"gmp-impl.h\" anchor line not" >&2
+    echo "found -- the stg_gmp_xsize.h patch below cannot be applied" >&2
+    echo "safely; investigate before staging (this GMP version may have" >&2
+    echo "changed this file's structure)." >&2
+    exit 1
+fi
+sed -i 's/^#include "gmp-impl.h"$/#include "gmp-impl.h"\n#include "stg_gmp_xsize.h"/' \
+    "$DEST/mpz/set_str.c"
+
+# Replace the two-line float-based xsize expression with a call to the
+# integer-only replacement above. Matched via perl -0 (whole-file slurp)
+# on the exact original text (spanning a line break) rather than a fixed
+# line-number range, so a future GMP point release reordering surrounding
+# code doesn't silently patch the wrong lines -- the post-patch grep
+# checks below fail loudly instead if the anchor text isn't found/matched.
+if ! grep -q 'xsize = (((mp_size_t) (str_size / __mp_bases\[base\].chars_per_bit_exactly))' "$DEST/mpz/set_str.c"; then
+    echo "ERROR: mpz/set_str.c's original xsize expression not found --" >&2
+    echo "the stg_gmp_xsize.h patch cannot be applied safely; investigate" >&2
+    echo "before staging (this GMP version may compute xsize differently)." >&2
+    exit 1
+fi
+perl -0pi -e 's/xsize = \(\(\(mp_size_t\) \(str_size \/ __mp_bases\[base\]\.chars_per_bit_exactly\)\)\s*\n\s*\/ GMP_NUMB_BITS \+ 2\);/xsize = (stg_gmp_estimate_bits (str_size, base) \/ GMP_NUMB_BITS + 2);/' \
+    "$DEST/mpz/set_str.c"
+
+# Verify the patch actually landed and the float expression is gone.
+if grep -q 'chars_per_bit_exactly' "$DEST/mpz/set_str.c"; then
+    echo "ERROR: mpz/set_str.c still references chars_per_bit_exactly" >&2
+    echo "after patching -- the perl substitution above did not match;" >&2
+    echo "investigate before building (STGGmp.ko would still need" >&2
+    echo "libgcc soft-float helpers)." >&2
+    exit 1
+fi
+if ! grep -q 'stg_gmp_estimate_bits (str_size, base)' "$DEST/mpz/set_str.c"; then
+    echo "ERROR: mpz/set_str.c's patched xsize call not found post-patch" >&2
+    echo "-- investigate before building." >&2
+    exit 1
+fi
+
 cat <<EOF
 
 >> staged $(ls "$DEST"/mpz/*.c "$DEST"/mpn/*.c 2>/dev/null | wc -l) GMP source files into $DEST

@@ -81,6 +81,23 @@ with the kernel toolchain (freestanding, no libc). That's exactly what Korg did.
    make glue KDIR=/mnt/tank/source/Kronos/linux-kronos
    ```
 
+### No libgcc soft-float dependency
+
+`mpz/set_str.c`'s stock upstream `xsize` scratch-buffer size estimate uses
+`double` arithmetic (`str_size / __mp_bases[base].chars_per_bit_exactly`),
+which pulls in three libgcc soft-float helpers
+(`__floatunsidf`/`__divdf3`/`__fixdfsi`) a bare kernel module is never
+linked against -- this made `STGGmp.ko` itself fail `insmod` outright
+(confirmed via a live boot test, MASTER_REFERENCE.md sec 10.210).
+`fetch-gmp.sh` patches this one expression, post-staging, to an
+integer-only, provably-safe over-estimate (`gmp/stg_gmp_xsize.h`, uses
+the table's existing integer `chars_per_limb` field instead of the
+`double` field -- see that header's own comment for the full derivation)
+-- zero floating point anywhere in the built module, confirmed via
+`nm -u STGGmp.ko`. See `verify/run_xsize_kat.sh` for the host-side KAT
+proving this changes no computed bignum result (only the harmless
+internal pre-allocation size).
+
 ### Symbol → GMP source map
 
 - `mpz/`: `add add_ui sub mul mul_2exp set set_str init iset_str iset_ui clear realloc
