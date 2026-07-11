@@ -134,6 +134,11 @@ void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
 void CSTGSlotVoiceData::SetIsDying() { }
 void CSTGSlotVoiceData::Setup(CSTGProgramSlot *, CSTGProgram *, const CSTGChannelValues *) { }
 void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *) { }
+/* CSTGPerformanceVarsManager::RunEffects() is real now (batch 49, see
+ * global.cpp, which this file links directly) -- trivial link-satisfying
+ * mock for its own confirmed-real, deliberately deferred DSP callee, not
+ * exercised by this file's own tests (see test_global.cpp). */
+void CSTGPerformance::RunEffects(CSTGPerformanceVars *) { }
 /* CSTGVoiceAllocator::EmergencyFreeVoiceList(void*) is real now (sec
  * 10.149, see managers.cpp, which this file links directly) -- no mock
  * here any more. Its own new real dependencies need trivial link-

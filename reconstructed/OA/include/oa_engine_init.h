@@ -478,6 +478,24 @@ struct CSTGMidiDispatcher {
 struct CSTGPerformance {
 	bool IsCurrentlyActive() const;
 	void SetIsDying(CSTGPerformanceVars *unused);
+
+	/*
+	 * RunEffects(CSTGPerformanceVars*) (batch 49, `.text+0xb9b50`, 256
+	 * bytes, confirmed via relocation from `CSTGPerformanceVarsManager::
+	 * RunEffects()`) confirmed real, deliberately deferred: genuine
+	 * audio-DSP effect processing -- calls `CSTGEffectRack::
+	 * RunEffects(CSTGEffectRackVars*)` (`this+4`, 636 bytes, its own
+	 * further not-reconstructed DSP body), a 256-iteration SSE
+	 * (`movaps`/`mulps`/`addps`/`subps`) stereo-pan-coefficient
+	 * smoothing loop over `this+0x2140` (via `CSTGPan::
+	 * CalculateStereoPanCoeffs`), `CSetListEQ::Run()` (conditionally, on
+	 * `this+0x23dc`'s own gate byte), and `CSTGEffectRackVars::
+	 * ApplyDModTickDelay()` -- out of scope per the sec 10.185
+	 * audio-DSP-fidelity policy. `CSTGPerformanceVarsManager::
+	 * RunEffects()` (the real caller, see oa_global.h) is fully real;
+	 * only this DSP callee is deferred, matching the established
+	 * reconstruct-caller-DSP-stub-callee pattern. */
+	void RunEffects(CSTGPerformanceVars *vars);
 };
 
 /*
@@ -926,6 +944,35 @@ struct CSTGMIDIClockSync {
 	 * SetIsDying()`) -- trivially sets `fieldAt(0xc8) = -1`. See
 	 * src/engine/performance_vars_set_is_dying.cpp. */
 	void DisableActivePerfClock();
+
+	/*
+	 * GetFilteredTempoBPM(unsigned int) const is real now, batch 49
+	 * (`.text+0x67990`, 108 bytes, confirmed via relocation from
+	 * `CSTGEffectManager::RunEffects()`) confirmed:
+	 *   - `index` (regparm edx) is clamped to 0 if >= 2 (unsigned
+	 *     `cmovae`, matching the two-slot shape below).
+	 *   - if `SKSTGGate_ShouldSyncExternalClock()` AND
+	 *     `fieldAt(0x60)` (a packed 32-bit pointer, confirmed zeroed by
+	 *     the ctor above -- the SAME field) is non-null: returns
+	 *     `(float)*(int*)(fieldAt(0x60)+0x1c4)` (an int-to-float
+	 *     conversion of a raw tick count on a not-independently-modeled
+	 *     object, real `fildl` instruction) -- no further fields of that
+	 *     object are reconstructed in this pass.
+	 *   - otherwise: returns `(float)((double)CSTGAudioBusManager::
+	 *     sInstance->busGainScale * fieldAt(0x98 + index*0x20) * 2.5)`
+	 *     -- `fieldAt(0x98)`/`fieldAt(0xb8)` are the SAME two "smoothed
+	 *     tempo interval" doubles the ctor initializes to `48.0 *
+	 *     busGainReciprocal` (see ctor comment above); `2.5f` a
+	 *     confirmed real `.rodata.cst4` float. CROSS-CHECK: at the
+	 *     ctor's own default state (`busGainScale=1500.0`,
+	 *     `busGainReciprocal=1/1500`), this evaluates to EXACTLY
+	 *     `1500.0 * (48.0/1500.0) * 2.5 == 120.0` -- independently
+	 *     confirming `CSTGEffectManager`'s own `defaultTempoA/
+	 *     defaultTempoB` "120.0f, plausible default tempo" flag (oa_engine.h)
+	 *     as the REAL computed steady-state value, not merely a guess.
+	 * See src/engine/midi_clock_sync.cpp for the implementation.
+	 */
+	float GetFilteredTempoBPM(unsigned int index) const;
 };
 
 /*

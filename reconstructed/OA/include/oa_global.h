@@ -1166,6 +1166,23 @@ struct CSTGPerformanceVarsManager {
 	 * Finally zeroes `+0x23d8` and sets (not clears) `+0x240c=1`.
 	 */
 	void StealAllDyingPerformanceVars();
+
+	/*
+	 * RunEffects() (batch 49, called with `this=&sInstance`, the SAME
+	 * "address of the singleton" idiom as `Initialize()`/
+	 * `AllocPerformanceVars()`; .text+0xba7f0, 67 bytes, confirmed via
+	 * relocation from `CSTGEffectManager::RunEffects()`) confirmed:
+	 * UNLIKE `ResolveActivePerformanceVarsManager()`, this does NOT
+	 * consult the `sInstance[8]` "active slot" selector -- it walks
+	 * BOTH `sInstance[0]`/`sInstance[4]` slots unconditionally. For
+	 * each: if that slot's own `+0x23d1` "active state" byte (SIGNED)
+	 * is `> 1`, reads its own `+0x23d4` `CSTGPerformance*` back-pointer
+	 * and calls `CSTGPerformance::RunEffects()` on it, passing the
+	 * ORIGINAL slot pointer (typed `CSTGPerformanceVars*` at the real
+	 * call site) as the argument. No null-check on either slot pointer
+	 * (matches ground truth exactly -- see src/engine/global.cpp).
+	 */
+	void RunEffects();
 };
 /*
  * USTGAliasBankTypes (sec 10.85) -- confirmed real (readelf, both

@@ -358,6 +358,17 @@ void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *svd)
 	g_lastCompleteLoadProgramThis = (void *)this;
 	g_lastCompleteLoadProgramArg = (void *)svd;
 }
+/* CSTGPerformanceVarsManager::RunEffects() (batch 49) real callee -- see
+ * oa_engine_init.h/global.cpp. Call-tracking mock (not a trivial no-op)
+ * since this file's own new scenario exercises RunEffects() for real. */
+static int g_perfRunEffectsCalls;
+static void *g_lastPerfRunEffectsThis, *g_lastPerfRunEffectsArg;
+void CSTGPerformance::RunEffects(CSTGPerformanceVars *vars)
+{
+	g_perfRunEffectsCalls++;
+	g_lastPerfRunEffectsThis = (void *)this;
+	g_lastPerfRunEffectsArg = (void *)vars;
+}
 static int g_runVoiceModelStaticFrontCalls, g_runVoiceModelStaticBackCalls;
 static void *g_lastRunVoiceModelStaticThis;
 static unsigned int g_lastRunVoiceModelStaticParam;
@@ -5778,6 +5789,70 @@ int main(void)
 		munmap(smoother, 0x10);
 		munmap(pVt, 60 * sizeof(void *));
 		munmap(dVt, 60 * sizeof(void *));
+	}
+
+	printf("\n[55] CSTGPerformanceVarsManager::RunEffects (batch 49)\n");
+	{
+		unsigned char *mgr0 = mmap32(0x2410);
+		unsigned char *mgr1 = mmap32(0x2410);
+		unsigned char *perf0 = mmap32(0x10);
+		unsigned char *perf1 = mmap32(0x10);
+
+		auto reset = [&]() {
+			memset(mgr0, 0, 0x2410);
+			memset(mgr1, 0, 0x2410);
+			memset(perf0, 0, 0x10);
+			memset(perf1, 0, 0x10);
+			*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) =
+				(unsigned int)(unsigned long)mgr0;
+			*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 4) =
+				(unsigned int)(unsigned long)mgr1;
+			*(unsigned int *)(mgr0 + 0x23d4) = (unsigned int)(unsigned long)perf0;
+			*(unsigned int *)(mgr1 + 0x23d4) = (unsigned int)(unsigned long)perf1;
+			g_perfRunEffectsCalls = 0;
+			g_lastPerfRunEffectsThis = g_lastPerfRunEffectsArg = 0;
+		};
+
+		printf("  -- both slots' +0x23d1 <= 1: neither called (unlike "
+		       "StealAllDyingPerformanceVars, NOT selector-gated -- both "
+		       "checked directly) --\n");
+		reset();
+		mgr0[0x23d1] = 0;
+		mgr1[0x23d1] = 1;
+		((CSTGPerformanceVarsManager *)CSTGPerformanceVarsManager::sInstance)->RunEffects();
+		check_eq("RunEffects not called at all", (unsigned int)g_perfRunEffectsCalls, 0u);
+
+		printf("  -- slot[0] > 1, slot[1] <= 1: ONLY slot[0]'s CSTGPerformance "
+		       "called, with slot[0]'s OWN pointer as the argument --\n");
+		reset();
+		mgr0[0x23d1] = 2;
+		mgr1[0x23d1] = 1;
+		((CSTGPerformanceVarsManager *)CSTGPerformanceVarsManager::sInstance)->RunEffects();
+		check_eq("called exactly once", (unsigned int)g_perfRunEffectsCalls, 1u);
+		check_eq("this == perf0 (from mgr0+0x23d4)",
+			 (unsigned int)(g_lastPerfRunEffectsThis == (void *)perf0), 1u);
+		check_eq("arg == mgr0 itself (the slot pointer, not perf0)",
+			 (unsigned int)(g_lastPerfRunEffectsArg == (void *)mgr0), 1u);
+
+		printf("  -- BOTH slots > 1: BOTH called, NOT gated by sInstance[8] "
+		       "(never even set in this scenario) --\n");
+		reset();
+		mgr0[0x23d1] = 9;
+		mgr1[0x23d1] = 3;
+		((CSTGPerformanceVarsManager *)CSTGPerformanceVarsManager::sInstance)->RunEffects();
+		check_eq("called exactly twice", (unsigned int)g_perfRunEffectsCalls, 2u);
+
+		printf("  -- negative (signed) state treated as <= 1: no call --\n");
+		reset();
+		mgr0[0x23d1] = (unsigned char)-3;
+		mgr1[0x23d1] = (unsigned char)-1;
+		((CSTGPerformanceVarsManager *)CSTGPerformanceVarsManager::sInstance)->RunEffects();
+		check_eq("neither called (signed compare)", (unsigned int)g_perfRunEffectsCalls, 0u);
+
+		munmap(mgr0, 0x2410);
+		munmap(mgr1, 0x2410);
+		munmap(perf0, 0x10);
+		munmap(perf1, 0x10);
 	}
 
 	munmap(buf, globalSize);

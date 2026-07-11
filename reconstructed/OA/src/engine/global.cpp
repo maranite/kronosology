@@ -4371,6 +4371,26 @@ void CSTGPerformanceVarsManager::StealAllDyingPerformanceVars()
 }
 
 /*
+ * CSTGPerformanceVarsManager::RunEffects() (batch 49): see oa_global.h
+ * for the full confirmed shape. Unlike StealAllDyingPerformanceVars()/
+ * ResolveActivePerformanceVarsManager(), walks BOTH slots directly, no
+ * sInstance[8] selector consulted, no null-check (matches ground truth).
+ */
+void CSTGPerformanceVarsManager::RunEffects()
+{
+	unsigned char *base = (unsigned char *)this;
+
+	for (unsigned int i = 0; i < 2; i++) {
+		unsigned char *perfVars = FromU32(*(unsigned int *)(base + i * 4));
+		if ((signed char)perfVars[0x23d1] > 1) {
+			CSTGPerformance *perf =
+				(CSTGPerformance *)FromU32(*(unsigned int *)(perfVars + 0x23d4));
+			perf->RunEffects((CSTGPerformanceVars *)perfVars);
+		}
+	}
+}
+
+/*
  * CSTGMidiDispatcher::StealingRequiresOneTickStall() (sec 10.136): see
  * oa_engine_init.h for the full confirmed shape.
  */

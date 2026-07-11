@@ -110,6 +110,10 @@ static void check_log(const char *label, const char *expected)
  * no mock body here any more, see the VoiceModelDtorEntryTrap comment
  * above for how test [5]'s reused vmm object drives it safely. */
 void CSTGEffectManager::RunEffects()             { log_call("CSTGEffectManager::RunEffects"); }
+/* CSTGPerformanceVarsManager::RunEffects() is real now, batch 49 (see
+ * global.cpp) -- calls this confirmed-real, deliberately-deferred DSP
+ * callee (own body a genuine audio-effect chain, out of scope). */
+void CSTGPerformance::RunEffects(CSTGPerformanceVars *)  { log_call("CSTGPerformance::RunEffects"); }
 void CSTGAudioBusManager::MixPerformanceOutputs(){ log_call("MixPerformanceOutputs"); }
 void CSTGAudioBusManager::LRBusIndivMirror()     { log_call("LRBusIndivMirror"); }
 void CSTGHDRManager::ProcessHDRRecord()          { log_call("ProcessHDRRecord"); }

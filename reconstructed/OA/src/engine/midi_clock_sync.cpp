@@ -6,6 +6,11 @@
  * 152 bytes) and the complete CSTGIntMIDIClockSync class (8 methods,
  * 1-66 bytes each, all confirmed via full disassembly/objdump -dr).
  *
+ * UPDATE (batch 49): CSTGMIDIClockSync::GetFilteredTempoBPM(unsigned int)
+ * const added (`.text+0x67990`, 108 bytes, confirmed via relocation from
+ * the newly-real CSTGEffectManager::RunEffects()) -- see oa_engine_init.h
+ * for the full confirmed shape, including the 120.0f cross-check.
+ *
  * This is the SAME "check the whole class once a tiny dependency turns
  * up" technique that paid off for CSTGHDRCircularBuffer (sec 10.158,
  * batch 11): CSTGMIDIClockSync's own ctor calls
@@ -142,6 +147,34 @@ float CSTGIntMIDIClockSync::GetClockLateThresholdTicks() const
 float CSTGIntMIDIClockSync::GetClockEarlyThresholdTicks() const
 {
 	return 0.0f;
+}
+
+/*
+ * GetFilteredTempoBPM(unsigned int) const -- see oa_engine_init.h for the
+ * full confirmed shape and the 120.0f cross-check. `index` selects one of
+ * two independent "smoothed tempo interval" doubles at +0x98/+0xb8
+ * (stride 0x20), matching the ctor's own +0x78/+0x98/+0xb8 triple.
+ */
+float CSTGMIDIClockSync::GetFilteredTempoBPM(unsigned int index) const
+{
+	const unsigned char *base = (const unsigned char *)this;
+
+	if (index >= 2)
+		index = 0;
+
+	if (SKSTGGate_ShouldSyncExternalClock()) {
+		unsigned int extPtr = *(const unsigned int *)(base + 0x60);
+		if (extPtr != 0) {
+			const unsigned char *extObj =
+				(const unsigned char *)(unsigned long)extPtr;
+			return (float)(*(const int *)(extObj + 0x1c4));
+		}
+	}
+
+	const CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+	double smoothed =
+		*(const double *)(base + 0x98 + (unsigned long)index * 0x20);
+	return (float)((double)bus->busGainScale * smoothed * 2.5);
 }
 
 /*

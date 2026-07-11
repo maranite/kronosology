@@ -157,12 +157,27 @@ public:
  * +0xb78. Everything from +0x000 to +0x7ff (2048 bytes) is also untouched
  * by this constructor -- not confirmed zero, just not written here.
  *
- * The repeated 120.0f value is a plausible-but-NOT-confirmed default tempo
- * (120 BPM is the near-universal synth/DAW default, and this project's own
- * CSTGMetronome constructor already confirmed a similar
- * tempo-related-constants pattern) -- flagged as speculation, not asserted
- * as the real semantic meaning; only the VALUE and OFFSET are confirmed
- * facts here.
+ * The repeated 120.0f value was flagged by an earlier pass as a
+ * plausible-but-not-confirmed default tempo. Batch 49's own
+ * `GetFilteredTempoBPM()` reconstruction (see oa_engine_init.h) CONFIRMS
+ * this is exactly right: at the ctor's own default state, that function's
+ * real formula (`busGainScale * smoothedInterval * 2.5`) evaluates to
+ * EXACTLY `1500.0 * (48.0/1500.0) * 2.5 == 120.0` -- no longer a guess.
+ *
+ * UPDATE (batch 49): `RunEffects()` is real now too (see
+ * src/engine/effect_manager_run_effects.cpp) and confirms `defaultTempoA`/
+ * `defaultTempoB` and the four `_tailZeroed` dwords are NOT merely
+ * "zeroed and never touched again" -- they're live state this method
+ * overwrites every call: `defaultTempoA`/`defaultTempoB` from
+ * `CSTGMIDIClockSync::sInstance->GetFilteredTempoBPM(0/1)`, clamped to
+ * `[40.0f, 300.0f]` (two confirmed real `.rodata.cst4` floats); the four
+ * `_tailZeroed` dwords mirrored directly from
+ * `CSTGMIDIClockSync::sInstance`'s own `fieldAt(0x90)/fieldAt(0x94)/
+ * fieldAt(0xb0)/fieldAt(0xb4)` (no transformation, straight dword
+ * copies). Field names kept as-is (not renamed away from
+ * "default"/"_tailZeroed") to avoid unnecessary churn now that their
+ * ctor-time values are just the FIRST of many real writes, matching this
+ * project's established "document the correction in place" convention.
  *
  * Total confirmed minimum size is 0xb7c (2940) bytes; the class's real
  * total size is not independently confirmed (no destructor or other
@@ -172,6 +187,17 @@ class CSTGEffectManager {
 public:
 	static CSTGEffectManager *sInstance;
 	CSTGEffectManager();
+	/*
+	 * RunEffects() is real now, batch 49 -- see
+	 * src/engine/effect_manager_run_effects.cpp (its own dedicated TU:
+	 * test_engine.cpp/test_global.cpp/test_global_ctor.cpp all keep
+	 * their own pre-existing mocks for this symbol untouched, matching
+	 * the CSTGMidiQueueWriter::Write precedent). Calls
+	 * `CSTGPerformanceVarsManager::RunEffects()` (real now too, see
+	 * oa_global.h) then does its own real tempo-smoothing/clamp math
+	 * against `CSTGMIDIClockSync::sInstance` (see
+	 * `GetFilteredTempoBPM()`, oa_engine_init.h).
+	 */
 	void RunEffects();
 	/* Confirmed real (called from CSTGEngine::Initialize(), sec 10.58),
 	 * body not reconstructed in this pass. */
@@ -181,9 +207,9 @@ public:
 	unsigned int  zeroedCounter;			/* +0x800, confirmed zeroed */
 	unsigned int  zeroedTable[198];		/* +0x804..+0xb1b, confirmed zeroed */
 	unsigned char _unrecovered_gap[0x48];		/* +0xb1c..+0xb63, confirmed untouched -- a real gap */
-	float         defaultTempoA;			/* +0xb64, confirmed: 120.0f (see comment above) */
-	float         defaultTempoB;			/* +0xb68, confirmed: 120.0f (same value, same caveat) */
-	unsigned int  _tailZeroed[4];			/* +0xb6c/+0xb70/+0xb74/+0xb78, confirmed zeroed */
+	float         defaultTempoA;			/* +0xb64, confirmed init 120.0f (see comment above); overwritten every RunEffects() call */
+	float         defaultTempoB;			/* +0xb68, confirmed init 120.0f (same value, same caveat); overwritten every RunEffects() call */
+	unsigned int  _tailZeroed[4];			/* +0xb6c/+0xb70/+0xb74/+0xb78, confirmed init zeroed; overwritten every RunEffects() call */
 };
 
 /*

@@ -20,7 +20,19 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <sys/mman.h>
 #include "oa_engine_init.h"
+
+/* Matches this project's established `mmap(..., MAP_32BIT, ...)` fix
+ * (test_global.cpp et al) -- fieldAt(0x60) is a packed 32-bit pointer on
+ * the real target; a plain stack/heap address on this 64-bit host would
+ * silently truncate when stored there and crash on reconstruction. */
+static unsigned char *mmap32(unsigned long size)
+{
+	void *p = mmap(0, size, PROT_READ | PROT_WRITE,
+		       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+	return (unsigned char *)p;
+}
 
 static int g_fail;
 static void check_eq(const char *label, long got, long want)
@@ -246,6 +258,65 @@ int main(void)
 			 buf[0x18], 0);
 		check_float("embedded Base::Initialize(): kMaxNormalizedTempo == 200*busGainReciprocal",
 			    CSTGMIDIClockSyncBase::kMaxNormalizedTempo, 200.0f * abm.busGainReciprocal);
+		(void)mcs;
+	}
+
+	printf("\n[7] GetFilteredTempoBPM(unsigned int) const (batch 49)\n");
+	{
+		*(int *)(bankMgr + 0x97c750) = 0; /* mode 0 -> ShouldSyncExternalClock() == false */
+		unsigned char innerBuf[0x30];
+		unsigned char outerBuf[0x8];
+		*(int *)(innerBuf + 0x2c) = 0;
+		*(unsigned char **)outerBuf = innerBuf;
+		CTimerManager::ms_poInstance = (CTimerManager *)outerBuf;
+
+		unsigned char buf[0x200];
+		memset(buf, 0xcc, sizeof(buf));
+		CSTGMIDIClockSync *mcs = new (buf) CSTGMIDIClockSync();
+
+		printf("  -- ctor-default state, internal sync (mode 0): index 0/1 both "
+		       "== EXACTLY 120.0f (1500.0 * (48.0/1500.0) * 2.5) --\n");
+		check_float("GetFilteredTempoBPM(0) == 120.0f", mcs->GetFilteredTempoBPM(0), 120.0f);
+		check_float("GetFilteredTempoBPM(1) == 120.0f", mcs->GetFilteredTempoBPM(1), 120.0f);
+
+		printf("  -- index >= 2 clamped to 0 (unsigned cmovae) --\n");
+		check_float("GetFilteredTempoBPM(2) == GetFilteredTempoBPM(0)",
+			    mcs->GetFilteredTempoBPM(2), mcs->GetFilteredTempoBPM(0));
+		check_float("GetFilteredTempoBPM(0xffffffff) == GetFilteredTempoBPM(0)",
+			    mcs->GetFilteredTempoBPM(0xffffffffu), mcs->GetFilteredTempoBPM(0));
+
+		printf("  -- else-branch formula independently, with a poked non-default "
+		       "smoothed interval --\n");
+		*(double *)(buf + 0x98) = 0.05; /* index 0's own smoothed interval */
+		*(double *)(buf + 0xb8) = 0.10; /* index 1's own smoothed interval */
+		double want0 = (double)abm.busGainScale * 0.05 * 2.5;
+		double want1 = (double)abm.busGainScale * 0.10 * 2.5;
+		check_float("GetFilteredTempoBPM(0) == busGainScale*0.05*2.5",
+			    mcs->GetFilteredTempoBPM(0), (float)want0);
+		check_float("GetFilteredTempoBPM(1) == busGainScale*0.10*2.5",
+			    mcs->GetFilteredTempoBPM(1), (float)want1);
+
+		printf("  -- external sync active (mode 1) but fieldAt(0x60)==0: falls "
+		       "through to the SAME else-branch formula --\n");
+		*(int *)(bankMgr + 0x97c750) = 1;
+		check_eq("fieldAt(0x60) confirmed still 0 (ctor zeroed it)",
+			 *(int *)(buf + 0x60), 0);
+		check_float("GetFilteredTempoBPM(0) unaffected by mode when fieldAt(0x60)==0",
+			    mcs->GetFilteredTempoBPM(0), (float)want0);
+
+		printf("  -- external sync active AND fieldAt(0x60) non-null: returns "
+		       "(float)*(int*)(fieldAt(0x60)+0x1c4), formula NOT consulted --\n");
+		unsigned char *extObj = mmap32(0x200);
+		memset(extObj, 0, 0x200);
+		*(int *)(extObj + 0x1c4) = 777;
+		*(unsigned int *)(buf + 0x60) = (unsigned int)(unsigned long)extObj;
+		check_float("GetFilteredTempoBPM(0) == 777.0f (int-to-float of fieldAt(0x60)+0x1c4)",
+			    mcs->GetFilteredTempoBPM(0), 777.0f);
+		check_float("GetFilteredTempoBPM(1) -- SAME external path, index irrelevant here",
+			    mcs->GetFilteredTempoBPM(1), 777.0f);
+
+		munmap(extObj, 0x200);
+		*(unsigned int *)(buf + 0x60) = 0; /* restore for cleanliness */
 		(void)mcs;
 	}
 

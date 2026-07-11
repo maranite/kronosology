@@ -61,6 +61,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/startup_file.o \
            src/engine/sk_stg_gate.o \
            src/engine/midi_clock_sync.o \
+           src/engine/effect_manager_run_effects.o \
            src/engine/lfo_stepseq_quad.o \
            src/engine/wave_seq_manager.o \
            src/engine/midi_dispatcher.o \
@@ -199,6 +200,14 @@ CFLAGS_smoother_init.o := -mhard-float -msse2 -mfpmath=sse
 # in unresolvable libgcc soft-float/double helpers.
 CFLAGS_midi_clock_sync.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: effect_manager_run_effects.cpp's own
+# CSTGEffectManager::RunEffects() (batch 49) does a genuine plain-C float
+# clamp (against confirmed real 40.0f/300.0f `.rodata.cst4` constants)
+# on CSTGMIDIClockSync::GetFilteredTempoBPM()'s own return value -- would
+# otherwise pull in unresolvable libgcc soft-float helpers under the
+# kernel's own -msoft-float default.
+CFLAGS_effect_manager_run_effects.o := -mhard-float -msse2 -mfpmath=sse
+
 # Same reasoning again: wave_sample_convert.cpp's own scalar reimplementation
 # of the real SSE2 sample-conversion leaf functions (int16->float, scale,
 # mix-add) does genuine float arithmetic confirmed real in the original
@@ -272,6 +281,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/startup_file.cpp \
        src/engine/sk_stg_gate.cpp \
        src/engine/midi_clock_sync.cpp \
+       src/engine/effect_manager_run_effects.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -402,7 +412,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_voice_models \
          verify/test_atmel_deax verify/test_program_ctor \
          verify/test_combi_ctor \
-         verify/test_atmel_zone_io
+         verify/test_atmel_zone_io \
+         verify/test_effect_manager_run_effects
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -504,6 +515,9 @@ verify/test_sk_stg_gate: verify/test_sk_stg_gate.cpp src/engine/sk_stg_gate.cpp 
 
 verify/test_midi_clock_sync: verify/test_midi_clock_sync.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_midi_clock_sync.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp -o $@
+
+verify/test_effect_manager_run_effects: verify/test_effect_manager_run_effects.cpp src/engine/effect_manager_run_effects.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp include/oa_engine.h include/oa_engine_init.h include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_effect_manager_run_effects.cpp src/engine/effect_manager_run_effects.cpp src/engine/midi_clock_sync.cpp src/engine/sk_stg_gate.cpp -o $@
 
 verify/test_lfo_stepseq_quad: verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp include/oa_engine.h include/oa_engine_init.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_stepseq_quad.cpp src/engine/lfo_stepseq_quad.cpp -o $@

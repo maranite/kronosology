@@ -92,7 +92,13 @@ void CSTGPianoModel::RescanPianoTypes() {}
 /* CSTGVoiceModelManager::~CSTGVoiceModelManager() is real now, sec
  * 10.147 -- see managers.cpp. */
 void CSTGEffectManager::Initialize() {}
-void CSTGEffectManager::RunEffects() {}
+/* CSTGEffectManager::RunEffects() is real now, batch 49 -- see
+ * src/engine/effect_manager_run_effects.cpp (its own dedicated TU).
+ * Its own newly-discovered confirmed-real, deliberately deferred
+ * dependencies -- CSTGPerformanceVarsManager::RunEffects() (real too,
+ * see global.cpp) and CSTGPerformance::RunEffects(CSTGPerformanceVars*)
+ * (a genuine audio-DSP callee, stubbed below, see oa_engine_init.h for
+ * the full derivation). */
 /* CSTGHDRManager::Initialize() is real now, batch 22 -- see
  * hdr_manager_init.cpp. */
 /* ProcessCommands()/Initialize() (CSTGMonitorMixer/CSTGHDRFileWriter/
@@ -359,6 +365,13 @@ void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
  * immediately below, matching the reconstruct-caller-DSP-stub-callee
  * pattern (`ChangeProgram()` itself is the caller, now fully real). */
 void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsigned long *) const {}
+/* CSTGPerformance::RunEffects(CSTGPerformanceVars*) (batch 49) -- confirmed
+ * real, deliberately deferred: genuine audio-DSP effect processing (SSE
+ * stereo-pan smoothing, CSTGEffectRack::RunEffects, CSetListEQ::Run,
+ * CSTGEffectRackVars::ApplyDModTickDelay), out of scope per the sec 10.185
+ * policy. Its own real caller, CSTGPerformanceVarsManager::RunEffects(),
+ * IS reconstructed for real -- see oa_global.h/global.cpp. */
+void CSTGPerformance::RunEffects(CSTGPerformanceVars *) {}
 void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 /* CSTGChannelValues::Reset() is real now, batch 18 -- see
  * src/engine/channel_values_reset.cpp (its own dedicated translation
