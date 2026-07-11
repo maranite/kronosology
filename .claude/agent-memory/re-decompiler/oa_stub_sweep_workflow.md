@@ -4570,3 +4570,83 @@ ring, same general shape/scope as the already-deferred file-daemon
 `ProcessCommands()` cluster -- a real future-batch candidate, not a
 same-pass win (only `ProcessSamplerCommands()` itself was disassembled
 this batch; the other two siblings still need their own look).
+
+**Batch 50 (2026-07-11, MASTER_REFERENCE sec 10.201): `CSTGHDRManager::
+ProcessSamplerCommands()` reconstructed for real, picking up the
+sec 10.200 `CSTGSampler`-blocker priority.** Key correction to that
+blocker's own framing: `CSTGSampler` has NO vtable at all (no `_ZTV`
+symbol) -- batch 49's "vtable dispatch into a new class" characterization
+was simply wrong; every call into it is a plain non-virtual call. Once
+actually disassembled, `ProcessSamplerCommands()` turned out to be the
+SAME ring-buffer-consumer shape as the already-solved
+`ProcessRecordCommands()`/`CSTGCDWorker::ProcessCommands()` family (sec
+10.158/10.162), just over a THIRD, previously-unidentified ring
+(`CSTGHDRManager+0x18af8/+0x18afc/+0x18b00/+0x18b04` -- resolves the
+"three AllocAligned rings" note already in oa_engine.h's own
+`CSTGHDRManager` ctor comment). Only 4 of `CSTGSampler`'s ~25 real
+methods were actually needed (`StandbyDisk`/`StandbyRAM`/`Start(bool)`/
+`Stop()`), all four cross-confirmed via DIRECT `.rel.text` relocation
+resolution against ground truth (not signature-shape guessing) --
+worth restating as a general technique: **before accepting a prior
+batch's "dispatches into an unmodeled class via a vtable" framing at
+face value, re-check whether that class even HAS a `_ZTV` symbol** --
+`nm -C OA.ko | grep _ZTV<mangled-class-name>` takes seconds and can
+turn an apparently-huge blocker into an ordinary direct-call reconstruction.
+
+**Cleaner DSP-stub pattern than batch 49's net-zero**: because the 4
+deferred `CSTGSampler` methods were BRAND NEW declarations (the class
+previously only had `Initialize()`), they didn't need their own
+`bar2_stubs.cpp` entries -- followed the established `CSTGRecordTrack::
+StandbyRec()` precedent (sec 10.162) of giving them real (no-op) bodies
+directly in the SAME dedicated TU as the real caller reconstruction
+(`hdr_sampler_commands.cpp`), purely so that TU links standalone.
+`bar2_stubs.cpp` is never linked into any `verify/` binary, so it's not
+the only place a "deferred" function can get a body -- **only add a new
+bar2_stubs.cpp entry when the deferred function has no dedicated TU of
+its own to live in already**; otherwise a same-TU no-op body is cleaner
+and produces a genuine stub-count REDUCTION instead of a net-zero.
+
+**"Check every verify/*.cpp file linking the touched source" paid off by
+finding nothing to fix, not just something** -- worth remembering both
+directions: a project-wide grep found SIX pre-existing independent
+`CSTGHDRManager::ProcessSamplerCommands() {}` link-satisfying mocks
+(`test_engine.cpp`, `test_engine_startup_bits2.cpp`, `test_global.cpp`,
+`test_global_ctor.cpp`, `test_managers.cpp`,
+`test_playback_buffer_events.cpp`), none of which link the new dedicated
+TU, so none needed changes -- confirmed safe rather than assumed safe.
+
+**Honest-testing pattern for an ALL-FOUR-callees-are-DSP-stubs caller**
+(a new variant of the "reconstruct-caller-DSP-stub-callee" family): when
+literally every dispatch target of a newly-real ring-consumer function is
+a deliberately deferred no-op (unlike `ProcessRecordCommands()`, where 3
+of 4 targets were real and testable via state changes), the honest KAT
+scope is the ring BOOKKEEPING only (consumer/producer index advance,
+capacity-modulus wraparound, unknown-tag-still-consumed, no-crash field
+extraction for every tag) -- explicitly documented in the test file's own
+header comment as NOT claiming to verify dispatch correctness beyond the
+disassembly-level derivation already established. Don't invent fake
+observability (e.g. injecting call-tracking into what should be a
+faithful no-op) just to make a test assertion possible.
+
+**bar2_stubs.cpp count**: 82 -> 81 (one stub removed --
+`CSTGHDRManager::ProcessSamplerCommands` -- zero new ones added, a
+genuine reduction, not net-zero).
+
+**Verification**: three full combined `make clean && make all && make
+ko-clean && rm -f *.o && make ko` passes, byte-identical each time
+(`OA.ko` 192,128 bytes, up from 191,724; md5
+`a57dbab6ffe1d3f93b7f173117e194e3`, up from
+`d9dfbabdb6973d0da9fe5e52ad059e9a`). 90 verify binaries (was 89, +1:
+`test_hdr_sampler_commands`), all exit 0, three independent passes.
+`nm -u` unchanged at 72, all confirmed genuinely `U` in a freshly-rebuilt
+ground truth via `comm -23`. `.gnu.linkonce.this_module` still byte-exact
+`0x148`; 0 `R_386_GOTPC`.
+
+**New, precisely-characterized future-batch candidates**:
+`CSTGHDRManager::ProcessPlaybackCommands()` (`.text+0xd5950`) and
+`ProcessHDRRecord()` (`.text+0xd4940`) -- `ProcessSamplerCommands()`'s own
+sibling deferrals, NOT yet individually disassembled. Given how much
+easier `ProcessSamplerCommands()` turned out to be than sec 10.200's own
+framing suggested, these two are worth a genuinely fresh look (not just
+re-citing the old "still deferred" note) rather than assuming they're
+equally hard.
