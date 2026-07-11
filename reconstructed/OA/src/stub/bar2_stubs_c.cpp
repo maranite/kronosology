@@ -148,7 +148,8 @@ extern "C" int load_global_resources() { return 0; }
  * sibling functions (`fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`) this does NOT
  * cover. */
 int cm_ComputeChallenge(const unsigned char *, int, unsigned char *) { return -1; }
-int cm_ReadUserZone(int, int, unsigned char *) { return -1; }
+/* cm_ReadUserZone is real now, batch 46 -- see src/auth/atmel_zone_io.cpp
+ * (confirmed real ground-truth identity: fFfFfFfFfFfF1C). */
 int cm_SetUserZone(int) { return -1; }
 int nv2ac_dispatch_cmd(void) { return -1; }
 int nv2ac_enable_cipher(unsigned char, const unsigned char *, const unsigned char *) { return -1; }
@@ -301,9 +302,9 @@ extern "C" unsigned int stg_cpumask_of_cpu(unsigned int cpu) { return 1u << cpu;
  * external (filp_open/vmalloc/rt_pend_linux_srq/etc).
  */
 
-/* ---- fFfFfFfFfFfF13 (AT88 zone-read wrapper, sec 10.x -- already
- * declared in oa_crypto.h, defined here) ---- */
-extern "C" int fFfFfFfFfFfF13(unsigned int, unsigned int, unsigned char *) { return -1; }
+/* fFfFfFfFfFfF13 is real now, batch 46 -- see
+ * src/auth/atmel_zone_io.cpp (also its sibling fFfFfFfFfFfF1C, aliased
+ * cm_ReadUserZone right above). */
 
 /* ---- operator delete(void*, unsigned int) (sized deallocation
  * overload -- new_delete.cpp already defines the unsized form) ---- */

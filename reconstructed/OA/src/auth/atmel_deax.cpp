@@ -54,30 +54,47 @@
  * 20-instruction inline init at entry, exactly like deax_init(), so no
  * incoming state ever matters).
  *
- * IMPORTANT, found this batch and deliberately handled, not overlooked:
+ * IMPORTANT, found in batch 43 and deliberately handled, not overlooked:
  * a whole-binary relocation scan found TWO OTHER real functions --
- * `fFfFfFfFfFfF13` (.text+0x4f4990-ish) and `fFfFfFfFfFfF1C`
- * (.text+0x4f4a80-ish, plus a `.clone.0`) -- that also READ (never write,
+ * `fFfFfFfFfFfF13` (.text+0x4f4840) and `fFfFfFfFfFfF1C`
+ * (.text+0x4f4a80, plus a `.clone.0`) -- that also READ (never write,
  * never touch the other 19 bytes) this exact same `gpa` byte
  * (0x5c90c1), each XORing a single external buffer byte with it as a
- * one-time-pad/keystream byte. These are NOT reconstructed in this batch
- * (out of scope -- this batch's target was only `cm_AuthenEncryptMAC`)
- * and are almost certainly the same "f13"-style Zone0 decrypt-continuation
- * functions already referenced qualitatively in this project's own AT88
- * chip-extraction documentation (`bbbbbbbba12` calls `f11` twice to reset
- * the cipher to a known position, and a subsequent `f13` call continues
- * decrypting FROM that exact position using the cipher state `f11` left
- * behind). Because of this, `gpa`'s FINAL value at the end of a real
- * `cm_AuthenEncryptMAC` call is a genuine, persistent, observable side
- * effect other real code may depend on -- NOT safe to model as a
- * function-local/stack-only variable that vanishes on return (that would
- * be a real fidelity regression the moment a future batch reconstructs
- * either sibling). Modeled instead as file-static state, matching
- * ground truth's own persistent `.bss` semantics; `cm_AuthenEncryptMAC`
- * itself still fully re-initializes it every call (matching its own
- * confirmed 20-byte zero-init preamble), so this call's own behavior is
- * unaffected -- only the state's postcondition (final `gpa`) now
- * persists correctly for whatever future code may come to read it.
+ * one-time-pad/keystream byte. Batch 43 left these NOT reconstructed
+ * (out of scope at the time -- that batch's target was only
+ * `cm_AuthenEncryptMAC`) and flagged them as almost certainly the same
+ * "f13"-style Zone0 decrypt-continuation functions already referenced
+ * qualitatively in this project's own AT88 chip-extraction documentation
+ * (`bbbbbbbba12` calls `f11` twice to reset the cipher to a known
+ * position, and a subsequent `f13` call continues decrypting FROM that
+ * exact position using the cipher state `f11` left behind). Because of
+ * this, `gpa`'s FINAL value at the end of a real `cm_AuthenEncryptMAC`
+ * call is a genuine, persistent, observable side effect other real code
+ * may depend on -- NOT safe to model as a function-local/stack-only
+ * variable that vanishes on return (that would be a real fidelity
+ * regression the moment a future batch reconstructs either sibling).
+ * Modeled instead as file-static state, matching ground truth's own
+ * persistent `.bss` semantics; `cm_AuthenEncryptMAC` itself still fully
+ * re-initializes it every call (matching its own confirmed 20-byte
+ * zero-init preamble), so this call's own behavior is unaffected -- only
+ * the state's postcondition (final `gpa`) now persists correctly for
+ * whatever future code may come to read it.
+ *
+ * UPDATE (batch 46): both siblings are now real too -- see
+ * src/auth/atmel_zone_io.cpp. That file needs read/step access to this
+ * exact persistent `DeaxState` (ground truth's own ` bzzzzzzzzzzzt12`,
+ * .text+0x4f3d00, is a real, separately-callable single-step primitive --
+ * confirmed via its own non-obfuscated `.bss` field names, `nm -C`:
+ * `gpa_byte`@0x5c90c1 plus `RA`..`RG`/`SA`..`SG`/`TA`..`TE` at
+ * 0x5c90c2-0x5c90d4, immediately adjacent to the real, non-obfuscated
+ * `mode`@0x5c90c0 -- this OA.ko_Decomp image is not fully stripped, an
+ * unusually direct corroboration this project doesn't normally get).
+ * `bzzzzzzzzzzzt12`/the `gpa` read are exposed below as two small bridge
+ * functions operating on the SAME `g_atmelDeaxState` this file already
+ * defines -- they can see it because C++ anonymous-namespace members are
+ * visible to the REST OF THIS TU, just not externally linkable; only the
+ * bridge functions themselves need real (extern "C") linkage to be
+ * callable from atmel_zone_io.cpp.
  *
  * Real signature-fidelity fix, found while re-deriving this: this
  * project's own pre-existing oa_atmel.h declared `iv` as
@@ -233,4 +250,50 @@ void cm_AuthenEncryptMAC(const unsigned char *c1, const unsigned char *kin,
 		DeaxStep(d, 0); DeaxStep(d, 0);
 	}
 	DeaxStep(d, 0);
+}
+
+/*
+ * bzzzzzzzzzzzt11() (batch 46, real ground-truth name, .text+0x4f4180,
+ * 144 bytes) -- the DEAX cipher's own real init primitive (a plain
+ * 20-byte zero-init, byte-for-byte equivalent to DeaxInit() above, just
+ * in a different field order -- functionally identical since both fully
+ * zero every field). NOT called by fFfFfFfFfFfF13/fFfFfFfFfFfF1C
+ * (neither resets the cipher -- both continue from whatever state is
+ * already there, matching ground truth). Exposed anyway: it's a real,
+ * already-internally-validated (via cm_AuthenEncryptMAC's own confirmed
+ * 20-byte zero-init preamble) ground-truth symbol, and having a real
+ * reset entry point is useful for tests that need to reach a known,
+ * reproducible cipher state (see test_atmel_zone_io.cpp).
+ */
+extern "C" void bzzzzzzzzzzzt11(void)
+{
+	DeaxInit(g_atmelDeaxState);
+}
+
+/*
+ * bzzzzzzzzzzzt12(in) (batch 46, real ground-truth name, .text+0x4f3d00) --
+ * the DEAX cipher's real single-step primitive, called directly by
+ * fFfFfFfFfFfF13/fFfFfFfFfFfF1C (src/auth/atmel_zone_io.cpp) as well as
+ * inlined into cm_AuthenEncryptMAC's own body above. Declared in
+ * oa_atmel.h. Operates on the exact same persistent `g_atmelDeaxState`
+ * cm_AuthenEncryptMAC fully re-initializes on every one of its own calls
+ * -- callers that need a "clean slate" must still go through
+ * cm_AuthenEncryptMAC (or a future `bzzzzzzzzzzzt11`/DeaxInit bridge, not
+ * needed by either currently-reconstructed sibling), not this function.
+ */
+extern "C" void bzzzzzzzzzzzt12(unsigned char in)
+{
+	DeaxStep(g_atmelDeaxState, in);
+}
+
+/*
+ * DeaxCurrentGpa() -- NOT a ground-truth symbol of its own (the real
+ * disassembly just reads `byte ds:0x5c90c1` directly inline at each of
+ * fFfFfFfFfFfF13/fFfFfFfFfFfF1C's own decode sites); exposed here purely
+ * as a same-behavior accessor so atmel_zone_io.cpp doesn't need its own
+ * copy of (or direct access to) `DeaxState`.
+ */
+extern "C" unsigned char DeaxCurrentGpa(void)
+{
+	return g_atmelDeaxState.gpa;
 }

@@ -67,15 +67,31 @@
  * on top of a standard Blowfish port in src/crypto/blowfish.cpp -- P/S-box
  * constants extracted programmatically from this exact kernel tree's own
  * `linux-2.6.32.11/crypto/blowfish.c`, not retyped) and `DecodeBytesFromAscii`
- * (src/crypto/cb32.cpp). `fFfFfFfFfFfF13` remains a call contract only (a
- * real AT88 hardware I/O primitive from `OmapNKS4Module.ko`, out of scope for
- * a software reconstruction). Both crypto ports are verified by
+ * (src/crypto/cb32.cpp). Both crypto ports are verified by
  * `verify/test_crypto.cpp` against vectors anchored to independent tool
  * chains, not just self-consistency: `moancjsd82` against a real
  * hardware-extracted key/iv + a ciphertext produced and checked by a separate
  * C#/BouncyCastle implementation (itself checked against a Python reference);
  * `DecodeBytesFromAscii` against an independent from-scratch Python
  * implementation written during this pass. `make verify` runs both.
+ *
+ * IMPLEMENTED (batch 46): `fFfFfFfFfFfF13` is now real too, see
+ * src/auth/atmel_zone_io.cpp -- full disassembly (.text+0x4f4840, 448
+ * bytes) found it is OA.ko's own internal AT88 command-dispatch-and-DEAX-
+ * decode wrapper (genuinely DEFINED inside OA.ko, a `T` ground-truth
+ * symbol -- not itself the hardware primitive; it CALLS the real hardware
+ * primitives `stgNV2AC_sync_read_cmd`/`stgNV2AC_sync_cmd`, exported by
+ * the AT88/NV2AC driver module, which remain legitimate externals per the
+ * sec 10.185 RTAI-substitution policy -- confirmed both are genuinely `U`
+ * in ground truth's own `nm -u` too). Shares its AT88-command-dispatch/
+ * DEAX-decode shape (and the shared `bzzzzzzzzzzzt12` single-step
+ * primitive, oa_atmel.h) with its sibling `fFfFfFfFfFfF1C` (aliased as
+ * `cm_ReadUserZone`, oa_atmel.h) -- see atmel_zone_io.cpp's own header
+ * comment for the full derivation of both, including the real `mode`
+ * global (confirmed non-obfuscated ground-truth name) that switches each
+ * function between "pass the read data through unchanged" (mode==0),
+ * "decode it via the DEAX keystream" (mode==2), and "no decode, but keep
+ * the cipher state advancing" (any other mode) behavior.
  *
  * See also `KronosExtract/source/kronos_extract.c` (a live hardware hook
  * module, hooks moancjsd82 directly): its trampoline documents the real
