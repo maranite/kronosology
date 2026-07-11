@@ -4148,3 +4148,90 @@ NOT linked here (`CSTGAudioInput` in `global.cpp`, `CSTGToneAdjust`/
 `grep -n "program_ctor.cpp" Makefile` -- only `test_program_ctor.cpp`
 itself already links that file, so no duplicate-definition risk from
 adding a second consumer.
+
+**Batch 46 specifics** (2026-07-11, sec 10.197, commit `b93c9e7`): closed
+the task briefing's own lead candidate, `fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`
+(the two DEAX-keystream-continuation siblings of `cm_AuthenEncryptMAC`
+sec 10.194 found but deferred) -- both real now, `src/auth/
+atmel_zone_io.cpp`. Both are OA.ko's own internal "build a raw AT88
+command, retry via the real `stgNV2AC_sync_read_cmd`/`stgNV2AC_sync_cmd`/
+`msleep` externals, then optionally DEAX-decode the response" wrappers --
+confirmed genuinely `T` in ground truth (not the hardware primitives
+themselves), calling three confirmed-genuinely-`U`-in-ground-truth-too
+externals per the sec 10.185 RTAI-substitution policy. No new bare-`{}`
+stubs (both were non-bare `{ return -1; }` stubs in `bar2_stubs_c.cpp`
+before this batch, same "doesn't move the metric but is real progress"
+shape as `rtwrap_pthread_create`/`CSetList::Activate`).
+
+**Unusually strong corroboration, worth remembering for any future batch
+touching this exact address range**: THIS PROJECT'S OWN `OA.ko_Decomp`
+ground-truth image is not fully stripped for a handful of `.bss`
+globals -- `nm -C` shows the REAL, non-obfuscated names `mode`
+(0x5c90c0), `gpa_byte` (0x5c90c1, exactly matching `atmel_deax.cpp`'s own
+already-speculative `DeaxState::gpa` field name), the rest of the DEAX
+state (`RA..RG`/`SA..SG`/`TA..TE`), and `bzzzzzzzzzt18` (0x5c90e0, a
+32-byte scratch response buffer) -- independent, direct confirmation of
+an EARLIER batch's own speculative naming, not just an inference from
+behavior. Worth checking `nm -C` for non-obfuscated names FIRST on any
+future function in this same DEAX/AT88 cluster before assuming everything
+needs deriving from raw bytes.
+
+**Xref-driven ecosystem resolution, a reusable technique**: rather than
+treating `atmel_setup.cpp`'s own pre-existing `cm_ReadUserZone(zone, len,
+buf)` abstraction as a separate, still-unimplemented function, checking
+its real caller's (`SetupAtmelForAuthorizations`, .text+0x207a50) own
+relocations found it calls `fFfFfFfFfFfF1C` at BOTH of `cm_ReadUserZone`'s
+own two real call sites (same EAX=zone/EDX=len values) -- confirming
+`cm_ReadUserZone` in this project's own ecosystem literally IS
+`fFfFfFfFfFfF1C` under the same "descriptive alias for an obfuscated real
+name" convention already used for `cm_AuthenEncryptMAC`=`fFfFfFfFfFfF11`.
+When a stub's own caller has a pre-existing "friendly name" for what
+looks like it might be the same function, check that caller's own
+relocations directly rather than assuming a fresh, unrelated
+reconstruction is needed.
+
+**Extended (not re-derived) the existing DEAX cipher infrastructure**:
+exposed two new bridge functions, `bzzzzzzzzzzzt12(in)` (ground truth's
+own real single-step symbol, already inlined into `cm_AuthenEncryptMAC`
+but never previously callable on its own) and `bzzzzzzzzzzzt11()` (ground
+truth's own real init/reset symbol, byte-for-byte equivalent to the
+already-existing `DeaxInit()`), both operating on `atmel_deax.cpp`'s
+existing file-scoped `DeaxState`/`g_atmelDeaxState` -- exactly the "move
+this into a shared header once a sibling needs it" step that file's own
+header comment had explicitly flagged as the trigger condition, now
+finally exercised. `bzzzzzzzzzzzt11` isn't called by either new function
+in ground truth (neither resets the cipher) but was exposed anyway
+because it's real, already-validated, and essential for a host KAT that
+needs a reproducible starting state.
+
+**Three own-test bugs, all in the SAME round-trip KAT, all caught by real
+`FAILED` lines (not proofreading) -- worth internalizing as a family for
+any future stream-cipher-style round-trip test**:
+1. **Replaying a fixed step sequence from an already-diverged state does
+   NOT "rewind" a one-way state machine.** DEAX stepping isn't simply
+   invertible; the fix was exposing a TRUE reset (`bzzzzzzzzzzzt11`) and
+   resetting to that before ANY replay, never assuming "replay the same
+   steps again" gets you back to where you were.
+2. **A function that itself runs a state-advancing preamble must have
+   that preamble simulated EXACTLY ONCE across the whole test, not once
+   per "side" of the round trip.** An early draft manually replayed
+   `fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`'s own internal 12-step preamble a
+   second time right before calling the real function (already having
+   used it once to compute the reference ciphertext) -- but the real
+   call ALSO applies its own preamble, silently going two-deep instead of
+   one. Fix: simulate the preamble manually ONLY for computing the
+   reference value; reset to the PRE-preamble state before invoking the
+   real function and let it apply the preamble itself, exactly once.
+3. **`buf` is a pure OUTPUT parameter here -- both functions overwrite it
+   with the (real or mocked) hardware response BEFORE their decode loop
+   ever runs.** Staging the expected test ciphertext by writing directly
+   into `buf` before the call gets silently clobbered; the ciphertext
+   must be staged as the MOCK's own fake chip-data buffer instead.
+
+**Remaining candidates, unchanged from sec 10.196**: `GetPatchStaticCosts`/
+`RunVoiceModelStaticFront/StaticBack`/`RunVoiceModelFeedback`/
+`GetTotalStaticCosts` (genuine vtable DISPATCH cluster,
+`CSTGPerformance`/`CSTGEffectRack`/`CIFXEffectSlot`/`CMFXEffectSlot`/
+`CTFXEffectSlot`). `ChangeProgram`/`GetChordSource` via growing
+`g_programSlotVtable` to 57 slots (unrelated to and untouched by this
+batch). `CSTGPianoModel::RescanPianoTypes()` (unchanged, sec 10.153).
