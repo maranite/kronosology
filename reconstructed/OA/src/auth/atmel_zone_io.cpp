@@ -291,3 +291,52 @@ int cm_ReadUserZone(int zoneArg, int lenArg, unsigned char *buf)
 	}
 	return 0;
 }
+
+/*
+ * nv2ac_dispatch_cmd (fFfFfFfFfFfF1F, .text+0x4f4c70, 105 bytes, batch
+ * 55): a persistent-global AT88 command dispatcher. Ground truth's own
+ * pending-command buffer lives at a fixed .data location, statically
+ * initialized to {0xb8, 0x00, 0x00, 0x00} (confirmed via a direct hex
+ * dump of ground truth's own .data section at that offset) -- 0xb8 is
+ * the real "$B8 Verify Crypto" opcode (CLAUDE.md's own documented AT88SC
+ * protocol), i.e. this global starts pre-armed with a pending verify-
+ * crypto command every time OA.ko loads, not runtime garbage. Nothing
+ * else in this project's own reconstruction currently writes this
+ * buffer (no other reconstructed function stores through it) --
+ * reproduced here as a plain static initializer, matching its real
+ * .data role exactly.
+ *
+ * Real control flow, confirmed via full disassembly: inspects the
+ * buffer's own status nibble (byte[0]&0xf); dispatches either
+ * stgNV2AC_sync_read_cmd (status 2 or 6) or stgNV2AC_sync_cmd (byte[3]+4
+ * as the length) into the SAME shared 32-byte scratch buffer
+ * (g_atmelZoneScratch) cm_ReadUserZone/fFfFfFfFfFfF13 use -- but its OWN
+ * return code is NEVER CHECKED (a real, confirmed ground-truth quirk,
+ * not a reconstruction gap: `eax` is clobbered by the immediately-
+ * following `mov $0x14,%eax`/msleep call before any `test eax,eax`).
+ * Then unconditionally reads 1 byte from AT88 zone 0x50 (ground truth's
+ * own `fFfFfFfFfFfF1C.clone.0` helper, confirmed byte-for-byte identical
+ * to cm_ReadUserZone(0x50,1,&scratch) for this zone -- see this file's
+ * own header comment for the "loop A" derivation), discarding the
+ * result -- purely to advance the DEAX cipher position. ALWAYS returns 0
+ * (ground truth never produces any other value here).
+ */
+static unsigned char gNv2acPendingCmd[4] = { 0xb8, 0x00, 0x00, 0x00 };
+
+int nv2ac_dispatch_cmd(void)
+{
+	unsigned char status = (unsigned char)(gNv2acPendingCmd[0] & 0xf);
+
+	if (status == 2 || status == 6) {
+		stgNV2AC_sync_read_cmd(gNv2acPendingCmd, g_atmelZoneScratch, 0);
+	} else {
+		int param = (int)gNv2acPendingCmd[3] + 4;
+		stgNV2AC_sync_cmd(gNv2acPendingCmd, param);
+	}
+	msleep(20);
+
+	unsigned char discard;
+	cm_ReadUserZone(0x50, 1, &discard);
+
+	return 0;
+}

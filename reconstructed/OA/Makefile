@@ -136,6 +136,8 @@ OA-objs := src/auth/klm_manager.o \
            src/auth/atmel_primitives.o \
            src/auth/atmel_deax.o \
            src/auth/atmel_zone_io.o \
+           src/auth/atmel_challenge.o \
+           src/auth/nv2ac_handshake.o \
            src/init/daemon_lifecycle.o \
            src/init/load_global_resources.o \
            src/engine/performance_vars_manager_init.o \
@@ -354,6 +356,8 @@ SRC := src/auth/klm_manager.cpp \
        src/auth/atmel_primitives.cpp \
        src/auth/atmel_deax.cpp \
        src/auth/atmel_zone_io.cpp \
+       src/auth/atmel_challenge.cpp \
+       src/auth/nv2ac_handshake.cpp \
        src/init/daemon_lifecycle.cpp \
        src/init/load_global_resources.cpp \
        src/engine/performance_vars_manager_init.cpp \
@@ -434,7 +438,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_load_global_resources \
          verify/test_performance_vars_manager_init \
          verify/test_tone_adjust_descriptors \
-         verify/test_init_performances
+         verify/test_init_performances \
+         verify/test_atmel_setup \
+         verify/test_init_module_real_atmel
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -750,6 +756,21 @@ verify/test_program_ctor: verify/test_program_ctor.cpp src/engine/program_ctor.c
 
 verify/test_combi_ctor: verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp -o $@
+
+verify/test_atmel_setup: verify/test_atmel_setup.cpp src/auth/atmel_setup.cpp src/auth/atmel_zone_io.cpp \
+                          src/auth/atmel_deax.cpp src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp \
+                          src/auth/nv2ac_handshake.cpp include/oa_atmel.h include/oa_crypto.h include/oa_gmp.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_atmel_setup.cpp src/auth/atmel_setup.cpp src/auth/atmel_zone_io.cpp \
+	  src/auth/atmel_deax.cpp src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp \
+	  src/auth/nv2ac_handshake.cpp -o $@
+
+verify/test_init_module_real_atmel: verify/test_init_module_real_atmel.cpp src/init/init_module.cpp \
+                          src/auth/atmel_setup.cpp src/auth/atmel_zone_io.cpp src/auth/atmel_deax.cpp \
+                          src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp src/auth/nv2ac_handshake.cpp \
+                          include/oa_init.h include/oa_atmel.h include/oa_crypto.h include/oa_gmp.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_module_real_atmel.cpp src/init/init_module.cpp \
+	  src/auth/atmel_setup.cpp src/auth/atmel_zone_io.cpp src/auth/atmel_deax.cpp \
+	  src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp src/auth/nv2ac_handshake.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

@@ -150,13 +150,23 @@ extern "C" void cleanup_cpp_support() {}
  * header comment for the full derivation and the two still-deferred
  * sibling functions (`fFfFfFfFfFfF13`/`fFfFfFfFfFfF1C`) this does NOT
  * cover. */
-int cm_ComputeChallenge(const unsigned char *, int, unsigned char *) { return -1; }
 /* cm_ReadUserZone is real now, batch 46 -- see src/auth/atmel_zone_io.cpp
- * (confirmed real ground-truth identity: fFfFfFfFfFfF1C). */
-int cm_SetUserZone(int) { return -1; }
-int nv2ac_dispatch_cmd(void) { return -1; }
-int nv2ac_enable_cipher(unsigned char, const unsigned char *, const unsigned char *) { return -1; }
-int nv2ac_enable_encrypt(unsigned char, const unsigned char *, const unsigned char *) { return -1; }
+ * (confirmed real ground-truth identity: fFfFfFfFfFfF1C).
+ *
+ * cm_ComputeChallenge/cm_SetUserZone/nv2ac_dispatch_cmd/nv2ac_enable_cipher/
+ * nv2ac_enable_encrypt are ALL real now too, batch 55 -- this was the
+ * exact gap sec 10.206 identified as the LAST thing hard-blocking
+ * SetupAtmelForAuthorizations() (and therefore init_module() step 9) at
+ * an unconditional -1. cm_ComputeChallenge: src/auth/atmel_challenge.cpp
+ * (ground truth `sdflkjsvnd2g`, a pure GMP bignum computation -- NOT a
+ * thin forwarder over stgNV2AC_sync_cmd/read_cmd despite this file's own
+ * PRIOR header comment above claiming all five were; that framing was
+ * wrong for this one specifically, corrected via full independent
+ * disassembly). cm_SetUserZone/nv2ac_enable_cipher/nv2ac_enable_encrypt:
+ * src/auth/nv2ac_handshake.cpp (ground truth `fFfFfFfFfFfF1A`/
+ * `fFfFfFfFfFfF1G`/`fFfFfFfFfFfF1H`). nv2ac_dispatch_cmd: added to
+ * src/auth/atmel_zone_io.cpp (ground truth `fFfFfFfFfFfF1F`), since it
+ * shares that file's own g_atmelZoneScratch/cm_ReadUserZone state. */
 
 /* ---- rtwrap_* RTAI wrapper layer -- signatures matching this
  * project's own already-established declarations (oa_cpu_affinity.h/
