@@ -119,16 +119,19 @@ extern "C" void cleanup_cpp_support() {}
 /* stg_log_startup_error + its guard stg_is_linux_context promoted to real
  * bodies in src/init/startup_helpers.cpp (batch 34, sec 10.182). */
 /*
- * load_global_resources (batch 38 scout, kept DEFERRED): disassembled
- * in full (.text+0x1188b0, 115 bytes). Genuinely small itself, but
- * fans out into THREE not-yet-reconstructed classes in its very first
- * few calls -- `CSTGMultisampleBankManager::StartupInitializeROMBank`/
- * `StartupInitializeRAMBank`/`ScanFileSystem`, `CSTGKLMManager::
- * AuthorizeBuiltins`, `CSTGInstalledEXProducts::Initialize` -- plus
- * `CSTGHeapManager_SetLastFixedBlock` and a `gSystemIsInitialized`
- * global. Disproportionate structural cost for a smallest-first pick;
- * needs a dedicated future batch scoping those three classes first. */
-extern "C" int load_global_resources() { return 0; }
+ * load_global_resources: real now, batch 52 -- see
+ * src/init/load_global_resources.cpp. Reconstructed under the sec 10.203
+ * init-path-priority directive (this function sits directly on
+ * init_module()'s own step 11, so its earlier "kept DEFERRED, return 0"
+ * stub -- while safe (no wild call) -- was exactly the kind of
+ * init-path gap that directive now prioritizes closing). Its own genuine
+ * filesystem/ROM-bank-scan callees (`CSTGMultisampleBankManager::
+ * StartupInitializeROMBank`/`StartupInitializeRAMBank`/`ScanFileSystem`,
+ * `CSTGInstalledEXProducts::Initialize`) are deliberately deferred
+ * safe-default stubs there (oa_types.h); `CSTGKLMManager::
+ * AuthorizeBuiltins` was ALREADY real (klm_manager.cpp) but never
+ * actually wired up until this batch, since the old stub never called
+ * it at all. */
 
 /* ---- AT88 auth-chip wrapper layer (cm_ and nv2ac_ prefixed
  * functions, confirmed real OA-internal wrappers over

@@ -177,6 +177,19 @@ struct CSTGInstalledEXProducts {
 	 * against; belongs to a later stage.
 	 */
 	bool ReInitialize(void);
+
+	/*
+	 * Initialize() (batch 52, `.text+0x48620`) -- confirmed real via
+	 * load_global_resources()'s own relocation. Its return value IS
+	 * checked (`test al,al; je -> soft-fail`), but that failure path is
+	 * itself confirmed SOFT (a bare printk, no stg_log_startup_error /
+	 * hard-fail return -- see load_global_resources.cpp) -- deliberately
+	 * deferred no-op stub, out of scope per the sec 10.185 policy,
+	 * returns true (matching this project's established "safe default
+	 * lets the caller's real success path run" convention for deferred
+	 * callees on the init path).
+	 */
+	bool Initialize();
 };
 
 /*
@@ -189,6 +202,29 @@ struct CSTGMultisampleBankManager {
 				const struct CSTGMultisampleBankUUID *uuid);
 	static void *AccessBankWithLegacyRAMAlias(struct CSTGMultisampleBankManager *self,
 				const struct CSTGMultisampleBankUUID *uuid);
+	/*
+	 * StartupInitializeROMBank(const char*, bool, unsigned char)/
+	 * StartupInitializeRAMBank()/ScanFileSystem() (batch 52) -- confirmed
+	 * real via load_global_resources()'s own `.rel.text` resolution
+	 * (`.text+0x3d0a0`/`.text+0x3cff0`/`.text+0x3d190`), genuine INSTANCE
+	 * methods this time (real `this` in EAX, unlike AccessBank/ReleaseBank
+	 * above which are modeled with an explicit `self` param instead) --
+	 * declared this way because nothing else in this project calls or
+	 * defines them, so there is no pre-existing convention to match.
+	 * `load_global_resources()` (see src/init/load_global_resources.cpp)
+	 * is init_module()'s own step 11, part of the confirmed-reachable
+	 * boot/init call graph (sec 10.203 priority) -- these three deep
+	 * filesystem/ROM-scan callees are deliberately deferred safe no-op
+	 * stubs (out of scope per the sec 10.185 policy, same category as
+	 * this project's existing CSTGFile_ / nv2ac_ family of deferrals), while the
+	 * caller itself is reconstructed for real. StartupInitializeROMBank's
+	 * own return value and ScanFileSystem's are both confirmed UNCHECKED
+	 * by the real caller (declared void here); StartupInitializeRAMBank's
+	 * IS checked (a real `test al,al` hard-fail branch) -- declared bool.
+	 */
+	bool StartupInitializeRAMBank();
+	void StartupInitializeROMBank(const char *name, bool flag, unsigned char n);
+	void ScanFileSystem();
 	/* Called by LM/LD/CM/CD's /proc/.oacmd handlers (process_oacmd.cpp) only
 	 * when a bank is stuck in the "reserved but not loaded" marker state
 	 * (CSTGMultisampleBank +0x00 == -1) AND LoadBankMetaData() fails to
@@ -206,6 +242,16 @@ struct CSTGMultisampleBankManager {
 struct CSTGGlobal            { static char *sInstance; };
 struct CSTGVoiceModelManager { static char *sInstance; };
 struct CSTGEffectManager     { static char *sInstance; };
-struct CSTGHeapManager       { static char *sInstance; };
+/*
+ * Alloc(unsigned int) -- this project's own established LOCAL "static"
+ * stand-in for the real instance method CSTGHeapManager::
+ * Alloc(unsigned long) (batch 17, see oa_heapmanager.h/heap_manager.cpp
+ * for the real class + src/mem/heap_manager_alloc_static.cpp for this
+ * exact `unsigned int`-mangled wrapper's own real body, already defined
+ * there -- adding the DECLARATION here, to this shared struct, lets
+ * load_global_resources.cpp (batch 52) link against that SAME existing
+ * body without a fourth redundant local stand-in).
+ */
+struct CSTGHeapManager       { static char *sInstance; static unsigned int Alloc(unsigned int size); };
 
 #endif /* OA_TYPES_H */

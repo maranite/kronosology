@@ -25,6 +25,17 @@ void *CSTGMultisampleBankManager::AccessBank(CSTGMultisampleBankManager *, const
 void *CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) { return 0; }
 void CSTGMultisampleBankManager::ReleaseBank(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) {}
 void CSTGMultisampleBankManager::CloseAllBankFiles(CSTGMultisampleBankManager *) {}
+/* StartupInitializeROMBank/StartupInitializeRAMBank/ScanFileSystem (batch
+ * 52) -- confirmed real, called from load_global_resources() (init_module
+ * step 11, src/init/load_global_resources.cpp), deliberately deferred
+ * here per the sec 10.185 policy (genuine ROM-bank/filesystem-scan
+ * subsystem, out of scope) -- see that file's own header comment for the
+ * full derivation and why StartupInitializeRAMBank() returns `true`
+ * (its own real return value IS checked by the caller, gating a genuine
+ * hard-fail path; a safe "succeeded" default lets init proceed). */
+void CSTGMultisampleBankManager::StartupInitializeROMBank(const char *, bool, unsigned char) {}
+bool CSTGMultisampleBankManager::StartupInitializeRAMBank() { return true; }
+void CSTGMultisampleBankManager::ScanFileSystem() {}
 
 CSTGKLEG::CSTGKLEG() {}
 void CSTGKLEG::Initialize(CSTGKLMManager *) {}
@@ -36,3 +47,10 @@ bool CSTGPatch::IsUsingAnyUnauthorizedMultisamples() { return false; }
 bool CUUID::ConvertFromText(const char *) { return false; }
 
 bool CSTGInstalledEXProducts::ReInitialize() { return true; }
+/* Initialize() (batch 52) -- confirmed real, called from
+ * load_global_resources() (init_module step 11). Its own real failure
+ * path is confirmed SOFT (a bare printk, no hard-fail return -- see
+ * load_global_resources.cpp), so `true` is the faithful-enough safe
+ * default either way; deliberately deferred per the sec 10.185 policy,
+ * same rationale as ReInitialize() above. */
+bool CSTGInstalledEXProducts::Initialize() { return true; }
