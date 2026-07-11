@@ -285,6 +285,19 @@ public:
 	 * pass. */
 	void OnExtModeSetChange();
 
+	/*
+	 * ResetPerfSwitches() (batch 36, `.text+0xd430`, 57 bytes, confirmed
+	 * via relocation from `CSTGControllerInfo::OnPerformanceDeactivate()`,
+	 * below) reconstructed for real -- a straight-line run of byte/word
+	 * field zeroing (`+0x14/+0x15/+0x1c..+0x1f/+0x27..+0x2a` all zeroed;
+	 * `+0x20` set to the confirmed non-zero literal `0x40`; `+0x18`/`+0x1a`
+	 * (each a `WORD`) both set to `0x0200`), no branches, no calls -- one
+	 * of the fields it zeroes (`+0x14`) is exactly the flag
+	 * `OnPerformanceDeactivate()` itself gates on. See
+	 * src/engine/controller_info_perf_deactivate.cpp.
+	 */
+	void ResetPerfSwitches();
+
 	/* OnPerformanceActivate(CSTGPerformance&) (sec 10.102, confirmed
 	 * via relocation from CSTGGlobal::CompletePerformanceActivation)
 	 * confirmed real, deliberately deferred extern -- own body not
@@ -1635,9 +1648,14 @@ struct CSTGControllerInfo {
 
 	/* OnPerformanceDeactivate() (batch 19, `.text+0x92a90`, 106 bytes,
 	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --
-	 * called there on the embedded sub-object at `+0xad3`) confirmed
-	 * real, deliberately deferred extern -- own body not reconstructed
-	 * this pass. */
+	 * called there on the embedded sub-object at `+0xad3`); reconstructed
+	 * for real in batch 36 -- see src/engine/
+	 * controller_info_perf_deactivate.cpp for the full confirmed control
+	 * flow (reads `CSTGControllerRTData::sInstance`'s own `+0x14`/`+0x15`
+	 * flags, conditionally calls `this->SetPerfSwitch()` on each, then
+	 * unconditionally calls `CSTGControllerRTData::sInstance->
+	 * ResetPerfSwitches()` and clears four more `sInstance` fields
+	 * directly). */
 	void OnPerformanceDeactivate();
 };
 

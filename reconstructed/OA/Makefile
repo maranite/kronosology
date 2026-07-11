@@ -121,6 +121,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/file_io.o \
            src/init/stg_daemons.o \
            src/engine/tick_count.o \
+           src/engine/controller_info_perf_deactivate.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -300,7 +301,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/startup_helpers.cpp \
        src/init/file_io.cpp \
        src/init/stg_daemons.cpp \
-       src/engine/tick_count.cpp
+       src/engine/tick_count.cpp \
+       src/engine/controller_info_perf_deactivate.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -357,7 +359,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_startup_helpers \
          verify/test_file_io \
          verify/test_stg_daemons \
-         verify/test_tick_count
+         verify/test_tick_count \
+         verify/test_controller_info_perf_deactivate
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -603,6 +606,9 @@ verify/test_stg_daemons: verify/test_stg_daemons.cpp src/init/stg_daemons.cpp in
 
 verify/test_tick_count: verify/test_tick_count.cpp src/engine/tick_count.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_tick_count.cpp src/engine/tick_count.cpp -o $@
+
+verify/test_controller_info_perf_deactivate: verify/test_controller_info_perf_deactivate.cpp src/engine/controller_info_perf_deactivate.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_info_perf_deactivate.cpp src/engine/controller_info_perf_deactivate.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

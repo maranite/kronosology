@@ -367,24 +367,27 @@ void CSTGVoiceAllocator::StealVoiceList(void *) {}
  * stubbed below). */
 void CSTGSmoother::FinalizeAllSmoothers() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
-/* Two of the four batch-19 OnPerformanceDeactivate externs are real now,
- * batch 20:
- *   - CSTGAudioInput::OnPerformanceDeactivate() -- see
+/* Three of the four batch-19 OnPerformanceDeactivate externs are real now:
+ *   - CSTGAudioInput::OnPerformanceDeactivate() (batch 20) -- see
  *     src/engine/audio_input_use_settings.cpp (counterpart of UseSettings).
- *   - CSTGMessageProcessor::ClearUnsolicitedMessages() -- see
+ *   - CSTGMessageProcessor::ClearUnsolicitedMessages() (batch 20) -- see
  *     src/engine/message_processor.cpp (also its sole dependency,
  *     CSTGDelayedMsgSender::Clear(), a new class -- see oa_engine.h).
- * The other two remain deferred, each blocked by real vtable/callback
- * dispatch (not mere complexity):
+ *   - CSTGControllerInfo::OnPerformanceDeactivate() (batch 36) -- see
+ *     src/engine/controller_info_perf_deactivate.cpp. Calling its own
+ *     still-stubbed CSTGControllerInfo::SetPerfSwitch() sibling (below) is
+ *     fine -- SetPerfSwitch's real 539-byte body (vtable dispatch + jump
+ *     table) is what's deferred, not this caller; the existing safe no-op
+ *     stub is exactly the right stand-in for it, same as any other
+ *     confirmed-real-but-deferred sibling call elsewhere in this project.
+ *     Its own newly-discovered dependency, CSTGControllerRTData::
+ *     ResetPerfSwitches(), is also real now (same file).
+ * The remaining one is still deferred, blocked by real vtable/callback
+ * dispatch INSIDE ITS OWN BODY (not mere complexity):
  *   - CSTGFrontPanelSmoothers::OnPerformanceDeactivate() (523 bytes) makes
  *     two indirect calls through a stack-cached callback pointer
- *     (`call *0x24(%esp)` twice).
- *   - CSTGControllerInfo::OnPerformanceDeactivate() (106 bytes) calls the
- *     still-stubbed CSTGControllerInfo::SetPerfSwitch (539 bytes), which
- *     itself dispatches through a vtable (`call *0x74(%ecx)`) plus a jump
- *     table and four further unreconstructed calls. */
+ *     (`call *0x24(%esp)` twice). */
 void CSTGFrontPanelSmoothers::OnPerformanceDeactivate() {}
-void CSTGControllerInfo::OnPerformanceDeactivate() {}
 /* CSTGStreamingEventManager::CSTGStreamingEventManager()/Initialize() are
  * real now, sec 10.158 -- see src/engine/streaming_event_manager.cpp
  * (also its own newly-discovered dependency, CSTGStreamingEvent, a
