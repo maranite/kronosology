@@ -455,8 +455,20 @@ void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
 /* placeholder-removed-below -- see
  * src/engine/global.cpp. CSTGPerformance::IsCurrentlyActive() is real
  * now too, sec 10.144 -- see managers.cpp. */
-void CSTGPerformanceVarsManager::Initialize() {}
-unsigned char CSTGPerformanceVarsManager::sInstance[12];
+/* CSTGPerformanceVarsManager::Initialize() is real now, batch 53 -- see
+ * src/engine/performance_vars_manager_init.cpp (sInstance storage moved
+ * there too, alongside it, matching the CSTGFrontPanelSmoothers/
+ * CSTGHDRMiniModel "home sInstance with the real ctor" precedent). Its
+ * own four newly-discovered confirmed-real, deliberately deferred
+ * sub-object Initialize()/ctor dependencies (CSTGAudioInputMixerBase's
+ * own ctor, CSTGAudioInputMixer::Initialize, CSTGMasterLRMixer::
+ * Initialize, CSTGEffectRackVars::Initialize, CSetListEQ::Initialize)
+ * are declared in oa_global.h and given safe no-op bodies right below. */
+CSTGAudioInputMixerBase::CSTGAudioInputMixerBase() {}
+void CSTGAudioInputMixer::Initialize(unsigned int) {}
+void CSTGMasterLRMixer::Initialize(unsigned int) {}
+void CSTGEffectRackVars::Initialize(CSTGPerformanceVars *) {}
+void CSetListEQ::Initialize(unsigned int) {}
 /* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now, sec 10.150 -- see
  * src/engine/engine_init.cpp. Needs its own confirmed 40-byte vtable
  * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its

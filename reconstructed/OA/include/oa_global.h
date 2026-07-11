@@ -1035,6 +1035,20 @@ struct CSTGHeldKeyList {
  */
 struct CSTGEffectRackVars {
 	void UpdateDModRoutings();
+
+	/*
+	 * Initialize(CSTGPerformanceVars*) (batch 53, confirmed via
+	 * relocation from `CSTGPerformanceVars::Initialize()`,
+	 * `.text+0xb9f10` -- mangled `_ZN18CSTGEffectRackVars10InitializeEP19CSTGPerformanceVars`)
+	 * confirmed: called with `this = mgr+0x20` (the SAME address
+	 * `UpdateMIDIChannel`'s already-confirmed `(resolved active
+	 * CSTGPerformanceVarsManager)+0x20` comment above documents --
+	 * independently cross-confirming that offset a SECOND time) and
+	 * `owner = mgr` itself (the enclosing `CSTGPerformanceVars`,
+	 * self-referential). Own body not reconstructed this pass --
+	 * confirmed real, deliberately deferred.
+	 */
+	void Initialize(CSTGPerformanceVars *owner);
 };
 
 /*
@@ -1079,9 +1093,18 @@ struct CSTGPerformanceVarsManager {
 	 * matching this project's established convention -- also still
 	 * used as the literal `this` for `Initialize()` via `&sInstance`
 	 * (sec 10.55/10.56's own "address of the singleton" call), meaning
-	 * `Initialize()` itself is what populates these three sub-fields,
-	 * not independently confirmed in this pass.
+	 * `Initialize()` itself is what populates these three sub-fields --
+	 * CONFIRMED now (batch 53, see src/engine/performance_vars_manager_init.cpp):
+	 * `Initialize()` loops `i` over `{0, 1}`, each iteration allocating a
+	 * fresh `0xb6d0`-byte `CSTGPerformanceVars` object (`CSTGBankMemory::
+	 * AllocAligned(0xb6d0, 0x40)`), fully field-initializing it, and
+	 * committing it into `sInstance[i*4]` (a packed 32-bit pointer) --
+	 * `sInstance[8]` itself is NOT written by `Initialize()` (stays
+	 * whatever it was, typically zero-initialized static storage);
+	 * `AllocPerformanceVars()`'s own already-confirmed toggle logic is
+	 * what actually flips it.
 	 *
+
 	 * `sInstance[9]` (sec 10.153, confirmed via `CSTGAudioBusManager::
 	 * LRBusIndivMirror()`'s own disassembly): a DIFFERENT single byte
 	 * from `sInstance[8]`'s "active perf-vars slot" toggle -- a 0/1
@@ -1090,7 +1113,25 @@ struct CSTGPerformanceVarsManager {
 	 * writes it (out of scope for this pass); only that
 	 * LRBusIndivMirror() reads it.
 	 */
+	/* Storage now lives in src/engine/performance_vars_manager_init.cpp,
+	 * alongside the real Initialize() body (batch 53) -- matching the
+	 * CSTGFrontPanelSmoothers/CSTGHDRMiniModel/CSTGControllerRTData
+	 * precedent of homing sInstance storage in the same TU as the real
+	 * ctor/Initialize(). No verify/test_*.cpp test links that file, so every
+	 * existing test's own local sInstance storage (test_engine.cpp/
+	 * test_global.cpp/test_global_ctor.cpp/etc.) is untouched. */
 	static unsigned char sInstance[12];
+	/*
+	 * Initialize() (`.text+0xb9f10`, 1431 bytes) is real now, batch 53 --
+	 * see src/engine/performance_vars_manager_init.cpp for the full
+	 * confirmed shape: allocates+field-initializes two `CSTGPerformanceVars`
+	 * objects (`sInstance[0]`/`sInstance[4]`), including 16 embedded
+	 * `CSTGChannelValues` sub-objects each (real `CSTGChannelValues::
+	 * Initialize()` calls, already-real since sec 10.151) and four
+	 * confirmed-real-but-deferred mixer/effect-rack sub-object
+	 * Initialize() calls (`CSTGAudioInputMixer`/`CSTGMasterLRMixer`/
+	 * `CSTGEffectRackVars`/`CSetListEQ` -- see their own class comments).
+	 */
 	void Initialize();
 
 	/*
@@ -1541,6 +1582,20 @@ public:
 	unsigned int mixerStateArray32;		/* +0x8 */
 	unsigned int busChangeArray32;		/* +0xc */
 
+	/*
+	 * CSTGAudioInputMixerBase() (confirmed real via relocation from
+	 * `CSTGPerformanceVars::Initialize()`, batch 53 -- see
+	 * src/engine/performance_vars_manager_init.cpp; `new (mgr)
+	 * CSTGAudioInputMixer()` there compiles down to a direct call to
+	 * THIS base ctor, no separate derived-class ctor symbol, since
+	 * `CSTGAudioInputMixer` below declares no ctor of its own). Own
+	 * body not reconstructed this pass -- confirmed real, deliberately
+	 * deferred, safe no-op (whatever it writes at `+0x0`/`+0x8`/`+0xc`
+	 * is immediately overwritten by the caller anyway, see that file's
+	 * own header comment).
+	 */
+	CSTGAudioInputMixerBase();
+
 	/* Confirmed real (CSTGAudioInput::UpdateHDRBus/UpdateFXControlBus/
 	 * UpdateBusSelect/UpdatePan's own tail calls). See the class-level
 	 * comment above for the full confirmed shape and file placement. */
@@ -1576,6 +1631,45 @@ public:
 	 * busChangeArray[i]'s own +0xa byte, busType=+0xb byte)` -- i.e.
 	 * `Reset(0x20, 0)` given the defaults just written above.
 	 */
+	void Initialize(unsigned int count);
+};
+
+/*
+ * CSTGAudioInputMixer -- confirmed real derived class (batch 53,
+ * relocation from `CSTGPerformanceVars::Initialize()`, `.text+0xb9f10`):
+ * `new (mgr) CSTGAudioInputMixer()` at the very base (`+0x0`) of each
+ * freshly-allocated `CSTGPerformanceVars` object emits a direct call to
+ * `CSTGAudioInputMixerBase::CSTGAudioInputMixerBase()` -- no separate
+ * derived-ctor symbol appears anywhere in the relocation table, so this
+ * class adds NO members/ctor of its own (a trivial single, non-virtual
+ * public-inheritance forwarding, matching what the compiler would emit
+ * for exactly this declaration). Its own `Initialize(unsigned int)` is a
+ * GENUINELY SEPARATE, not-yet-disassembled method from the already-real
+ * `CSTGAudioInputMixerBase::Initialize(unsigned int)` above -- confirmed
+ * via its own distinct mangled symbol, `_ZN19CSTGAudioInputMixer10InitializeEj`
+ * (19-char class name, no "Base" suffix -- i.e. NOT inherited/reused,
+ * a real override/shadow with its own object code elsewhere in
+ * OA_real.ko). Called with `this = mgr` (the enclosing
+ * `CSTGPerformanceVars*` itself) and `arg1 = i` (the same 0/1
+ * double-buffer slot index `CSTGPerformanceVarsManager::Initialize()`'s
+ * own outer loop uses throughout). Confirmed real, deliberately
+ * deferred: own DSP/mixer-init body not reconstructed this pass.
+ */
+struct CSTGAudioInputMixer : public CSTGAudioInputMixerBase {
+	void Initialize(unsigned int count);
+};
+
+/*
+ * CSTGMasterLRMixer -- confirmed real (batch 53, relocation from
+ * `CSTGPerformanceVars::Initialize()`): embedded at `mgr+0x2140`
+ * (immediately after the 16-byte zeroed region `Initialize()` writes
+ * there itself). Its own `Initialize(unsigned int)` is called with
+ * `this = mgr+0x2140`, `arg1 = i` -- the SAME per-slot index argument
+ * as `CSTGAudioInputMixer::Initialize`/`CSetListEQ::Initialize` above/
+ * below. Own layout/body not reconstructed this pass -- confirmed real,
+ * deliberately deferred.
+ */
+struct CSTGMasterLRMixer {
 	void Initialize(unsigned int count);
 };
 
@@ -1856,6 +1950,19 @@ struct CSetListEQ {
 	 * confirmed-real-but-deferred callee).
 	 */
 	void SetBand(unsigned int band, float gain);
+
+	/*
+	 * Initialize(unsigned int count) (batch 53, confirmed via relocation
+	 * from `CSTGPerformanceVars::Initialize()`, `.text+0xb9f10`) confirmed:
+	 * called with `this = mgr+0x2160` (the SAME embedded `CSetListEQ`
+	 * address `CSetList::Activate()`'s own already-confirmed
+	 * `mgr+0x2160` comment below documents -- independently
+	 * cross-confirming that offset) and `count = i`, the same 0/1
+	 * double-buffer slot index the other three sibling Initialize()
+	 * calls in that same function use. Own body not reconstructed this
+	 * pass -- confirmed real, deliberately deferred.
+	 */
+	void Initialize(unsigned int count);
 };
 /*
  * CSetList::Activate() (batch 41, sec 10.192, ground truth

@@ -138,6 +138,7 @@ OA-objs := src/auth/klm_manager.o \
            src/auth/atmel_zone_io.o \
            src/init/daemon_lifecycle.o \
            src/init/load_global_resources.o \
+           src/engine/performance_vars_manager_init.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -352,7 +353,8 @@ SRC := src/auth/klm_manager.cpp \
        src/auth/atmel_deax.cpp \
        src/auth/atmel_zone_io.cpp \
        src/init/daemon_lifecycle.cpp \
-       src/init/load_global_resources.cpp
+       src/init/load_global_resources.cpp \
+       src/engine/performance_vars_manager_init.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -425,7 +427,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_hdr_sampler_commands \
          verify/test_file_opener_events \
          verify/test_hdr_playback_commands \
-         verify/test_load_global_resources
+         verify/test_load_global_resources \
+         verify/test_performance_vars_manager_init
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -707,6 +710,9 @@ verify/test_daemon_lifecycle: verify/test_daemon_lifecycle.cpp src/init/daemon_l
 
 verify/test_load_global_resources: verify/test_load_global_resources.cpp src/init/load_global_resources.cpp include/auth.h include/oa_internal.h include/oa_heap.h include/oa_types.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_load_global_resources.cpp src/init/load_global_resources.cpp -o $@
+
+verify/test_performance_vars_manager_init: verify/test_performance_vars_manager_init.cpp src/engine/performance_vars_manager_init.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine_init.h include/oa_bank_memory.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_performance_vars_manager_init.cpp src/engine/performance_vars_manager_init.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_voice_models: verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp -o $@
