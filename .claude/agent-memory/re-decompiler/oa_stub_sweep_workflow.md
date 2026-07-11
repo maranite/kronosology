@@ -4363,3 +4363,139 @@ disassembled `CSTGHDRFileReader::ProcessCommands`, 118 bytes) --
 RE-CONFIRMED (not just re-quoted) still genuinely blocked by an
 unrecovered per-command function-pointer table, a real callback-queue
 pattern rather than a simple vtable.
+
+## Batch 48 (2026-07-11, commit `1414706`)
+
+**Target: `CSTGComPort::RTAIInterruptHandler(unsigned int, void*)`** (154
+bytes, WEAK symbol in its own COMDAT `.text._ZN...` section). Originally
+deferred at sec 10.153 (re-confirmed blocked as recently as sec 10.198,
+one batch ago) purely because its body genuinely dispatches TWICE
+through `CSTGComPort`'s own vtable (`OnByteReceived`/`GetByteToTransmit`)
+and, at the time, nothing in this project gave `CSTGComPort` a real
+populated vtable anywhere. **Key lesson reused, worth internalizing as a
+general pattern**: a MUCH LATER, unrelated batch (`keybed_init.cpp`'s
+`KeybedComPortStub`, sec 10.49-era) placement-constructs a real concrete
+`CSTGComPort` subclass with a working vtable, already dispatched through
+successfully by `TriggerInterrupt()` in `test_keybed_init`/`test_comport`.
+Full disassembly this batch found `RTAIInterruptHandler`'s body is
+BYTE-FOR-BYTE the same poll/drain/transmit loop already modeled as
+`ComPortServiceLoop` behind `HandleInterrupt()` in `comport.cpp` -- not
+a coincidental resemblance, `rtwrap_request_irq(irq,
+&CSTGComPort::RTAIInterruptHandler, this, 0)` (confirmed via
+`comport_init.cpp`) means RTAI really does call this function back as
+`(irq, this)`, i.e. it IS the real ISR entry to the exact same service
+loop. Promoted as a 2-line forwarder (`static_cast<CSTGComPort*>(dev)
+->HandleInterrupt();`) reusing the already-hardware-validated dispatch
+path rather than re-deriving the loop a second time
+("reuse-existing-hardware-validated-port" technique, textbook case).
+
+**Concrete instance of "always re-check an old blocker's OWN dependency,
+not just re-cite the old conclusion"**: this is exactly why the sec
+10.185-era standing instruction to periodically re-survey "blocked"
+candidates pays off -- the blocker (no real CSTGComPort vtable) had
+already been resolved by a COMPLETELY UNRELATED batch's own work
+(`keybed_init.cpp`) many sessions ago, but nobody had gone back to
+re-check `RTAIInterruptHandler` specifically against that fact until
+this batch's systematic mangled-name-exact re-survey.
+
+**Mangled-name-exact matching caught a false lead early**: matching
+`nm -S -C --size-sort` demangled names against `bar2_stubs.cpp`'s own
+stub signatures by SUBSTRING is not reliable -- `CSTGMidiDispatcher::
+HandleController` has TWO real overloads in ground truth (a 5-arg one
+using `eSTGMidiSource`/`eSTGMidiTargetPerformance` enum types, size 5583
+bytes, and an unrelated weak `(unsigned char const*, ...)` variant) while
+this project's own stub uses a DIFFERENT (`int, int`) signature that
+doesn't even mangle to either one -- extracting the ACTUAL mangled name
+from `nm bar2_stubs.o` (or the project's own build) and grepping ground
+truth's `nm` output for that EXACT mangled string is the only reliable
+way to find the real counterpart; demangled substring matches can silently
+pick the wrong overload or miss that "our" signature isn't even the real
+one (harmless here since it's purely internal, only matters once you go
+to promote it for real).
+
+**ET_REL section-relative-addressing gotcha, worth remembering
+explicitly**: for an unlinked `.ko` (ET_REL), EVERY function gets its own
+value/offset relative to ITS OWN section -- a `nm` value of `00000000`
+for a WEAK symbol is completely normal (each weak/COMDAT function lives
+in its own `.text._ZN...` section starting at offset 0) and is NOT by
+itself a sign of "undefined" or suspicious. Don't waste time chasing that
+as a red flag; check the symbol's TYPE letter (`T`/`W` defined vs `U`
+undefined) instead, and use `objdump -d -j .text.<mangled_name>` (or
+`--start-address`/`--stop-address` into the merged `.text` for non-weak
+symbols) to actually disassemble it.
+
+**Extensive re-survey of the whole remaining bare-`{}` list this batch,
+all reconfirmed still blocked for the reasons already on record** (fresh
+disassembly, not just re-citing): `CSTGPianoModel::RescanPianoTypes()`
+(4 new classes + 2 vtable dispatches, sec 10.153's own call fully
+holds). `CSTGParamsOwner::ValidateParamChange()` -- NEW finding this
+batch: its two real vtable dispatches (physical slots 11/12) resolve via
+a fresh `readelf -r` re-derivation to `CSTGProgramSlot::GetNumParams()`/
+`GetParamDescriptors()` in BOTH split per-class vtables (batch 47's own
+split only ever populated slot 56) -- `GetNumParams` is a trivial 6-byte
+`return 82`, but `GetParamDescriptors` returns a pointer to a REAL
+82-entry x 0x34-byte (4264-byte) `CSTGParamDescriptor` table that would
+need full field-by-field transcription to support arbitrary indices --
+now precisely characterized as a `CSTGCCInfo::sCCInfoTable`-shaped
+dedicated-future-push data problem, not a vague "vtable blocked" note.
+`CSTGProgramSlot::LoadCombiTrackForPerformanceChange()` (batch 47's own
+flagged "second Setup() caller") -- NOT simply ChangeProgram-shaped:
+dispatches through a DIFFERENT not-yet-identified vtable slot (physical
+52, unrelated to slot 56) plus new x87 float curve math and a new
+external call at a `+0x1488` sub-object offset. All of the smoother/
+jump-catch cluster, the `CSTGSlotVoiceData`/`CSTGVoiceAllocator` DSP/
+vtable clusters, `SendUnsolicitedUIParam`/`SetPerfSwitch`,
+`EnterActivatingState`/`PerformanceVarsManager::Initialize`, and the
+file-daemon `ProcessCommands()` family: all re-confirmed blocked,
+matching sec 10.153/10.160-10.165/10.176/10.187-10.198 with no new
+resolution found this batch.
+
+**Makefile `TESTS` extraction gotcha, a NEW variant of the existing
+"trailing-line-safe read loop" gotcha**: the Makefile declares `TESTS :=`
+(colon-equals), not `TESTS =`. A regex written for bare `=` silently
+matches nothing (returns `None`/empty) rather than erroring loudly in an
+obvious way -- always check the parsed list length looks sane (88, not 0
+or some clearly-wrong number) before trusting it, and don't accidentally
+reuse a STALE leftover output file from an earlier unrelated scratch run
+that happens to already contain a plausible-looking count -- verify the
+file was actually just written by the current parse, not inherited.
+
+**Stale-mock collision, same family as sec 10.197/10.198's own
+findings**: `verify/test_comport_init.cpp` carried its own trivial
+link-satisfying `CSTGComPort::RTAIInterruptHandler` mock (needed only
+because that test also links `comport.cpp` for `GetByteToTransmit`'s
+vtable slot) -- this would have been a straight multiple-definition
+link error the moment the real body landed in `comport.cpp`. Removed.
+Reinforces the standing rule: grep every `verify/*.cpp` for the touched
+symbol name before considering a promotion complete, not just the test
+file that "obviously" belongs to the function.
+
+**Verification**: three full clean-rebuild passes, byte-identical all
+three (`OA.ko` 190,816 bytes -- same SIZE as batch 47's build,
+coincidentally, but a DIFFERENT confirmed md5 `aa32ad6c06054da0c84e2b1c
+c398678`, up from `555e28ec8a3ad5774603df3c0494902d` -- don't mistake an
+unchanged byte COUNT for an unchanged build; always diff the md5 too).
+88 verify binaries (unchanged, no new test binary), all exit 0, all
+three passes. `nm -u` unchanged at 72, all confirmed genuinely `U` in
+ground truth too via `comm -23`. `.gnu.linkonce.this_module` still
+byte-exact `0x148`; 0 `R_386_GOTPC`. `bar2_stubs.cpp` bare-`{}` count
+83 -> 82.
+
+**Remaining candidates for a future batch**: `CSTGPianoModel::
+RescanPianoTypes()` (unchanged). `CSTGParamsOwner::ValidateParamChange()`
+(now precisely scoped: needs the real 82-entry `CSTGParamDescriptor`
+table, a dedicated data-reconstruction push). `CSTGProgramSlot::
+LoadCombiTrackForPerformanceChange()` (needs vtable slot 52's real
+target identified across both ProgramSlot-derived classes, plus new
+float math). `GetPatchStaticCosts`/`RunVoiceModelStaticFront`/
+`StaticBack`/`RunVoiceModelFeedback`/`GetTotalStaticCosts`/
+`UpdateGlobalTune` (unchanged, DSP/vtable cluster). `CSTGSlotVoiceData::
+Setup()`/`CSTGProgramSlot::CompleteLoadProgram()` (already DSP-stubbed).
+The smoother/jump-catch cluster and file-daemon `ProcessCommands()`
+family (both re-confirmed blocked again). Given how thoroughly this
+batch re-surveyed the list with NO new resolution found beyond
+`RTAIInterruptHandler` itself, the remaining 82 stubs are now mostly
+either large multi-class DSP/vtable clusters or a dedicated future data-
+table-transcription push -- future batches may want to budget for that
+kind of dedicated push rather than expecting more quick "smallest-first"
+wins from this exact list.
