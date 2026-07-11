@@ -3696,3 +3696,96 @@ own `T` status for both). linkonce 0x148, GOTPC 0.
 remain untouched by this batch's new code -- still saturated with
 genuine vtable-dispatch/DSP-cluster blockers per sec 10.190's survey;
 re-check fresh next time rather than trusting this note indefinitely.
+
+**Batch 42 specifics** (2026-07-11, sec 10.193, commit TBD): the first
+batch to explicitly apply the batch-41 "reconstruct the caller for real,
+stub the DSP callee" pattern ONE LEVEL REMOVED -- to a vtable-DISPATCH
+case, not a plain function call. Re-surveyed sec 10.153/10.154's own
+long-standing "ten Model ctors, disproportionate structural cost"
+deferral and found the REAL blocker (sec 10.154's own "an already-real
+caller immediately dispatches through this vtable" risk) is now
+resolvable: give each model a correctly-shaped real vtable (matching
+`kCCostProfileVtbl`'s own precedent, sec 10.186) with ONLY the
+confirmed-dispatched slot(s) populated -- real for `CSTGOffModel`
+(genuinely 1-byte/`ret` in ground truth), safe no-op DSP stand-ins for
+the other 9. Net effect: 10 ctors + a new `CSTGVoiceModel` base class +
+`CSTGVoiceModelManager::Register()` promoted to real, bare-`{}` count
+INCREASED (67->84 in bar2_stubs.cpp) because 27 new confirmed-real DSP
+no-op stubs were needed for the 9 non-Off models' `Initialize`/
+`ProcessSubRate`/`ProcessAudioRate`. Reported the net increase honestly
+rather than hunting for a way to make the number look better -- matches
+the task briefing's own "don't force a bigger number by cutting corners"
+instruction, and the underlying progress (a previously-latent wild-call
+risk converted to a safe, correctly-shaped dispatch) is real regardless
+of what the grep metric shows.
+
+**New generalized technique, worth reusing:** when a "vtable install
+only" ctor is blocked because SOME already-real caller dispatches
+through a specific slot (the sec 10.153/10.154 danger case), check
+whether that slot's OWN real target is itself audio-DSP/out-of-scope --
+if so, the sec 10.185 policy resolves the whole deferral: hand-build a
+correctly-shaped vtable (matching ground truth's own confirmed byte
+size/relocation layout via `readelf -rW ... | c++filt` on the
+`.rel.rodata._ZTVxxx` section) with JUST the confirmed-dispatched
+slot(s) pointed at a real-or-no-op function, leave every other slot
+null. This is strictly SAFER than the pre-existing empty-ctor status quo
+(which left the vtable pointer null/uninitialized -- a WORSE, less
+honest gap) and unblocks the ctor. Before doing this, grep for EVERY
+already-real caller that might dispatch through the SAME object's
+vtable at a DIFFERENT slot (not just the one that motivated the
+investigation) -- this batch found a second slot pair (`ProcessSubRate`/
+`ProcessAudioRate`, reached via `CSTGVoiceModelManager`'s own
+already-real dispatch loop, itself only becoming LIVE once `Register()`
+-- the ctor's own transitive dependency -- was also promoted) that
+would have been an equally real wild-call risk if missed.
+
+**Recurring pointer-width gotcha (sec 10.150/10.156/10.181), a NEW
+angle: a previously-always-EMPTY shared array's own established readers
+can carry a LATENT width bug that only manifests once something
+finally populates the array for the first time.** `CSTGVoiceModelManager::
+ProcessSubRate`/`ProcessAudioRate`/`~CSTGVoiceModelManager()`
+(managers.cpp, already "real" since sec 10.137/10.147) all read their
+own `+0x30` per-entry array via a native `void **` (8 bytes on this
+64-bit host) even though the real stride is 4 bytes (32-bit-target
+pointer) -- undetected for THREE prior batches because the only thing
+that ever populates this array, `Register()`, was itself still a stub,
+so the loop body never ran with real data on any host test to date.
+Promoting `Register()` this batch made the bug immediately live: my own
+first-draft `Register()` had the SAME mistake (native `CSTGVoiceModel **`
+write), caught instantly by a real KAT `check_eq` FAIL. Fixed both
+sides (write in `Register()`, reads in the three managers.cpp methods)
+via the established `ToU32`/`FromU32` packed-pointer convention. Lesson,
+worth its own callout: **the moment a batch makes a previously-dead
+loop/array genuinely live (by finally providing the ONE function that
+populates it), treat every existing "already real" consumer of that same
+memory as unverified until re-checked for this exact bug class -- "it
+was already reconstructed and already had a KAT" does NOT mean "it was
+ever exercised with actual non-empty data."**
+
+**Sub-gotcha, a real ripple onto an EXISTING passing test:**
+`verify/test_engine.cpp`'s own test [1] had a matching pre-existing bug
+in its own mock setup (writing a native 8-byte pointer into the SAME
+`+0x30` slot, self-consistent with the OLD buggy read) -- fixing the
+real code broke this test until its own write was ALSO converted to the
+packed convention, AND its backing storage (`vmmFakeItem`/
+`vmmFakeVtable`) moved from a plain `static` array to `mmap32()`-backed
+storage (a 32-bit truncate-and-reconstitute round-trip needs the real
+address to actually fit under 4GB, not guaranteed for `static` storage
+in this project's PIE host test binaries -- same MAP_32BIT precedent
+already used in `test_audio_input_mixer.cpp`/`test_managers.cpp`).
+Caught by the REQUIRED full-suite run (a segfault, not a `check_eq`
+fail) -- reinforces the standing rule to always check real exit codes,
+never assume a fix that changes shared memory layout conventions is
+purely additive.
+
+**Confirmed-negative finding worth recording so a future batch doesn't
+redo this disassembly**: `CSTGSlotVoiceData::RunVoiceModelStaticFront/
+StaticBack/RunVoiceModelFeedback` do NOT dispatch through
+`CSTGVoiceModel`'s own vtable at all, despite the name similarity to
+"Model" -- fresh disassembly this batch confirms all three dispatch
+through a DIFFERENT object (reached via `this->fieldAt(0x38)` or
+similar, not the per-voice model pointer) at vtable offsets 0x68/0x8c,
+both WELL PAST `CSTGVoiceModel`'s own confirmed 0x5c-byte/23-slot
+vtable size -- these are the SAME `CIFXEffectSlot`/`CMFXEffectSlot`
+cluster sec 10.157 already flagged as blocking `CSTGProgram::
+CSTGProgram()`, not unlocked by this batch's own work.
