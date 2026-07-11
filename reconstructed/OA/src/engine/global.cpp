@@ -3673,6 +3673,39 @@ void CSetListSlot::Activate()
 }
 
 /*
+ * CSetList::Activate() (batch 41, sec 10.192, .text+0x2012e0, 266 bytes)
+ * confirmed: resolves the active CSTGPerformanceVarsManager via the same
+ * shared ResolveActivePerformanceVarsManagerRaw() helper as its sibling
+ * just above, then treats `mgr+0x2160` as an embedded CSetListEQ
+ * sub-object:
+ *   - mgr+0x2168 (target+0x8) = this->fieldAt(0x828)!=0 ? 0.0f : 1.0f --
+ *     a real "mute gain" multiplier. Confirmed via a `cmovne` selecting
+ *     between the hardcoded 1.0f default and a `.rodata.cst4+0xc08`
+ *     constant that decodes to exactly 0.0f.
+ *   - mgr+0x2170 (target+0x10) = this->fieldAt(0x82c), a raw dword copy
+ *     (no interpretation).
+ *   - calls SetBand(band, gain) on the mgr+0x2160 CSetListEQ nine times,
+ *     band = 0..8, gain = this's own nine contiguous floats at
+ *     +0x804..+0x824 (stride 4).
+ * SetBand()'s own body is genuine SSE/x87 EQ-coefficient DSP -- out of
+ * scope per the sec 10.185 policy, so it stays a confirmed-real,
+ * deliberately-deferred no-op (bar2_stubs.cpp). This function's own
+ * control flow / argument marshaling is fully real regardless of that.
+ */
+void CSetList::Activate()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *mgr = ResolveActivePerformanceVarsManagerRaw();
+	CSetListEQ *target = (CSetListEQ *)(mgr + 0x2160);
+
+	*(float *)(mgr + 0x2168) = (base[0x828] != 0) ? 0.0f : 1.0f;
+	*(unsigned int *)(mgr + 0x2170) = *(unsigned int *)(base + 0x82c);
+
+	for (unsigned int band = 0; band < 9; band++)
+		target->SetBand(band, *(float *)(base + 0x804 + band * 4));
+}
+
+/*
  * CSTGProgramSlot::GetProperMidiChannel() const (sec 10.110): see
  * oa_global.h for the full confirmed shape.
  */

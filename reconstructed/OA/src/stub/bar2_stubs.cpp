@@ -234,6 +234,15 @@ void CSTGSmoother::FinalizeSmoother(void *, bool) {}
 /* Sec 10.101's own confirmed-real, deliberately deferred externs. */
 void CSTGControllerRTData::HandleControllerChange(int, unsigned char, bool, bool) {}
 void CSTGControllerInfo::SetPerfSwitch(int, bool) {}
+/* CSetListEQ::SetBand(unsigned int, float) (batch 41, ground truth
+ * .text+0x2025b0) confirmed real: genuine SSE/x87 EQ-coefficient DSP
+ * (SSE broadcast + CSTGEQ::CalculatePeakingBeta + peaking-coefficient
+ * math) -- out of scope per the sec 10.185 audio-DSP policy. Its own
+ * caller, CSetList::Activate(), IS reconstructed for real (see
+ * src/engine/global.cpp) -- this no-op is exactly the safe stand-in for
+ * a confirmed-real-but-deferred callee, matching the SetPerfSwitch
+ * precedent right above. */
+void CSetListEQ::SetBand(unsigned int, float) {}
 void CSTGControllerRTData::ResetKnobsJumpCatch() {}
 void CSTGControllerRTData::ResetSlidersJumpCatch() {}
 void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
@@ -407,7 +416,13 @@ void CSTGVoiceAllocator::StealAllVoices() {}
  * defined there). Neither ctor has its OWN standalone symbol in
  * OA_real.ko -- both are fully inlined at their one call site in
  * CSTGGlobal::CSTGGlobal(), see that file's own header comment. */
-void CSetList::Activate() {}
+/* CSetList::Activate() is real now, batch 41 -- see src/engine/global.cpp
+ * (right alongside its sibling CSetListSlot::Activate()). Its own callee,
+ * CSetListEQ::SetBand(), is a confirmed-real, deliberately-out-of-scope
+ * audio-DSP no-op stub -- see below, near the other confirmed-real-but-
+ * deferred callees (matches the CSTGControllerInfo::SetPerfSwitch
+ * precedent, sec 10.187: promoting a caller is safe when its callee is a
+ * confirmed-real, already-covered no-op sibling). */
 /* CStartupFile::CStartupFile(const char*)/~CStartupFile() are real now,
  * sec 10.148 -- see src/engine/startup_file.cpp. */
 /* USTGAliasBankTypes::InitializeAliasBanks() reconstructed for real,

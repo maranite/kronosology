@@ -166,6 +166,12 @@ extern "C" void PushUnsolicitedMessage(void *) { }
  * StealingRequiresOneTickStall is now real (sec 10.136). */
 void CSTGSmoother::FinalizeSmoother(void *, bool) { }
 void CSTGChannelValues::Reset() { }
+/* CSetListEQ::SetBand() -- confirmed-real, deliberately deferred
+ * (audio-DSP out of scope, batch 41). CSetList::Activate() (its own
+ * caller) is ALSO now real (global.cpp) -- its stale flat mock below is
+ * removed (see test_global.cpp for the real call-tracking KAT); this
+ * file's own tests don't otherwise exercise either function. */
+void CSetListEQ::SetBand(unsigned int, float) { }
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) { }
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) { }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
@@ -201,7 +207,7 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
  * SYMBOL still needs local storage to link even though it's never
  * dereferenced at runtime here. */
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
-void CSetList::Activate() { }
+/* CSetList::Activate() is now real (batch 41) -- stale flat mock removed. */
 /* CSTGControllerRTData::OnExtModeKnobAssignChange/OnExtModeSliderAssignChange
  * are now real (sec 10.161) -- see global.cpp (this file already links
  * global.cpp + the new cc_info_table.cpp directly). */

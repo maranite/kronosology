@@ -114,6 +114,11 @@ extern "C" void PushUnsolicitedMessage(void *) { }
  * StealingRequiresOneTickStall is now real (sec 10.136). */
 void CSTGSmoother::FinalizeSmoother(void *, bool) { }
 void CSTGChannelValues::Reset() { }
+/* CSetListEQ::SetBand() -- confirmed-real, deliberately deferred
+ * (audio-DSP out of scope, batch 41). CSetList::Activate() (its own
+ * caller, now real in global.cpp) isn't exercised by this file's own
+ * tests -- see test_global.cpp for the real call-tracking KAT. */
+void CSetListEQ::SetBand(unsigned int, float) { }
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) { }
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) { }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
@@ -164,7 +169,7 @@ CSTGProgram::CSTGProgram() { g_programCalls++; }
 CSTGCombi::CSTGCombi() { g_combiCalls++; }
 CSTGSequence::CSTGSequence() { g_sequenceCalls++; }
 CSetList::CSetList() { g_setListCalls++; }
-void CSetList::Activate() { }
+/* CSetList::Activate() is now real (batch 41) -- stale flat mock removed. */
 CSTGControllerRTData::CSTGControllerRTData() { g_controllerRtCalls++; }
 CSTGSlotVoiceData::CSTGSlotVoiceData() { g_slotVoiceDataCalls++; }
 

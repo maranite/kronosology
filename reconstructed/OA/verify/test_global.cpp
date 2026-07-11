@@ -154,10 +154,11 @@ static CSTGPerfChangeRequest &PendingRequest(unsigned char *buf)
  * src/engine/global.cpp; this file links global.cpp directly. Its own
  * real side effects (mgr->fieldAt(0x23f0)/fieldAt(0x23e0) copied from
  * the slot's own fields) are checked directly at each call site below
- * instead of a call counter. */
-static int g_setListActivateCalls;
-static void *g_lastSetListActivateThis;
-void CSetList::Activate() { g_setListActivateCalls++; g_lastSetListActivateThis = this; }
+ * instead of a call counter. CSetList::Activate() is ALSO now real
+ * (batch 41, sec 10.192) -- same treatment: no call-counter mock here
+ * any more, its own real side effects (mgr+0x2168/+0x2170, plus
+ * SetBand() call tracking via the g_setBand* mock below) are checked
+ * directly at the [40]/[53] call sites instead. */
 static int g_onPerformanceActivateCalls;
 static void *g_lastOnPerformanceActivateArg;
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &perf)
@@ -237,6 +238,25 @@ static int g_channelValuesResetCalls;
 static void *g_lastChannelValuesResetThis;
 void CSTGChannelValues::Reset()
 { g_channelValuesResetCalls++; g_lastChannelValuesResetThis = this; }
+
+/* CSetList::Activate() is now real (batch 41, sec 10.192) -- see
+ * src/engine/global.cpp. Its own confirmed-real, deliberately-deferred
+ * (audio-DSP out of scope) callee, CSetListEQ::SetBand(), is mocked here
+ * with full call-tracking (this/band/gain of each of the 9 calls) so the
+ * caller's own real argument marshaling can be verified end to end. */
+static int g_setBandCalls;
+static void *g_lastSetBandThis;
+static unsigned int g_setBandBands[16];
+static float g_setBandGains[16];
+void CSetListEQ::SetBand(unsigned int band, float gain)
+{
+	g_lastSetBandThis = this;
+	if (g_setBandCalls < 16) {
+		g_setBandBands[g_setBandCalls] = band;
+		g_setBandGains[g_setBandCalls] = gain;
+	}
+	g_setBandCalls++;
+}
 /* SetPitchBend is now real (sec 10.128) -- see src/engine/global.cpp;
  * verified via its own real field writes (+0x5a0/+0x5a4/+0x5a8/+0x634),
  * not a call-tracking mock. */
@@ -4109,20 +4129,32 @@ int main(void)
 		buf[0x698] = 9;
 		buf[0x6b8] = 4; /* channel */
 
-		g_setListActivateCalls = 0;
 		g_onExtModeSetChangeCalls = 0;
 		g_onPerformanceActivateCalls = 0;
 		g_writeQueueCalls = 0;
+		g_setBandCalls = 0;
 
 		unsigned char *setListObj = buf + 3 * 0x834 + 0x293374c;
 		unsigned char *setListSlot = buf + 0x2933750 + 3 * 0x834 + (2 << 4);
 		*(unsigned int *)(setListSlot + 4) = 0x11111111;
 		*(unsigned int *)(setListSlot + 0xc) = 0x22222222;
+		/* Non-trivial CSetList::Activate() inputs so its own real
+		 * pass-through copy/mute-select logic is actually exercised,
+		 * not just "still zeroed". */
+		setListObj[0x828] = 1; /* muted */
+		*(unsigned int *)(setListObj + 0x82c) = 0x77777777u;
 
 		g->CompletePerformanceActivation();
 		check_eq("+0x2975184 set to 3", buf[0x2975184], 3);
-		check_eq("CSetList::Activate called once", (unsigned int)g_setListActivateCalls, 1u);
-		check_eq("  ...on the real idx-only-strided object", g_lastSetListActivateThis == setListObj, true);
+		/* CSetList::Activate() is now real -- verify its own confirmed
+		 * real side effects directly. */
+		check_eq("CSetList::Activate's real effect: mgr+0x2168 == 0.0f (muted)",
+			 (long)*(float *)(mgr3 + 0x2168) == 0.0f, 1);
+		check_eq("  ...mgr+0x2170 == setListObj+0x82c",
+			 *(unsigned int *)(mgr3 + 0x2170), 0x77777777u);
+		check_eq("  ...on the real idx-only-strided object",
+			 (unsigned int)(unsigned long)g_lastSetBandThis == (unsigned int)(unsigned long)(mgr3 + 0x2160), true);
+		check_eq("  ...SetBand called 9 times", (unsigned int)g_setBandCalls, 9u);
 		check_eq("CSetListSlot::Activate's real effect: mgr+0x23f0 == slot+4",
 			 *(unsigned int *)(mgr3 + 0x23f0), 0x11111111u);
 		check_eq("  ...mgr+0x23e0 == slot+0xc",
@@ -5444,10 +5476,74 @@ int main(void)
 		munmap(msgProc2, 0x1040);
 		munmap(voiceAlloc, 0x10);
 		/* mgr52 deliberately NOT munmap'd -- see [17]'s own identical
-		 * comment (this is currently the last section in the file, so
-		 * it's not strictly needed here, but kept consistent so a
-		 * future section added after this one doesn't reintroduce the
-		 * same dangling-pointer hazard). */
+		 * comment ([53] below re-points CSTGPerformanceVarsManager::
+		 * sInstance to its own fresh mgr, so this dangling pointer is
+		 * harmless once that section runs). */
+	}
+
+	printf("\n[53] CSetList::Activate (batch 41, sec 10.192)\n");
+	{
+		/* CSetList itself has no fields modeled -- this is a raw
+		 * byte-offset object, same convention as CSetListSlot. Only
+		 * needs to be big enough to cover the confirmed real field
+		 * range (+0x804..+0x82f); a plain heap/stack buffer is fine
+		 * (Activate() never reconstitutes a pointer stored WITHIN
+		 * `this`, only copies/reads raw floats and a dword). */
+		unsigned char thisBuf[0x840];
+		memset(thisBuf, 0, sizeof(thisBuf));
+		float gains[9];
+		for (unsigned int i = 0; i < 9; i++) {
+			gains[i] = (float)(i + 1) * 0.25f;
+			*(float *)(thisBuf + 0x804 + i * 4) = gains[i];
+		}
+		*(unsigned int *)(thisBuf + 0x82c) = 0xdeadbeefu;
+		CSetList *setList = (CSetList *)thisBuf;
+
+		/* mgr IS dereferenced (mgr+0x2168/+0x2170 writes, and
+		 * SetBand's own `this` is mgr+0x2160) -- needs MAP_32BIT so
+		 * the packed-32-bit ResolveActivePerformanceVarsManagerRaw()
+		 * round trip doesn't truncate to a wild address (sec 10.156's
+		 * established convention). */
+		unsigned char *mgr53 = mmap32(0x3000);
+		memset(mgr53, 0, 0x3000);
+		*(unsigned int *)(CSTGPerformanceVarsManager::sInstance + 0) = (unsigned int)(unsigned long)mgr53;
+		CSTGPerformanceVarsManager::sInstance[8] = 0;
+
+		printf("  -- mute flag (+0x828) clear: gain multiplier = 1.0f --\n");
+		thisBuf[0x828] = 0;
+		g_setBandCalls = 0;
+		memset(g_setBandBands, 0, sizeof(g_setBandBands));
+		memset(g_setBandGains, 0, sizeof(g_setBandGains));
+		setList->Activate();
+		check_eq("mgr+0x2168 == 1.0f (unmuted default)",
+			 (long)*(float *)(mgr53 + 0x2168) == 1.0f, 1);
+		check_eq("mgr+0x2170 == this+0x82c (raw dword copy)",
+			 *(unsigned int *)(mgr53 + 0x2170), 0xdeadbeefu);
+		check_eq("SetBand called 9 times", (unsigned int)g_setBandCalls, 9u);
+		check_eq("SetBand's own `this` == mgr+0x2160",
+			 (unsigned int)(unsigned long)g_lastSetBandThis,
+			 (unsigned int)(unsigned long)(mgr53 + 0x2160));
+		{
+			int bandsOk = 1, gainsOk = 1;
+			for (unsigned int i = 0; i < 9; i++) {
+				if (g_setBandBands[i] != i)
+					bandsOk = 0;
+				if (g_setBandGains[i] != gains[i])
+					gainsOk = 0;
+			}
+			check_eq("band indices 0..8 in order", bandsOk, 1);
+			check_eq("gains match this+0x804..+0x824 in order", gainsOk, 1);
+		}
+
+		printf("  -- mute flag (+0x828) set: gain multiplier = 0.0f --\n");
+		thisBuf[0x828] = 1;
+		g_setBandCalls = 0;
+		setList->Activate();
+		check_eq("mgr+0x2168 == 0.0f (muted, .rodata.cst4+0xc08)",
+			 (long)*(float *)(mgr53 + 0x2168) == 0.0f, 1);
+		check_eq("SetBand still called 9 times", (unsigned int)g_setBandCalls, 9u);
+
+		munmap(mgr53, 0x3000);
 	}
 
 	munmap(buf, globalSize);

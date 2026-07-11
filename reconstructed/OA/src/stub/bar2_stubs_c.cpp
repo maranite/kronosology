@@ -47,8 +47,10 @@ extern "C" void *CSTGSharedMemory_CreateMidiShareHeader() { return 0; }
 
 /* ---- Startup/daemon lifecycle helpers, confirmed real (init_module's
  * own confirmed call chain, sec 10.17 -- own bodies not reconstructed) ---- */
-/* cleanup_cpp_support @0x118... (ground truth OA.ko, 57 bytes) -- DEFERRED,
- * fully disassembled (batch 34 scout) so the next attempt need not re-derive:
+/* cleanup_cpp_support @0x118... (ground truth OA.ko, 57 bytes) -- RESOLVED
+ * as a deliberate, documented no-op VIRTUAL SUBSTITUTE (batch 41, sec
+ * 10.185 policy), not left as an open "still deferred" TODO any more.
+ * Fully disassembled (batch 34 scout):
  *
  *     push %ebp; mov %esp,%ebp; and $-16,%esp; push %ebx; sub $0xc,%esp
  *     mov  .dtors+4, %eax          ; R_386_32 .dtors  -> eax = .dtors[1]
@@ -66,16 +68,41 @@ extern "C" void *CSTGSharedMemory_CreateMidiShareHeader() { return 0; }
  * function pointer until it hits the 0 terminator, then calls stg_cpp_exit.
  * The fini-side mirror of init_cpp_support (sec 10.179, a 1-byte `ret`).
  *
- * WHY STILL DEFERRED: the body references the `.dtors` SECTION symbol
- * directly (`R_386_32 .dtors`), a linker construct. Faithfully binding a
- * portable-C body to `.dtors` start in THIS freestanding kernel-module
- * build (no crtstuff, so no `__DTOR_LIST__`) needs either a module linker-
- * script boundary symbol or an in-section anchor -- the latter would ADD a
- * `.dtors` entry and change semantics. It is the UNLOAD path (not needed to
- * get OA.ko running), so promoting it correctly is a dedicated task, not a
- * smallest-first stub. stg_cpp_exit itself is a trivial confirmed no-op
- * (1-byte ret) but is only reachable through this function, so it rides
- * along whenever cleanup_cpp_support is promoted. */
+ * WHAT THIS REPLACES: OA_real.ko's own static-C++-destructor teardown at
+ * module unload (registered via `-fno-use-cxa-atexit`'s `.dtors`
+ * mechanism, since no crtstuff/`__DTOR_LIST__`/`__DTOR_END__` boundary
+ * symbols are linked into a freestanding kernel module here or in ground
+ * truth).
+ *
+ * WHY A FAITHFUL WALK CAN'T (USEFULLY) RUN HERE: binding portable C to a
+ * `.dtors` SECTION symbol needs a linker-script boundary symbol GNU ld
+ * does NOT auto-synthesize for a dot-prefixed section name like `.dtors`
+ * (the `__start_SECNAME`/`__stop_SECNAME` auto-synthesis GNU ld provides
+ * only fires for section names that are themselves valid C identifiers);
+ * building one would mean adding a custom linker-script fragment to this
+ * project's shared Kbuild -- real infra risk for a list that is currently
+ * EMPTY ANYWAY: confirmed via `objdump -h OA.ko | grep dtors` / `readelf -x
+ * .dtors OA.ko` on THIS project's own from-scratch build that no `.dtors`
+ * section is emitted at all (zero global C++ objects in this
+ * reconstruction currently have a non-trivial destructor needing
+ * registration). A faithful walk over an empty list plus a call to a
+ * confirmed no-op (`stg_cpp_exit`) is bit-for-bit indistinguishable from
+ * this function's own current no-op body -- so the existing empty `{}` IS
+ * the faithful behavior for this reconstruction's PRESENT state, not
+ * merely a placeholder standing in for unfinished work.
+ *
+ * WHAT THIS SUBSTITUTE DELIBERATELY DOES NOT GUARANTEE: if a FUTURE batch
+ * gives some class a real non-trivial destructor for a genuine global
+ * static object, this build would then start emitting a non-empty
+ * `.dtors` section of its own -- and this no-op would silently skip
+ * running those destructors at `rmmod` time (a static-teardown gap, not a
+ * boot/insmod-time hazard; kernel modules don't generally depend on C++
+ * static destructors running for correctness, since the whole module's
+ * memory is reclaimed on unload regardless). Revisit this decision at
+ * that point rather than assuming it stays vacuously correct forever.
+ * stg_cpp_exit itself stays an unimplemented confirmed no-op (1-byte
+ * ret) -- not given its own extern here since nothing in this
+ * reconstruction calls it (this substitute never reaches that call). */
 extern "C" void cleanup_cpp_support() {}
 /* setup_stg_daemons/cleanup_stg_daemons/setup_stg_decrypt_daemons/
  * cleanup_stg_decrypt_daemons -- the full daemon kernel-thread lifecycle,

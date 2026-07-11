@@ -1328,8 +1328,11 @@ enum eEQShelvingType { kEQLowShelf = 0, kEQHighShelf = 1 };
  * CSTGEQ -- a plain static-method math-utility class (no fields, no
  * vtable, matching `CSTGPan` above), confirmed via `nm -C OA.ko | grep
  * CSTGEQ::` (only method symbols, no `vtable for`/`typeinfo for`).
- * `CSetListEQ::Initialize()`/`SetBand()` (not yet reconstructed) call
- * these -- sec 10.177 identified this whole 5-function cluster as the
+ * `CSetListEQ::Initialize()`/`SetBand()` (both still deferred -- `SetBand`
+ * is now DECLARED, see the `CSetListEQ` struct below `CSetList`, but its
+ * own body stays an out-of-scope no-op per the sec 10.185 audio-DSP
+ * policy) call these -- sec 10.177 identified this whole 5-function
+ * cluster as the
  * TRUE root blocker of the entire `CSetListEQ`/`CSTGEffectRack`
  * subsystem (`CalculatePeakingBeta()` alone is called 9x from
  * `CSetListEQ::Initialize()`). Batch 30 (sec 10.178) reconstructs all
@@ -1616,6 +1619,45 @@ struct CSTGSequence : public CSTGCombi { CSTGSequence(); };
  * above.
  */
 extern "C" unsigned char _ZTV8CSetList[96];
+/*
+ * CSetListEQ -- a plain (no vtable, no fields modeled beyond what
+ * `CSetList::Activate()` writes into it) embedded sub-object type,
+ * confirmed real but with its OWN body genuinely out of scope: see
+ * `SetBand()` below. Not independently constructed anywhere in this
+ * reconstruction -- always accessed as a raw sub-object at a fixed
+ * offset inside a `CSTGPerformanceVarsManager` (`mgr+0x2160`), matching
+ * the `CSTGEffectRackVars`/`CSTGAudioInputMixerBase` "reinterpret a
+ * manager sub-region as a different class" idiom already used
+ * elsewhere in this cluster (sec 10.90/10.101/oa_global.h comments
+ * above).
+ */
+struct CSetListEQ {
+	/*
+	 * SetBand(unsigned int band, float gain) (batch 41, ground truth
+	 * `.text+0x2025b0`, confirmed calling convention: `this` in %eax,
+	 * `band` in %edx, `gain` on the stack at [ebp+8]) is genuine SSE/x87
+	 * EQ-coefficient DSP (SSE broadcast + `CSTGEQ::CalculatePeakingBeta`
+	 * + peaking-coefficient computation) -- out of scope per the sec
+	 * 10.185 audio-DSP policy. Confirmed real, deliberately deferred:
+	 * own body not reconstructed (safe no-op stub in bar2_stubs.cpp,
+	 * matching the `SetPerfSwitch`/`CSTGControllerInfo` precedent for a
+	 * confirmed-real-but-deferred callee).
+	 */
+	void SetBand(unsigned int band, float gain);
+};
+/*
+ * CSetList::Activate() (batch 41, sec 10.192, ground truth
+ * `.text+0x2012e0`, 266 bytes) reconstructed for real -- see
+ * src/engine/global.cpp (right after the sibling `CSetListSlot::
+ * Activate()`) for the full confirmed body. Resolves the active
+ * `CSTGPerformanceVarsManager` via the shared
+ * `ResolveActivePerformanceVarsManagerRaw()` helper, treats
+ * `mgr+0x2160` as an embedded `CSetListEQ`, writes two of `this`'s own
+ * fields into it (`+0x828`-gated mute-gain float at `+0x2168`, a raw
+ * dword copy of `+0x82c` at `+0x2170`), then calls `SetBand()` nine
+ * times (band 0..8, gain = `this`'s own nine contiguous floats at
+ * `+0x804..+0x824`).
+ */
 struct CSetList { CSetList(); void Activate(); };
 
 /*
