@@ -59,9 +59,12 @@ char CSTGThread::CreateRealTimeWithCPUAffinity(void *(*entryFn)(void *), int pri
  * 10.37/10.52), so no test behavior changes here. This file links
  * audio_start.cpp directly (not bar2_stubs.cpp), so their own new
  * confirmed-real, deliberately-deferred dependencies still need
- * trivial link-satisfying mocks: */
-extern "C" void rtwrap_whoami(void) {}
-extern "C" void rtwrap_task_suspend(void) {}
+ * trivial link-satisfying mocks (rtwrap_whoami/rtwrap_task_suspend's
+ * real bodies now live in src/init/rtwrap.cpp, batch 37 -- this file
+ * doesn't link that TU either, so it keeps its own local mocks here,
+ * updated to the corrected void* / 1-arg signatures): */
+extern "C" void *rtwrap_whoami(void) { return 0; }
+extern "C" void rtwrap_task_suspend(void *) {}
 extern "C" void SKMain_Run(void) {}
 void CSTGAudioThread::AudioTickLoopRoutine() {}
 

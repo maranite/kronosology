@@ -98,43 +98,26 @@ int nv2ac_enable_encrypt(unsigned char, const unsigned char *, const unsigned ch
 /* ---- rtwrap_* RTAI wrapper layer -- signatures matching this
  * project's own already-established declarations (oa_cpu_affinity.h/
  * oa_comport.h) or, where undeclared elsewhere, a reasonable regparm-
- * safe signature ---- */
+ * safe signature ----
+ *
+ * The 22 bare-`{}` forwarders that used to live here (rtwrap_free,
+ * the pthread_mutex_* / mutexattr_* / cond_init / attr_* families,
+ * rtwrap_whoami/task_suspend, rtwrap_pthread_cancel, and the irq
+ * quartet) are now real bodies in src/init/rtwrap.cpp (batch 37) --
+ * see that file's own header comment for the full ground-truth
+ * derivation. Still deferred here: rtwrap_pthread_create (needs the
+ * `.text+0x118e80` internal thread-trampoline target reconstructed
+ * too, a larger task) and rtwrap_request_irq/rtwrap_set_debug_traps_
+ * in_rt_task (both already have safe non-bare-`{}` stub bodies below,
+ * not part of the "smallest remaining" bare-`{}` tally). */
 extern "C" unsigned int get_sizeof_rtwrap_pthread_attr(void) { return 64; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" int get_pthread_recursive_attr_constant(void) { return 1; }
 extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
-extern "C" void rtwrap_free(void *) {}
-extern "C" void rtwrap_pthread_mutex_init(void *, void *) {}
-extern "C" void rtwrap_pthread_mutex_destroy(void *) {}
-/* rtwrap_pthread_mutex_lock/_unlock -- confirmed real (plain, unmangled
- * `T` symbols in OA_real.ko, same rtwrap_* family), newly needed by
- * sec 10.149's real CSTGVoiceAllocator::EmergencyFreeVoiceList(). */
-extern "C" void rtwrap_pthread_mutex_lock(void *) {}
-extern "C" void rtwrap_pthread_mutex_unlock(void *) {}
-/* rtwrap_whoami/rtwrap_task_suspend -- confirmed real (plain, unmangled
- * `T` symbols), newly needed by sec 10.149's real
- * CSTGAudioManager::ASKThreadRoutine(void*) (src/init/audio_start.cpp). */
-extern "C" void rtwrap_whoami(void) {}
-extern "C" void rtwrap_task_suspend(void) {}
-extern "C" void rtwrap_pthread_mutexattr_init(void *) {}
-extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) {}
-extern "C" void rtwrap_pthread_mutexattr_destroy(void *) {}
-extern "C" void rtwrap_pthread_cond_init(void *, void *) {}
-extern "C" void rtwrap_pthread_attr_init(void *) {}
-extern "C" void rtwrap_pthread_attr_setrtpriority(void *, int) {}
-extern "C" void rtwrap_pthread_attr_setstacksize(void *, unsigned int) {}
 extern "C" void *rtwrap_pthread_create(void *, void *, void *(*)(void *), void *) { return 0; }
-extern "C" void rtwrap_pthread_attr_destroy(void *) {}
 extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return -1; }
-extern "C" void rtwrap_set_runnable_on_cpuid(void *, unsigned int) {}
-extern "C" void rtwrap_clear_debug_traps_in_rt_task(void *) {}
-extern "C" void rtwrap_pthread_cancel(void *) {}
-extern "C" void rtwrap_shutdown_irq(unsigned int) {}
-extern "C" void rtwrap_release_irq(unsigned int) {}
 extern "C" int rtwrap_request_irq(unsigned int, void (*)(unsigned int, void *), void *, unsigned int) { return -1; }
-extern "C" void rtwrap_assign_irq_to_cpu(unsigned int, unsigned int) {}
-extern "C" void rtwrap_startup_irq(unsigned int) {}
 
 /* ---- Low-level stg_* RTAI/CPU primitives (confirmed real, own bodies
  * not reconstructed) ---- */

@@ -130,15 +130,27 @@ extern "C" int CSTGAudioManager_StartAudioEngine(void)
  * reconstruction's own C++ call graph.
  */
 
-/* Plain C-linkage forward declarations for the three confirmed-real,
- * deliberately deferred siblings these bodies call into (see
- * bar2_stubs.cpp/bar2_stubs_c.cpp for their trivial no-op definitions).
- * SKMain_Run is declared WITHOUT extern "C" to match the plain-C-linkage
- * CHOICE already made for its own definition (an internal-consistency
- * convention, not a claim about the real binary's own mangling -- see
- * bar2_stubs.cpp's own comment on this). */
-extern "C" void rtwrap_whoami(void);
-extern "C" void rtwrap_task_suspend(void);
+/* Plain C-linkage forward declarations for the siblings these bodies
+ * call into. rtwrap_whoami/rtwrap_task_suspend are now REAL bodies
+ * (src/init/rtwrap.cpp, batch 37) -- promoting them forced a
+ * signature fix here too: ground truth's real ASKThreadRoutine calls
+ * `call rtwrap_whoami` immediately followed by `call
+ * rtwrap_task_suspend` with NO intervening instruction that touches
+ * %eax, i.e. rtwrap_task_suspend's argument (regparm(3) arg1, %eax) IS
+ * rtwrap_whoami's own return value (an implicit register-passthrough,
+ * not two independent void calls) -- confirmed via a fresh disassembly
+ * of `.text+0x67100` (see rtwrap.cpp's own header for why
+ * rtwrap_whoami/task_suspend needed a void->void* / 0-arg->1-arg
+ * fidelity fix, same class of fix as sec 10.182's
+ * stg_log_startup_error int->const-char* correction). SKMain_Run
+ * remains a confirmed-real, deliberately deferred sibling (see
+ * bar2_stubs.cpp for its trivial no-op definition), declared WITHOUT
+ * extern "C" to match the plain-C-linkage CHOICE already made for its
+ * own definition (an internal-consistency convention, not a claim
+ * about the real binary's own mangling -- see bar2_stubs.cpp's own
+ * comment on this). */
+extern "C" void *rtwrap_whoami(void);
+extern "C" void rtwrap_task_suspend(void *task);
 extern "C" void SKMain_Run(void);
 
 /*
@@ -163,9 +175,10 @@ void *CSTGAudioThread::AudioTickLoopRoutine(void *)
  * from the explicit `void *arg` register instead -- both are the same
  * value at a thread-entry call, modeled here via the `arg` parameter
  * directly), then `while (fieldAt(0xa65))` ("running", confirmed via
- * StartAudioEngine's own +0xa65 field above): rtwrap_whoami();
- * rtwrap_task_suspend(); SKMain_Run(); -- a real per-tick synthesis-
- * kernel dispatch loop, gated on the SAME running flag
+ * StartAudioEngine's own +0xa65 field above): `me = rtwrap_whoami();
+ * rtwrap_task_suspend(me); SKMain_Run();` -- a real per-tick synthesis-
+ * kernel dispatch loop (self-suspend idiom: get the calling task's own
+ * handle, then suspend THAT task), gated on the SAME running flag
  * StartAudioEngine sets to 1 and CSTGAudioManager_StopAudioEngine's
  * own vtable-slot-1 target presumably clears (not independently
  * confirmed in this pass).
@@ -174,8 +187,8 @@ void *CSTGAudioManager::ASKThreadRoutine(void *arg)
 {
 	unsigned char *self = (unsigned char *)arg;
 	while (self[0xa65]) {
-		rtwrap_whoami();
-		rtwrap_task_suspend();
+		void *me = rtwrap_whoami();
+		rtwrap_task_suspend(me);
 		SKMain_Run();
 	}
 	return 0;
