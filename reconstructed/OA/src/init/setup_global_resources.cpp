@@ -54,10 +54,27 @@ static unsigned char *local_heap_region(unsigned int slot)
 	unsigned char *heap = (unsigned char *)CSTGHeapManager::sInstance;
 	if (heap == (unsigned char *)(long)-44 || slot > 0x1869f)
 		return 0;
-	unsigned int *rec = (unsigned int *)(heap + slot * 0x14);
-	if (!*(unsigned int *)((unsigned char *)rec + 0x18))
+	unsigned char *rec = heap + slot * 0x14;
+	/*
+	 * CORRECTED (root-caused alongside the CSTGHeapManager cursor bug,
+	 * see oa_heapmanager.h's own file comment): the real disassembly
+	 * (.text+0x116cbe/0x116cc2/0x116cc4) computes `rec+0x18` (the
+	 * entry's own address, via `lea`) and null-tests THAT ADDRESS
+	 * directly (`test %ecx,%ecx`) -- it never dereferences memory here.
+	 * An earlier pass of this reconstruction wrongly turned this into
+	 * `*(rec+0x18) != 0`, a genuine bug: for the very first-ever
+	 * allocation, that memory location (the entry's own "next" field)
+	 * legitimately reads 0 right after insertion, which would make this
+	 * function spuriously return NULL for a perfectly valid slot. Since
+	 * `heap` is already confirmed non-null above and `slot` is bounded,
+	 * `rec+0x18` as a pointer is never NULL in practice -- reproduced
+	 * faithfully (as an always-true guard) rather than dropped, to stay
+	 * behaviorally identical to the real code.
+	 */
+	unsigned long recAddr = (unsigned long)(rec + 0x18);
+	if (!recAddr)
 		return 0;
-	return (unsigned char *)(*(unsigned int *)((unsigned char *)rec + 0x24) +
+	return (unsigned char *)(*(unsigned int *)(rec + 0x24) +
 				  *(unsigned int *)(heap + 0x1e8498));
 }
 

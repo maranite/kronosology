@@ -48,7 +48,12 @@ static unsigned char *mmap32(unsigned long size)
 #define OFF_FREE_CNT    0x14ul
 #define OFF_SENTINEL    0x18ul
 #define OFF_HEAP_SIZE   0x1e84a0ul
-#define OFF_CURSOR      0x1e84a4ul
+/* CORRECTED: the real live cursor is the sentinel's own repurposed
+ * "size" slot at +0x28 (sentinel base +0x18, +0x10 within the entry),
+ * not +0x1e84a4 -- see oa_heapmanager.h's file comment and
+ * heap_manager_alloc_static.cpp's own HM_OFF_CURSOR for the full
+ * disassembly-confirmed evidence. */
+#define OFF_CURSOR      0x28ul
 #define OFF_RESERVED    0x1e84a8ul
 
 static void wr32(unsigned char *p, unsigned long off, unsigned int v) { *(unsigned int *)(p + off) = v; }

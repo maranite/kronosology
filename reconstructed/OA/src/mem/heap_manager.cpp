@@ -14,6 +14,42 @@ void CSTGHeapManager::Initialize(unsigned long base, unsigned long size)
 	heapBase = base;
 	heapSize = size;
 
+	/*
+	 * FIX (root-caused via live-boot printk instrumentation,
+	 * 2026-07-12): explicitly zero the free-list bookkeeping this
+	 * function itself is about to read, rather than relying solely on
+	 * CSTGHeapManager_Initialize()'s external wrapper having already
+	 * zeroed this object's memory.
+	 *
+	 * Without this, a live kernel build's `-O2` codegen for the very
+	 * first loop iteration below reused the CPU register still holding
+	 * this function's own `size` PARAMETER (untouched since function
+	 * entry, per the real regparm(3) calling convention) as the value
+	 * for `oldTail = freeListTail` -- because nothing WITHIN THIS
+	 * FUNCTION's own compiled body had yet written `freeListTail`, the
+	 * compiler could not see across the call boundary into the
+	 * separate wrapper function/TU that actually zeroed it, and chose
+	 * to treat the read as an arbitrary/indeterminate value rather
+	 * than emit a real load. Since `size` (a large nonzero byte count,
+	 * confirmed live e.g. 117534720) is never 0, this took the
+	 * "non-empty list" branch and dereferenced that bogus value AS A
+	 * POINTER (`mov (%ecx),%edx` in the compiled output), corrupting
+	 * memory and explaining every downstream symptom independently
+	 * confirmed live: `heapBase`/`heapSize` reading back as 0 despite
+	 * being written two lines above, `freeListHead` staying 0 while
+	 * `freeCount` incremented exactly once, and every subsequent
+	 * `CSTGHeapManager::Alloc()` call failing immediately at its own
+	 * `freeListHead == 0` guard. An explicit, compiler-visible write
+	 * here removes the ambiguity that produced this codegen -- a
+	 * behavior-preserving robustness fix (a no-op whenever the
+	 * external wrapper's own pre-zeroing already ran, which is always
+	 * true for the real call path), not a deviation from the real
+	 * binary's own logic.
+	 */
+	freeListHead = 0;
+	freeListTail = 0;
+	freeCount = 0;
+
 	/* Insert the sentinel into the (empty) active list -- confirmed
 	 * real insert-or-init doubly-linked-list idiom (identical shape to
 	 * every other intrusive list build elsewhere in this project). */
@@ -32,7 +68,16 @@ void CSTGHeapManager::Initialize(unsigned long base, unsigned long size)
 	activeListHead = (unsigned int)(unsigned long)&sentinel;
 	sentinel.owner = (unsigned int)(unsigned long)this;
 	activeCount++;
-	cursor = heapSize;
+
+	/* CORRECTED: the real live bump-down cursor is the sentinel's own
+	 * repurposed "size" field (+0x28), NOT a separate struct member --
+	 * see oa_heapmanager.h's own file comment for the full disassembly
+	 * evidence (.text+0x2e888-0x2e895). sentinel.offset is likewise
+	 * explicitly zeroed here by the real code (confirmed
+	 * `movl $0,0x24(%eax)`, redundant with the object's own
+	 * zero-initialization but reproduced faithfully). */
+	sentinel.size = (unsigned int)heapSize;
+	sentinel.offset = 0;
 
 	/* Thread all 99999 handle-table entries onto the free list, in
 	 * order (append at tail each time) -- confirmed shape of
@@ -87,12 +132,16 @@ unsigned int CSTGHeapManager::Alloc(unsigned long size)
 	entry->owner = 0;
 	freeCount--;
 
-	unsigned long available = cursor - reservedSize;
+	/* CORRECTED: cursor lives at sentinel.size (+0x28), not a separate
+	 * field -- see Initialize()'s own comment above and
+	 * oa_heapmanager.h's file comment. Confirmed directly against
+	 * Alloc()'s real disassembly (.text+0x2e9c8-0x2e9e7). */
+	unsigned long available = sentinel.size - reservedSize;
 	if (size > available)
 		return (unsigned int)-1;
 
-	unsigned long newCursor = (cursor - size) & ~3ul;
-	cursor = newCursor;
+	unsigned long newCursor = (sentinel.size - size) & ~3ul;
+	sentinel.size = (unsigned int)newCursor;
 	entry->offset = (unsigned int)newCursor;
 	entry->size = (unsigned int)size;
 

@@ -59,7 +59,7 @@ int main()
 	CSTGHeapManager *mgr = CSTGHeapManager::sInstance;
 	check("freeCount == 99999", (long)mgr->freeCount, CSTG_HEAPMANAGER_HANDLE_COUNT);
 	check("activeCount == 1 (sentinel)", (long)mgr->activeCount, 1);
-	check("cursor == heapSize", (long)mgr->cursor, (long)mgr->heapSize);
+	check("cursor == heapSize", (long)mgr->sentinel.size, (long)mgr->heapSize);
 
 	printf("[3] Alloc() carves from the top, returns increasing-from-0 handle numbers\n");
 	unsigned int h0 = mgr->Alloc(100);
@@ -70,7 +70,7 @@ int main()
 	check("freeCount decremented twice", (long)mgr->freeCount, CSTG_HEAPMANAGER_HANDLE_COUNT - 2);
 	check("activeCount incremented twice", (long)mgr->activeCount, 3);
 
-	unsigned long cursorAfter = mgr->cursor;
+	unsigned long cursorAfter = mgr->sentinel.size;
 	check("cursor decreased by >= 300", (mgr->heapSize - cursorAfter) >= 300, 1);
 
 	printf("[4] Alloc() fails cleanly once requested size exceeds remaining space\n");
@@ -79,7 +79,7 @@ int main()
 
 	printf("[5] Exhausting the free list eventually fails\n");
 	{
-		unsigned long remaining = mgr->cursor;
+		unsigned long remaining = mgr->sentinel.size;
 		unsigned int last = 0;
 		int failed = 0;
 		for (int i = 0; i < 10; i++) {
