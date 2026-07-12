@@ -656,19 +656,21 @@ void CSTGVoiceAllocator::StealAllVoices() {}
  * longer references this symbol anywhere. Removed rather than left as
  * misleading dead code. The other vtable placeholders below remain
  * genuinely unpopulated -- none of them has yet been confirmed reached
- * by a real dispatch. */
-extern "C" unsigned char _ZTV14CSTGVectorEGCC[12];
-unsigned char _ZTV14CSTGVectorEGCC[12];
-extern "C" unsigned char _ZTV17CSTGVectorEGXOnly[12];
-unsigned char _ZTV17CSTGVectorEGXOnly[12];
-extern "C" unsigned char _ZTV14CSTGVectorEGXY[12];
-unsigned char _ZTV14CSTGVectorEGXY[12];
-/* _ZTV16CSTGVectorEGBase -- needed now that CSTGVectorEGBase::
- * CSTGVectorEGBase() is real (sec 10.148, vector_eg_ctors.cpp) and
- * references it directly, same placeholder treatment as its three
- * derived siblings just above. */
-extern "C" unsigned char _ZTV16CSTGVectorEGBase[12];
-unsigned char _ZTV16CSTGVectorEGBase[12];
+ * by a real dispatch.
+ *
+ * UPDATE (sec 10.227): that same predicted crash then arrived live for
+ * `CSTGVectorEGXOnly`/`CSTGVectorEGXY`/`CSTGVectorEGCC`/
+ * `CSTGVectorEGBase` (`CSTGVectorManager::Initialize()`'s own confirmed
+ * slot-0 dispatch, sec 10.65, unconditionally on every real boot, same
+ * as `CSTGAudioManager` above). Fixed the other way this project
+ * established for a genuinely real single-slot vtable
+ * (`CSTGAudioDriverInterface`, sec 10.225): all four classes are now
+ * genuinely C++-polymorphic (real `virtual void Init()`, see
+ * oa_engine_init.h/vector_eg_ctors.cpp), so the compiler emits these
+ * exact four mangled vtable symbols itself -- the four manual
+ * placeholders that used to live here are now fully DEAD and are
+ * removed rather than left as misleading (and now link-conflicting)
+ * dead code. */
 unsigned char _ZTV15CSTGRecordEvent[40];
 /* _ZTV14CSTGAudioEvent -- needed now that CSTGAudioEvent::CSTGAudioEvent()
  * is real (sec 10.149, engine_init.cpp) and references it directly, same

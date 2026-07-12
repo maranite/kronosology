@@ -43,16 +43,17 @@
  */
 
 #include "oa_engine_init.h"
+#include "oa_global.h" /* CSTGGlobal::sInstance, read by CSTGVectorEGXOnly::Init() */
 
-/* Real vtable data symbols, referenced via the `extern "C"` byte-array
- * trick established in sec 10.58/10.60 (CSTGRecordEvent/CCostProfile):
- * lets this file point at the confirmed-real symbols without needing
- * to fully define their contents (none of these three classes' own
- * virtual methods are reconstructed yet). */
-extern "C" unsigned char _ZTV17CSTGVectorEGXOnly[];
-extern "C" unsigned char _ZTV14CSTGVectorEGXY[];
-extern "C" unsigned char _ZTV14CSTGVectorEGCC[];
-extern "C" unsigned char _ZTV16CSTGVectorEGBase[];
+/* UPDATE (sec 10.227): these four classes are genuinely C++-polymorphic
+ * (confirmed via `objdump -r` on OA_real.ko's own vtable relocations --
+ * see oa_engine_init.h's CSTGVectorEGBase header comment for the full
+ * ground-truthing). The manual `extern "C" unsigned char _ZTVxxx[]`
+ * byte-array trick this file used to reference is GONE -- the compiler
+ * now emits these exact mangled vtable symbols itself, from the real
+ * `virtual void Init()` declared on each class below, and writes the
+ * vtable pointer automatically as part of ordinary base/derived
+ * construction (no more manual `*(unsigned char**)p = _ZTVxxx + 8`). */
 
 /* Host/target pointer-width fix (this project's established pattern,
  * e.g. vector_manager_init.cpp): the real target's pointer fields are
@@ -70,18 +71,34 @@ static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
  * vtable pointer right after -- same real double-write pattern already
  * confirmed for CCostProfile : public CStartupFile, sec 10.60), then
  * `*(byte*)(this+0xc) = 0`, `*(byte*)(this+0xf) = 0`, and
- * `*(dword*)(this+8) = 0`. Uses the same raw-pointer-cast convention as
- * its three derived siblings below (this base class declares no C++
- * virtual functions of its own in this reconstruction, so there's no
- * compiler-managed vtable to rely on here either).
+ * `*(dword*)(this+8) = 0`. UPDATE (sec 10.227): the vtable-pointer store
+ * is no longer hand-written -- this class (and its three derived
+ * siblings) is now genuinely C++-polymorphic (real `virtual void
+ * Init()`, see oa_engine_init.h), so the compiler emits that store
+ * automatically, same as every other real-vtable class in this project
+ * (e.g. CSTGAudioDriverInterfaceKorgUsb, sec 10.225).
  */
 CSTGVectorEGBase::CSTGVectorEGBase()
 {
 	unsigned char *p = reinterpret_cast<unsigned char *>(this);
 
-	*(unsigned char **)p = _ZTV16CSTGVectorEGBase + 8;
 	*(unsigned int *)(p + 0x8) = 0;
 	p[0xc] = 0;
+	p[0xf] = 0;
+}
+
+/*
+ * CSTGVectorEGBase::Init() (.text+0x7f810, 5 bytes) confirmed real and
+ * fully self-contained: resets the same +0xf flag byte the constructor
+ * above already zeroes (an idempotent re-prime, not independently
+ * understood beyond its confirmed effect). Called directly (non-
+ * virtually) by each derived override below, matching the confirmed
+ * disassembly.
+ */
+void CSTGVectorEGBase::Init()
+{
+	unsigned char *p = reinterpret_cast<unsigned char *>(this);
+
 	p[0xf] = 0;
 }
 
@@ -89,13 +106,11 @@ CSTGVectorEGXOnly::CSTGVectorEGXOnly()
 {
 	/* CSTGVectorEGBase::CSTGVectorEGBase() (just above) runs implicitly
 	 * as this class's own base subobject construction (standard C++, no
-	 * explicit call needed here). */
+	 * explicit call needed here). The derived vtable pointer is also no
+	 * longer hand-written here (sec 10.227) -- C++ does that
+	 * automatically now that this class has a real `virtual void
+	 * Init()` (oa_engine_init.h). */
 	unsigned char *p = reinterpret_cast<unsigned char *>(this);
-
-	/* Derived vtable pointer, standard Itanium "+8 to skip offset-to-
-	 * top/RTTI" convention (confirmed via the real relocation's own
-	 * addend). */
-	*(unsigned char **)p = _ZTV17CSTGVectorEGXOnly + 8;
 
 	*(unsigned int *)(p + 0x44) = (unsigned int)(unsigned long)p; /* self-pointer */
 	*(unsigned int *)(p + 0x3c) = 0; /* list node: next */
@@ -109,11 +124,46 @@ CSTGVectorEGXOnly::CSTGVectorEGXOnly()
 	*(unsigned int *)(p + 0x74) = 0;
 }
 
+/*
+ * CSTGVectorEGXOnly::Init() (.text+0x7ece0, 379 bytes) -- see
+ * oa_engine_init.h's own header comment on this method for the full
+ * confirmed-reachable-vs-confirmed-but-deferred breakdown. Implements
+ * exactly the reachable-at-boot portion.
+ */
+void CSTGVectorEGXOnly::Init()
+{
+	CSTGVectorEGBase::Init();
+	unsigned char *p = reinterpret_cast<unsigned char *>(this);
+
+	p[0x80] = 0;
+
+	/* Confirmed real: mirrors CSTGGlobal's own confirmed "mode" field
+	 * (+0x684, the same field global.cpp's UpdateMIDIChannel/etc. family
+	 * already reads -- sec 10.117 onward) into this object's own +0x4c. */
+	unsigned int mode = *(unsigned int *)(
+		reinterpret_cast<unsigned char *>(CSTGGlobal::sInstance) + 0x684);
+
+	*(unsigned int *)(p + 0x5c) = 0;
+	*(unsigned int *)(p + 0x58) = 0;
+	*(unsigned int *)(p + 0x54) = 0;
+	*(unsigned int *)(p + 0x50) = 0;
+	*(unsigned int *)(p + 0x4c) = mode;
+
+	/* Confirmed real, but PROVABLY unreachable the first (and, on this
+	 * boot path, only) time Init() ever runs on a given object -- see
+	 * the header comment. Left deferred rather than modeling the
+	 * unidentified external pool-manager object these branches touch. */
+	if (*(unsigned int *)(p + 0x60) != 0) {
+		/* deferred: pool-A self-removal + external +0xb0/+0xb8 update */
+	}
+	if (*(unsigned int *)(p + 0x6c) != 0) {
+		/* deferred: pool-B self-removal + external +0xb0/+0xb8 update */
+	}
+}
+
 CSTGVectorEGXY::CSTGVectorEGXY()
 {
 	unsigned char *p = reinterpret_cast<unsigned char *>(this);
-
-	*(unsigned char **)p = _ZTV14CSTGVectorEGXY + 8;
 
 	*(unsigned int *)(p + 0x44) = (unsigned int)(unsigned long)p;
 	*(unsigned int *)(p + 0x3c) = 0;
@@ -126,11 +176,32 @@ CSTGVectorEGXY::CSTGVectorEGXY()
 	p[0x6e] &= 0xfd; /* clear bit 1 of a flags byte the base ctor already set */
 }
 
+/*
+ * CSTGVectorEGXY::Init() (.text+0x7de90, 211 bytes) -- reachable-at-boot
+ * portion only, same deferral rationale as CSTGVectorEGXOnly::Init()
+ * above (see oa_engine_init.h's header comment on this method).
+ */
+void CSTGVectorEGXY::Init()
+{
+	CSTGVectorEGBase::Init();
+	unsigned char *p = reinterpret_cast<unsigned char *>(this);
+
+	p[0x6e] &= 0xfd; /* same bit-clear the constructor already did (idempotent) */
+	*(unsigned int *)(p + 0x54) = 0;
+	*(unsigned int *)(p + 0x58) = 0;
+	*(unsigned int *)(p + 0x50) = 0;
+	*(unsigned int *)(p + 0x4c) = 0;
+
+	if (*(unsigned int *)(p + 0x5c) != 0) {
+		/* deferred: pool self-removal + external +0xb4/+0xb8 update,
+		 * provably unreachable the first time Init() ever runs (same
+		 * argument as CSTGVectorEGXOnly::Init()). */
+	}
+}
+
 CSTGVectorEGCC::CSTGVectorEGCC()
 {
 	unsigned char *p = reinterpret_cast<unsigned char *>(this);
-
-	*(unsigned char **)p = _ZTV14CSTGVectorEGCC + 8;
 
 	*(unsigned int *)(p + 0x44) = (unsigned int)(unsigned long)p;
 	*(unsigned int *)(p + 0x3c) = 0;
@@ -151,4 +222,25 @@ CSTGVectorEGCC::CSTGVectorEGCC()
 	*(unsigned short *)(p + 0x6c) = 0x8000;
 
 	*(unsigned int *)(p + 0x4c) = 0;
+}
+
+/*
+ * CSTGVectorEGCC::Init() (.text+0x7bb10, 69 bytes) confirmed real and
+ * FULLY self-contained (no deferred portion, unlike its two siblings
+ * above) -- see oa_engine_init.h's header comment on this method.
+ */
+void CSTGVectorEGCC::Init()
+{
+	CSTGVectorEGBase::Init();
+	unsigned char *p = reinterpret_cast<unsigned char *>(this);
+
+	unsigned short index = *(unsigned short *)(p + 0x4);
+	*(unsigned int *)(p + 0x4c) = 0;
+	if (index == 0x10)
+		return;
+
+	*(unsigned int *)(p + 0x54) = 0;
+	*(unsigned int *)(p + 0x58) = 0;
+	*(unsigned int *)(p + 0x5c) = 0;
+	*(unsigned int *)(p + 0x60) = 0;
 }

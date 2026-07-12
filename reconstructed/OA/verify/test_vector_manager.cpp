@@ -25,6 +25,18 @@ static void check_eq(const char *label, long got, long want)
 	g_fail++;
 }
 
+/* sec 10.227: CSTGVectorEGBase/XOnly/XY/CC are now genuinely
+ * C++-polymorphic (real `virtual void Init()`, see oa_engine_init.h).
+ * This test doesn't link the real vector_eg_ctors.cpp (own mock
+ * constructors below instead, to count construction calls), so the
+ * linker still needs SOME definition of each class's own
+ * compiler-generated `Init()` -- never actually called by this test
+ * (it only constructs CSTGVectorManager, doesn't call Initialize()). */
+void CSTGVectorEGBase::Init() {}
+void CSTGVectorEGXOnly::Init() {}
+void CSTGVectorEGXY::Init() {}
+void CSTGVectorEGCC::Init() {}
+
 CSTGVectorEGBase::CSTGVectorEGBase() {}
 
 static int g_xOnlyCtorCalls, g_xyCtorCalls, g_ccCtorCalls;

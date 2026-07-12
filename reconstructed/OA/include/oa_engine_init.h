@@ -157,9 +157,44 @@ struct CSTGWaveSeqManager {
  * (this class is placed into pre-allocated CSTGBankMemory storage, sec
  * 10.64), not a value the base ctor set -- test_vector_eg_ctors.cpp's
  * own poison-then-construct mock updated to match (sec 10.148).
+ *
+ * UPDATE (sec 10.227): this class (and its three derived siblings) is
+ * genuinely C++-polymorphic, not a manual "raw byte array + hand-written
+ * vtable pointer" placeholder -- confirmed via `objdump -r` on
+ * OA_real.ko's own `.rodata._ZTV16CSTGVectorEGBase`/
+ * `.rodata._ZTV{14CSTGVectorEGCC,17CSTGVectorEGXOnly,14CSTGVectorEGXY}`:
+ * all four are EXACTLY 12 bytes (offset-to-top + a null RTTI slot, this
+ * build's confirmed `-fno-rtti`, + ONE real vtable slot at +0x8), each
+ * with a single real relocation pointing at that class's own `Init()`
+ * method (`_ZN16CSTGVectorEGBase4InitEv`/`_ZN14CSTGVectorEGCC4InitEv`/
+ * `_ZN17CSTGVectorEGXOnly4InitEv`/`_ZN14CSTGVectorEGXY4InitEv`) -- i.e.
+ * this project's own earlier placeholder (`unsigned char _ZTVxxx[12]`,
+ * bar2_stubs.cpp) already guessed the real SIZE correctly but left the
+ * one real slot all-zero. `CSTGVectorManager::Initialize()`'s own
+ * confirmed slot-0 dispatch (sec 10.65) reads that zero and calls
+ * through NULL on the very first object it touches -- EIP=0/CR2=0,
+ * exactly the live boot crash this update fixes (MASTER_REFERENCE.md
+ * sec 10.226/10.227). Fixed the same way as `CSTGAudioDriverInterface`
+ * (sec 10.225): a real `virtual void Init()` declared here and in each
+ * derived class below, so the compiler emits the real vtable and
+ * populates slot 0 itself -- the derived classes' own manual
+ * `*(unsigned char**)p = _ZTVxxx + 8` vtable-pointer writes are removed
+ * accordingly (vector_eg_ctors.cpp), C++ does that automatically now.
  */
 struct CSTGVectorEGBase {
 	CSTGVectorEGBase();
+	/*
+	 * Init() (.text+0x7f810, 5 bytes) confirmed real: called directly
+	 * (non-virtually -- i.e. the derived overrides below call
+	 * `CSTGVectorEGBase::Init()` by qualified name, not through the
+	 * vtable) as the very first statement of each derived override,
+	 * matching the confirmed disassembly (`call
+	 * _ZN16CSTGVectorEGBase4InitEv`). Real body: resets one flag byte at
+	 * +0xf to 0 -- the SAME byte the constructor above already sets to
+	 * 0 (an idempotent re-prime), not independently understood beyond
+	 * its confirmed effect.
+	 */
+	virtual void Init();
 };
 
 /*
@@ -175,12 +210,11 @@ extern "C" unsigned char STGVJSAssignInfo[];
  * CSTGVectorEGXOnly/CSTGVectorEGXY/CSTGVectorEGCC : public
  * CSTGVectorEGBase -- confirmed real (sec 10.64/10.66), three "vector
  * envelope generator" classes embedded inside CSTGVectorManager. Each
- * also has a real vtable (confirmed via `Initialize()`'s own indirect
- * `call DWORD PTR [edx]` slot-0 dispatch, not reconstructed in this
- * pass -- their own real vtable DATA symbols are referenced via the
- * `extern "C"` byte-array trick, sec 10.58's own precedent). Sizes
- * are the confirmed real per-instance stride from CSTGVectorManager's
- * own constructor (0x88/0x7c/0x70 bytes).
+ * also has a real vtable, now genuinely C++-polymorphic (sec 10.227,
+ * see CSTGVectorEGBase's own header comment above for the full
+ * `objdump -r` ground-truthing). Sizes are the confirmed real
+ * per-instance stride from CSTGVectorManager's own constructor
+ * (0x88/0x7c/0x70 bytes).
  *
  * All three share a confirmed real field layout at the SAME object-
  * relative offsets (ground-truthed independently by each of their own
@@ -196,10 +230,41 @@ extern "C" unsigned char STGVJSAssignInfo[];
  *                field stays 0 on that type)
  * Not modeled as named members since the rest of each class's own
  * layout isn't independently recovered; manipulated via raw offset
- * arithmetic in the .cpp instead.
+ * arithmetic in the .cpp instead. `_unrecovered` is sized `stride - 4`,
+ * not the full confirmed stride: the compiler-managed vtable pointer
+ * now occupies the object's own leading slot (4 bytes on the confirmed
+ * 32-bit target, 8 on a 64-bit host build) -- same host/target ABI
+ * convention already established for `CSTGAudioDriverInterfaceKorgUsb`
+ * (oa_engine.h, sec 10.225). The raw-offset arithmetic in the .cpp
+ * counts from `this` (i.e. target-relative offsets unchanged either
+ * way); `CSTGVectorManager`'s own constructor/`Initialize()` place
+ * these objects at their real LITERAL byte strides (0x88/0x7c/0x70),
+ * never via `sizeof()`, so a host build's slightly larger `sizeof()`
+ * doesn't affect correctness there either (each object's own
+ * construction fully re-initializes its own memory, self-healing any
+ * transient host-only overlap into the next slot).
  */
 struct CSTGVectorEGXOnly : public CSTGVectorEGBase {
 	CSTGVectorEGXOnly();
+	/*
+	 * Init() (.text+0x7ece0, 379 bytes) confirmed real. Reachable-at-
+	 * boot portion (this project's own KAT covers exactly this): base
+	 * Init(); clears +0x80; zeroes +0x5c/+0x58/+0x54/+0x50; mirrors
+	 * CSTGGlobal::sInstance's own confirmed "mode" field (+0x684,
+	 * already load-bearing elsewhere -- global.cpp) into this object's
+	 * own +0x4c. The remaining ~300 bytes are two confirmed real
+	 * intrusive-pool-removal loops (gated on +0x60 / +0x6c being
+	 * non-NULL) that touch an unidentified external pool-manager
+	 * object's own +0xb0/+0xb8 fields via each list node's own +0x8 --
+	 * both gates are PROVABLY false the very first time Init() can ever
+	 * run (called exactly once per object, immediately after that same
+	 * object's own constructor placement-new'd it with +0x60/+0x6c
+	 * freshly zeroed, before anything else could link it into either
+	 * pool) -- a confirmed-real-but-here-unreachable deferral, not a
+	 * guess, left undone rather than modeling an unidentified external
+	 * type.
+	 */
+	virtual void Init();
 	/* Confirmed real (`_ZN17CSTGVectorEGXOnly6sMutexE`) -- same
 	 * "address of the singleton pointer" idiom already confirmed
 	 * elsewhere (e.g. CSTGWaveSeqGenerator::sMutex, sec 10.62). Set by
@@ -207,20 +272,41 @@ struct CSTGVectorEGXOnly : public CSTGVectorEGBase {
 	 * `&manager->+0x1c9e0`, the second of the three mutexes the
 	 * constructor allocates. */
 	static void **sMutex;
-	unsigned char _unrecovered[0x88];
+	unsigned char _unrecovered[0x88 - 4];
 };
 struct CSTGVectorEGXY : public CSTGVectorEGBase {
 	CSTGVectorEGXY();
+	/*
+	 * Init() (.text+0x7de90, 211 bytes) confirmed real. Reachable-at-
+	 * boot portion: base Init(); the SAME `+0x6e &= 0xfd` bit-clear the
+	 * constructor already does (idempotent); zeroes +0x54/+0x58/+0x50/
+	 * +0x4c. Remaining ~150 bytes: one confirmed real intrusive-pool-
+	 * removal loop (gated on +0x5c non-NULL), same external-pool-object
+	 * shape and same "provably unreachable on this exact call" argument
+	 * as CSTGVectorEGXOnly::Init() above -- deferred for the same
+	 * reason.
+	 */
+	virtual void Init();
 	/* Confirmed real (`_ZN14CSTGVectorEGXY6sMutexE`) -- set by
 	 * CSTGVectorManager::Initialize() (sec 10.65) to
 	 * `&manager->+0x1c9e4`, the third of the three constructor-
 	 * allocated mutexes. */
 	static void **sMutex;
-	unsigned char _unrecovered[0x7c];
+	unsigned char _unrecovered[0x7c - 4];
 };
 struct CSTGVectorEGCC : public CSTGVectorEGBase {
 	CSTGVectorEGCC();
-	unsigned char _unrecovered[0x70];
+	/*
+	 * Init() (.text+0x7bb10, 69 bytes) confirmed real and FULLY
+	 * self-contained (no deferred portion, unlike its two siblings):
+	 * base Init(); always zeroes +0x4c; if this object's own +0x4
+	 * index is NOT 16 (i.e. every EGCC except the last of each 17-
+	 * element batch), also resets the four STGVJSAssignInfo pointer
+	 * fields (+0x54/+0x58/+0x5c/+0x60, the ctor's own default) back to
+	 * a literal 0.
+	 */
+	virtual void Init();
+	unsigned char _unrecovered[0x70 - 4];
 };
 
 struct CSTGVectorManager {

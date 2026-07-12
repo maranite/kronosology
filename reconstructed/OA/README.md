@@ -1092,6 +1092,28 @@ pass targeted) — a clean, well-bounded hand-off for whoever picks this
 up next: find each class's own real vtable slot-0 method via the same
 `objdump -r` technique used above, and populate accordingly.
 
+**That predicted crash is now FIXED (`MASTER_REFERENCE.md` sec 10.227)**:
+all four real vtables (`_ZTV16CSTGVectorEGBase`/`_ZTV17CSTGVectorEGXOnly`/
+`_ZTV14CSTGVectorEGXY`/`_ZTV14CSTGVectorEGCC`) turned out to already be
+the CORRECT confirmed size (12 bytes = 1 real slot each, unlike the
+`CSTGAudioDriverInterfaceKorgUsb` bug which was undersized) — just
+left all-zero. Fixed by declaring a real `virtual void Init()` on
+`CSTGVectorEGBase` and an override on each derived class
+(`oa_engine_init.h`/`vector_eg_ctors.cpp`), same direction as the
+`CSTGAudioDriverInterface` fix (sec 10.225), so the compiler emits the
+real vtable and populates slot 0 itself; bodies implemented from the
+real disassembly (`CSTGVectorEGBase`/`CSTGVectorEGCC` fully
+self-contained, `CSTGVectorEGXOnly`/`CSTGVectorEGXY` implement the
+confirmed-reachable-at-boot portion, deferring ~150-300 bytes of
+intrusive pool-removal logic each that's PROVABLY unreachable the very
+first time `Init()` runs on a freshly-constructed object). Live-tested:
+boot now clears this crash entirely and reaches a NEW, later, different
+NULL-pointer crash inside `CSTGGlobal::Initialize()`
+(`setup_global_resources+0x2b5` → `CSTGGlobal::Initialize()+0x19/0x1d0`,
+`CR2: 0x1c` — a vtable dispatch through slot 7 of a NULL object), one
+level deeper in `init_module()`'s call graph than anything reached so
+far — not investigated further this pass, the next hand-off point.
+
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec
 10.36):

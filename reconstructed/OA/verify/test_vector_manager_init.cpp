@@ -43,6 +43,23 @@ static void XOnlySlot0(void *) { g_xOnlyCalls++; }
 static void XYSlot0(void *) { g_xyCalls++; }
 static void CCSlot0(void *) { g_ccCalls++; }
 
+/* sec 10.227: CSTGVectorEGBase/XOnly/XY/CC are now genuinely C++-
+ * polymorphic (real `virtual void Init()`, see oa_engine_init.h). This
+ * test target doesn't link the real vector_eg_ctors.cpp (it provides
+ * its own mock constructors below, to precisely count vtable-slot-0
+ * dispatches instead of running the real bodies), so the linker still
+ * needs SOME definition for each class's own compiler-generated
+ * `Init()` -- these trivial bodies are never actually reached: each
+ * mock constructor below immediately overwrites its object's real
+ * vtable pointer with a fake one (g_xOnlyVtable/g_xyVtable/g_ccVtable)
+ * pointing at XOnlySlot0/XYSlot0/CCSlot0 instead, which is what
+ * CSTGVectorManager::Initialize()'s own generic vtable-slot-0 dispatch
+ * (vector_manager_init.cpp's DispatchSlot0) actually calls through. */
+void CSTGVectorEGBase::Init() {}
+void CSTGVectorEGXOnly::Init() {}
+void CSTGVectorEGXY::Init() {}
+void CSTGVectorEGCC::Init() {}
+
 CSTGVectorEGBase::CSTGVectorEGBase() {}
 
 CSTGVectorEGXOnly::CSTGVectorEGXOnly()
