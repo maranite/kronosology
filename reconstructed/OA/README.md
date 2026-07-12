@@ -936,6 +936,83 @@ a NULL-filename `path_init()` Oops from `CSTGFile_Open(0, 0)`'s literal
 `0` filename argument (init_module.cpp step 4) — a separate, pre-existing
 reconstruction gap, not investigated further by this task.
 
+**Update (2026-07-12): the long-standing `CSTGEngine` ctor crash (CR2
+`0x029cc4f4`) was a VM memory-map artifact, not a source bug — fixed by
+a QEMU config change. New standard boot config below.** Full derivation:
+`MASTER_REFERENCE.md` sec 10.224,
+`.claude/agent-memory/re-decompiler/cstgengine_crash_is_not_qemu_memory_map.md`.
+Short version: `InitializeSTGHeap()` (`stgheap_init.cpp`) scans
+`iomem_resource` for the single largest unclaimed top-level gap and
+`ioremap_cache`s it as OA's private ~100-200MB+ bank-memory pool — a
+genuine-hardware strategy (real Kronos has physically-present reserved
+DRAM there). Under a stock QEMU `pc`/i440fx machine with a plain `-m`
+value and no `mem=` cap, the largest such gap is always the *unbacked*
+address space between top-of-installed-RAM and the ~4GB BIOS-reserved
+region — `ioremap_cache()` succeeds (returns a non-NULL, plausible-
+looking pointer) but the region is phantom: writes are silently dropped,
+reads return `0`. This produces a `bankBase==0` heap that looks
+initialized but isn't, which downstream sails past every null-guard
+(`CSTGBankMemory::Initialize(0, size)` is itself harmless) until
+`CSTGEngine`'s storage `AllocAligned` computes a bogus non-null offset
+into memory address `0`, and the ctor Oopses at
+`CR2 0x029cc4f4`. Confirmed decisively with a temporary
+write-then-read-back `printk` probe immediately after
+`sIORemapBase = (unsigned long)mapped` in `stgheap_init.cpp`: stock
+config read back `0x00000000` at both ends of the mapped region despite
+writing `0xA5A5A5A5`/`0x5A5A5A5A`.
+
+**The fix is a QEMU/boot-config change, not a C-source edit** — every
+function in the failing chain (`Alloc`, `local_heap_base`,
+`local_heap_region`, `setup_global_resources`, the `0xaaf1140` size
+constant) was independently disassembly-verified faithful to the real
+`OA_real.ko` first (sec 10.224's own opus second-opinion pass), and the
+prior three genuine `CSTGHeapManager` bugs (cursor offset, struct
+padding gap, `Initialize()` register reuse — commit `44b4b07`) remain
+correctly fixed; none of that was reverted or touched here. The scan
+always keeps the *largest* top-level gap it finds — not simply "the
+first free gap above `high_memory`" — so a plain `mem=` kernel-cmdline
+cap alone does NOT work if it leaves the unbacked
+"above-installed-`-m`-value" hole bigger than the newly-freed backed
+gap (confirmed empirically: `-m 2048M` + `mem=1024M` still handed the
+scanner the huge *unbacked* space above the 2048M `-m` ceiling, because
+that hole is bigger than the ~1023MB the `mem=` cap freed up — same
+`BANKPROBE` all-zero result). **The fix that works**: push `-m` close to
+(but safely under) the i440fx PCI-hole boundary (`0xc0000000`, ~3072MB)
+so the "leftover" unbacked space above `-m` shrinks to a few hundred MB,
+and use a *small* `mem=` cap so the freed backed gap (`-m` minus `mem=`)
+is comfortably bigger than that leftover — guaranteeing the scanner's
+largest-gap search lands on genuine, QEMU-backed DRAM instead.
+
+**New standard VM boot config for this project (supersedes any
+`run_dbg.sh` using a plain `-m` value with no `mem=` cap):**
+```
+qemu-system-i386 -M pc -cpu n270 -m 3000M -smp 1 -accel tcg \
+    -drive file=kronos.img,format=raw,if=ide,index=0,media=disk \
+    ... (display/serial/monitor/net/rtc/-no-reboot as usual) ...
+```
+with the guest's `/boot/grub/grub.conf` kernel line carrying `mem=384M`
+(alongside the existing `root=`/`init=`/etc args, e.g.
+`... console=tty0 mem=384M init=/korg/kronos_init`). This reserves
+physical `[384M, ~3000M)` as genuine QEMU-backed DRAM the kernel itself
+never claims as System RAM — confirmed via the same probe re-added
+temporarily: `BANKPROBE n=a5a5a5a5 f=5a5a5a5a` (correct read-back at
+both ends) under this config, versus `n=00000000 f=00000000` (phantom)
+under the old plain `-m 2048M`/no-`mem=` config. `-smp 4` (the older
+convention) should still work here too — only `-m`/`mem=` are the
+load-bearing change; `-smp 1` was carried over unchanged from the most
+recent working baseline, not re-tested at `-smp 4` under this new memory
+config.
+
+Live-tested end to end with this config and the temporary probe removed
+again: boot now gets all the way past `OA_DEBUG_MARKER 8` and past
+`CSTGEngine`'s constructor for the first time ever, reaching a NEW,
+later, and completely different crash inside
+`CSTGEngine::Initialize()` (`setup_global_resources+0x2a4` →
+`CSTGEngine::Initialize()+0x2f7`): a call through a NULL function
+pointer (`EIP: [<00000000>] 0x0`, `CR2: 00000000`, `Bad EIP value` — most
+likely an uninitialized vtable slot or null function-pointer member
+called mid-`Initialize()`), not investigated further this session.
+
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec
 10.36):
