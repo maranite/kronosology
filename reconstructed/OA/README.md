@@ -905,11 +905,36 @@ scheduling — it must load **first**, before `STGEnabler.ko` (see
 `reconstructed/RTAIVirtualDriver/README.md` for why). Live-tested: with
 this substitute, `OA.ko`'s `insmod` resolves all 84 previously-unresolved
 symbols for the first time in this project's history, and `init_module()`
-genuinely runs (`OA_DEBUG_MARKER 1/2/3`) before hitting the pre-existing,
-unrelated sec 10.184 `fs_base` bzImage bug — see `MASTER_REFERENCE.md`
-sec 10.215. Real hardware must still use the genuine RTAI stack (step 1
-above) — `RTAIVirtualDriver.ko` is a VM-only substitute, never a
-replacement on real hardware.
+genuinely runs (`OA_DEBUG_MARKER 1/2/3`). Real hardware must still use the
+genuine RTAI stack (step 1 above) — `RTAIVirtualDriver.ko` is a VM-only
+substitute, never a replacement on real hardware.
+
+**Update (2026-07-12): the sec 10.184/10.215 `fs_base` Oops was NEVER a
+bzImage/kernel bug — it was a bug in `stg_get_current_task()`'s own
+reconstruction, now fixed.** Full root-cause trace: `MASTER_REFERENCE.md`
+sec 10.216. Short version: `stg_get_current_task()`
+(`src/stub/bar2_stubs_c.cpp`) used a literal, hardcoded `mov %fs:0x0`
+displacement, based on a misreading of `OA_real.ko`'s raw disassembly —
+`objdump -d` without `-r` prints an unresolved ELF relocation's
+placeholder bytes as `00 00 00 00`, identical-looking to a real immediate
+zero. `readelf -r`/`objdump -dr` against the real binary shows every one
+of its 8 real `mov %fs:0x0` call sites carries an `R_386_32` relocation
+against `per_cpu__current_task`, resolved by the kernel's own module
+loader at insmod time to `current_task`'s real (non-zero) per-cpu offset
+for that exact kernel build. The real, factory-shipped kernel's own
+`setup_per_cpu_areas()`/GDT setup (confirmed by reading
+`/home/share/linux-kronos`, the first time this project had real kernel
+source for this) is stock, correct, unmodified upstream Linux 2.6.32
+x86_32 SMP code — it was never the bug. Fixed by referencing
+`per_cpu__current_task` by name in the inline asm operand instead of a
+literal 0, which makes GAS emit the same kind of relocation the real
+binary has (confirmed byte-for-byte via `objdump -dr` on the rebuilt
+`.ko`). Live-tested: `OA.ko`'s `init_module()` now reaches
+`OA_DEBUG_MARKER 4` (never reached before) and gets all the way past
+`stg_get_current_task()` before hitting a NEW, unrelated, later crash —
+a NULL-filename `path_init()` Oops from `CSTGFile_Open(0, 0)`'s literal
+`0` filename argument (init_module.cpp step 4) — a separate, pre-existing
+reconstruction gap, not investigated further by this task.
 
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec

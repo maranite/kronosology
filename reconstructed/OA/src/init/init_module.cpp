@@ -173,12 +173,21 @@ int init_module(void)
 		goto fail_before_pin;
 	}
 
-	/* current = fs:0x0 (this kernel's `current` idiom -- current_task's
-	 * own per-cpu offset is 0, so this direct read IS `current`, not a
-	 * separate per-cpu-area base as first assumed); originalCpuMask =
-	 * current->cpus_allowed at +0xbc, saved here and restored on every
-	 * exit path from here on (success epilogue and every remaining
-	 * unwind label alike). */
+	/* current = fs:per_cpu__current_task (this kernel's `current` idiom).
+	 * CORRECTED 2026-07-12 (MASTER_REFERENCE.md sec 10.216): the
+	 * displacement here is NOT a literal 0 -- that was a misreading of
+	 * OA_real.ko's raw, pre-relocation disassembly bytes (`objdump -d`
+	 * without `-r` prints an unresolved relocation's placeholder as
+	 * `00 00 00 00`, identical-looking to a real immediate). `readelf -r`
+	 * against the real binary shows an `R_386_32` relocation against
+	 * `per_cpu__current_task` at this exact call site (and all 7 of its
+	 * siblings elsewhere in OA_real.ko) -- the module loader patches this
+	 * to `current_task`'s real, non-zero per-cpu-section offset at insmod
+	 * time. See stg_get_current_task()'s own header comment
+	 * (bar2_stubs_c.cpp) for the full root-cause trace and live-boot
+	 * confirmation. originalCpuMask = current->cpus_allowed at +0xbc,
+	 * saved here and restored on every exit path from here on (success
+	 * epilogue and every remaining unwind label alike). */
 	oa_debug_marker(3);
 	current = stg_get_current_task();
 	originalCpuMask = *(unsigned long *)((unsigned char *)current + 0xbc);

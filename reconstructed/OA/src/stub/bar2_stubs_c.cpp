@@ -206,17 +206,59 @@ extern "C" unsigned long long stg_rdtsc() { return 0; }
  * state rather than cleanly crashing at the read itself (the actual
  * user-visible symptom was a deterministic, reproducible "unable to
  * handle kernel paging request" Oops much later, inside module_put()
- * during this same insmod). Confirmed real semantics (already
- * documented in init_module.cpp's own comment): `mov ebx, fs:0x0` is
- * this kernel's own `current_task` per-CPU idiom -- replicated here
- * with inline asm rather than pulling in full kernel headers (this
- * file deliberately stays header-light, matching this project's own
- * convention elsewhere in bar2_stubs_c.cpp).
+ * during this same insmod).
+ *
+ * CORRECTED (2026-07-12, MASTER_REFERENCE.md sec 10.216, the real
+ * `fs_base` root cause -- see that section for the full investigation):
+ * the previous version of this function used a LITERAL, hardcoded
+ * `mov %%fs:0x0` displacement. That was a misreading of OA_real.ko's
+ * own ground-truth disassembly, not a real property of this kernel.
+ * `objdump -d` (no `-r`) on any ET_REL object -- and a `.ko` kernel
+ * module IS one -- prints an UNRESOLVED relocation's placeholder bytes
+ * as a plain `00 00 00 00` displacement, which is BYTE-IDENTICAL to a
+ * genuine hardcoded-zero immediate. Cross-checking with `readelf -r`/
+ * `objdump -dr` against the real OA_real.ko shows EVERY SINGLE one of
+ * its 8 real `mov %fs:0x0` call sites (including the exact one at this
+ * call's own real address) carries an `R_386_32` relocation against
+ * `per_cpu__current_task` -- i.e. the real displacement is NEVER
+ * actually 0; it's a linker/module-loader relocation placeholder that
+ * the kernel's own `apply_relocate()` (arch/x86/kernel/module.c)
+ * patches at insmod time to `current_task`'s REAL per-cpu-section-
+ * relative offset for that exact kernel build (confirmed non-zero live:
+ * `current_task` cannot be at percpu offset 0 in this kernel's own
+ * linker script -- `.data.percpu.page_aligned` [occupied by `gdt_page`,
+ * confirmed via a live `PERCPU: Embedded 13 pages/cpu @42c00000` boot
+ * line landing exactly on this kernel's own reported `.init` range]
+ * always precedes plain `.data.percpu` (where `current_task` links) in
+ * `include/asm-generic/vmlinux.lds.h`'s `PERCPU()`/`PERCPU_VADDR()`
+ * macros). A literal displacement of 0 instead computes
+ * `pcpu_base_addr - __per_cpu_start` (a "delta" value meant to be ADDED
+ * to a real percpu-relative displacement, not used standalone) -- an
+ * address below `PAGE_OFFSET` with no kernel mapping, producing the
+ * exact, deterministic "BUG: unable to handle kernel paging request"
+ * Oops this project chased across sec 10.122/10.184/10.186/10.215
+ * under the mistaken belief it was a bug in the real, factory-shipped
+ * bzImage. It never was -- the real kernel's percpu/GDT setup
+ * (`arch/x86/kernel/setup_percpu.c`) is stock, correct, unmodified
+ * upstream Linux 2.6.32 x86_32 SMP code; this project's own
+ * reconstruction of this one function was the actual bug.
+ *
+ * Fix: reference the real, `EXPORT_PER_CPU_SYMBOL`'d kernel symbol
+ * `current_task` (`per_cpu__current_task` at the object-file level, the
+ * pre-`this_cpu_*`-rewrite 2.6.32 naming convention) by NAME in the
+ * inline asm operand, exactly as real kernel/module C code compiles to
+ * -- this makes GAS emit a genuine `R_386_32` relocation (confirmed via
+ * `nm`/`objdump -dr` on the rebuilt `.ko`, see sec 10.216), which the
+ * module loader then resolves the same way it resolves the real
+ * OA_real.ko's own 8 call sites. Still deliberately kept as inline asm
+ * rather than pulling in `<asm/current.h>` (this file's own established
+ * header-light convention) -- unlike the previous version, this one is
+ * genuinely correct, not merely compiling.
  */
 extern "C" void *stg_get_current_task()
 {
 	void *current_task;
-	asm volatile("mov %%fs:0x0, %0" : "=r"(current_task));
+	asm volatile("mov %%fs:per_cpu__current_task, %0" : "=r"(current_task));
 	return current_task;
 }
 /*
