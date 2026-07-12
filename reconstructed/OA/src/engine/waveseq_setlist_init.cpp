@@ -24,23 +24,57 @@
  * .text+0x81860/0x2014c0 in OA_real.ko) -- confirmed real, IDENTICAL
  * shape: a loop over N embedded sub-objects (stride confirmed literal
  * per class), dispatching each one's own vtable slot 7 (`call
- * *0x1c(%edx)`, the SAME slot CSTGProgramSlot::Initialize() dispatches
- * through -- reuses CallVtableSlot7 rather than a separate helper).
- * CSTGWaveSeqData: 598 (0x256) sub-objects, stride 0xd14 (3348 bytes).
- * CSetListBank: 128 (0x80) sub-objects, stride 0x834 (2100 bytes).
+ * *0x1c(%edx)`, the SAME slot offset CSTGProgramSlot::Initialize()
+ * dispatches through).
+ * CSTGWaveSeqData: 598 (0x256) sub-objects, stride 0xd14 (3348 bytes),
+ * each a CSTGWaveSequence (see this file's own CSTGWaveSequence::
+ * CSTGWaveSequence() below -- same array, same stride, constructed by
+ * CSTGGlobal::CSTGGlobal() step 8).
+ * CSetListBank: 128 (0x80) sub-objects, stride 0x834 (2100 bytes), each
+ * a CSetList (CSTGGlobal::CSTGGlobal() step 13).
+ *
+ * FIX (sec 10.229): this used to call the raw CallVtableSlot7(obj)
+ * helper (`vtable[7]` off the object's own +0x0 pointer). Root-caused
+ * via `objdump -r`/`objdump -sr -j .rodata._ZTV16CSTGWaveSequence`+
+ * `.rodata._ZTV8CSetList` on OA_real.ko: BOTH real vtables are laid out
+ * identically to CSTGGlobal's own (sec 10.228) -- 24 CSTGParamsOwner-
+ * shaped relocations, with vtable_base+0x24 (== vptr+0x1c, i.e. this
+ * exact "slot 7") resolving in EITHER case to the SAME real method,
+ * `CSTGParamsOwner::UseDefaults()` (CSTGWaveSequence doesn't override
+ * it despite overriding ValidateParamChange at vtable_base+0x1c/slot 5;
+ * CSetList doesn't override it either). Exactly the sec 10.228 shape:
+ * CSTGWaveSequence/CSetList are this project's other two "vtable
+ * install only, no real C++ virtuals modeled" placeholder classes
+ * (`_ZTV16CSTGWaveSequence[96]`/`_ZTV8CSetList[96]` below, both left
+ * zero-filled since batch 12 -- see their own ctor comments) -- nothing
+ * dispatched through them until now, so the placeholder's null slot 7
+ * silently produced a real `EIP=0x0`/`CR2=0x0` null-function-pointer
+ * crash live (`CSTGWaveSeqData::Initialize()+0x1d`, i==0, the array's
+ * first element, called from `CSTGGlobal::Initialize()+0x27`).
+ * `CSetListBank::Initialize()` is reachable from the very next
+ * statement in `CSTGGlobal::Initialize()` (global.cpp) and has the
+ * IDENTICAL bug -- fixed here in the same pass rather than waiting for
+ * it to reproduce live one call site later.
+ *
+ * Fixed the same way as CSTGGlobal::Initialize()/ValidateParamChange's
+ * own forwarding calls: a same-address `reinterpret_cast<CSTGParamsOwner
+ * *>` call to the real, already-declared, deliberately-deferred no-op
+ * `UseDefaults()` (bar2_stubs.cpp) instead of the raw vtable[7] fetch --
+ * reproduces the identical `this` pointer the real dispatch would use,
+ * without needing a real vtable populated on either per-element array.
  */
 void CSTGWaveSeqData::Initialize()
 {
 	unsigned char *base = (unsigned char *)this;
 	for (unsigned int i = 0; i < 0x256; i++)
-		CallVtableSlot7(base + i * 0xd14);
+		reinterpret_cast<CSTGParamsOwner *>(base + i * 0xd14)->UseDefaults();
 }
 
 void CSetListBank::Initialize()
 {
 	unsigned char *base = (unsigned char *)this;
 	for (unsigned int i = 0; i < 0x80; i++)
-		CallVtableSlot7(base + i * 0x834);
+		reinterpret_cast<CSTGParamsOwner *>(base + i * 0x834)->UseDefaults();
 }
 
 /*

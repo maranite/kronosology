@@ -28,25 +28,23 @@ static void *mmap32(unsigned long size)
 		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
 }
 
-static int g_slot7Calls;
-static void Slot7Trap(void *) { g_slot7Calls++; }
-
-/* Installs a fake vtable (slot 7 = Slot7Trap) at every sub-object's own
- * +0x0 across `count` entries of `stride` bytes starting at `base`.
- * The vtable storage itself must survive 32-bit truncation too (a
- * plain `static` array's address isn't guaranteed to on a PIE host --
- * see oa_global.h's own g_programSlotVtable comment, sec 10.81), so
- * it's allocated via mmap32 as well, leaked deliberately (test-only). */
-static void installFakeVtables(unsigned char *base, unsigned int count, unsigned int stride)
-{
-	void **vt = (void **)mmap32(8 * sizeof(void *));
-	for (int i = 0; i < 8; i++)
-		vt[i] = 0;
-	vt[7] = (void *)Slot7Trap;
-	unsigned int packed = (unsigned int)(unsigned long)vt;
-	for (unsigned int i = 0; i < count; i++)
-		*(unsigned int *)(base + i * stride) = packed;
-}
+/* sec 10.229: CSTGWaveSeqData::Initialize()/CSetListBank::Initialize()
+ * no longer do a raw vtable[7] fetch off each sub-object's own +0x0 --
+ * both real vtables (`_ZTV16CSTGWaveSequence`/`_ZTV8CSetList`) resolve
+ * that exact slot to the SAME real method, `CSTGParamsOwner::
+ * UseDefaults()` (confirmed via objdump -r on OA_real.ko, identical
+ * shape to CSTGGlobal's own sec 10.228 fix), so the real code now calls
+ * it directly via `reinterpret_cast<CSTGParamsOwner*>`. The old
+ * installFakeVtables()/Slot7Trap scheme poked a fake vtable pointer into
+ * each sub-object that the real code path no longer even reads -- it
+ * would silently stop exercising anything real, exactly the masking
+ * hazard sec 10.228 found in test_global.cpp's own scenario [15].
+ * Replaced with a real, call-counting mock of UseDefaults() itself
+ * (this test binary links waveseq_setlist_init.cpp alone, so it must
+ * supply this symbol -- production's real no-op lives in
+ * bar2_stubs.cpp, not linked here). */
+static int g_useDefaultsCalls;
+void CSTGParamsOwner::UseDefaults() { g_useDefaultsCalls++; }
 
 int main(void)
 {
@@ -58,13 +56,12 @@ int main(void)
 		unsigned long size = 0x80ul * 0x834ul + 0x10;
 		unsigned char *buf = (unsigned char *)mmap32(size);
 		memset(buf, 0, size);
-		installFakeVtables(buf, 0x80, 0x834);
-		g_slot7Calls = 0;
+		g_useDefaultsCalls = 0;
 
 		CSetListBank *b = (CSetListBank *)buf;
 		b->Initialize();
 
-		check_eq("dispatched exactly 128 times", (unsigned int)g_slot7Calls, 0x80);
+		check_eq("UseDefaults() dispatched exactly 128 times", (unsigned int)g_useDefaultsCalls, 0x80);
 		munmap(buf, size);
 	}
 
@@ -73,13 +70,12 @@ int main(void)
 		unsigned long size = 0x256ul * 0xd14ul + 0x10;
 		unsigned char *buf = (unsigned char *)mmap32(size);
 		memset(buf, 0, size);
-		installFakeVtables(buf, 0x256, 0xd14);
-		g_slot7Calls = 0;
+		g_useDefaultsCalls = 0;
 
 		CSTGWaveSeqData *d = (CSTGWaveSeqData *)buf;
 		d->Initialize();
 
-		check_eq("dispatched exactly 598 times", (unsigned int)g_slot7Calls, 0x256);
+		check_eq("UseDefaults() dispatched exactly 598 times", (unsigned int)g_useDefaultsCalls, 0x256);
 		munmap(buf, size);
 	}
 
