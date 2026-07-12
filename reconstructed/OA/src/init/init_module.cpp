@@ -70,10 +70,25 @@ extern "C" void *stg_get_current_task(void);
 extern "C" bool cpu_features_ok(void);
 
 /*
- * Step 4's optional leftover-PID file. Real path/format string not
- * resolved in this pass (anonymous .rodata pool, same as every other
- * unresolved format-string constant below) -- represented via a small
- * helper rather than guessed-at literal text. `CSTGFile_Open`/`Close`
+ * Step 4's optional leftover-PID file.
+ *
+ * CORRECTED (2026-07-12, MASTER_REFERENCE.md sec 10.216/current task):
+ * this call site was passing a literal `0` filename pointer instead of
+ * the real path string -- a genuine reconstruction gap (the comment used
+ * to read "real path/format string not resolved in this pass (anonymous
+ * .rodata pool)"), NOT an ordering bug. A literal NULL filename reaches
+ * the real kernel's own `do_filp_open()`/`path_init()` unchanged and
+ * Oopses on the first live boot to ever get this far (confirmed live,
+ * `BUG: unable to handle kernel NULL pointer dereference at (null)`,
+ * `IP: path_init+0x2b/0x150`, called via `CSTGFile_Open+0x1f/0x60
+ * [OA]`/`init_module+0x73`). The real string is NOT in an anonymous/
+ * unresolved pool after all -- confirmed two independent ways: (1)
+ * `/home/share/Decomp/oa_export/functions/init_module@005a27e5.c`'s own
+ * Ghidra decompile of the real `init_module` shows
+ * `CSTGFile_Open("/tmp/progress.pid",0)` at this exact point in the step
+ * sequence; (2) `strings -a OA_real.ko | grep progress.pid` finds the
+ * literal string at file offset 18140, confirming it's a genuine,
+ * resolvable `.rodata` string, not a placeholder. `CSTGFile_Open`/`Close`
  * signatures match the already-confirmed real ABI established in
  * src/auth/products.cpp (handle-based, `void *`, NOT an int fd) --
  * `CSTGFile_GetFileSize`/`CSTGFile_Read` follow the same handle
@@ -198,7 +213,7 @@ int init_module(void)
 
 	oa_debug_marker(4);
 	{						/* step 4: soft, file-missing-tolerant */
-		void *handle = CSTGFile_Open(0, 0);
+		void *handle = CSTGFile_Open("/tmp/progress.pid", 0);
 		if (handle != 0) {
 			unsigned int size = CSTGFile_GetFileSize(handle);
 			char buf[0x60];
