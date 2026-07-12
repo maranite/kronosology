@@ -2182,6 +2182,48 @@ struct CSTGControllerValue {
 class CSTGParamsOwner {
 public:
 	void ValidateParamChange(CSTGMessageContext &ctx, unsigned long paramId, const CValue &value);
+
+	/*
+	 * UseDefaults() -- confirmed real (`.text+0x26470`, 152 bytes),
+	 * confirmed real caller `CSTGGlobal::Initialize()` (sec 10.55/10.228).
+	 * Ground-truthed via `objdump -dr` on `OA_real.ko`: walks
+	 * `GetNumParams()`/`GetParamDescriptors()` (both genuine OWN virtual
+	 * slots, `.text+0x38358`'s vtable offsets 0x34/0x38) and, for every
+	 * descriptor whose `+0x2c` byte isn't the sentinel `0x11` AND whose
+	 * `+0x18` byte (a sub-element count) is nonzero, calls
+	 * `UseDefault(unsigned char paramIndex, unsigned char subIndex)`
+	 * (`.text+0x26380`, 238 bytes) once per sub-index. Own body
+	 * deliberately NOT reconstructed -- would require the
+	 * `CSTGParamDescriptor` layout and `GetParamDescriptors()`'s real
+	 * backing table, neither recovered yet -- same "confirmed real,
+	 * separate not-yet-reconstructed task" treatment as this class's own
+	 * `ValidateParamChange` above; safe no-op stub in bar2_stubs.cpp.
+	 *
+	 * FIX (sec 10.228): `CSTGGlobal::Initialize()`'s first action is a
+	 * genuine virtual call through ITS OWN vtable slot 7 (`call
+	 * *0x1c(%edx)` after `mov (%eax),%edx`) which resolves, in the real
+	 * binary's `.rodata._ZTV10CSTGGlobal` relocations, to exactly this
+	 * method (vtable_base+0x24 == vptr+0x1c). This project's `CSTGGlobal`
+	 * deliberately has NO declared virtuals (see this class's own header
+	 * comment above) and its real constructor (`global_ctor.cpp`) never
+	 * writes a vtable pointer into `self+0x0` for the same reason -- so a
+	 * literal re-creation of the raw `vtable[7]` dispatch always read a
+	 * NULL vtable pointer at runtime (self+0 is genuinely 0, never having
+	 * been written), producing `CR2=0x1c` (0+0x1c) the first time
+	 * `Initialize()` ran on a live boot. This was a live boot-only bug: the
+	 * host KAT (`test_global.cpp` scenario [15]) never caught it because it
+	 * manually poked a fake `vtable[7]` entry into the test buffer before
+	 * calling `Initialize()`, masking the fact that the REAL, already-
+	 * reconstructed constructor never installs one. Fixed the same way
+	 * `ValidateParamChange`'s own identical-shaped forwarding call already
+	 * is (this class's own header comment, above): `CSTGGlobal::
+	 * Initialize()` now calls `reinterpret_cast<CSTGParamsOwner
+	 * *>(this)->UseDefaults()` directly -- reproduces the identical `this`
+	 * pointer the real vtable dispatch would have used, without needing a
+	 * real/packed vtable pointer installed on this enormous (~43MB),
+	 * host/target ABI-sensitive singleton object at all.
+	 */
+	void UseDefaults();
 };
 
 /* GetSTGTickCount (ground-truth `GetSTGTickCount`, 16 bytes, extern "C") --

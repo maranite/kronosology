@@ -139,6 +139,12 @@ void CSTGChannelValues::Reset() { }
 void CSetListEQ::SetBand(unsigned int, float) { }
 void CSTGChannelValues::SetControllerValue(unsigned char, const CSTGControllerValue &) { }
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) { }
+/* CSTGParamsOwner::UseDefaults() (sec 10.228) -- confirmed real,
+ * deliberately deferred; see oa_global.h's own comment and
+ * global.cpp's CSTGGlobal::Initialize(), its real caller. Trivial
+ * link-satisfying mock -- this file only exercises the constructor,
+ * never Initialize(). */
+void CSTGParamsOwner::UseDefaults() { }
 void CSTGSlotVoiceData::FreeSlotVoiceData(bool) { }
 /* CSTGProgramSlot::ChangeProgram() is real now (batch 47, global.cpp,
  * which this file links directly), reachable only via its own two new

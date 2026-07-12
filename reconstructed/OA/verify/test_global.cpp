@@ -298,6 +298,13 @@ void CSTGChannelValues::SetControllerValue(unsigned char ccNumber, const CSTGCon
 static int g_validateParamChangeCalls;
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &)
 { g_validateParamChangeCalls++; }
+/* CSTGParamsOwner::UseDefaults() (sec 10.228) -- confirmed real,
+ * deliberately deferred; see oa_global.h's own comment and this file's
+ * own scenario [15], which now checks CSTGGlobal::Initialize() reaches
+ * (and returns cleanly from) this call via a direct, non-virtual
+ * reinterpret_cast rather than the old fake-vtable[7] KAT artifact. */
+static int g_useDefaultsCalls;
+void CSTGParamsOwner::UseDefaults() { g_useDefaultsCalls++; }
 static int g_freeSlotVoiceDataCalls;
 static bool g_lastFreeSlotVoiceDataFlag;
 /* Optional hook for [38]'s own GetFreeSlotVoiceData test: the real
@@ -1093,17 +1100,23 @@ int main(void)
 		*(unsigned char **)(buf + 0x29c9900) = 0; /* reset for later scenarios */
 	}
 
-	printf("[15] Initialize: confirmed control flow (vtable slot 7, 32-slot list, sub-inits)\n");
+	printf("[15] Initialize: confirmed control flow (UseDefaults, 32-slot list, sub-inits)\n");
 	{
-		typedef void (*VtableSlot7Fn)(void *);
-		static int slot7Calls;
-		VtableSlot7Fn slot7 = [](void *) { slot7Calls++; };
-		void *vtable[8];
-		for (int i = 0; i < 8; i++)
-			vtable[i] = 0;
-		vtable[7] = (void *)slot7;
-		*(void ***)buf = vtable;
-
+		/* sec 10.228: Initialize()'s first action is a direct
+		 * reinterpret_cast<CSTGParamsOwner*>(this)->UseDefaults() call,
+		 * not a raw vtable[7] dispatch -- CSTGGlobal deliberately has no
+		 * installed vtable pointer at self+0x0 (see oa_global.h), so this
+		 * scenario no longer needs to fake one up. UseDefaults() itself is
+		 * a confirmed-real, deliberately-deferred no-op (this file's own
+		 * mock counts calls; bar2_stubs.cpp's production version is a
+		 * plain no-op) -- everything after this call in Initialize()'s
+		 * body only runs if this call returns cleanly, so the rest of
+		 * this scenario's own checks already prove that much; the
+		 * counter below additionally proves the call site itself fires
+		 * exactly once, same as the old "vtable slot 7 called once"
+		 * check it replaces.
+		 */
+		g_useDefaultsCalls = 0;
 		g_waveSeqInitCalls = 0;
 		g_initLongHandCalls = 0;
 		CSTGChannelValues::sTemplateReady = 0;
@@ -1129,7 +1142,6 @@ int main(void)
 		CSTGCommonStepSeq::sSubRateParams = (STGStepSeqSubRateParams *)stepSeqPoolBuf;
 		g_perfVarsInitCalls = 0;
 		g_aliasBanksInitCalls = g_initPerformancesCalls = g_setListBankInitCalls = 0;
-		slot7Calls = 0;
 		buf[0x67f] = 0;
 		buf[0x6b8] = 5;
 		buf[0x6ba] = 7;
@@ -1176,7 +1188,7 @@ int main(void)
 			 (unsigned int)programSlotTrapCalls, 2);
 		munmap(programSlotVtableBuf, 10 * sizeof(void *));
 
-		check_eq("vtable slot 7 called once", (unsigned int)slot7Calls, 1);
+		check_eq("CSTGParamsOwner::UseDefaults called once", (unsigned int)g_useDefaultsCalls, 1);
 		check_eq("CSTGWaveSeqData::Initialize called once", (unsigned int)g_waveSeqInitCalls, 1);
 		check_eq("+0x67f bit 1 (0x2) set", buf[0x67f] & 0x2, 0x2);
 		/* CSTGSlotVoiceData::Initialize() is now real (sec 10.150) --

@@ -252,6 +252,12 @@ extern "C" void SKMain_Initialize(void *) {}
  * deliberately deferred; see src/engine/global.cpp for the real
  * callers now reconstructed. */
 void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, const CValue &) {}
+/* CSTGParamsOwner::UseDefaults() (sec 10.228) -- confirmed real,
+ * deliberately deferred (needs the not-yet-recovered CSTGParamDescriptor
+ * table); see oa_global.h's own comment on this method and
+ * src/engine/global.cpp's CSTGGlobal::Initialize() for the real caller,
+ * now reconstructed as a direct (non-virtual) call to this. */
+void CSTGParamsOwner::UseDefaults() {}
 void CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) {}
 void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
 /* CSTGComPort::RTAIInterruptHandler is real now, batch 48 -- see

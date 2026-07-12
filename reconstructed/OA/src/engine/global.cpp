@@ -512,9 +512,16 @@ void CSTGGlobal::RunVoiceModelFeedback()
 
 /*
  * Initialize (.text+0x8340, 267 bytes) confirmed:
- *   - Calls its OWN vtable slot 7 (`[vtable+0x1c]`, identity not
- *     confirmed -- same raw-indirect-call treatment as
- *     RunVoiceModelFeedback's slot 0x1a above) with no extra args.
+ *   - Calls its OWN vtable slot 7 (`[vtable+0x1c]`) with no extra args --
+ *     IDENTITY NOW CONFIRMED (sec 10.228, via `objdump -dr` on
+ *     `OA_real.ko`'s `.rodata._ZTV10CSTGGlobal` relocations): resolves to
+ *     `CSTGParamsOwner::UseDefaults()`. Reconstructed as a direct
+ *     `reinterpret_cast<CSTGParamsOwner *>(this)->UseDefaults()` call,
+ *     NOT a raw vtable-pointer dispatch -- see `CSTGParamsOwner::
+ *     UseDefaults()`'s own comment in oa_global.h for why (this class
+ *     deliberately has no real vtable pointer installed at `self+0x0`,
+ *     same reasoning as `ValidateParamChange`'s identical-shaped
+ *     forwarding call).
  *   - CSTGWaveSeqData::Initialize() on an embedded sub-object at
  *     `+0x1143c10`.
  *   - Sets flag bit `+0x67f` |= 0x2.
@@ -572,11 +579,9 @@ static unsigned int ToU32(unsigned char *p)
 
 void CSTGGlobal::Initialize()
 {
-	typedef void (*VtableSlot7Fn)(void *);
 	unsigned char *self = (unsigned char *)this;
 
-	void **vtable = *(void ***)self;
-	((VtableSlot7Fn)vtable[7])(self);
+	reinterpret_cast<CSTGParamsOwner *>(this)->UseDefaults();
 
 	((CSTGWaveSeqData *)(self + 0x1143c10))->Initialize();
 
@@ -1285,8 +1290,11 @@ void CSTGGlobal::UpdateVJSYAssignment(CSTGMessageContext &ctx, STGConvertedParam
  * class's own virtual method layout isn't otherwise modeled in this
  * project, so the call is made through the raw vtable pointer, matching
  * this project's established convention for not-yet-fully-modeled
- * vtable dispatches (e.g. `CSTGGlobal::Initialize()`'s own vtable[7]
- * call). Ignores its own `this` (a `CSTGControllerRTData*`) entirely,
+ * vtable dispatches (e.g. `RunVoiceModelFeedback()`'s own slot 0x1a
+ * calls, above -- unlike `CSTGGlobal::Initialize()`'s OWN dispatch,
+ * fixed sec 10.228 to a direct `reinterpret_cast` call instead, since
+ * `CSTGGlobal` itself deliberately has no real installed vtable
+ * pointer). Ignores its own `this` (a `CSTGControllerRTData*`) entirely,
  * operating purely via the global `CSTGGlobal::sInstance` singleton.
  */
 void CSTGControllerRTData::NotifySoloChange()
