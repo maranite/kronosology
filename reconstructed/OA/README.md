@@ -894,6 +894,23 @@ for any future VM boot test:
    OA.ko (confirmed via `nm -u` on each), so their relative order among
    themselves doesn't matter — only "after 1, before 7" is load-bearing.
 
+**Update (2026-07-12): step 1 (real RTAI core) can now be replaced
+entirely by `RTAIVirtualDriver.ko`** for VM/QEMU-TCG boot testing, where
+genuine RTAI cannot be reliably brought up at all (`MASTER_REFERENCE.md`
+sec 10.211–10.214). `RTAIVirtualDriver.ko` (`reconstructed/RTAIVirtualDriver/`)
+provides the same 26-symbol RTAI-family surface `OA.ko` needs, plus the
+3 extra RTAI-timer symbols `STGEnabler.ko` needs directly, using ordinary
+Linux kthreads/semaphores/workqueues instead of genuine hard-RT
+scheduling — it must load **first**, before `STGEnabler.ko` (see
+`reconstructed/RTAIVirtualDriver/README.md` for why). Live-tested: with
+this substitute, `OA.ko`'s `insmod` resolves all 84 previously-unresolved
+symbols for the first time in this project's history, and `init_module()`
+genuinely runs (`OA_DEBUG_MARKER 1/2/3`) before hitting the pre-existing,
+unrelated sec 10.184 `fs_base` bzImage bug — see `MASTER_REFERENCE.md`
+sec 10.215. Real hardware must still use the genuine RTAI stack (step 1
+above) — `RTAIVirtualDriver.ko` is a VM-only substitute, never a
+replacement on real hardware.
+
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec
 10.36):
