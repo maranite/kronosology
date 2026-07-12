@@ -155,7 +155,9 @@ unsigned long USTGHDRUtils::Convert44100WaveToSTGSamples(float *, bool, bool, ch
  * CSTGStreamingFileReader::ProcessCommands()) all still dispatch through
  * a not-yet-recovered vtable or pointer-to-member-function table and
  * remain deliberately stubbed below. */
-void CSTGMidiPortManager::Initialize() {}
+/* CSTGMidiPortManager::Initialize() is real now, sec 10.230/
+ * MASTER_REFERENCE -- see src/engine/midi_port_manager.cpp (the root fix
+ * for the CSTGMidiQueueWriter::Write() ringCtl-NULL crash). */
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
 /* CSTGMidiPortManager::WriteSTGMidiOutQueue()/NotifyNKS4TestMode() are
  * real now, batch 12 -- see src/engine/midi_port_manager.cpp (its own

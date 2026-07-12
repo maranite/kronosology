@@ -26,14 +26,46 @@
  * CSTGGlobal's own methods, so it doesn't link global.cpp. */
 CSTGGlobal *CSTGGlobal::sInstance;
 
-/* Local minimal CSTGHeapManager stand-in + storage, matching
- * midi_port_manager.cpp's own internal declaration (same mangled
- * `sInstance` symbol) -- needed here so this test can SET the value;
- * see midi_port_manager.cpp's own top-of-file note on why it can't
- * just `#include "oa_heap.h"` (ODR conflict with oa_global.h's
- * CSTGGlobal). */
+/* Storage for CSTGMidiPortManager's own static port arrays (normally
+ * defined in engine.cpp, not linked into this test) -- left all-NULL,
+ * matching this project's own confirmed real boot state (no
+ * reconstructed caller of RegisterMidiInPort/RegisterMidiOutPort exists
+ * yet), so Initialize()'s own port-registration loop stays a confirmed
+ * no-op in test [4] below. */
+void *CSTGMidiPortManager::sMidiInPorts[4];
+void *CSTGMidiPortManager::sMidiOutPorts[4];
+
+/* Local minimal CSTGHeapManager stand-in, matching midi_port_manager.cpp's
+ * own internal declaration (same mangled `sInstance` symbol) -- needed
+ * here so tests [1]-[3] can SET the value via convenient `char*`
+ * arithmetic; see midi_port_manager.cpp's own top-of-file note on why it
+ * can't just `#include "oa_heap.h"` (ODR conflict with oa_global.h's
+ * CSTGGlobal). Storage is now provided by src/mem/heap_manager.cpp
+ * (linked into this test as of sec 10.230, for CSTGMidiQueue::
+ * Initialize()'s own real `CSTGHeapManager::Alloc(unsigned long)` call)
+ * -- NOT defined again here, that would be a duplicate definition of the
+ * same real symbol. */
 struct CSTGHeapManager { static char *sInstance; };
-char *CSTGHeapManager::sInstance;
+
+/* Real C-linkage wrapper (oa_heapmanager.h) -- declared directly rather
+ * than `#include`d, since that header's own `class CSTGHeapManager`
+ * declaration would conflict with this file's local minimal stand-in
+ * above WITHIN THE SAME TRANSLATION UNIT (a hard redefinition error,
+ * unlike the cross-TU same-mangled-name trick used everywhere else in
+ * this project) -- this one function's signature doesn't reference the
+ * class type at all, so it's safe to forward-declare standalone. */
+extern "C" unsigned long CSTGHeapManager_Initialize(unsigned long base, unsigned long size);
+
+/* Local minimal CSTGCPUInfo stand-in, matching midi_port_manager.cpp's
+ * own internal declaration -- needed here to provide `sInstance`'s
+ * storage (CSTGMidiPortManager::Initialize()'s own confirmed real
+ * CPU-speed-scaled timing-constant tail reads `field8`). */
+struct CSTGCPUInfo {
+	static CSTGCPUInfo *sInstance;
+	unsigned int _cpuCount, _khz;
+	float field8;
+};
+CSTGCPUInfo *CSTGCPUInfo::sInstance;
 
 static int g_fail;
 static void check_eq(const char *label, unsigned long got, unsigned long want)
@@ -44,6 +76,16 @@ static void check_eq(const char *label, unsigned long got, unsigned long want)
 	printf("  %s  %-60s 0x%lx\n", ok ? "ok  " : "FAIL", label, got);
 	if (!ok)
 		printf("        (wanted 0x%lx)\n", want);
+}
+
+static void check_str(const char *label, const char *got, const char *want)
+{
+	bool ok = strcmp(got, want) == 0;
+	if (!ok)
+		g_fail++;
+	printf("  %s  %-60s \"%s\"\n", ok ? "ok  " : "FAIL", label, got);
+	if (!ok)
+		printf("        (wanted \"%s\")\n", want);
 }
 
 static unsigned char *map32(unsigned long size)
@@ -167,6 +209,83 @@ int main(void)
 			snprintf(label, sizeof(label), "slot[%d] readerCount untouched", i);
 			check_eq(label, q[0x20], 4);
 		}
+	}
+
+	printf("[4] Initialize(): 5 embedded CSTGMidiQueue rings, ringCtl/bufBase\n"
+	       "    wiring at +0x138/+0x208 -- the sec 10.230/MASTER_REFERENCE\n"
+	       "    CSTGMidiQueueWriter::Write() ringCtl-NULL crash fix\n");
+	{
+		/* Real CSTGHeapManager, same setup style as test_heap_manager.cpp
+		 * -- CSTGMidiQueue::Initialize() (midi_queue_init.cpp) now calls
+		 * the REAL CSTGHeapManager::Alloc(unsigned long), so this test
+		 * needs a genuinely working heap, not a raw-buffer stand-in. */
+		unsigned long heapBufSize = 8 * 1024 * 1024;
+		unsigned char *heapBuf = map32(heapBufSize);
+		CSTGHeapManager_Initialize((unsigned long)heapBuf, heapBufSize);
+
+		unsigned char *cpuInfoBuf = map32(sizeof(CSTGCPUInfo));
+		memset(cpuInfoBuf, 0, sizeof(CSTGCPUInfo));
+		CSTGCPUInfo *cpuInfo = (CSTGCPUInfo *)cpuInfoBuf;
+		cpuInfo->field8 = 2500.0f; /* arbitrary cyclesPerTick: chosen so
+					    * 0.04x/0.2x land on exact integers
+					    * (100/500), avoiding a float-
+					    * rounding false failure. */
+		CSTGCPUInfo::sInstance = cpuInfo;
+
+		unsigned char *portMgrBuf = map32(0x210);
+		memset(portMgrBuf, 0xAA, 0x210); /* poison every byte first */
+		/* Reproduce engine_init.cpp's own confirmed real struct-init
+		 * block (the exact pre-condition the real caller sets up
+		 * right before calling Initialize()). */
+		portMgrBuf[0x0] = 0;
+		portMgrBuf[0x1] = 0;
+		portMgrBuf[0x2] = 0;
+		portMgrBuf[0x3] = 0;
+		*(unsigned int *)(portMgrBuf + 0xc)   = 0xffffffff;
+		*(unsigned int *)(portMgrBuf + 0x70)  = 0xffffffff;
+		*(unsigned int *)(portMgrBuf + 0xd4)  = 0xffffffff;
+		*(unsigned int *)(portMgrBuf + 0x138) = 0;
+		*(unsigned int *)(portMgrBuf + 0x13c) = 0;
+		*(unsigned int *)(portMgrBuf + 0x140) = 0xffffffff;
+		*(unsigned int *)(portMgrBuf + 0x1a4) = 0xffffffff;
+		*(unsigned int *)(portMgrBuf + 0x208) = 0; /* the crash field */
+		*(unsigned int *)(portMgrBuf + 0x20c) = 0;
+
+		CSTGMidiPortManager *mgr = (CSTGMidiPortManager *)portMgrBuf;
+		mgr->Initialize();
+
+		check_eq("qStgOut (+0xc) mask == 0xfff",    *(unsigned int *)(portMgrBuf+0xc+0x8), 0xfff);
+		check_eq("qStgOut (+0xc) format == 0",       *(unsigned int *)(portMgrBuf+0xc+0x4), 0);
+		check_eq("qStgOut (+0xc) writeCursor == 0",  *(unsigned int *)(portMgrBuf+0xc+0xc), 0);
+		check_str("qStgOut desc",  (char *)(portMgrBuf+0xc+0x21),  "STG MIDI Out");
+
+		check_eq("qKgReg (+0x70) mask == 0x3ff",     *(unsigned int *)(portMgrBuf+0x70+0x8), 0x3ff);
+		check_str("qKgReg desc",   (char *)(portMgrBuf+0x70+0x21), "KG Regular MIDI Out");
+
+		check_eq("qKgRt (+0xd4) mask == 0x7f",       *(unsigned int *)(portMgrBuf+0xd4+0x8), 0x7f);
+		check_str("qKgRt desc",    (char *)(portMgrBuf+0xd4+0x21), "KG Real Time MIDI Out");
+
+		check_eq("qStgToKg (+0x140) mask == 0x1ff",  *(unsigned int *)(portMgrBuf+0x140+0x8), 0x1ff);
+		check_eq("qStgToKg (+0x140) format == 1",    *(unsigned int *)(portMgrBuf+0x140+0x4), 1);
+		check_str("qStgToKg desc", (char *)(portMgrBuf+0x140+0x21), "STG->KG");
+
+		check_eq("qKgToStg (+0x1a4) mask == 0xff",   *(unsigned int *)(portMgrBuf+0x1a4+0x8), 0xff);
+		check_eq("qKgToStg (+0x1a4) format == 1",    *(unsigned int *)(portMgrBuf+0x1a4+0x4), 1);
+		check_str("qKgToStg desc", (char *)(portMgrBuf+0x1a4+0x21), "KG->STG");
+
+		check_eq("fieldAt(0x138) == &qStgOut (ringCtl)",
+			 *(unsigned int *)(portMgrBuf+0x138), ToU32(portMgrBuf+0xc));
+		check_eq("fieldAt(0x13c) resolved (bufBase != 0)",
+			 *(unsigned int *)(portMgrBuf+0x13c) != 0, 1);
+
+		printf("      -- the actual sec 10.230 crash fix: --\n");
+		check_eq("fieldAt(0x208) == &qStgToKg (ringCtl, was NULL before this fix)",
+			 *(unsigned int *)(portMgrBuf+0x208), ToU32(portMgrBuf+0x140));
+		check_eq("fieldAt(0x20c) resolved (bufBase != 0)",
+			 *(unsigned int *)(portMgrBuf+0x20c) != 0, 1);
+
+		check_eq("fieldAt(0x4) == (int)(0.04*cyclesPerTick)", (unsigned int)*(int *)(portMgrBuf+0x4), 100);
+		check_eq("fieldAt(0x8) == (int)(0.2*cyclesPerTick)",  (unsigned int)*(int *)(portMgrBuf+0x8), 500);
 	}
 
 	printf("=========================================================\n");

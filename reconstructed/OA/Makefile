@@ -67,6 +67,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_dispatcher.o \
            src/engine/midi_queue_writer.o \
            src/engine/midi_queue.o \
+           src/engine/midi_queue_init.o \
            src/engine/midi_port_manager.o \
            src/engine/audio_input_mixer.o \
            src/engine/waveseq_setlist_init.o \
@@ -246,6 +247,14 @@ CFLAGS_lfo_tables.o := -mhard-float -msse2 -mfpmath=sse
 # header comment).
 CFLAGS_keybed_debounce.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: CSTGMidiPortManager::Initialize()'s (sec 10.230/
+# MASTER_REFERENCE) confirmed real CPU-speed-scaled timing-constant tail
+# (0.04f/0.2f * CSTGCPUInfo::sInstance->field8) does genuine plain-C
+# float arithmetic confirmed real in the original binary (real
+# fld/fmul/fisttp sequence) -- would otherwise pull in unresolvable
+# libgcc soft-float helpers under the kernel's own -msoft-float default.
+CFLAGS_midi_port_manager.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -301,6 +310,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/slot_voice_data_ctor.cpp \
        src/engine/alias_bank_convert.cpp \
        src/engine/midi_dispatcher.cpp \
+       src/engine/midi_queue_init.cpp \
        src/engine/midi_port_manager.cpp \
        src/engine/vector_manager.cpp \
        src/engine/vector_manager_init.cpp \
@@ -564,8 +574,8 @@ verify/test_midi_queue_writer: verify/test_midi_queue_writer.cpp src/engine/midi
 verify/test_midi_queue: verify/test_midi_queue.cpp src/engine/midi_queue.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_queue.cpp src/engine/midi_queue.cpp -o $@
 
-verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heap.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp -o $@
+verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_init.cpp src/engine/midi_queue_writer.cpp src/mem/heap_manager.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heap.h include/oa_heapmanager.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_init.cpp src/engine/midi_queue_writer.cpp src/mem/heap_manager.cpp -o $@
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@

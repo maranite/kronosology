@@ -14,6 +14,13 @@ CSTGEngine           *CSTGEngine::sInstance;
  * CSTGHDRManager::sInstance are now defined in managers.cpp, alongside
  * the real constructors reconstructed there. */
 CSTGMidiPortManager   *CSTGMidiPortManager::sInstance;
+/* sMidiInPorts/sMidiOutPorts (sec 10.230/MASTER_REFERENCE) -- confirmed
+ * real static array symbols, zero-initialized like every other .bss
+ * static here (matches confirmed real behavior: no reconstructed
+ * caller of RegisterMidiInPort/RegisterMidiOutPort exists yet in this
+ * project's own boot-reachable call graph). */
+void *CSTGMidiPortManager::sMidiInPorts[4];
+void *CSTGMidiPortManager::sMidiOutPorts[4];
 /* CPowerOffTimer/CEmergencyStealer/CLoadBalancer::sInstance are now defined
  * in managers.cpp, alongside the real constructors reconstructed there. */
 /* CSTGMessageProcessor::sInstance is now defined in managers.cpp,

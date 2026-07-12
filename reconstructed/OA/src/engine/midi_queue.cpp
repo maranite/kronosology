@@ -30,6 +30,18 @@
 #include "oa_global.h"
 #include "oa_engine_init.h"	/* for CSTGMidiQueue */
 
+/*
+ * CSTGMidiQueue::Initialize()/SetDesc() (sec 10.230/MASTER_REFERENCE) are
+ * deliberately NOT here: they need the REAL CSTGHeapManager class
+ * (oa_heapmanager.h), which would pull heap_manager.cpp's own
+ * CSTGHeapManager::sInstance definition into every TU that links THIS
+ * file -- test_global.cpp/test_midi_dispatcher.cpp only ever needed
+ * GetNumWritableBytes()/Reset() from here. Given its own dedicated TU
+ * instead, matching this project's established per-unit convention (see
+ * midi_queue_writer.cpp's own header comment for the precedent this
+ * follows) -- see midi_queue_init.cpp.
+ */
+
 unsigned int CSTGMidiQueue::GetNumWritableBytes() const
 {
 	const unsigned char *ringCtl = (const unsigned char *)this;

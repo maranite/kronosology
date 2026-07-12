@@ -37,6 +37,41 @@
  */
 struct CSTGHeapManager { static char *sInstance; };
 
+/*
+ * Local minimal CSTGCPUInfo stand-in, same ODR-avoidance technique as
+ * CSTGHeapManager above: only the leading 3 confirmed real fields
+ * (oa_setup_global_resources.h's own full declaration) are needed here,
+ * `field8` (cyclesPerTick, a float) at its confirmed real `+0x8` offset.
+ * `sInstance`'s storage is defined once, in engine_startup_bits.cpp.
+ */
+struct CSTGCPUInfo {
+	static CSTGCPUInfo *sInstance;
+	unsigned int _cpuCount;	/* +0x0, unused here */
+	unsigned int _khz;	/* +0x4, unused here */
+	float field8;		/* +0x8, cyclesPerTick */
+};
+
+/*
+ * Generic vtable dispatch for the not-yet-named MIDI in/out port classes
+ * (CSTGMidiInPort/CSTGMidiOutPort) -- matches this project's established
+ * `CallVtableSlot`-style treatment (oa_engine_init.h) for vtabled classes
+ * whose own layout isn't independently reconstructed. Slot 0 is a bool
+ * "query" method (confirmed via disassembly: `test al,al` on the return
+ * value gates the slot-1 call); slot 1 hands the port a region pointer.
+ */
+static bool PortQuery(void *port)
+{
+	typedef bool (*Fn)(void *);
+	void **vtable = *(void ***)port;
+	return ((Fn)vtable[0])(port);
+}
+static void PortRegister(void *port, void *region)
+{
+	typedef void (*Fn)(void *, void *);
+	void **vtable = *(void ***)port;
+	((Fn)vtable[1])(port, region);
+}
+
 static char *LocalHeapBase()
 {
 	char *heap = CSTGHeapManager::sInstance;
@@ -52,6 +87,119 @@ static char *LocalHeapRegion(unsigned int slot)
 		return 0;
 	return (char *)(*(unsigned int *)(heap + 0x24 + slot * 0x14) +
 			*(unsigned int *)(heap + 0x1e8498));
+}
+
+/*
+ * Initialize() (sec 10.230/MASTER_REFERENCE, `.text+0xf4f60`, 790 bytes)
+ * -- see this method's own declaration comment in oa_engine.h for the
+ * full summary. Root-caused via full `objdump -dr` disassembly of
+ * OA_real.ko: this method was previously a no-op stub (bar2_stubs.cpp),
+ * which is the ENTIRE root cause of the `CSTGMidiQueueWriter::Write()`
+ * ringCtl-NULL crash (sec 10.230) -- engine_init.cpp's own confirmed
+ * struct-init block explicitly zeroes `+0x208`/`+0x20c` right before
+ * calling this method, exactly as the real binary does, trusting this
+ * method to overwrite them for real; call ORDER was never the problem
+ * (`setup_global_resources.cpp` calls `engine->Initialize()` -- which
+ * calls this -- strictly before `global->Initialize()`, confirmed by
+ * direct inspection of that file's own real call sequence).
+ *
+ * Five embedded CSTGMidiQueue rings, confirmed sizes/labels (extracted
+ * directly from `.rodata.str1.1`):
+ *   +0xc   0x1000 (4096) byte ring, format 0, "STG MIDI Out"
+ *   +0x70  0x400  (1024) byte ring, format 0, "KG Regular MIDI Out"
+ *   +0xd4  0x80   (128)  byte ring, format 0, "KG Real Time MIDI Out"
+ *   +0x140 0x200  (512)  byte ring, format 1, "STG->KG"
+ *   +0x1a4 0x100  (256)  byte ring, format 1, "KG->STG"
+ * `format`'s own enum meaning (0 vs 1) isn't independently determined
+ * beyond these two observed values.
+ *
+ * The embedded CSTGMidiQueueWriter sub-objects (oa_global.h) at +0x138/
+ * +0x208 get their own `ringCtl`/`bufBase` fields populated here by
+ * resolving the FIRST ("STG MIDI Out") and FOURTH ("STG->KG") rings'
+ * own alloc handles through the same LocalHeapRegion() idiom already
+ * established by NotifyNKS4TestMode() above -- `+0x208` is the exact
+ * field CSTGGlobal::SubmitPerfChangeRequest()'s call chain dereferences.
+ *
+ * The 8-port (4 in + 4 out) registration loop and the final CPU-speed-
+ * scaled timing-constant block are both confirmed real and reproduced
+ * faithfully, even though `sMidiInPorts`/`sMidiOutPorts` are confirmed
+ * all-NULL at every point in this project's own current boot-reachable
+ * call graph (no reconstructed caller of RegisterMidiInPort/
+ * RegisterMidiOutPort exists yet) -- the loop is therefore provably
+ * dead code for now, not exercised beyond its own null checks.
+ */
+void CSTGMidiPortManager::Initialize()
+{
+	unsigned char *self = (unsigned char *)this;
+
+	CSTGMidiQueue *qStgOut  = (CSTGMidiQueue *)(self + 0xc);
+	CSTGMidiQueue *qKgReg   = (CSTGMidiQueue *)(self + 0x70);
+	CSTGMidiQueue *qKgRt    = (CSTGMidiQueue *)(self + 0xd4);
+	CSTGMidiQueue *qStgToKg = (CSTGMidiQueue *)(self + 0x140);
+	CSTGMidiQueue *qKgToStg = (CSTGMidiQueue *)(self + 0x1a4);
+
+	qStgOut->Initialize(0, 0x1000);
+	qKgReg->Initialize(0, 0x400);
+	qKgRt->Initialize(0, 0x80);
+
+	/* +0x138/+0x13c: CSTGMidiQueueWriter wrapping the "STG MIDI Out"
+	 * ring -- ringCtl = &qStgOut, bufBase = LocalHeapRegion(qStgOut's
+	 * own alloc handle, stored at qStgOut+0x0 by Initialize() above). */
+	unsigned int stgOutHandle = *(unsigned int *)((unsigned char *)qStgOut + 0x0);
+	*(unsigned int *)(self + 0x138) = (unsigned int)(unsigned long)qStgOut;
+	*(unsigned int *)(self + 0x13c) = (unsigned int)(unsigned long)LocalHeapRegion(stgOutHandle);
+
+	qStgOut->SetDesc("STG MIDI Out");
+	qKgReg->SetDesc("KG Regular MIDI Out");
+	qKgRt->SetDesc("KG Real Time MIDI Out");
+
+	qStgToKg->Initialize(1, 0x200);
+	qKgToStg->Initialize(1, 0x100);
+
+	/* +0x208/+0x20c: CSTGMidiQueueWriter wrapping the "STG->KG" ring --
+	 * THE crash-fix field: CSTGGlobal::SubmitPerfChangeRequest()'s call
+	 * chain reads *(CSTGMidiPortManager::sInstance+0x208) and
+	 * dereferences it. */
+	unsigned int stgToKgHandle = *(unsigned int *)((unsigned char *)qStgToKg + 0x0);
+	*(unsigned int *)(self + 0x208) = (unsigned int)(unsigned long)qStgToKg;
+	*(unsigned int *)(self + 0x20c) = (unsigned int)(unsigned long)LocalHeapRegion(stgToKgHandle);
+
+	qStgToKg->SetDesc("STG->KG");
+	qKgToStg->SetDesc("KG->STG");
+
+	/* 8-port registration loop -- see this function's own header
+	 * comment: confirmed dead code right now (all 8 port pointers are
+	 * NULL this early in boot), reproduced faithfully rather than
+	 * skipped. `region` is the same heap "test mode" region
+	 * NotifyNKS4TestMode() resolves, holding 8 dedicated CSTGMidiQueue-
+	 * sized slots (4 in + 4 out, 0x64-byte stride, confirmed matching
+	 * NotifyNKS4TestMode()'s own first 4 offsets). */
+	unsigned int testModeSlot = *(unsigned int *)(LocalHeapBase() + 8);
+	unsigned char *region = (unsigned char *)LocalHeapRegion(testModeSlot);
+
+	static const unsigned int kInOffsets[4]  = { 0x0, 0x64, 0xc8, 0x12c };
+	static const unsigned int kOutOffsets[4] = { 0x190, 0x1f4, 0x258, 0x2bc };
+
+	for (int i = 0; i < 4; i++) {
+		void *inPort = sMidiInPorts[i];
+		if (inPort != 0 && PortQuery(inPort))
+			PortRegister(inPort, region + kInOffsets[i]);
+
+		void *outPort = sMidiOutPorts[i];
+		if (outPort != 0 && PortQuery(outPort))
+			PortRegister(outPort, region + kOutOffsets[i]);
+	}
+
+	/* CPU-speed-scaled timing constants (confirmed real `.rodata.cst8`
+	 * immediates 0.04/0.2) -- plausibly active-sensing-monitor timeout
+	 * thresholds in CPU-cycle units; meaning beyond the literal values
+	 * not independently determined. CSTGCPUInfo::sInstance is confirmed
+	 * already constructed by this point (setup_global_resources's own
+	 * Step 1, strictly before `engine->Initialize()` -- which calls this
+	 * method -- runs). */
+	float cyclesPerTick = CSTGCPUInfo::sInstance->field8;
+	*(int *)(self + 0x4) = (int)(0.04f * cyclesPerTick);
+	*(int *)(self + 0x8) = (int)(0.2f * cyclesPerTick);
 }
 
 /*

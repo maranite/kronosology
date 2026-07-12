@@ -1235,18 +1235,66 @@ public:
  * bulk of the setup. Where `sInstance` actually gets assigned (if ever,
  * within this specific firmware image) was not determined -- possibly a
  * companion kernel module (STGEnabler.ko or similar) rather than OA.ko
- * itself, though that wasn't independently confirmed either. Reconstructing
- * `Initialize()` itself would be the natural equivalent next step for this
- * class, but that's a different task from "find the missing constructor",
- * which is now closed.
+ * itself, though that wasn't independently confirmed either. `Initialize()`
+ * itself is now fully reconstructed too (sec 10.230/MASTER_REFERENCE --
+ * see this class's own `Initialize()` declaration below), closing that
+ * natural next step as well.
  */
 class CSTGMidiPortManager {
 public:
 	static CSTGMidiPortManager *sInstance;
+
+	/*
+	 * sMidiInPorts/sMidiOutPorts (confirmed real symbols,
+	 * `_ZN19CSTGMidiPortManager12sMidiInPortsE`/`13sMidiOutPortsE`, each
+	 * 16 bytes = 4 pointers) -- the two STATIC arrays this class's own
+	 * destructor and `Initialize()` both operate on (see this class's
+	 * own header note above: no per-instance state, everything routes
+	 * through these). Modeled as opaque `void*` slots: the real port
+	 * classes (`CSTGMidiInPort`/`CSTGMidiOutPort`) aren't independently
+	 * reconstructed, only their confirmed real dispatch shape
+	 * (`Initialize()`'s own port loop calls vtable slot 0 as a bool
+	 * query, then vtable slot 1 to hand the port a dedicated
+	 * `CSTGMidiQueue` region) -- matching this project's established
+	 * `CallVtableSlot`-style generic dispatch for not-yet-named vtabled
+	 * classes.
+	 */
+	static void *sMidiInPorts[4];
+	static void *sMidiOutPorts[4];
+
 	~CSTGMidiPortManager();
-	void Initialize();	/* .text+0xf4f60, 790 bytes -- confirmed real
-				 * and substantial (buffer clears, table-driven
-				 * lookups), body not reconstructed in this pass. */
+
+	/*
+	 * Initialize() (sec 10.230/MASTER_REFERENCE, `.text+0xf4f60`, 790
+	 * bytes) confirmed real and fully reconstructed (see
+	 * src/engine/midi_port_manager.cpp): sets up 5 embedded
+	 * `CSTGMidiQueue` rings (+0xc/+0x70/+0xd4/+0x140/+0x1a4, sizes
+	 * 0x1000/0x400/0x80/0x200/0x100, confirmed real labels "STG MIDI
+	 * Out"/"KG Regular MIDI Out"/"KG Real Time MIDI Out"/"STG->KG"/
+	 * "KG->STG" via `SetDesc()`), resolves the first (+0xc) and fourth
+	 * (+0x140) rings' heap-allocated buffers into the embedded
+	 * `CSTGMidiQueueWriter` sub-objects at `+0x138`/`+0x208` (THIS is
+	 * the real fix for the `CSTGMidiQueueWriter::Write()` ringCtl-NULL
+	 * crash traced in sec 10.230 -- that crash was this method being a
+	 * no-op stub, not an init-order bug: `setup_global_resources()`'s
+	 * own confirmed real call order, `engine->Initialize()` (which
+	 * calls this) strictly before `global->Initialize()` (whose
+	 * `InitializePerformances()` eventually dereferences `+0x208`), was
+	 * already correct), assigns each of 8 possible MIDI in/out ports
+	 * (`sMidiInPorts`/`sMidiOutPorts`, both still all-NULL at this point
+	 * in this project's own boot-reachable call graph -- no reconstructed
+	 * caller of `RegisterMidiInPort`/`RegisterMidiOutPort` exists yet, so
+	 * this loop is confirmed dead code for now, reproduced faithfully
+	 * rather than skipped) a dedicated `CSTGMidiQueue`-sized slot out of
+	 * the same heap "test mode" region `NotifyNKS4TestMode()` already
+	 * uses, and finally derives two CPU-speed-scaled timing constants
+	 * (`+0x4`/`+0x8` = `(int)(0.04 * CSTGCPUInfo::sInstance->field8)`/
+	 * `(int)(0.2 * CSTGCPUInfo::sInstance->field8)`, confirmed real
+	 * `.rodata.cst8` immediates -- plausibly active-sensing-monitor
+	 * timeout thresholds in CPU-cycle units, meaning not independently
+	 * determined beyond the literal values).
+	 */
+	void Initialize();
 
 	/*
 	 * WriteSTGMidiOutQueue(const unsigned char*, unsigned int) (sec

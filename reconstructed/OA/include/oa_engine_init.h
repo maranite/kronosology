@@ -400,6 +400,57 @@ struct CSTGMidiQueue {
 	 * empty). See midi_queue.cpp.
 	 */
 	void Reset();
+
+	/*
+	 * Initialize(unsigned int format, unsigned int size) (sec 10.230/
+	 * MASTER_REFERENCE, `.text+0x3ffe0` in OA_real.ko, mangled
+	 * `_ZN13CSTGMidiQueue10InitializeENS_7eFormatEj` -- i.e. the real
+	 * signature's first parameter is a nested `CSTGMidiQueue::eFormat`
+	 * enum, modeled here as a plain `unsigned int` since only two
+	 * concrete values (0 and 1) are ever observed at real call sites and
+	 * neither's semantic meaning is independently determined) confirmed
+	 * via full disassembly: calls the real `SetDesc()` below with a
+	 * fixed label string (caller-supplied, see midi_port_manager.cpp),
+	 * then `buf = CSTGHeapManager::sInstance->Alloc(size)` (the REAL
+	 * instance method, `_ZN15CSTGHeapManager5AllocEm`, oa_heapmanager.h
+	 * -- confirmed via relocation, NOT the "raw-offset static" `Alloc
+	 * (unsigned int)` stand-in used elsewhere in this project), storing
+	 * the returned HANDLE (not a raw pointer -- same small-integer-slot
+	 * convention as every other `CSTGHeapManager::Alloc()` call site in
+	 * this codebase) into `+0x0`. Fields, all confirmed via disassembly:
+	 *   +0x0  allocHandle -- CSTGHeapManager::Alloc()'s return value
+	 *   +0x4  format -- the raw `format` parameter, stored verbatim
+	 *   +0x8  mask -- `size - 1` (capacity mask, matches Write()'s own
+	 *         confirmed `(mask+1)-backlog` formula)
+	 *   +0xc  writeCursor -- 0
+	 *   +0x10..+0x1c  4 reader cursors -- 0
+	 *   +0x20  active reader count -- 0 (confirmed real, matches
+	 *         AllocReader()'s own `lock xadd` target)
+	 *   +0x21..+0x60  64-byte SetDesc() label buffer
+	 * This is the object CSTGMidiPortManager::Initialize() embeds 5 of
+	 * (at +0xc/+0x70/+0xd4/+0x140/+0x1a4) -- the ringCtl NULL-pointer
+	 * crash traced there (sec 10.230) is this project's own
+	 * CSTGMidiPortManager::Initialize() never having called this method
+	 * for real, not anything wrong with this class itself.
+	 */
+	void Initialize(unsigned int format, unsigned int size);
+
+	/*
+	 * SetDesc(const char *fmt, ...) (`.text+0x3ffb0`,
+	 * `_ZN13CSTGMidiQueue7SetDescEPKcz` -- confirmed real variadic
+	 * member, matching this class's real regparm(3)+stack-varargs
+	 * calling convention) confirmed via disassembly: a plain
+	 * `vsnprintf(this+0x21, 0x40, fmt, args)` -- writes a cosmetic
+	 * debug/label string into the 64-byte buffer right after this
+	 * object's own confirmed fields. Every real call site in
+	 * CSTGMidiPortManager::Initialize() passes a literal label string
+	 * with zero variadic arguments (confirmed: "STG MIDI Out"/"KG
+	 * Regular MIDI Out"/"KG Real Time MIDI Out"/"STG->KG"/"KG->STG",
+	 * extracted directly from `.rodata.str1.1`), so the `...` machinery
+	 * is exercised here only for signature fidelity, not because any
+	 * real caller needs it.
+	 */
+	void SetDesc(const char *fmt, ...);
 };
 
 /*
