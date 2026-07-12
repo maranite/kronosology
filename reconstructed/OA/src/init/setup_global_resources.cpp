@@ -237,8 +237,40 @@ int setup_global_resources(int param)
 	 * Step 9: bank memory pool (~179MB, `0xaaf1140`), then three
 	 * AllocAligned calls carving CSTGGlobal/CMeteredDebugOutput/
 	 * CSTGEngine/CSTGFrontPanel's own storage out of it.
+	 *
+	 * CORRECTED (2026-07-12): the pool's own base is NOT `panel`
+	 * (STGAPIFrontPanelStatus::sInstance, step 3's much smaller
+	 * 0x294fc-byte region) -- an earlier pass of this reconstruction
+	 * mistakenly reused that variable. The real disassembly
+	 * (`.text+0x11863a`..`0x118686`) shows a FOURTH, dedicated
+	 * `CSTGHeapManager::Alloc(0xaaf1140)` call right here (same
+	 * literal size as CSTGBankMemory::Initialize's own second arg),
+	 * whose slot is stored at `heapBase+4` -- a different slot than
+	 * the `heapBase+0xc` step 6's ~19MB region used -- then resolved
+	 * via the same heap-region formula used throughout this function.
+	 * THAT resolved address, not `panel`, is what real code passes as
+	 * CSTGBankMemory::Initialize's base.
+	 *
+	 * Missing this made `sOurMemoryBase` collapse to whatever `panel`
+	 * happened to be. Live-confirmed root cause of a real Oops:
+	 * `panel` was null on the boot that first reached this code, so
+	 * `AllocAligned(0x29cc4ec,0x10)` (CSTGGlobal's storage) returned 0
+	 * as intended -- harmless, CSTGGlobal is null-guarded -- but the
+	 * VERY NEXT `AllocAligned(0x8,0x10)` (CSTGEngine's storage) then
+	 * landed at `0x29cc4ec` rounded up to `0x29cc4f0`, a nonzero
+	 * *garbage* pointer that sails past this function's own
+	 * `!engineStorage` hard-fail check and gets used as `this` in
+	 * `CSTGEngine::CSTGEngine()`, which Oopses writing `this[4]=0` at
+	 * CR2 0x029cc4f4 -- an exact match confirming this root cause
+	 * precisely (0x29cc4f0 + 4).
 	 */
-	CSTGBankMemory::Initialize(panel, 0xaaf1140);
+	heapBase = local_heap_base(); /* real code reloads it here too */
+	unsigned int bankSlot = CSTGHeapManager::Alloc(0xaaf1140);
+	if (heapBase)
+		*(unsigned int *)(heapBase + 4) = bankSlot;
+	heapBase = local_heap_base(); /* real code reloads it here too */
+	unsigned char *bankBase = heapBase ? local_heap_region(*(unsigned int *)(heapBase + 4)) : 0;
+	CSTGBankMemory::Initialize(bankBase, 0xaaf1140);
 	unsigned char *globalStorage = CSTGBankMemory::AllocAligned(0x29cc4ec, 0x10);
 	CSTGGlobal *global = globalStorage ? new (globalStorage) CSTGGlobal() : 0;
 

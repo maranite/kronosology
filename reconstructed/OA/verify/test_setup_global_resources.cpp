@@ -123,6 +123,13 @@ static unsigned char *mmap32(unsigned long size)
 static unsigned char *g_heapInstanceBuf = mmap32(0x1869f * 0x14 + 0x30);
 static unsigned char *g_panelBuf = mmap32(STGAPI_FRONTPANEL_SIZE);
 static unsigned char *g_bigRegionBuf = mmap32(256 * 0x604);
+/* CORRECTED (2026-07-12): a dedicated buffer for the 4th, previously-
+ * missing CSTGHeapManager::Alloc(0xaaf1140) call setup_global_resources.cpp
+ * now makes for CSTGBankMemory::Initialize's own base (see that file's
+ * step 9 comment) -- this used to fall through to g_bigRegionBuf by
+ * accident of the old 3-call slot table below; giving it its own buffer
+ * keeps the two heap regions distinguishable in this test. */
+static unsigned char *g_bankMemoryBuf = mmap32(256 * 0x604);
 char *CSTGHeapManager::sInstance = (char *)g_heapInstanceBuf;
 static unsigned int g_allocCallCount;
 static int g_forceAllocFail; /* if set, Alloc() returns an out-of-range slot */
@@ -132,9 +139,18 @@ unsigned int CSTGHeapManager::Alloc(unsigned int)
 	if (g_forceAllocFail)
 		return 0x1869f + 1;
 	/* Deterministic slot assignment by call order: call 1 = discarded
-	 * alloc, call 2 = panel, call 3 = big region. */
+	 * alloc, call 2 = panel, call 3 = big region, call 4 = bank memory
+	 * pool base (CORRECTED 2026-07-12 -- this 4th call was missing
+	 * entirely until setup_global_resources.cpp stopped reusing `panel`
+	 * as CSTGBankMemory::Initialize's base; see that file's step 9
+	 * comment and MASTER_REFERENCE.md for the live-boot Oops this
+	 * fixes). */
 	unsigned int slot = g_allocCallCount;
-	unsigned char *target = (slot == 2) ? g_panelBuf : g_bigRegionBuf;
+	unsigned char *target = g_bigRegionBuf;
+	if (slot == 2)
+		target = g_panelBuf;
+	else if (slot == 4)
+		target = g_bankMemoryBuf;
 	unsigned char *rec = g_heapInstanceBuf + slot * 0x14;
 	*(unsigned int *)(rec + 0x18) = 1; /* non-zero "valid" marker */
 	*(unsigned int *)(rec + 0x24) = (unsigned int)(unsigned long)target;
@@ -216,7 +232,12 @@ int main(void)
 	g_costProfileVtableTargetCalled = 0;
 	rc = setup_global_resources(0);
 	check_eq("return value", rc, 0);
-	check_eq("HeapManager::Alloc called 3 times", (long)g_allocCallCount, 3);
+	/* CORRECTED (2026-07-12): was 3 -- now 4, matching real ground truth
+	 * (`.text+0x11863a`): a 4th, dedicated Alloc(0xaaf1140) call for
+	 * CSTGBankMemory's own pool base, previously missing (that call site
+	 * wrongly reused `panel` instead -- see setup_global_resources.cpp's
+	 * step 9 comment). */
+	check_eq("HeapManager::Alloc called 4 times", (long)g_allocCallCount, 4);
 	check_eq("panel[0xfc] == 0xff (midi echo marker)", g_panelBuf[0xfc], 0xff);
 	check_eq("panel[0xfd] == 0xff (midi echo marker)", g_panelBuf[0xfd], 0xff);
 	check_eq("panel[0x1091] == 0x04 (cal marker)", g_panelBuf[0x1091], 0x04);
