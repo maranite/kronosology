@@ -143,6 +143,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/performance_vars_manager_init.o \
            src/engine/tone_adjust_descriptors.o \
            src/engine/init_performances.o \
+           src/engine/sequence_combi_init.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
            src/stub/bar2_stubs_c.o
@@ -362,7 +363,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/load_global_resources.cpp \
        src/engine/performance_vars_manager_init.cpp \
        src/engine/tone_adjust_descriptors.cpp \
-       src/engine/init_performances.cpp
+       src/engine/init_performances.cpp \
+       src/engine/sequence_combi_init.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -439,6 +441,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_performance_vars_manager_init \
          verify/test_tone_adjust_descriptors \
          verify/test_init_performances \
+         verify/test_sequence_combi_init \
          verify/test_atmel_setup \
          verify/test_init_module_real_atmel
 
@@ -741,6 +744,9 @@ verify/test_tone_adjust_descriptors: verify/test_tone_adjust_descriptors.cpp src
 
 verify/test_init_performances: verify/test_init_performances.cpp src/engine/init_performances.cpp include/oa_global.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_performances.cpp src/engine/init_performances.cpp -o $@
+
+verify/test_sequence_combi_init: verify/test_sequence_combi_init.cpp src/engine/sequence_combi_init.cpp src/engine/combi_ctor.cpp src/engine/sequence_ctor.cpp src/engine/program_ctor.cpp src/engine/program_slot_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_sequence_combi_init.cpp src/engine/sequence_combi_init.cpp src/engine/combi_ctor.cpp src/engine/sequence_ctor.cpp src/engine/program_ctor.cpp src/engine/program_slot_ctor.cpp -o $@
 
 verify/test_voice_models: verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_voice_models.cpp src/engine/voice_models.cpp src/mem/bank_memory.cpp -o $@

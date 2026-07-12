@@ -566,6 +566,23 @@ struct CSTGPerformance {
 	void SetIsDying(CSTGPerformanceVars *unused);
 
 	/*
+	 * Initialize() (batch 55, `.text+0xb9920`, 92 bytes) confirmed real
+	 * -- see src/engine/sequence_combi_init.cpp for the full derivation
+	 * (sec 10.230, `CSTGSequence::Initialize()`'s own hand-off chain).
+	 * Calls `CSTGEffectRack::Initialize()` (direct, non-virtual) on the
+	 * `CSTGEffectRack` base sub-object at `this+4`, two genuine virtual
+	 * slot-7 dispatches on the embedded `CSTGCommonEffectLFO` pair at
+	 * `+0xa59`/`+0xa6a` (bypassed via the established
+	 * `CSTGParamsOwner::UseDefaults()` forwarding cast -- confirmed
+	 * neither overrides it, `objdump -sr -j .rodata._ZTV19CSTGCommonEffectLFO`),
+	 * two DIRECT (non-virtual in ground truth) `UseDefaults()` calls on
+	 * the embedded `CSTGVectorMotion`/`CSTGAudioInput` sub-objects at
+	 * `+0xa7b`/`+0xae7`, and finally a literal `float 1.0f` write at
+	 * `+0xb5f` (a confirmed real immediate, own meaning not determined).
+	 */
+	void Initialize();
+
+	/*
 	 * RunEffects(CSTGPerformanceVars*) (batch 49, `.text+0xb9b50`, 256
 	 * bytes, confirmed via relocation from `CSTGPerformanceVarsManager::
 	 * RunEffects()`) confirmed real, deliberately deferred: genuine

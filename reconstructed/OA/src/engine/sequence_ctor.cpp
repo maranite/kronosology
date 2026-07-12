@@ -17,9 +17,14 @@
 
 #include "oa_global.h"
 
-unsigned char _ZTV12CSTGSequence[12];
-unsigned char _ZTV12CSTGHDRTrack[12];
-unsigned char _ZTV21CSTGMetronomeSettings[12];
+/* Sized to the real confirmed 0x9c/0x60/0x60-byte vtables (nm -CS /
+ * objdump -sr), fixed batch 55 (sec 10.230) -- see oa_global.h's own
+ * header comment on these three symbols for why (were previously an
+ * undersized 12-byte placeholder each, the proximate cause of the
+ * sec 10.229 hand-off crash). */
+unsigned char _ZTV12CSTGSequence[0x9c];
+unsigned char _ZTV12CSTGHDRTrack[0x60];
+unsigned char _ZTV21CSTGMetronomeSettings[0x60];
 
 static unsigned int ToU32(void *p)
 {

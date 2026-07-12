@@ -863,6 +863,47 @@ struct CSTGProgramSlot {
 	 * stub-callee pattern.
 	 */
 	void CompleteLoadProgram(CSTGSlotVoiceData *slotVoiceData);
+
+	/*
+	 * Initialize()/UseDefaults() (batch 55, `.text+0xac060`, 42 bytes /
+	 * own overridden `UseDefaults()`, 0x4b/75 bytes) -- both ground-
+	 * truthed real via `CSTGCombi::Initialize()`'s own direct
+	 * (non-virtual) call site, see src/engine/sequence_combi_init.cpp
+	 * for the full derivation (sec 10.230).
+	 *
+	 * `Initialize()`: a genuine virtual dispatch on `this` OWN vtable
+	 * slot 7 (`call *0x1c(%edx)` after `mov (%eax),%edx`) -- ground-
+	 * truthed via `objdump -sr -j .rodata._ZTV15CSTGProgramSlot` to
+	 * resolve to `CSTGProgramSlot::UseDefaults()` ITSELF (an override,
+	 * NOT the generic `CSTGParamsOwner::UseDefaults()` -- unlike every
+	 * other slot-7 dispatch site this project has fixed so far, sec
+	 * 10.228/10.229). Reproduced as a direct (non-virtual) call to this
+	 * class's own `UseDefaults()` below, bypassing the vtable fetch
+	 * entirely (this class's own `_ZTV15CSTGProgramSlot[0xf0]`
+	 * placeholder is still zero-filled -- see the sec 10.153/batch 45
+	 * "install vs dispatch" precedent) -- reproduces the identical
+	 * `this` used by the real dispatch without needing that whole
+	 * 60-slot vtable populated. Then copies this slot's own `+0x4`
+	 * index byte (patched by `CSTGCombi::CSTGCombi()`, see combi_ctor.cpp)
+	 * into `+0x10` (confirmed zeroed by this class's own ctor), and
+	 * finally a DIRECT (non-virtual, ground truth uses a plain PC32
+	 * call, not vtable dispatch) call to the generic
+	 * `CSTGParamsOwner::UseDefaults()` on the embedded `CSTGToneAdjust`
+	 * sub-object at `+0x7f` (placement-constructed by this class's own
+	 * ctor, program_slot_ctor.cpp).
+	 *
+	 * `UseDefaults()`: this class's OWN override. Ground truth first
+	 * makes a direct (non-virtual) call to the generic
+	 * `CSTGParamsOwner::UseDefaults()` on `this` (the base-class portion
+	 * -- same `reinterpret_cast<CSTGParamsOwner*>(this)->UseDefaults()`
+	 * forwarding idiom already established for `CSTGGlobal::Initialize()`,
+	 * sec 10.228), then writes twelve literal index bytes `1..12` into
+	 * `+0x63..+0x6e` (a confirmed real, fully deterministic table --
+	 * likely per-controller-slot default indices, meaning not
+	 * independently determined).
+	 */
+	void Initialize();
+	void UseDefaults();
 };
 
 /*
@@ -1831,6 +1872,29 @@ struct CSTGVectorMotion { CSTGVectorMotion(); };
  */
 extern "C" unsigned char _ZTV15CSTGPerformance[0x98];
 extern "C" unsigned char _ZTV14CSTGEffectRack[0x60];
+/*
+ * CSTGEffectRack::Initialize() (batch 55, `.text+0xbed40`, 0x10a/266
+ * bytes) confirmed real -- see src/engine/sequence_combi_init.cpp for
+ * the full derivation (CSTGSequence::Initialize()'s own hand-off chain,
+ * sec 10.230). Own body: sixteen embedded effect-slot sub-objects
+ * (twelve CIFXEffectSlot + two CMFXEffectSlot + two CTFXEffectSlot, the
+ * SAME cluster/offsets `CSTGCombi::CSTGCombi()` already places, 0xa8
+ * stride for the first twelve) each patched with a zero-based index
+ * byte (+0x4) and a shared "type mismatch" flag byte (+0x6), then two
+ * scalar field writes near +0xa50/+0xa54. The flag byte is gated on a
+ * genuine virtual call in ground truth (`this->GetPerformanceType()`,
+ * re-based to the OUTER CSTGPerformance/CSTGCombi/CSTGSequence object
+ * via `this-4`) -- but since this method is, in this project's own
+ * current call graph, reachable ONLY through
+ * `CSTGSequence::Initialize()`'s own chain (never through a bare
+ * `CSTGCombi`/`CSTGProgram`), and `CSTGSequence::GetPerformanceType()`
+ * is ground-truthed as a literal `return 2;` (`.text+0` of that symbol,
+ * `mov $0x2,%eax; ret` -- no other logic), the comparison always takes
+ * its "equal" branch here -- reproduced as the ground-truthed constant
+ * directly rather than adding a virtual-dispatch mechanism for a
+ * single-caller, single-implementation getter.
+ */
+struct CSTGEffectRack { void Initialize(); };
 extern "C" unsigned char _ZTV11CSTGProgram[0x98];
 /* CMFXEffectSlot/CTFXEffectSlot/CSTGEffectBalance/CSTGCommonEffectLFO
  * have NO out-of-line ctor at all in ground truth (confirmed via a
@@ -1894,35 +1958,88 @@ struct CSTGProgram {
  * array begins at `+0x19e7`, exactly 4 bytes after this ctor's own last
  * write, consistent with `CSTGCombi`'s own object footprint ending right
  * there and `CSTGSequence`'s derived tail picking up cleanly afterward.
+ *
+ * `Initialize()` (batch 55, `.text+0x8fa60`, 196 bytes) confirmed real
+ * -- see src/engine/sequence_combi_init.cpp for the full derivation
+ * (sec 10.230). Calls `CSTGProgramSlot::Initialize()` (direct,
+ * non-virtual) on all sixteen embedded `CSTGProgramSlot`s at the SAME
+ * `+0xb63`/`0xe8`-stride array this ctor builds, then
+ * `CSTGPerformance::Initialize()` (direct) on the whole object's own
+ * `CSTGPerformance` base sub-object (`+0x0`), then a final genuine
+ * virtual dispatch on `this`'s OWN (most-derived) vtable slot 7 (`mov
+ * (%ebx),%edx; call *0x1c(%edx)`). In this project's current call
+ * graph `Initialize()` is reachable ONLY via `CSTGSequence::
+ * Initialize()` (never on a bare `CSTGCombi`), so by the time this
+ * runs the object's installed vtable is always `CSTGSequence`'s own --
+ * confirmed via `objdump -sr -j .rodata._ZTV12CSTGSequence` that ITS
+ * OWN slot 7 (vtable_base+0x24) is the generic, non-overridden
+ * `CSTGParamsOwner::UseDefaults()` -- reproduced as a direct
+ * `reinterpret_cast<CSTGParamsOwner*>(this)->UseDefaults()` forwarding
+ * call (same established idiom as sec 10.228/10.229), safe specifically
+ * because this method is monomorphic in this project's own graph.
  */
 extern "C" unsigned char _ZTV9CSTGCombi[0x9c];
-struct CSTGCombi { CSTGCombi(); };
+struct CSTGCombi { CSTGCombi(); void Initialize(); };
 /*
  * CSTGSequence::CSTGSequence() (sec 10.153, `.text+0xcbfd0`, 546 bytes)
  * confirmed real: calls the base `CSTGCombi::CSTGCombi()` first (Itanium
  * "base ctor first" pattern, matching CSTGProgramSlot's own derived-ctor
  * precedent -- `CSTGCombi::CSTGCombi()` is confirmed real too now, batch
  * 45, see src/engine/combi_ctor.cpp), installs its own vtable
- * (`_ZTV12CSTGSequence`, zero-
- * filled placeholder, never dispatched by anything reconstructed here),
- * then a confirmed real 44-byte-stride (`0x2c`) array of 16 embedded
- * "CSTGHDRTrack" sub-objects at `+0x19e7..+0x1c7b` (each: install its
- * OWN vtable `_ZTV12CSTGHDRTrack`, zero 3 bytes at +0x4/+0x5/+0x6 -- the
- * remaining 41 bytes of each 44-byte slot are a real, confirmed gap, not
- * independently touched by this ctor), and finally ONE more slot at the
- * SAME stride (`+0x1ca7`) holding a DIFFERENT vtable
- * (`_ZTV21CSTGMetronomeSettings`) with only ONE zero byte (+0x4) --
- * confirmed a real, deliberate variation (not a 17th CSTGHDRTrack), kept
- * as a separate write rather than folded into the loop. All sub-objects
- * modeled via raw offset writes (no named C++ sub-object types), matching
- * CSTGSequence's/CSTGProgramSlot's own established "opaque, no named
- * fields" convention -- none of these vtables are ever genuinely
- * dispatched through by anything reconstructed in this pass.
+ * (`_ZTV12CSTGSequence`), then a confirmed real 44-byte-stride (`0x2c`)
+ * array of 16 embedded "CSTGHDRTrack" sub-objects at
+ * `+0x19e7..+0x1c7b` (each: install its OWN vtable `_ZTV12CSTGHDRTrack`,
+ * zero 3 bytes at +0x4/+0x5/+0x6 -- the remaining 41 bytes of each
+ * 44-byte slot are a real, confirmed gap, not independently touched by
+ * this ctor), and finally ONE more slot at the SAME stride (`+0x1ca7`)
+ * holding a DIFFERENT vtable (`_ZTV21CSTGMetronomeSettings`) with only
+ * ONE zero byte (+0x4) -- confirmed a real, deliberate variation (not a
+ * 17th CSTGHDRTrack), kept as a separate write rather than folded into
+ * the loop. All sub-objects modeled via raw offset writes (no named C++
+ * sub-object types), matching CSTGSequence's/CSTGProgramSlot's own
+ * established "opaque, no named fields" convention.
+ *
+ * SIZE FIX (sec 10.230/batch 55): all three of this class's own vtable
+ * placeholders (`_ZTV12CSTGSequence`/`_ZTV12CSTGHDRTrack`/
+ * `_ZTV21CSTGMetronomeSettings`) were declared as an undersized 12
+ * bytes (1 function slot past the 8-byte header) -- the SAME
+ * too-short-placeholder class of bug already fixed once for
+ * `CSTGProgramSlot` (batch 45) and now hit for real: `objdump -sr` on
+ * `OA_real.ko` confirms `_ZTV12CSTGSequence` is actually `0x9c` (156)
+ * bytes/37 slots, `_ZTV12CSTGHDRTrack`/`_ZTV21CSTGMetronomeSettings`
+ * are each `0x60` (96) bytes/22 slots -- `CSTGGlobal::
+ * InitializePerformances()`'s own block 4 (see init_performances.cpp)
+ * dispatches vtable slot 22 (`vtbl[0x58/4]`) on 200 `CSTGSequence`
+ * array elements, reading 12 bytes out of bounds of the old 12-byte
+ * placeholder and landing on a NULL function pointer -- the exact
+ * `EIP:0x0`/`CR2:0` crash sec 10.229 handed off
+ * (`CSTGGlobal::Initialize()+0x182` ->
+ * `InitializePerformances()+0x145`). Resized to their real sizes here
+ * (removing the landmine, matching the `CSTGProgramSlot` precedent)
+ * even though the actual FIX (below) bypasses the vtable dispatch
+ * entirely via a direct `CSTGSequence::Initialize()` call from
+ * `InitializePerformances()` -- none of these three placeholders are
+ * genuinely dispatched through by anything reconstructed in this
+ * project (the `CSTGHDRTrack`/`CSTGMetronomeSettings` slot-7 dispatches
+ * inside `CSTGSequence::Initialize()` itself are ALSO bypassed with
+ * direct forwarding calls, see sequence_combi_init.cpp -- confirmed
+ * safe since neither overrides `UseDefaults()`, per
+ * `objdump -sr -j .rodata._ZTV12CSTGHDRTrack`/
+ * `.rodata._ZTV21CSTGMetronomeSettings`).
+ *
+ * `Initialize()` (batch 55, `.text+0xcb1d0`, 277 bytes) confirmed real
+ * -- see src/engine/sequence_combi_init.cpp. Calls the base
+ * `CSTGCombi::Initialize()` first (direct, non-virtual -- matching this
+ * class's own ctor's "base first" pattern), then a real 16-iteration
+ * loop dispatching each `CSTGHDRTrack`'s own vtable slot 7 (bypassed,
+ * see above), then one final DIRECT (non-virtual in ground truth) call
+ * to `CSTGParamsOwner::UseDefaults()` on the `CSTGMetronomeSettings`
+ * sub-object at `+0x1ca7`.
  */
-extern "C" unsigned char _ZTV12CSTGSequence[12];
-extern "C" unsigned char _ZTV12CSTGHDRTrack[12];
-extern "C" unsigned char _ZTV21CSTGMetronomeSettings[12];
-struct CSTGSequence : public CSTGCombi { CSTGSequence(); };
+extern "C" unsigned char _ZTV12CSTGSequence[0x9c];
+extern "C" unsigned char _ZTV12CSTGHDRTrack[0x60];
+extern "C" unsigned char _ZTV21CSTGMetronomeSettings[0x60];
+struct CSTGSequence : public CSTGCombi { CSTGSequence(); void Initialize(); };
 /* Activate() (sec 10.102, confirmed via relocation from CSTGGlobal::
  * CompletePerformanceActivation) confirmed real, deliberately deferred
  * extern -- own body not reconstructed. A DIFFERENT object from

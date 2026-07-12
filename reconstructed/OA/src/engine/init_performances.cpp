@@ -152,18 +152,34 @@ void CSTGGlobal::InitializePerformances()
 	 * comment for the full two-nested-loop derivation. */
 	PopulateDefaultProgramSlotTemplates();
 
-	/* Block 4: real -- a simple (non-nested) 200-item virtual-dispatch
-	 * loop over a DIFFERENT array (`this+0x27cd024`, stride 0x1cad),
-	 * same vtable slot 0x58 as block 3's own call. Zero-explicit-
-	 * argument call (`this` only) -- confirmed via register tracing.
-	 * Modeled via this project's own established raw-vtable-dispatch
-	 * idiom (see klm_manager.cpp's vcall()/stamp_object()). */
+	/* Block 4: real -- a simple (non-nested) 200-item loop over a
+	 * DIFFERENT array (`this+0x27cd024`, stride 0x1cad), each element a
+	 * `CSTGSequence` (sec 10.77 resolution), same vtable slot 0x58 as
+	 * block 3's own call.
+	 *
+	 * FIX (sec 10.230/batch 55): this used to model the call as a raw
+	 * `vtbl[0x58/4]` dispatch off the array element's own +0x0 vtable
+	 * pointer. Root-caused via `objdump -sr -j .rodata._ZTV12CSTGSequence`
+	 * on `OA_real.ko`: vtable slot 22 (byte offset 0x58 from the vptr,
+	 * i.e. symbol offset 0x60) resolves to `CSTGSequence::Initialize()`
+	 * ITSELF -- but this project's own `_ZTV12CSTGSequence` placeholder
+	 * was declared as only 12 bytes (1 function slot), so the raw
+	 * dispatch read 12 bytes out of bounds and landed on a NULL function
+	 * pointer, producing the `EIP:0x0`/`CR2:0` crash this method's own
+	 * batch-54 hand-off predicted (`CSTGGlobal::Initialize()+0x182` ->
+	 * `InitializePerformances()+0x145`). Fixed the same way as every
+	 * other "slot the array element type actually needs" bug this
+	 * project has hit (sec 10.226/10.227): call the now-real
+	 * `CSTGSequence::Initialize()` (src/engine/sequence_combi_init.cpp)
+	 * directly instead of re-deriving the raw vtable-slot fetch --
+	 * reproduces the identical `this` pointer per element without
+	 * needing a real, fully-populated 0x9c-byte vtable on all 200
+	 * instances. */
 	{
 		unsigned char *arrBase = self + 0x27cd024u;
 		for (unsigned int i = 0; i < 200; i++) {
 			unsigned char *obj = arrBase + i * 0x1cadu;
-			void *const *vtbl = *(void *const *const *)obj;
-			((void (*)(void *))vtbl[0x58 / 4])(obj);
+			reinterpret_cast<CSTGSequence *>(obj)->Initialize();
 		}
 	}
 

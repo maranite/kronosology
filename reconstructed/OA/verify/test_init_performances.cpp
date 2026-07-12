@@ -22,9 +22,22 @@
  * confirmed field offsets (see oa_global.h/test_global.cpp) -- this
  * test allocates the SAME established mmap32() buffer size (0x29cc920),
  * zeroed, for `this`, which comfortably covers every offset this batch's
- * own reconstruction touches, including the 200-item vtable-dispatch
- * array at +0x27cd024 (last item's vtable-pointer slot ends at
- * +0x2931aa7, well under the buffer's own 0x29cc920 bound).
+ * own reconstruction touches, including the 200-item block-4 array at
+ * +0x27cd024 (last item's own extent ends at +0x2931aa7, well under the
+ * buffer's own 0x29cc920 bound).
+ *
+ * UPDATE (sec 10.230/batch 55): block 4's own raw `vtbl[0x58/4]` fetch
+ * was replaced with a direct `reinterpret_cast<CSTGSequence*>(obj)->
+ * Initialize()` call (CSTGSequence::Initialize() is now real, see
+ * sequence_combi_init.cpp) -- the old `install_vcall_array()`/
+ * `vcall_tracker` scheme poked a fake vtable pointer into each array
+ * element that the real code no longer even reads, the SAME masking
+ * hazard sec 10.228/10.229 already found and fixed in
+ * test_global.cpp/test_waveseq_setlist_init.cpp's own scenarios.
+ * Replaced with a real, call-counting mock of `CSTGSequence::
+ * Initialize()` itself (this test binary links init_performances.cpp
+ * alone, so it must supply this symbol -- production's real body lives
+ * in sequence_combi_init.cpp, not linked here).
  */
 
 #include <cstdio>
@@ -119,12 +132,13 @@ void CSTGGlobal::SubmitPerfChangeRequest(CSTGPerfChangeRequest &request)
 	g_submitReq = request;
 }
 
-/* ---- the 200-item vtable-dispatch array (block 4) ---- */
+/* ---- the 200-item CSTGSequence::Initialize() array (block 4) ---- */
 static int g_vcallCount;
 static int g_vcallSeq = -1;
 static void *g_vcallFirstObj, *g_vcallLastObj;
-static void vcall_tracker(void *obj)
+void CSTGSequence::Initialize()
 {
+	void *obj = (void *)this;
 	if (g_vcallCount == 0) {
 		g_vcallFirstObj = obj;
 		g_vcallSeq = g_seq++;
@@ -135,15 +149,6 @@ static void vcall_tracker(void *obj)
 
 static unsigned char *g_selfBuf;
 static const unsigned long kSelfSize = 0x29cc920;
-
-static void install_vcall_array(void)
-{
-	static void *vtbl[32];
-	vtbl[0x58 / 4] = (void *)&vcall_tracker;
-	unsigned char *arrBase = g_selfBuf + 0x27cd024u;
-	for (unsigned int i = 0; i < 200; i++)
-		*(void **)(arrBase + i * 0x1cadu) = (void *)vtbl;
-}
 
 static int g_fail;
 static void check_eq(const char *label, unsigned long got, unsigned long want)
@@ -169,7 +174,6 @@ static void check_str(const char *label, const char *got, const char *want)
 static void reset_all(void)
 {
 	memset(g_selfBuf, 0, kSelfSize);
-	install_vcall_array();
 
 	memset(STGAPIFrontPanelStatus::sInstance, 0, 0x30000);
 
