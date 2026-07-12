@@ -34,6 +34,19 @@
 /* Same mocks test_global.cpp/test_managers.cpp need for
  * CSTGAudioBusManager's own real constructor (linked in via
  * managers.cpp). */
+/* Sec 10.225: CSTGAudioDriverInterface::sInstance + the KorgUsbAudio*
+ * externs CSTGAudioDriverInterfaceKorgUsb::Initialize()/Start()/
+ * KeepSynchronized() now call directly (managers.cpp, which this file
+ * links) -- link-satisfying host mocks only, same treatment as the
+ * RTAI wrappers below. */
+CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
+extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
+extern "C" int   KorgUsbAudioStart(void) { return 0; }
+extern "C" void *KorgUsbAudioInput(void) { return 0; }
+extern "C" void  KorgUsbAudioInputDone(void) { }
+extern "C" void *KorgUsbAudioOutput(void) { return 0; }
+extern "C" void  KorgUsbAudioOutputDone(void) { }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" void *rtwrap_malloc(unsigned int size) { return malloc(size); }
 extern "C" void rtwrap_pthread_mutex_init(void *, void *) { }
@@ -44,7 +57,9 @@ extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
-CSTGAudioManager::~CSTGAudioManager() { }
+/* CSTGAudioManager::~CSTGAudioManager() is now real (managers.cpp,
+ * linked directly by this test, sec 10.225 -- no longer virtual, no
+ * mock needed here any more). */
 /* Sec 10.147: ~CSTGVoiceAllocator()/~CSTGMessageProcessor() are now real
  * (see managers.cpp) -- link-satisfying only, same reasoning as
  * test_global.cpp's own identical addition. */

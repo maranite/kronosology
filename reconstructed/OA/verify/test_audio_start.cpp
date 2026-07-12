@@ -69,9 +69,47 @@ extern "C" void SKMain_Run(void) {}
 void CSTGAudioThread::AudioTickLoopRoutine() {}
 
 CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+CSTGAudioDriverInterface::CSTGAudioDriverInterface() {}
 CSTGAudioDriverInterface::~CSTGAudioDriverInterface() {}
+/* Sec 10.225: CSTGAudioDriverInterface/CSTGAudioDriverInterfaceKorgUsb
+ * grew their real full set of virtual methods (previously just the
+ * destructor -- see oa_engine.h's class comment). This test never
+ * actually constructs a real CSTGAudioDriverInterfaceKorgUsb (it pokes
+ * `g_driverVtable` directly onto a raw pointer, see main() below), but
+ * the class's own vtable is still emitted/linked here since this file
+ * defines its constructor -- these trivial bodies only need to exist to
+ * resolve that vtable's addresses, never actually invoked. */
+int CSTGAudioDriverInterface::Initialize() { return 1; }
+void CSTGAudioDriverInterface::Start() {}
+void CSTGAudioDriverInterface::Reset() {}
+void CSTGAudioDriverInterface::WriteAudioOuts() {}
+void CSTGAudioDriverInterface::KeepSynchronized() {}
+unsigned int CSTGAudioDriverInterface::GetNumDriverOutputChannels() const { return 0; }
+unsigned int CSTGAudioDriverInterface::GetNumDriverInputChannels() const { return 0; }
+void CSTGAudioDriverInterface::IncrementSTGDMABufferCounter() {}
+void CSTGAudioDriverInterface::IncrementDriverDMABufferCounter() {}
+bool CSTGAudioDriverInterface::STGRequiredToFillAnotherDMABuffer() const { return false; }
 CSTGAudioDriverInterfaceKorgUsb::CSTGAudioDriverInterfaceKorgUsb() {}
 CSTGAudioDriverInterfaceKorgUsb::~CSTGAudioDriverInterfaceKorgUsb() {}
+int CSTGAudioDriverInterfaceKorgUsb::Initialize() { return 1; }
+void CSTGAudioDriverInterfaceKorgUsb::Start() {}
+void CSTGAudioDriverInterfaceKorgUsb::Reset() {}
+void *CSTGAudioDriverInterfaceKorgUsb::GetAudioInputFromDriver() { return 0; }
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOutsAndWait() {}
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOuts() {}
+void CSTGAudioDriverInterfaceKorgUsb::KeepSynchronized() {}
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverOutputChannels() const { return 0; }
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverInputChannels() const { return 0; }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAllAudio() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAllAudio() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInput(unsigned int) {}
 
 static int g_driverStartCalls;
 static void driver_start(void *) { g_driverStartCalls++; }

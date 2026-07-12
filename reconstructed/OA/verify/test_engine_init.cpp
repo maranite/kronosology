@@ -58,7 +58,43 @@ static void *g_audioDriverVtable[3];
 static int g_audioDriverSlot2Calls;
 static void AudioDriverSlot2(void *) { g_audioDriverSlot2Calls++; }
 CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+/* Base ctor is no longer compiler-trivial (sec 10.225 added a real one,
+ * managers.cpp) -- this test deliberately doesn't link managers.cpp (see
+ * this file's own header comment), so it needs its own trivial stand-in,
+ * same treatment as every other mocked ctor in this file. Body doesn't
+ * matter: the derived ctor below immediately overwrites the vtable
+ * pointer with its own hand-rolled fake anyway. */
+CSTGAudioDriverInterface::CSTGAudioDriverInterface() {}
 CSTGAudioDriverInterface::~CSTGAudioDriverInterface() {}
+/* Sec 10.225: CSTGAudioDriverInterface/CSTGAudioDriverInterfaceKorgUsb
+ * grew their real full set of virtual methods (previously just the
+ * destructor, which produced a too-small vtable and a real live-boot
+ * NULL-function-pointer crash -- see oa_engine.h's class comment). This
+ * test's own vtable is a hand-rolled 3-entry fake (only slot 2 matters,
+ * see AudioDriverSlot2 above) that overwrites the object's real vtable
+ * pointer at construction, so none of these new bodies are ever actually
+ * invoked here -- they only need to exist so the real compiler-generated
+ * vtable (which IS still emitted/linked even though never used at
+ * runtime by this test) has a resolvable address for every slot.
+ *
+ * All of the base's own non-pure virtuals need a body here too (even
+ * the ones CSTGAudioDriverInterfaceKorgUsb overrides) -- the base
+ * class's own vtable/typeinfo is independently referenced via
+ * CSTGAudioDriverInterfaceKorgUsb's RTTI info, and nothing else in this
+ * test's own isolated link provides them (see this file's own header
+ * comment: deliberately not linking managers.cpp). (GetAudioInputFromDriver/
+ * WriteAudioOutsAndWait/the ten Mute/Unmute* methods stay pure in the
+ * base -- no body needed/expected there, matching managers.cpp.) */
+int CSTGAudioDriverInterface::Initialize() { return 1; }
+void CSTGAudioDriverInterface::Start() {}
+void CSTGAudioDriverInterface::Reset() {}
+void CSTGAudioDriverInterface::WriteAudioOuts() {}
+void CSTGAudioDriverInterface::KeepSynchronized() {}
+unsigned int CSTGAudioDriverInterface::GetNumDriverOutputChannels() const { return 0; }
+unsigned int CSTGAudioDriverInterface::GetNumDriverInputChannels() const { return 0; }
+void CSTGAudioDriverInterface::IncrementSTGDMABufferCounter() {}
+void CSTGAudioDriverInterface::IncrementDriverDMABufferCounter() {}
+bool CSTGAudioDriverInterface::STGRequiredToFillAnotherDMABuffer() const { return false; }
 CSTGAudioDriverInterfaceKorgUsb::CSTGAudioDriverInterfaceKorgUsb()
 {
 	g_audioDriverVtable[2] = (void *)&AudioDriverSlot2;
@@ -67,6 +103,25 @@ CSTGAudioDriverInterfaceKorgUsb::CSTGAudioDriverInterfaceKorgUsb()
 }
 CSTGAudioDriverInterfaceKorgUsb::~CSTGAudioDriverInterfaceKorgUsb() {}
 void CSTGAudioDriverInterfaceKorgUsb::Callback(void *) {}
+int CSTGAudioDriverInterfaceKorgUsb::Initialize() { return 1; }
+void CSTGAudioDriverInterfaceKorgUsb::Start() {}
+void CSTGAudioDriverInterfaceKorgUsb::Reset() {}
+void *CSTGAudioDriverInterfaceKorgUsb::GetAudioInputFromDriver() { return 0; }
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOutsAndWait() {}
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOuts() {}
+void CSTGAudioDriverInterfaceKorgUsb::KeepSynchronized() {}
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverOutputChannels() const { return 0; }
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverInputChannels() const { return 0; }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAllAudio() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAllAudio() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInputs() {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInput(unsigned int) {}
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInput(unsigned int) {}
 
 static void *g_audioManagerVtable[1];
 static int g_audioManagerSlot0Calls;

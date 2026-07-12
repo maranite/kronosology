@@ -56,6 +56,21 @@ extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
 
+/* Sec 10.225: CSTGAudioDriverInterfaceKorgUsb::Initialize()/Start()/
+ * KeepSynchronized() (managers.cpp) now call these real
+ * KorgUsbAudioDriver.ko exports directly -- link-satisfying host mocks
+ * only, same treatment as the RTAI wrappers above (this file's own
+ * MockAudioDriverInterface never actually calls into
+ * CSTGAudioDriverInterfaceKorgUsb, so these are never invoked here, just
+ * needed to resolve managers.cpp's own real references). */
+extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
+extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
+extern "C" int   KorgUsbAudioStart(void) { return 0; }
+extern "C" void *KorgUsbAudioInput(void) { return 0; }
+extern "C" void  KorgUsbAudioInputDone(void) { }
+extern "C" void *KorgUsbAudioOutput(void) { return 0; }
+extern "C" void  KorgUsbAudioOutputDone(void) { }
+
 /* Real module-global data CSTGAudioBusManager's constructor touches (used
  * by test [3]'s `CSTGAudioBusManager abm` below) -- mocked here purely for
  * host linking, same treatment as the RTAI wrappers above. See
@@ -152,7 +167,11 @@ void CSTGMidiPortManager::WriteSTGMidiOutQueue(const unsigned char *, unsigned i
  * MockAudioDriverInterface's destructor below logs for this test; C++
  * destructor chaining fires the (silent) base one too, which is why only
  * one log entry shows up per virtual `delete`. */
-CSTGAudioManager::~CSTGAudioManager()            { log_call("~CSTGAudioManager"); }
+/* CSTGAudioManager::~CSTGAudioManager() is now real (managers.cpp, linked
+ * directly by this test, sec 10.225) -- confirmed NOT virtual (a real ABI
+ * mismatch bug in an earlier reconstruction pass, see oa_engine.h's class
+ * comment) and a genuine silent no-op, no mock/log_call here any more;
+ * test [5] below no longer expects a "~CSTGAudioManager" log entry. */
 /* CSTGAudioInput's own 9 UpdateXXX methods are now reconstructed for
  * real (sec 10.80, see src/engine/global.cpp, linked into this test via
  * the Makefile) -- no mock needed for CSTGAudioInput itself any more,
@@ -363,6 +382,23 @@ extern "C" void signal_timed_out_daemons(void)       { log_call("signal_timed_ou
 class MockAudioDriverInterface : public CSTGAudioDriverInterface {
 public:
 	virtual ~MockAudioDriverInterface() { log_call("~CSTGAudioDriverInterface"); }
+	/* Sec 10.225: CSTGAudioDriverInterface grew its real full set of pure
+	 * virtuals (previously just the destructor, which produced a
+	 * too-small vtable and a NULL-function-pointer crash on real boot --
+	 * see oa_engine.h's class comment). This mock only needs trivial
+	 * bodies to be instantiable; it never exercises any of these. */
+	virtual void *GetAudioInputFromDriver() { return 0; }
+	virtual void WriteAudioOutsAndWait() { }
+	virtual void MuteAllAudio() { }
+	virtual void UnmuteAllAudio() { }
+	virtual void MuteAudioOutputs() { }
+	virtual void UnmuteAudioOutputs() { }
+	virtual void MuteAudioInputs() { }
+	virtual void UnmuteAudioInputs() { }
+	virtual void MuteAudioOutput(unsigned int) { }
+	virtual void UnmuteAudioOutput(unsigned int) { }
+	virtual void MuteAudioInput(unsigned int) { }
+	virtual void UnmuteAudioInput(unsigned int) { }
 };
 
 int main(void)
@@ -503,11 +539,16 @@ int main(void)
 	 * log entry at all, since none of its real logic calls log_call); the
 	 * third calls the SAME rtwrap_pthread_mutex_destroy/rtwrap_free mocks
 	 * CPowerOffTimer's own teardown already uses, so that pair now shows up
-	 * a second time in place of the old flat "~CSTGVoiceAllocator" mock log. */
+	 * a second time in place of the old flat "~CSTGVoiceAllocator" mock log.
+	 * ~CSTGAudioManager() is ALSO now real (sec 10.225, confirmed NOT
+	 * virtual -- see oa_engine.h's class comment) and a genuine silent
+	 * no-op, so no "~CSTGAudioManager" entry appears here any more either
+	 * (engine.cpp's `audioMgr->~CSTGAudioManager()` call itself is now a
+	 * plain direct call, not a vtable dispatch). */
 	check_log("~CSTGEngine",
 		  "~CSTGMidiPortManager;rtwrap_pthread_mutex_destroy;rtwrap_free;"
 		  "VoiceModelManager::entryDtor;~CSTGAudioDriverInterface;"
-		  "~CSTGAudioManager;rtwrap_pthread_mutex_destroy;rtwrap_free;~CLoadBalancer;");
+		  "rtwrap_pthread_mutex_destroy;rtwrap_free;~CLoadBalancer;");
 
 	free(globalBuf);
 

@@ -106,14 +106,27 @@ extern "C" int  get_pthread_recursive_attr_constant(void) { return 1; }
 static int g_condInitCalls;
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { g_condInitCalls++; }
-/* CSTGAudioManager has a real vtable (confirmed) and a NOT-reconstructed
- * destructor body (see oa_engine.h) -- a definition is required here
- * purely so its vtable links; this test never calls it (matches every
- * other test in this file: `delete[]` on the raw byte buffer, not the
- * typed object). */
-CSTGAudioManager::~CSTGAudioManager() { }
+/* CSTGAudioManager::~CSTGAudioManager() is now real (managers.cpp,
+ * linked directly by this test, sec 10.225 -- no longer virtual, no
+ * mock needed here any more; a local redefinition would now be a
+ * multiple-definition link error). */
 extern "C" void rtwrap_pthread_mutexattr_settype(void *, int) { g_mutexattrCalls++; }
 extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
+
+/* Sec 10.225: CSTGAudioDriverInterface::sInstance + the KorgUsbAudio*
+ * externs CSTGAudioDriverInterfaceKorgUsb::Initialize()/Start()/
+ * KeepSynchronized() now call directly (managers.cpp) -- test [12] below
+ * constructs a real `CSTGAudioDriverInterfaceKorgUsb` on the stack, so
+ * these need real link-satisfying storage/mocks, not just a vtable
+ * placeholder. */
+CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
+extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
+extern "C" int   KorgUsbAudioStart(void) { return 0; }
+extern "C" void *KorgUsbAudioInput(void) { return 0; }
+extern "C" void  KorgUsbAudioInputDone(void) { }
+extern "C" void *KorgUsbAudioOutput(void) { return 0; }
+extern "C" void  KorgUsbAudioOutputDone(void) { }
 
 /* CSTGVoiceAllocator::EmergencyFreeVoiceList() is real now (sec 10.149,
  * see managers.cpp) -- its own confirmed-real, deliberately deferred
@@ -376,6 +389,12 @@ int main(void)
 	check_eq("channelsOut == 6", adi.channelsOut, 6);
 	check_eq("selfPtr == this (self-pointer)", adi.selfPtr == (void *)&adi, 1);
 	check_eq("callbackFnPtr is non-null", adi.callbackFnPtr != nullptr, 1);
+	/* Sec 10.225: CSTGAudioDriverInterface's own (base) constructor is now
+	 * reconstructed real -- confirmed to set
+	 * CSTGAudioDriverInterface::sInstance = this, previously always NULL
+	 * (this class had no explicit base constructor at all before). */
+	check_eq("CSTGAudioDriverInterface::sInstance == &adi",
+		 CSTGAudioDriverInterface::sInstance == (CSTGAudioDriverInterface *)&adi, 1);
 
 	printf("[13] CSTGVoiceModelManager: two big AllocAligned pools + zeroed range\n");
 	CSTGVoiceModelManager *vmm;

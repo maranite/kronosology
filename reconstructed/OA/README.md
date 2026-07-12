@@ -1013,6 +1013,85 @@ pointer (`EIP: [<00000000>] 0x0`, `CR2: 00000000`, `Bad EIP value` — most
 likely an uninitialized vtable slot or null function-pointer member
 called mid-`Initialize()`), not investigated further this session.
 
+**That crash is now FIXED (two real bugs, both found via `objdump -r` on
+`OA_real.ko`'s own vtable relocations, not guessed):**
+
+1. `CSTGAudioDriverInterface`/`CSTGAudioDriverInterfaceKorgUsb`
+   (`oa_engine.h`) previously declared only a pure virtual destructor,
+   producing a real 0x10-byte compiler-generated vtable — the REAL
+   `_ZTV31CSTGAudioDriverInterfaceKorgUsb` is 0x68 bytes (24 virtual
+   slots: dtor ×2, `Initialize`/`Start`/`Reset`,
+   `GetAudioInputFromDriver`/`WriteAudioOutsAndWait`/`WriteAudioOuts`/
+   `KeepSynchronized`, `GetNumDriverOutputChannels`/
+   `GetNumDriverInputChannels` (const), 8 pure-virtual Mute/UnmuteAll
+   Audio/Outputs/Inputs, 4 pure-virtual Mute/UnmuteAudioOutput/Input
+   (`unsigned int`), and 3 non-overridden base-only DMA-buffer-counter
+   methods). `CSTGEngine::Initialize()`'s `CallVtableSlot(audioDriver,
+   2)` (`Initialize()`) read one dword past the truncated vtable's own
+   end and jumped through whatever zero-filled linker padding followed
+   it. Fixed by adding all 22 missing virtual methods to both classes
+   (`oa_engine.h`) with real bodies where cheap/confirmed (`Initialize`/
+   `Start`/`Reset`/`KeepSynchronized` call the already-reconstructed
+   `KorgUsbAudioInitialize`/`Initialized`/`Start`/`Input`/`InputDone`/
+   `Output`/`OutputDone` exports from `KorgUsbAudioVirtualDriver.ko`;
+   `WriteAudioOutsAndWait` and all ten Mute/Unmute overrides are
+   confirmed real 1-byte `ret`s even on real hardware) and safe no-op
+   stand-ins for the two genuinely large real-time audio-DSP bodies
+   (`GetAudioInputFromDriver`/`WriteAudioOuts`, 1428/638 bytes of SSE
+   sample-format-conversion code, out of scope per the RTAI/audio-DSP
+   policy below and not on any boot-reachable path). Also fixed the
+   separate, previously-permanently-NULL `CSTGAudioDriverInterface::
+   sInstance` (a real base-class constructor, confirmed via
+   `objdump -r`, sets it — this class had no explicit base ctor at all
+   before).
+2. `CSTGAudioManager` (`oa_engine.h`) declared `virtual
+   ~CSTGAudioManager()` — but the REAL `_ZTV16CSTGAudioManager` has NO
+   destructor slot at all (confirmed via `objdump -r`): its three real
+   slots are `Initialize()` (5387 bytes), `StopAudioEngine()` (95
+   bytes), `DoAudioManagerThreadProcessing()` (956 bytes). This was a
+   genuine ABI-mismatch bug from an earlier reconstruction pass, not
+   just a missing population: `CSTGEngine::Initialize()`'s
+   `CallVtableSlot(audioManager, 0)` dispatches the REAL ABI's slot 0
+   (`Initialize()`) while `engine.cpp`'s `audioMgr->
+   ~CSTGAudioManager()` explicit-destructor call ALSO dispatches
+   through that exact same slot 0 (an explicit destructor call still
+   uses virtual dispatch when the destructor is `virtual`) expecting
+   the Itanium ABI's D1 slot — two incompatible real uses of the same
+   memory. Fixed at the root: `virtual` removed from the destructor
+   declaration, replaced with a plain explicit `void *_vtablePtr` first
+   member (reserving the same native-pointer-width leading slot without
+   any C++ vtable machinery), and the three real slots populated with
+   safe no-op stand-ins (`Initialize`/`ThreadProcessing` are large
+   real-time audio-engine bodies out of scope per policy;
+   `StopAudioEngine`'s own callees `CSTGThread::Delete`/
+   `CSTGAudioThread::Shutdown` aren't reconstructed either).
+
+Both fixes are host-KAT-covered (`verify/test_engine`/`test_managers`/
+etc. — 99/99 pass, invariants unchanged: `.gnu.linkonce.this_module`
+0x148 bytes, zero `R_386_GOTPC`, `nm -u` 85→92 net new symbols, all 7 the
+expected `KorgUsbAudio*` externs already provided by
+`KorgUsbAudioVirtualDriver.ko`). Live-tested on `kronosvm`: boot now
+clears the `+0x2f7` crash entirely and proceeds ~0x1d9 bytes further into
+`CSTGEngine::Initialize()` (through the audio-driver/audio-manager
+dispatches, all ten Model-class constructions, `CSTGCommonLFO`/
+`CSTGCommonStepSeq`/`CSTGEffectManager`/`CSTGWaveSeqManager::Initialize()`)
+before hitting a NEW, later, different crash — same EIP=0/CR2=0 shape,
+now inside `CSTGVectorManager::Initialize()`
+(`CSTGEngine::Initialize()+0x4d0/0x7f0` → `CSTGVectorManager::
+Initialize()+0x45/0x190`). This is very likely the SAME class of bug one
+level down: `CSTGVectorManager::Initialize()`'s own confirmed structure
+dispatches through each `CSTGVectorEGXOnly`/`CSTGVectorEGXY`/
+`CSTGVectorEGCC` object's own vtable slot 0, and `bar2_stubs.cpp`
+already carries `_ZTV14CSTGVectorEGCC`/`_ZTV17CSTGVectorEGXOnly`/
+`_ZTV14CSTGVectorEGXY`/`_ZTV16CSTGVectorEGBase` as the SAME kind of
+all-zero "left zero ... would show up as a real crash to investigate at
+that point" placeholder that `_ZTV16CSTGAudioManager` was — this is that
+predicted crash arriving for a different class. Not investigated further
+this session (out of scope for the audio-driver/audio-manager fix this
+pass targeted) — a clean, well-bounded hand-off for whoever picks this
+up next: find each class's own real vtable slot-0 method via the same
+`objdump -r` technique used above, and populate accordingly.
+
 **Two corrections to the picture above**, found by actually reading code
 rather than assuming from names (full detail: `MASTER_REFERENCE.md` sec
 10.36):

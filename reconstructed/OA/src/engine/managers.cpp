@@ -221,9 +221,114 @@ extern float gAllPlusHeadroom[4];
 extern float gAllMinusHeadroom[4];
 
 /* Pure virtual destructors still need a definition -- every derived
- * destructor's implicit chaining calls this. Empty: CSTGAudioDriverInterface
- * itself has no confirmed fields of its own to tear down. */
+ * destructor's implicit chaining calls this. Empty: the real D1Ev/D0Ev
+ * bodies (confirmed via disassembly) only reset `sInstance` to NULL and
+ * rewrite the vtable pointer back to this class's own -- standard Itanium
+ * ABI destructor-unwind bookkeeping neither this project's KAT harness nor
+ * its boot-path testing depends on, so left as a no-op rather than
+ * reproduced. */
 CSTGAudioDriverInterface::~CSTGAudioDriverInterface() { }
+
+/*
+ * CSTGAudioDriverInterface's own constructor (.text+0x5ded0, 44 bytes,
+ * sec 10.225) -- confirmed real: zeroes the two DMA buffer counters at
+ * +0x30/+0x34 (the real disassembly does this twice, redundantly;
+ * reproduced once here), clears the "initialized" flag at +0x4, and --
+ * confirmed ONLY from this constructor -- sets
+ * `CSTGAudioDriverInterface::sInstance = this`. This was the other half
+ * of the sec 10.225 reconstruction gap: with no explicit base
+ * constructor, the base subobject's implicit (compiler-generated) one
+ * never touched `sInstance`, leaving it permanently NULL for anything
+ * that reads it later (engine.cpp's own destructor, audio_start.cpp).
+ */
+CSTGAudioDriverInterface::CSTGAudioDriverInterface()
+{
+	_pad04[0x04 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x30 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x34 - 0x04] = 0;
+	CSTGAudioDriverInterface::sInstance = this;
+}
+
+/*
+ * CSTGAudioDriverInterface::Initialize() (.text+0x5de50, 80 bytes) --
+ * confirmed real: sets the +0x4 "initialized" flag true, zeroes ten
+ * dwords at +0x8..+0x2c, returns 1. Return value is discarded by every
+ * confirmed caller (CSTGEngine::Initialize()'s CallVtableSlot() helper
+ * treats the slot as void-returning) -- kept as `int` only for fidelity
+ * with the real disassembly's own `mov $0x1,%eax; ret`.
+ */
+int CSTGAudioDriverInterface::Initialize()
+{
+	_pad04[0x04 - 0x04] = 1;
+	*(unsigned int *)&_pad04[0x08 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x0c - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x10 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x14 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x18 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x1c - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x20 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x24 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x28 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x2c - 0x04] = 0;
+	return 1;
+}
+
+/* CSTGAudioDriverInterface::Reset() (.text+0x5dea0, 15 bytes) --
+ * confirmed real: zeroes the same two DMA buffer counters the
+ * constructor does. */
+void CSTGAudioDriverInterface::Reset()
+{
+	*(unsigned int *)&_pad04[0x30 - 0x04] = 0;
+	*(unsigned int *)&_pad04[0x34 - 0x04] = 0;
+}
+
+/* Start()/WriteAudioOuts()/KeepSynchronized() (.text._ZN24CSTG...,
+ * confirmed via each symbol's own dedicated 1-byte section) -- every one
+ * of these base-class default implementations is a real, literal `ret`
+ * with no body at all, not a reconstruction shortcut. */
+void CSTGAudioDriverInterface::Start() { }
+void CSTGAudioDriverInterface::WriteAudioOuts() { }
+void CSTGAudioDriverInterface::KeepSynchronized() { }
+
+/* GetNumDriverOutputChannels()/GetNumDriverInputChannels() (confirmed via
+ * each symbol's own 6-byte dedicated section): both return the same
+ * hardcoded constant 10 in the base class -- CSTGAudioDriverInterfaceKorgUsb
+ * overrides both to instead read its own per-instance channel-count
+ * fields (see that class's own overrides below). */
+unsigned int CSTGAudioDriverInterface::GetNumDriverOutputChannels() const { return 10; }
+unsigned int CSTGAudioDriverInterface::GetNumDriverInputChannels() const { return 10; }
+
+/*
+ * IncrementSTGDMABufferCounter()/IncrementDriverDMABufferCounter()
+ * (confirmed via each symbol's own dedicated 11-byte section: `lock xadd`
+ * against +0x30/+0x34 respectively) and
+ * STGRequiredToFillAnotherDMABuffer() (confirmed via its own dedicated
+ * 14-byte section: `(driverCounter - stgCounter) > 0`, signed compare).
+ * Real-time audio-tick bookkeeping -- CSTGAudioDriverInterfaceKorgUsb does
+ * NOT override any of these three (confirmed via its own vtable's
+ * relocations at +0x5c/+0x60/+0x64, which point directly at these base
+ * symbols), so this is the actual code that runs even for a real
+ * KorgUsb-backed instance. Out of scope for full audio-DSP fidelity (sec
+ * 10.185) but cheap and unambiguous to reproduce exactly via the
+ * compiler's own `__sync_fetch_and_add` builtin, which lowers to the same
+ * `lock xadd` the real code uses.
+ */
+void CSTGAudioDriverInterface::IncrementSTGDMABufferCounter()
+{
+	__sync_fetch_and_add((unsigned int *)&_pad04[0x30 - 0x04], 1);
+}
+
+void CSTGAudioDriverInterface::IncrementDriverDMABufferCounter()
+{
+	__sync_fetch_and_add((unsigned int *)&_pad04[0x34 - 0x04], 1);
+}
+
+bool CSTGAudioDriverInterface::STGRequiredToFillAnotherDMABuffer() const
+{
+	int stgCount = *(int *)&_pad04[0x30 - 0x04];
+	int driverCount = *(int *)&_pad04[0x34 - 0x04];
+	return (driverCount - stgCount) > 0;
+}
 
 /* Real kernel-side RTAI wrapper functions -- confirmed real symbol names
  * via relocation, not host-testable (same treatment as __kmalloc/kfree).
@@ -439,6 +544,121 @@ CSTGAudioDriverInterfaceKorgUsb::~CSTGAudioDriverInterfaceKorgUsb()
 	/* Real destructor (.text+0x33f7e0, 69 bytes) not reconstructed in this
 	 * pass -- see the class comment in oa_engine.h. */
 }
+
+/* Real KorgUsbAudioDriver.ko exports (sec 10.225) -- already provided by
+ * the companion `KorgUsbAudioVirtualDriver.ko` stub
+ * (reconstructed/KorgUsbAudioVirtualDriver/korgusbaudio_stub.cpp/.h); OA.ko
+ * itself only needs matching `extern "C"` declarations to generate the
+ * right undefined-symbol relocations, same as every other cross-module
+ * extern in this file. */
+extern "C" int   KorgUsbAudioInitialize(void);
+extern "C" int   KorgUsbAudioInitialized(void);
+extern "C" int   KorgUsbAudioStart(void);
+extern "C" void *KorgUsbAudioInput(void);
+extern "C" void  KorgUsbAudioInputDone(void);
+extern "C" void *KorgUsbAudioOutput(void);
+extern "C" void  KorgUsbAudioOutputDone(void);
+
+/*
+ * CSTGAudioDriverInterfaceKorgUsb::Initialize() (.text+0x33f770, 100
+ * bytes, sec 10.225) -- confirmed real: calls the base class's
+ * Initialize() first (return value kept, passed through), then -- only
+ * if `KorgUsbAudioInitialized()` is still false -- calls
+ * `KorgUsbAudioInitialize(0x20, 8, this+0x38, 2)`.
+ *
+ * The real call site pushes 4 cdecl stack args (0x20, 8, a pointer to
+ * this object's own +0x38 field [`&selfPtr`], and 2 -- plausibly a
+ * buffer size, block count, context pointer, and channel-pair count).
+ * The companion module's own `KorgUsbAudioInitialize(void)` stub
+ * intentionally takes none (see korgusbaudio_stub.h's own header
+ * comment, which already anticipated this exact call site: the real
+ * function's return value is discarded unconditionally by this caller,
+ * so no particular argument handling is required). This is safe under
+ * cdecl either way -- the caller pushes/pops its own stack args
+ * regardless of how many the callee actually reads, so calling the
+ * zero-arg declaration here produces identical stack discipline to the
+ * real 4-arg call.
+ */
+int CSTGAudioDriverInterfaceKorgUsb::Initialize()
+{
+	int baseResult = CSTGAudioDriverInterface::Initialize();
+	if (!KorgUsbAudioInitialized())
+		KorgUsbAudioInitialize();
+	return baseResult;
+}
+
+/* Start() (.text+0x33f760, 15 bytes) -- confirmed real: calls
+ * KorgUsbAudioStart(), return value discarded. */
+void CSTGAudioDriverInterfaceKorgUsb::Start()
+{
+	KorgUsbAudioStart();
+}
+
+/* Reset() (.text+0x33f750, 15 bytes) -- confirmed real: calls the base
+ * class's Reset() directly, nothing else. */
+void CSTGAudioDriverInterfaceKorgUsb::Reset()
+{
+	CSTGAudioDriverInterface::Reset();
+}
+
+/* KeepSynchronized() (.text+0x33f730, 30 bytes) -- confirmed real: calls
+ * KorgUsbAudioInput(), KorgUsbAudioInputDone(), KorgUsbAudioOutput(),
+ * KorgUsbAudioOutputDone() in that order, all return values discarded. */
+void CSTGAudioDriverInterfaceKorgUsb::KeepSynchronized()
+{
+	KorgUsbAudioInput();
+	KorgUsbAudioInputDone();
+	KorgUsbAudioOutput();
+	KorgUsbAudioOutputDone();
+}
+
+/* GetNumDriverOutputChannels()/GetNumDriverInputChannels() (confirmed via
+ * each symbol's own dedicated 4-6 byte section): read +0x40/+0x44
+ * respectively -- i.e. the `channelsIn`/`channelsOut` fields declared in
+ * oa_engine.h. The real getter names cross over their own field names
+ * (Output reads the field named "In", Input reads the one named "Out")
+ * -- both are confirmed set to the same value (6) by the constructor, so
+ * this doesn't change any observable behavior, just worth flagging
+ * rather than silently renaming already-confirmed fields. */
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverOutputChannels() const { return channelsIn; }
+unsigned int CSTGAudioDriverInterfaceKorgUsb::GetNumDriverInputChannels() const { return channelsOut; }
+
+/*
+ * GetAudioInputFromDriver() (.text+0x33f830, 1428 bytes) and
+ * WriteAudioOuts() (.text+0x33fe10, 638 bytes) are real-time
+ * sample-format-conversion audio DSP -- confirmed via SSE `movaps`
+ * instructions and gain/sample-rate floating point math in the real
+ * disassembly, not simple plumbing like the methods above. Out of scope
+ * per this project's RTAI/audio-DSP-fidelity policy (sec 10.185) and,
+ * more importantly, not on the init_module boot path at all (only
+ * reachable from the real-time audio tick, which this project's VM boot
+ * testing doesn't exercise) -- safe no-op stand-ins, matching this
+ * class's own already-established Callback() precedent above.
+ */
+void *CSTGAudioDriverInterfaceKorgUsb::GetAudioInputFromDriver()
+{
+	return 0;
+}
+
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOuts()
+{
+}
+
+/* WriteAudioOutsAndWait() and all ten Mute/Unmute overrides below are
+ * confirmed real, literal single-byte `ret` instructions in
+ * OA_real.ko -- true no-ops even on real hardware, not a reconstruction
+ * shortcut. */
+void CSTGAudioDriverInterfaceKorgUsb::WriteAudioOutsAndWait() { }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAllAudio() { }
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAllAudio() { }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutputs() { }
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutputs() { }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInputs() { }
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInputs() { }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioOutput(unsigned int) { }
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioOutput(unsigned int) { }
+void CSTGAudioDriverInterfaceKorgUsb::MuteAudioInput(unsigned int) { }
+void CSTGAudioDriverInterfaceKorgUsb::UnmuteAudioInput(unsigned int) { }
 
 CSTGVoiceModelManager::CSTGVoiceModelManager()
 {
@@ -944,8 +1164,88 @@ void CSTGVoiceAllocator::EmergencyFreeVoiceList(void *list)
 	rtwrap_pthread_mutex_unlock(mutex);
 }
 
+/*
+ * Sec 10.225: `CSTGAudioManager` genuinely gets dispatched through its
+ * own vtable-like `_vtablePtr` slot on every real boot --
+ * `CSTGEngine::Initialize()`'s `CallVtableSlot(audioManager, 0)`
+ * unconditionally calls slot 0 (confirmed via `objdump -r` on
+ * OA_real.ko's own `.rodata._ZTV16CSTGAudioManager` relocations to be
+ * `Initialize()`) -- this class's real slot layout is +0x08
+ * `Initialize()` (0x150b/5387 bytes -- substantial real audio-engine
+ * setup, out of scope per this project's RTAI/audio-DSP-fidelity
+ * policy, sec 10.185), +0x0c `StopAudioEngine()` (95 bytes -- small, but
+ * its own two callees `CSTGThread::Delete()`/`CSTGAudioThread::
+ * Shutdown()` aren't reconstructed either, deferred together), +0x10
+ * `DoAudioManagerThreadProcessing()` (956 bytes, a real-time per-tick
+ * audio dispatch body -- also out of scope, and not reachable from
+ * init_module's own boot path at all: it only runs inside
+ * `AudioManagerThreadRoutine`'s background thread, which
+ * `StartAudioEngine`'s own thread-creation gate never reaches on this
+ * project's VM boot tests, per audio_start.cpp's own header comment).
+ * `bar2_stubs.cpp`'s own `_ZTV16CSTGAudioManager[20]` placeholder
+ * predicted exactly this: "if any of these vtables are ever genuinely
+ * DISPATCHED through ... that would show up as a real crash to
+ * investigate at that point" -- that point arrived live (EIP=0/CR2=0,
+ * inside `CSTGEngine::Initialize()`).
+ *
+ * A REAL, deeper bug surfaced while fixing this, not just a missing
+ * population: this class's own header declared `virtual
+ * ~CSTGAudioManager()`, which made the C++ compiler treat slots 0/1
+ * (this SAME memory) as the Itanium ABI's D1/D0 destructor slots for
+ * `engine.cpp`'s `audioMgr->~CSTGAudioManager()` call (an EXPLICIT
+ * destructor call, which still dispatches virtually when the destructor
+ * is declared `virtual`) -- directly conflicting with the real ABI's
+ * own Initialize()/StopAudioEngine() meaning for those exact same
+ * bytes. `objdump -r` on OA_real.ko's own vtable relocations settles
+ * it: there is NO destructor slot in the real vtable at all (confirmed,
+ * see oa_engine.h's own corrected class comment) -- this class was
+ * never polymorphic via its destructor on real hardware. Fixed at the
+ * root: `virtual` removed from the destructor declaration (oa_engine.h)
+ * and a plain `void *_vtablePtr` first member added there instead,
+ * reserving the same leading native-pointer-width slot without any of
+ * C++'s own vtable/destructor machinery -- this constructor now owns
+ * that slot exclusively and unambiguously, matching the real ABI.
+ */
+typedef void (*AudioManagerVtableFn)(void *);
+static AudioManagerVtableFn sAudioManagerVtable[3];
+
+static void CSTGAudioManager_InitializeVtableStub(void *)
+{
+	/* Real body: 5387 bytes of audio-engine setup -- not reconstructed,
+	 * out of scope. Safe no-op: CSTGEngine::Initialize()'s own caller
+	 * (CallVtableSlot) discards any return value already. */
+}
+
+static void CSTGAudioManager_StopAudioEngineVtableStub(void *)
+{
+	/* Real body: 95 bytes, tears down two embedded CSTGThread objects
+	 * and walks a linked list calling CSTGAudioThread::Shutdown() on
+	 * each node -- neither dependency reconstructed yet. Safe no-op:
+	 * this project's own StartAudioEngine reconstruction (audio_start.cpp)
+	 * already established the audio driver's thread-creation gate never
+	 * succeeds on a VM boot test, so no real threads exist for this to
+	 * tear down in practice. */
+}
+
+static void CSTGAudioManager_ThreadProcessingVtableStub(void *)
+{
+	/* Real body: 956-byte real-time per-tick audio dispatch -- not on
+	 * any boot-reachable path (see class comment above). Safe no-op. */
+}
+
+CSTGAudioManager::~CSTGAudioManager()
+{
+	/* Confirmed real: NOT virtual (see class comment, oa_engine.h/sec
+	 * 10.225) and no teardown logic reconstructed at this scope. */
+}
+
 CSTGAudioManager::CSTGAudioManager()
 {
+	sAudioManagerVtable[0] = &CSTGAudioManager_InitializeVtableStub;
+	sAudioManagerVtable[1] = &CSTGAudioManager_StopAudioEngineVtableStub;
+	sAudioManagerVtable[2] = &CSTGAudioManager_ThreadProcessingVtableStub;
+	_vtablePtr = (void *)sAudioManagerVtable;
+
 	/* +0xa48..+0xa5c (target-relative, i.e. right after the vtable
 	 * pointer): two complete mutex+condvar pairs. Confirmed real
 	 * allocate/init shape, same as CPowerOffTimer's/CSTGVoiceAllocator's

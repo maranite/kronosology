@@ -641,9 +641,22 @@ void CSTGVoiceAllocator::StealAllVoices() {}
  * insmod'ing); if any of these vtables are ever genuinely DISPATCHED
  * through before their real virtual methods are reconstructed, that
  * would show up as a real crash to investigate at that point, not
- * silently papered over here. */
-extern "C" unsigned char _ZTV16CSTGAudioManager[20];
-unsigned char _ZTV16CSTGAudioManager[20];
+ * silently papered over here.
+ *
+ * UPDATE (sec 10.225): that predicted crash arrived live for
+ * `CSTGAudioManager` specifically -- `CSTGEngine::Initialize()`
+ * genuinely dispatches through its own slot 0, unconditionally, on
+ * every real boot. Fixed in `CSTGAudioManager::CSTGAudioManager()`
+ * (managers.cpp): that investigation also found this class's `virtual
+ * ~CSTGAudioManager()` declaration was itself a real ABI mismatch bug
+ * (the real vtable has no destructor slot at all -- see oa_engine.h's
+ * corrected class comment), so `_ZTV16CSTGAudioManager` -- this exact
+ * placeholder -- is now fully DEAD: the class is no longer C++-virtual
+ * at all, uses a plain explicit `_vtablePtr` member instead, and no
+ * longer references this symbol anywhere. Removed rather than left as
+ * misleading dead code. The other vtable placeholders below remain
+ * genuinely unpopulated -- none of them has yet been confirmed reached
+ * by a real dispatch. */
 extern "C" unsigned char _ZTV14CSTGVectorEGCC[12];
 unsigned char _ZTV14CSTGVectorEGCC[12];
 extern "C" unsigned char _ZTV17CSTGVectorEGXOnly[12];

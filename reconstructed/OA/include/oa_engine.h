@@ -1477,11 +1477,85 @@ public:
  * destructor" slot), not a direct non-virtual destructor call, because the
  * real allocated object is the derived CSTGAudioDriverInterfaceKorgUsb
  * (confirmed via Initialize()'s `_Znwj` + that derived class's own
- * constructor call). */
+ * constructor call).
+ *
+ * CORRECTS an earlier pass of this header (sec 10.225): this class was
+ * previously left with ONLY the pure virtual destructor declared, which
+ * produced a real 0x10-byte vtable (offset-to-top + RTTI + the two
+ * dtor slots only). The REAL `.rodata._ZTV24CSTGAudioDriverInterface`
+ * is 0x68 bytes (confirmed via `nm -S`/`objdump -r` on OA_real.ko) --
+ * 24 total virtual-function slots. The missing 22 virtual methods below
+ * are added to restore the real vtable size/layout; this was a genuine
+ * reconstruction gap, not a stylistic choice -- `CSTGEngine::Initialize()`
+ * dispatches through slot 2 (`Initialize()`, vtable+0x8) via
+ * `CallVtableSlot(audioDriver, 2)`, which on the too-small vtable read
+ * whatever zero-filled linker padding followed the truncated
+ * `_ZTV31CSTGAudioDriverInterfaceKorgUsb` symbol and jumped through a
+ * NULL function pointer (EIP/CR2 both 0, "Bad EIP value") --
+ * `setup_global_resources+0x2a4` -> `CSTGEngine::Initialize()+0x2f7` in
+ * the sec 10.225 live-boot crash.
+ *
+ * Slot order below is the REAL confirmed order (from the vtable's own
+ * relocation list, offsets +0x08..+0x64): dtor(2), Initialize, Start,
+ * Reset, GetAudioInputFromDriver(pure), WriteAudioOutsAndWait(pure),
+ * WriteAudioOuts, KeepSynchronized, GetNumDriverOutputChannels() const,
+ * GetNumDriverInputChannels() const, then eight pure-virtual
+ * Mute/UnmuteAllAudio|Outputs|Inputs, four pure-virtual
+ * Mute/UnmuteAudioOutput|Input(unsigned int), then three NON-pure
+ * "DMA buffer counter" methods CSTGAudioDriverInterfaceKorgUsb does NOT
+ * override (confirmed: its own vtable's +0x5c/+0x60/+0x64 relocations
+ * point directly at these base-class symbols).
+ */
 class CSTGAudioDriverInterface {
 public:
 	static CSTGAudioDriverInterface *sInstance;
+	CSTGAudioDriverInterface();
 	virtual ~CSTGAudioDriverInterface() = 0;
+	virtual int Initialize();
+	virtual void Start();
+	virtual void Reset();
+	virtual void *GetAudioInputFromDriver() = 0;
+	virtual void WriteAudioOutsAndWait() = 0;
+	virtual void WriteAudioOuts();
+	virtual void KeepSynchronized();
+	virtual unsigned int GetNumDriverOutputChannels() const;
+	virtual unsigned int GetNumDriverInputChannels() const;
+	virtual void MuteAllAudio() = 0;
+	virtual void UnmuteAllAudio() = 0;
+	virtual void MuteAudioOutputs() = 0;
+	virtual void UnmuteAudioOutputs() = 0;
+	virtual void MuteAudioInputs() = 0;
+	virtual void UnmuteAudioInputs() = 0;
+	virtual void MuteAudioOutput(unsigned int busIndex) = 0;
+	virtual void UnmuteAudioOutput(unsigned int busIndex) = 0;
+	virtual void MuteAudioInput(unsigned int busIndex) = 0;
+	virtual void UnmuteAudioInput(unsigned int busIndex) = 0;
+	virtual void IncrementSTGDMABufferCounter();
+	virtual void IncrementDriverDMABufferCounter();
+	virtual bool STGRequiredToFillAnotherDMABuffer() const;
+
+protected:
+	/*
+	 * Opaque state occupying target-relative +0x04..+0x37 (immediately
+	 * after the vtable pointer, whatever its width on this build -- the
+	 * same host/target-portable "named byte array as the first data
+	 * member" convention CSTGAudioDriverInterfaceKorgUsb's own `_pad04`
+	 * used to use for this exact span before it moved up into the base
+	 * class here). Confirmed real content within this blob (all via
+	 * direct disassembly of the tiny, dedicated-section base-class
+	 * methods below): +0x04 a one-byte "initialized" flag (ctor clears
+	 * it, Initialize() sets it, never read back by any reconstructed
+	 * path); +0x08..+0x2c ten confirmed-zeroed-by-Initialize() dwords,
+	 * otherwise unrecovered; +0x30/+0x34 a pair of DMA buffer counters
+	 * (STG-side / driver-side), atomically incremented by
+	 * IncrementSTGDMABufferCounter()/IncrementDriverDMABufferCounter()
+	 * and compared by STGRequiredToFillAnotherDMABuffer() -- real-time
+	 * audio-tick bookkeeping, out of scope per this project's
+	 * RTAI/audio-DSP-fidelity policy (sec 10.185); reconstructed only
+	 * far enough to be memory-safe and internally self-consistent, not
+	 * asserted to be byte-position-correct on a host (non-32-bit) build.
+	 */
+	unsigned char _pad04[0x38 - 0x04];
 };
 
 /*
@@ -1516,23 +1590,50 @@ public:
 	void Callback(void *arg);
 
 	/*
+	 * Real overrides (confirmed via `_ZTV31CSTGAudioDriverInterfaceKorgUsb`'s
+	 * own relocation list, offsets +0x08..+0x58 -- see oa_engine.h's
+	 * CSTGAudioDriverInterface comment for the full slot-order ground
+	 * truth and why this class needed these added at all, sec 10.225).
+	 * The three DMA-buffer-counter slots (+0x5c/+0x60/+0x64) are
+	 * DELIBERATELY NOT overridden here -- confirmed real: this class's
+	 * own vtable relocations at those offsets point directly at the
+	 * BASE class's IncrementSTGDMABufferCounter/
+	 * IncrementDriverDMABufferCounter/STGRequiredToFillAnotherDMABuffer
+	 * symbols, i.e. genuinely inherited, not overridden.
+	 */
+	virtual int Initialize();
+	virtual void Start();
+	virtual void Reset();
+	virtual void *GetAudioInputFromDriver();
+	virtual void WriteAudioOutsAndWait();
+	virtual void WriteAudioOuts();
+	virtual void KeepSynchronized();
+	virtual unsigned int GetNumDriverOutputChannels() const;
+	virtual unsigned int GetNumDriverInputChannels() const;
+	virtual void MuteAllAudio();
+	virtual void UnmuteAllAudio();
+	virtual void MuteAudioOutputs();
+	virtual void UnmuteAudioOutputs();
+	virtual void MuteAudioInputs();
+	virtual void UnmuteAudioInputs();
+	virtual void MuteAudioOutput(unsigned int busIndex);
+	virtual void UnmuteAudioOutput(unsigned int busIndex);
+	virtual void MuteAudioInput(unsigned int busIndex);
+	virtual void UnmuteAudioInput(unsigned int busIndex);
+
+	/*
 	 * Deliberately NAMED members here, not a raw `_unrecovered[]` byte
 	 * blob accessed via `(this)+OFFSET` casts (the pattern used
 	 * everywhere else in this file): this class has a real inherited
 	 * vtable pointer, which is 4 bytes on the confirmed 32-bit target but
-	 * 8 bytes on a 64-bit host build -- a hardcoded target-relative offset
-	 * like `+0x38` would land 4 bytes short of the real field on host,
-	 * corrupting whatever comes after it. Named members let each build's
-	 * own compiler place them correctly after the (target- or
-	 * host-width) vtable pointer, consistently within that build, which
-	 * is what actually matters: the real target build is what has to be
-	 * byte-correct, and the host build only needs internally-consistent
-	 * relative placement to KAT-test the confirmed field *values*.
-	 * +0x34..+0x37 (target-relative, between the confirmed 0x00-vtable
-	 * and the first named field here) is unaccounted-for space --
-	 * real content there not determined in this pass.
+	 * 8 bytes on a 64-bit host build. The base class's own `_pad04`
+	 * (moved up into `CSTGAudioDriverInterface` itself, sec 10.225 --
+	 * previously duplicated here before that class had any fields of its
+	 * own) already accounts for target offsets +0x04..+0x37; the
+	 * compiler places these named members right after that base
+	 * subobject on any build, target or host, without needing a second
+	 * padding array here.
 	 */
-	unsigned char _pad04[0x38 - 0x04];
 	void *selfPtr;			/* +0x38, confirmed: set to `this` */
 	void *callbackFnPtr;		/* +0x3c, confirmed: &Callback trampoline */
 	unsigned int channelsIn;	/* +0x40, confirmed: 6 */
@@ -1598,17 +1699,33 @@ public:
  *
  * Total confirmed size (target, including the 4-byte vtable pointer):
  * 0x455c (~17.3KB). This reconstruction's own declared member data spans
- * 0x4558 bytes (excluding the compiler-placed vtable pointer), so
- * `sizeof(CSTGAudioManager)` matches the real confirmed size exactly on
- * the 32-bit target build (host builds differ only by the vtable
- * pointer's own width, the same tolerated/documented gap as every other
- * vtabled class here).
+ * 0x4558 bytes (excluding the vtable pointer), so `sizeof(CSTGAudioManager)`
+ * matches the real confirmed size exactly on the 32-bit target build
+ * (host builds differ only by the vtable pointer's own width, the same
+ * tolerated/documented gap as every other vtabled class here).
+ *
+ * CORRECTED (sec 10.225): this class's destructor is NOT actually
+ * virtual in the real ABI -- confirmed via `objdump -r` on OA_real.ko's
+ * own `.rodata._ZTV16CSTGAudioManager` relocations, which contain ZERO
+ * destructor slots at all (just three real methods: `Initialize()`,
+ * `StopAudioEngine()`, `DoAudioManagerThreadProcessing()`, at the exact
+ * offsets an earlier reconstruction pass's `virtual ~CSTGAudioManager()`
+ * declaration made the C++ compiler treat as its own D1/D0 destructor
+ * slots -- a genuine, previously-undiscovered ABI mismatch: this class
+ * was never polymorphic via its destructor on real hardware at all). A
+ * plain, explicit `void *_vtablePtr` first member (see below) reserves
+ * the same leading native-pointer-width slot the compiler used to place
+ * automatically for the (removed) `virtual` keyword, now used
+ * exclusively for the three real methods above -- see
+ * `CSTGAudioManager::CSTGAudioManager()`'s own header comment in
+ * managers.cpp for the full story of how this was found (a live-boot
+ * NULL-pointer crash) and fixed.
  */
 class CSTGAudioManager {
 public:
 	static CSTGAudioManager *sInstance;
 	CSTGAudioManager();
-	virtual ~CSTGAudioManager();
+	~CSTGAudioManager();
 
 	/* Confirmed real (via relocation, .text+0x66f00, 235 bytes) -- see
 	 * oa_audio_start.h/src/init/audio_start.cpp for the full
@@ -1636,7 +1753,12 @@ public:
 	static void *ASKThreadRoutine(void *arg);
 	static void *AudioManagerThreadRoutine(void *arg);
 
-	unsigned char _unrecovered_head[0xa44];	/* vtable(target:+0x00) then this reaches +0xa48 */
+	/* Raw vtable-pointer-sized slot (sec 10.225 -- NOT a real C++
+	 * `virtual` mechanism, see this class's own header comment above).
+	 * Native-pointer-width so it's correctly sized on any build without
+	 * relying on the compiler's own implicit vtable-pointer placement. */
+	void *_vtablePtr;
+	unsigned char _unrecovered_head[0xa44];	/* +0x04 (target) after _vtablePtr, this reaches +0xa48 */
 	unsigned int  mutexCondFlag1;			/* +0xa48, confirmed zeroed */
 	unsigned int  mutex1Handle;			/* +0xa4c, confirmed real mutex handle */
 	unsigned int  cond1Handle;			/* +0xa50, confirmed real condvar handle */
