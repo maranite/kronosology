@@ -104,16 +104,87 @@ static_assert(sizeof(STGDecryptDaemonWatch) == 0x94,
 static unsigned char sDaemonLockKeyDummy[4];
 static unsigned char sDecryptDaemonLockKeyDummy[4];
 
-/* The two kernel-thread entry trampolines (ground truth `.text+0x11ccc0`
- * for the general cluster, `.text+0x11c820` for the decrypt cluster) are
- * real internal (`t`) functions this batch does NOT reconstruct -- they
- * are only ever passed to kernel_thread() as an opaque function-pointer
- * VALUE by the code reconstructed here, never called. Modeled as raw
- * ground-truth address constants, exactly matching the established
- * `RTWRAP_THREAD_TRAMPOLINE` precedent (rtwrap.cpp, sec 10.190/batch 39).
+/* ---------------------------------------------------------------------
+ * DaemonThreadEntry / DecryptDaemonThreadEntry -- the real kernel-thread
+ * entry points ground truth passes to kernel_thread() (both real,
+ * confirmed-named `ThreadRoutine` symbols: `.text+0x11ccc0` for the
+ * general cluster, `.text+0x11c820` for the decrypt cluster -- confirmed
+ * both via `objdump -d` against OA_real.ko and the Ghidra decompile
+ * export, /home/share/Decomp/oa_export/functions/ThreadRoutine@0012ccc0.c
+ * / @0012c820.c, sec 10.234). Ground truth's real body is a genuine
+ * infinite per-daemon dispatch loop (thread bring-up, then repeatedly
+ * wait-for-wakeup and call the stored mainRoutine() while running != 0)
+ * -- squarely real-time audio/DSP daemon work, out of scope per this
+ * project's own established RTAI-substitution/audio-DSP-fidelity policy
+ * (sec 10.185).
+ *
+ * THE BUG THIS REPLACES (sec 10.233's own hand-off): this file previously
+ * modeled these two trampolines as raw ground-truth ADDRESS CONSTANTS
+ * (`(int (*)(void *))0x11ccc0` / `0x11c820`), following the same "opaque
+ * address, never called by anything reconstructed here" treatment already
+ * established for `rtwrap_pthread_create`'s own `RTWRAP_THREAD_TRAMPOLINE`
+ * (rtwrap.cpp, sec 10.190/batch 39). That precedent is valid THERE only
+ * because `rt_task_init()` (RTAIVirtualDriver.ko's own from-scratch, purely
+ * bookkeeping substitute) never actually jumps to the address it's given.
+ * `kernel_thread()`, by contrast, is genuine, UNMODIFIED core Linux 2.6.32
+ * kernel API (`arch/x86/kernel/process_32.c`'s `kernel_thread_helper`): it
+ * unconditionally spawns a REAL kernel thread whose EIP starts executing
+ * at exactly the function pointer given, immediately, with no
+ * virtualization possible. In a freshly-rebuilt OA.ko the literal
+ * ground-truth addresses 0x11ccc0/0x11c820 are just wherever the linker
+ * happened to place unrelated code (or nothing at all) in THIS build --
+ * confirmed live: `BUG: unable to handle kernel paging request at
+ * 0011c820, IP: [<0011c820>] 0x11c820 ... Call Trace: [<40103af7>] ?
+ * kernel_thread_helper+0x7/0x10` (MASTER_REFERENCE.md sec 10.233) is an
+ * EXACT match for the old `DECRYPT_DAEMON_THREAD_TRAMPOLINE` literal --
+ * the new kernel thread's very first instruction faulted because nothing
+ * valid lives at that address in this build. `setup_stg_decrypt_daemons()`
+ * (step 10) runs before `setup_stg_daemons()` (step 12) in `init_module()`,
+ * which is exactly why the decrypt cluster's trampoline was hit first.
+ *
+ * FIX: real, minimal, SAFE stand-in entry points, matching kernel_thread's
+ * own required `int (*)(void*)` signature exactly (ground truth's real
+ * ThreadRoutine is also regparm(3) with a single pointer arg -- same ABI).
+ * Each: (1) immediately signals the "I'm alive" startup completion
+ * (completion1) -- confirmed structurally REQUIRED, since SetupDaemon/
+ * SetupDecryptDaemon block on wait_for_completion(completion1) right
+ * after spawning and would hang forever otherwise; (2) signals the
+ * shutdown completion (completion2) so cleanup_stg_daemons()/
+ * cleanup_stg_decrypt_daemons()'s own wait_for_completion_timeout doesn't
+ * need its full 2000-jiffy timeout at rmmod time; (3) returns 0
+ * immediately -- kernel_thread_helper calls do_exit() with this value
+ * once the function returns, a completely standard, safe kernel-thread
+ * exit (confirmed via the same live call trace: `kernel_thread_helper`
+ * IS the real trampoline that calls fn(arg) then do_exit()). Deliberately
+ * does NOT dispatch to mainRoutine/srqHandler at all -- the real
+ * per-daemon command-processing loop -- honestly inert rather than a
+ * fabricated approximation of unreconstructed audio/DSP logic.
+ *
+ * `complete()` is a genuine real kernel primitive, confirmed as an actual
+ * `*UND*` import in OA_real.ko's own symbol table (`nm`/`objdump -t`) --
+ * not a new invented dependency, the ground-truth binary needs this exact
+ * same symbol resolved at insmod time regardless.
  */
-static int (*const DAEMON_THREAD_TRAMPOLINE)(void *) = (int (*)(void *))0x11ccc0;
-static int (*const DECRYPT_DAEMON_THREAD_TRAMPOLINE)(void *) = (int (*)(void *))0x11c820;
+extern "C" void complete(void *completion);
+
+static int DaemonThreadEntry(void *arg)
+{
+	STGDaemonWatch *d = (STGDaemonWatch *)arg;
+	complete(d->completion1);
+	complete(d->completion2);
+	return 0;
+}
+
+static int DecryptDaemonThreadEntry(void *arg)
+{
+	STGDecryptDaemonWatch *d = (STGDecryptDaemonWatch *)arg;
+	complete(d->completion1);
+	complete(d->completion2);
+	return 0;
+}
+
+static int (*const DAEMON_THREAD_TRAMPOLINE)(void *) = DaemonThreadEntry;
+static int (*const DECRYPT_DAEMON_THREAD_TRAMPOLINE)(void *) = DecryptDaemonThreadEntry;
 
 /* The 18 daemon-specific MainRoutine/SRQHandler functions (11
  * MainRoutines + 7 SRQHandlers) are likewise real, confirmed (`T`/`t` in

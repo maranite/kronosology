@@ -77,13 +77,32 @@ static int g_kthreadFailAtCall;
 static long g_kthreadReturnValue = 100;
 static void *g_lastKthreadArg;
 static unsigned long g_lastKthreadFlags;
-long kernel_thread(int (*)(void *), void *arg, unsigned long flags)
+static int (*g_lastKthreadFn)(void *);
+long kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
 	g_kthreadCalls++;
+	g_lastKthreadFn = fn;
 	g_lastKthreadArg = arg;
 	g_lastKthreadFlags = flags;
 	if (g_kthreadFailAtCall && g_kthreadCalls == g_kthreadFailAtCall) return -1;
 	return g_kthreadReturnValue + g_kthreadCalls;
+}
+
+/* Records complete() calls -- sec 10.234's own new mock, added to KAT the
+ * fix for the sec 10.233 "kernel_thread jumps into a garbage literal
+ * address" bug: the real entry points passed to kernel_thread() above are
+ * now real functions (DaemonThreadEntry/DecryptDaemonThreadEntry), not
+ * raw address constants, and must be exercised directly (kernel_thread()
+ * itself is mocked to never invoke its fn argument, matching this
+ * project's established convention -- see section [7] below, which
+ * captures g_lastKthreadFn and calls it back by hand). */
+static int g_completeCalls;
+static void *g_completeArgs[4];
+void complete(void *completion)
+{
+	if (g_completeCalls < 4)
+		g_completeArgs[g_completeCalls] = completion;
+	g_completeCalls++;
 }
 
 static int g_waitCompletionCalls;
@@ -125,7 +144,9 @@ static void reset_mocks(void)
 	g_srqFailAtCall = 0; g_srqReturnValue = 1;
 	g_freeSrqCalls = 0; g_lastFreedSrq = 0;
 	g_kthreadCalls = 0; g_kthreadFailAtCall = 0; g_kthreadReturnValue = 100;
-	g_lastKthreadArg = 0; g_lastKthreadFlags = 0;
+	g_lastKthreadArg = 0; g_lastKthreadFlags = 0; g_lastKthreadFn = 0;
+	g_completeCalls = 0;
+	g_completeArgs[0] = g_completeArgs[1] = g_completeArgs[2] = g_completeArgs[3] = 0;
 	g_waitCompletionCalls = 0; g_lastWaitCompletion = 0;
 	g_waitCompletionTimeoutCalls = 0; g_lastWaitCompletionTimeout = 0; g_lastTimeoutValue = 0;
 	g_wakeUpCalls = 0; g_lastWakeQueue = 0; g_lastWakeMode = 0; g_lastWakeExclusive = 0;
@@ -252,6 +273,50 @@ int main(void)
 		 gStgDecryptDaemons[0].running == 0 && gStgDecryptDaemons[2].running == 0, 1);
 	check_eq("untouched entries[1]/[3] still running==0",
 		 gStgDecryptDaemons[1].running == 0 && gStgDecryptDaemons[3].running == 0, 1);
+
+	printf("\n[7] DaemonThreadEntry/DecryptDaemonThreadEntry: real kernel_thread()\n"
+	       "    entry points, invoked directly (sec 10.234 fix for the sec\n"
+	       "    10.233 kernel_thread-into-garbage-literal-address crash)\n");
+	reset_mocks();
+	rc = setup_stg_daemons();
+	check_eq("setup_stg_daemons() still returns 0", rc, 0);
+	check_eq("kernel_thread's fn arg is non-NULL (a real function, not stubbed out)",
+		 g_lastKthreadFn != 0, 1);
+	{
+		/* The general cluster's entry point (this is the SAME function
+		 * pointer value passed to every one of the 7 kernel_thread()
+		 * calls -- one shared trampoline, matching ground truth's own
+		 * single `ThreadRoutine` symbol at .text+0x11ccc0). Call it
+		 * back by hand exactly as the real kernel_thread_helper would,
+		 * against the last-populated real control block
+		 * (gStgDaemons[6], "OACDAudio"). */
+		STGDaemonWatch *d = &gStgDaemons[6];
+		int entryRet = g_lastKthreadFn(d);
+		check_eq("DaemonThreadEntry returns 0 (do_exit(0) via kernel_thread_helper)",
+			 entryRet, 0);
+		check_eq("complete() called exactly twice (completion1 then completion2)",
+			 g_completeCalls, 2);
+		check_eq("first complete() call targets completion1 (the 'I'm alive' signal"
+			 " SetupDaemon's own wait_for_completion blocks on)",
+			 g_completeArgs[0] == (void *)d->completion1, 1);
+		check_eq("second complete() call targets completion2 (the shutdown signal"
+			 " cleanup_stg_daemons' wait_for_completion_timeout waits on)",
+			 g_completeArgs[1] == (void *)d->completion2, 1);
+	}
+
+	reset_mocks();
+	rc = setup_stg_decrypt_daemons();
+	check_eq("setup_stg_decrypt_daemons() still returns 0", rc, 0);
+	{
+		STGDecryptDaemonWatch *d = &gStgDecryptDaemons[3];
+		int entryRet = g_lastKthreadFn(d);
+		check_eq("DecryptDaemonThreadEntry returns 0", entryRet, 0);
+		check_eq("complete() called exactly twice", g_completeCalls, 2);
+		check_eq("first complete() call targets completion1",
+			 g_completeArgs[0] == (void *)d->completion1, 1);
+		check_eq("second complete() call targets completion2",
+			 g_completeArgs[1] == (void *)d->completion2, 1);
+	}
 
 	printf("\n%s (%d failed checks)\n",
 	       g_fail ? "SOME CHECKS FAILED" : "all checks passed", g_fail);
