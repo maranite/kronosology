@@ -14,16 +14,74 @@
 #include "at88_chip.h"
 #include "bignum.h"
 
+/*
+ * Real AT88SC AAC decay sequences. Ground truth: Atmel CryptoMemory datasheet
+ * (Good Info/Atmel-8664-CryptoMem-Low-Density-Full-Specification-Datasheet.pdf),
+ * section 6.3.18 "Authentication Attempts Counters": "The AAC will decrement
+ * ($FF, $EE, $CC, $88, $00) with each incorrect attempt to authenticate. The AAC
+ * permanently locks the corresponding key set once its value reaches $00." A
+ * chip config bit ("ETA") extends this from 4 to 8 consecutive failures, using
+ * the sequence $FF,$FE,$FC,$F8,$F0,$E0,$C0,$80,$00 instead. The real Kronos
+ * chip's actual ETA setting has not been characterized from a live capture (see
+ * README.md's Open Items) -- AT88ChipState::useEightStepAac defaults to 0 (the
+ * 4-step/documented-default sequence); set it explicitly if/when this gets
+ * confirmed against real hardware.
+ */
+static const unsigned char kAacSequence4[5] = {0xff, 0xee, 0xcc, 0x88, 0x00};
+static const unsigned char kAacSequence8[9] = {0xff, 0xfe, 0xfc, 0xf8, 0xf0, 0xe0, 0xc0, 0x80, 0x00};
+
+static void aac_sequence(const struct AT88ChipState *chip, const unsigned char **seq, int *len)
+{
+	if (chip->useEightStepAac) { *seq = kAacSequence8; *len = 9; }
+	else                       { *seq = kAacSequence4; *len = 5; }
+}
+
+/*
+ * Real chips refuse to even attempt verification once locked (datasheet: "the
+ * device will return...to indicate the command is unauthorized" without
+ * processing the command) -- session-scoped only, see at88_chip.h's
+ * at88_chip_handle_b8() doc comment for what "session-scoped" means here.
+ */
+int at88_chip_is_locked_out(const struct AT88ChipState *chip)
+{
+	return chip->configZone[0x50] == 0x00;
+}
+
 static void update_aac(struct AT88ChipState *chip, int accepted)
 {
 	unsigned char *aac = &chip->configZone[0x50];
+
 	if (accepted) {
-		if (*aac < 0xff)
-			(*aac)++;
-	} else {
-		if (*aac > 0)
-			(*aac)--;
+		/* Datasheet: "any correct attempt to authenticate resets the AAC
+		 * value to $FF" -- only reachable prior to lockout, since a locked
+		 * chip's $B8 short-circuits before this function is ever called. */
+		*aac = 0xff;
+		return;
 	}
+
+	const unsigned char *seq; int len;
+	aac_sequence(chip, &seq, &len);
+
+	int idx = -1;
+	for (int i = 0; i < len; i++)
+		if (seq[i] == *aac) { idx = i; break; }
+
+	if (idx < 0) {
+		/* AAC holds a value outside the known decay sequence (e.g. a
+		 * captured chip mid-sequence from real prior use under a config
+		 * this emulator doesn't know about) -- fail safe by locking
+		 * immediately rather than guessing which step it's really on. */
+		*aac = seq[len - 1];
+		return;
+	}
+	if (idx < len - 1)
+		*aac = seq[idx + 1];
+	/* else: already at the final step ($00) -- stays there. This IS the
+	 * per-session-permanent lock: nothing in this function or the $B8
+	 * dispatch path (at88_chip_handle_b8(), which short-circuits on lock
+	 * before even calling this) can move it off $00 again. Only reloading
+	 * the whole AT88ChipState (at88_chip_load_from_extract()/
+	 * at88_chip_load_synthetic()) clears it. */
 }
 
 void at88_chip_post_b8_steps(struct AT88ChipState *chip)
@@ -47,6 +105,9 @@ void at88_chip_post_b8_steps(struct AT88ChipState *chip)
 int at88_chip_handle_b8(struct AT88ChipState *chip, unsigned char zone,
 			 const unsigned char *nc, const unsigned char *q)
 {
+	if (at88_chip_is_locked_out(chip))
+		return 0;	/* real chips don't even attempt verification once locked */
+
 	if (zone == 0x00) {
 		if (chip->b8RoundsAccepted != 0)
 			return 0;	/* round 1 must be first */

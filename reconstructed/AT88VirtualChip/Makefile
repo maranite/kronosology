@@ -68,7 +68,7 @@ SRC := chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp pairfact_fix
 # `.ko`. A distinct suffix makes the two build modes unable to collide.
 OBJ := $(SRC:.cpp=.hostobj)
 
-TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_nv2ac_exports verify/test_pairfact_fixture verify/test_oa_integration
+TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_aac_lockout verify/test_nv2ac_exports verify/test_pairfact_fixture verify/test_oa_integration
 
 # reconstructed/OA/src/auth/*.cpp -- OA.ko's own real SetupAtmelForAuthorizations()
 # call chain, linked completely unmodified against this module's own real
@@ -99,6 +99,9 @@ verify/test_chip_state: verify/test_chip_state.cpp chip_state.cpp at88_chip.h
 
 verify/test_b8_handshake: verify/test_b8_handshake.cpp chip_state.cpp bignum.cpp b8_handshake.cpp at88_chip.h bignum.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_b8_handshake.cpp chip_state.cpp bignum.cpp b8_handshake.cpp -o $@
+
+verify/test_aac_lockout: verify/test_aac_lockout.cpp chip_state.cpp bignum.cpp b8_handshake.cpp at88_chip.h bignum.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_aac_lockout.cpp chip_state.cpp bignum.cpp b8_handshake.cpp -o $@
 
 verify/test_nv2ac_exports: verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp at88_chip.h bignum.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp -o $@

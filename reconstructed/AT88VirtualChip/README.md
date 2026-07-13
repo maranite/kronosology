@@ -96,6 +96,16 @@ lookup for loadmod's specific need.
    fire and `loadmod.ko` will get a wrong/undefined answer. Simplest mitigation:
    ship the VM's own `/.pairFact3` as the exact captured `pairFact3.bin`, so the
    fixture is guaranteed to match by construction.
+5. **`useEightStepAac` (b8_handshake.cpp's real `$B8` lockout, added 2026-07-13)
+   defaults to the 4-attempt decay sequence** (`$FF,$EE,$CC,$88,$00`) per the
+   Atmel CryptoMemory datasheet's stated default ("ETA=1"). The real Kronos
+   chip's actual ETA config bit has not been characterized from a live capture —
+   if it turns out to be the 8-attempt config instead, set `useEightStepAac = 1`
+   on the loaded `AT88ChipState` (or thread it through the `KronosExtract.bin`
+   loader once that config bit's location in the captured config zone is
+   identified). Doesn't affect the AT88 relay's correctness either way, only how
+   many consecutive failed `$B8` attempts it takes to lock — see
+   `verify/test_aac_lockout.cpp`.
 
 ## Planned layout
 
@@ -180,9 +190,16 @@ Covers:
   confirmed 18-step post-`$B8` continuation
   (`at88_chip_post_b8_steps()`, ported from `kronos_extract.c`'s
   `synth_post_b8_steps()` — "critical for subsequent zone0 reads to
-  decrypt correctly" per that file's own comment) and bumps a real,
-  saturating AAC byte (`configZone[0x50]`) up on accept / down on reject,
-  matching the real chip's confirmed anti-brute-force counter behavior.
+  decrypt correctly" per that file's own comment) and resets the AAC byte
+  (`configZone[0x50]`) to `$FF` on accept, or steps it through the real
+  datasheet-confirmed decay sequence (`$FF,$EE,$CC,$88,$00`, see
+  `at88_chip.h`'s `useEightStepAac`) on reject. Once the AAC reaches `$00`
+  the key set is locked for the rest of that `AT88ChipState`'s lifetime —
+  every further `$B8` (even with a cryptographically correct Q) is
+  rejected without evaluation, matching real hardware's own documented
+  anti-brute-force lockout (Good Info's Atmel CryptoMemory datasheet
+  §6.3.18) rather than the plain saturating ±1 counter this emulator used
+  before 2026-07-13. See `verify/test_aac_lockout.cpp`.
 
 **Honesty note on what's actually verified**: the bignum/p2 derivation IS
 checked against an independent oracle (`verify/gen_bignum_vectors.py`, a
