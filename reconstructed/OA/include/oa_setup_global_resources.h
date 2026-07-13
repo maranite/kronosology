@@ -199,6 +199,14 @@ struct CSTGHeapManager {
 #define STGAPI_OFF_FIXED_CONST          0x29118 /* confirmed 0x473b8000 */
 #define STGAPI_OFF_NKS4_HW_VERSION      0x29124
 #define STGAPI_OFF_NKS4_PANEL_KIND      0x29125
+#define STGAPI_OFF_KEYBED_STATUS16      0x1084  /* written by CSTGKeybedInterface::
+						  * ReceiveMessage's confirmed real
+						  * handshake-ACK branch (sec 10.237) --
+						  * own semantic meaning (plausibly a
+						  * keybed firmware/calibration revision
+						  * word) not independently determined,
+						  * only that it's a raw 16-bit copy of
+						  * the ACK message's bytes 1-2. */
 
 struct STGAPIFrontPanelStatus {
 	static unsigned char *sInstance;

@@ -27,6 +27,17 @@
 
 #include <cstdio>
 #include "oa_keybed_init.h"
+#include "oa_setup_global_resources.h" /* STGAPIFrontPanelStatus::sInstance,
+					 * referenced by keybed_receive.cpp's
+					 * ACK-completion path (sec 10.237) --
+					 * not otherwise exercised by this
+					 * file's own tests (they set the ACK
+					 * flag directly via __const_udelay's
+					 * mock instead), so a plain static
+					 * buffer is enough here. */
+
+static unsigned char g_frontPanelStub[STGAPI_FRONTPANEL_SIZE];
+unsigned char *STGAPIFrontPanelStatus::sInstance = g_frontPanelStub;
 
 static int g_fail;
 static void check_eq(const char *label, long got, long want)

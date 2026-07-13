@@ -24,25 +24,16 @@
 #include "oa_internal.h" /* placement operator new(size_t, void*) */
 
 /*
- * `CSTGComPort::OnByteReceived` (vtable slot 0) is a confirmed-real
- * pure virtual hook this project hasn't independently confirmed the
- * real override for (see oa_comport.h) -- plausibly set by whatever
- * REAL class provides it (e.g. setting the ACK flag below when the
- * expected byte arrives), not confirmed in this pass. A minimal stub
- * override is placement-constructed into the CSTGComPort sub-object at
- * `sInstance+0` purely so this class's own vtable-dispatching methods
- * (TriggerInterrupt/HandleInterrupt) have a valid vtable pointer to
- * call through, rather than leaving it as uninitialized/zeroed raw
- * storage (which would crash on the real dispatch). This does NOT
- * assert `CSTGKeybedInterface` itself inherits `CSTGComPort` -- that
- * relationship is not confirmed in this pass.
+ * `CSTGComPort::OnByteReceived` (vtable slot 0) is now a REAL,
+ * confirmed override -- `CSTGKeybedComPort::ReceiveByte` (sec 10.237),
+ * placement-constructed here matching the real static constructor's own
+ * confirmed action (installing `vtable for CSTGKeybedComPort` at
+ * `CSTGKeybedInterface::sInstance+0x0`). An earlier pass in this
+ * project modeled this as an empty `KeybedComPortStub` purely to give
+ * the vtable-dispatching methods (TriggerInterrupt/HandleInterrupt) a
+ * valid vtable pointer -- that placeholder is now replaced by the real
+ * class, see oa_comport.h/keybed_receive.cpp.
  */
-namespace {
-struct KeybedComPortStub : CSTGComPort {
-	void OnByteReceived(unsigned char) override { /* not confirmed */ }
-};
-} // namespace
-
 static unsigned char s_keybedInstance[KEYBED_SINSTANCE_SIZE];
 
 extern "C" unsigned char *CSTGKeybedInterface_sInstance(void)
@@ -73,11 +64,11 @@ int CSTGKeybedInterface_Startup(void)
 	 * counter across the whole function. */
 	int outerRetries = 0;
 
-	/* Placement-construct the CSTGComPort sub-object's vtable once --
-	 * see this file's own KeybedComPortStub comment above. */
+	/* Placement-construct the real CSTGKeybedComPort sub-object's
+	 * vtable once -- see this file's own updated comment above. */
 	static bool comPortConstructed = false;
 	if (!comPortConstructed) {
-		new (sInstance) KeybedComPortStub();
+		new (sInstance) CSTGKeybedComPort();
 		comPortConstructed = true;
 	}
 

@@ -71,6 +71,10 @@ static int g_clearDebugTrapsCalls;
 static void *g_lastClearDebugTrapsTask;
 static int g_shutdownIrqCalls, g_releaseIrqCalls, g_assignIrqCalls, g_startupIrqCalls;
 static unsigned int g_lastShutdownIrq, g_lastReleaseIrq, g_lastAssignIrq, g_lastAssignCpu, g_lastStartupIrq;
+static int g_requestIrqCalls, g_requestIrqReturn;
+static unsigned int g_lastRequestIrq, g_lastRequestFlags;
+static void (*g_lastRequestHandler)(unsigned int, void *);
+static void *g_lastRequestDev;
 static int g_rtheapFreeCalls;
 static void *g_lastRtheapFreeHeap;
 static void *g_lastRtheapFreePtr;
@@ -147,6 +151,16 @@ int rt_assign_irq_to_cpu(unsigned int irq, unsigned int cpu)
 	return 0;
 }
 int rt_startup_irq(unsigned int irq) { g_startupIrqCalls++; g_lastStartupIrq = irq; return 0; }
+int rt_request_irq(unsigned int irq, void (*handler)(unsigned int, void *), void *dev,
+		    unsigned int flags)
+{
+	g_requestIrqCalls++;
+	g_lastRequestIrq = irq;
+	g_lastRequestHandler = handler;
+	g_lastRequestDev = dev;
+	g_lastRequestFlags = flags;
+	return g_requestIrqReturn;
+}
 void rtheap_free(void *heap, void *ptr)
 {
 	g_rtheapFreeCalls++;
@@ -183,6 +197,8 @@ void rtwrap_shutdown_irq(unsigned int irq);
 void rtwrap_release_irq(unsigned int irq);
 void rtwrap_assign_irq_to_cpu(unsigned int irq, unsigned int cpu);
 void rtwrap_startup_irq(unsigned int irq);
+int rtwrap_request_irq(unsigned int irq, void (*handler)(unsigned int, void *), void *dev,
+			unsigned int flags);
 void rtwrap_set_runnable_on_cpuid(void *taskHandle, unsigned int cpuId);
 void rtwrap_clear_debug_traps_in_rt_task(void *taskHandle);
 void rtwrap_free(void *ptr);
@@ -545,6 +561,26 @@ int main(void)
 		check_eq("rt_assign_irq_to_cpu(_,1)", g_lastAssignCpu, 1);
 		rtwrap_startup_irq(8);
 		check_eq("rt_startup_irq(8)", g_lastStartupIrq, 8);
+	}
+
+	printf("\n[21] rtwrap_request_irq -- real forward (sec 10.237, no longer a hardcoded -1 stub)\n");
+	{
+		void (*dummyHandler)(unsigned int, void *) = (void (*)(unsigned int, void *))0x1234;
+		void *dummyDev = (void *)0x5678;
+		g_requestIrqReturn = 0;
+		int rc = rtwrap_request_irq(9, dummyHandler, dummyDev, 0);
+		check_eq("rt_request_irq called exactly once", g_requestIrqCalls, 1);
+		check_eq("rt_request_irq(irq=9)", g_lastRequestIrq, 9);
+		check_eq("rt_request_irq(handler forwarded unchanged)",
+			 (long)(intptr_t)(g_lastRequestHandler == dummyHandler), 1);
+		check_ptr("rt_request_irq(dev forwarded unchanged)", g_lastRequestDev, dummyDev);
+		check_eq("rt_request_irq(flags==0, matching ground truth's confirmed literal)",
+			 g_lastRequestFlags, 0);
+		check_eq("rtwrap_request_irq returns rt_request_irq's own return value (success)", rc, 0);
+
+		g_requestIrqReturn = -16; /* -EBUSY */
+		rc = rtwrap_request_irq(10, dummyHandler, dummyDev, 0);
+		check_eq("rtwrap_request_irq propagates a real failure return value", rc, -16);
 	}
 
 	printf("\n=========================================================\n");

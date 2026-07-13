@@ -105,6 +105,7 @@
 #include <linux/cpumask.h>
 #include <linux/string.h>
 #include <linux/param.h>
+#include <linux/interrupt.h>
 #include <asm/atomic.h>
 #include <stdarg.h>
 
@@ -755,15 +756,85 @@ __attribute__((regparm(0))) int rtf_put_if(unsigned int fifo, const void *buf, i
 EXPORT_SYMBOL(rtf_put_if);
 
 /* ========================================================================= *
- *  6. rt_assign_irq_to_cpu / rt_release_irq / rt_shutdown_irq /
- *     rt_startup_irq -- real RTAI IRQ-affinity/management primitives.
- *     Confirmed REGISTER-passed (regparm(3)), pure "arg never moved out
- *     of eax/edx" passthroughs in ground truth (rtwrap.cpp's own header
- *     comment). No confirmed real caller in this project's own
- *     reconstruction inspects any return value beyond OA-internal
- *     void-returning rtwrap_* forwarders discarding it outright -- safe
- *     no-ops in a VM context with no real hardware IRQ routing to manage.
+ *  6. rt_request_irq / rt_assign_irq_to_cpu / rt_release_irq /
+ *     rt_shutdown_irq / rt_startup_irq -- real RTAI IRQ-affinity/
+ *     management primitives. Confirmed REGISTER-passed (regparm(3)),
+ *     pure "arg never moved out of eax/edx" passthroughs in ground
+ *     truth (rtwrap.cpp's own header comment) -- `rt_request_irq`
+ *     itself confirmed via a direct disassembly of ground truth's own
+ *     `rtwrap_request_irq` (a pure one-arg-marshalled forward to this
+ *     exact symbol, MASTER_REFERENCE.md sec 10.237).
+ *
+ *     `rt_assign_irq_to_cpu`/`rt_shutdown_irq`/`rt_startup_irq` stay
+ *     safe no-ops (matching this substitute's own established
+ *     "-smp 1, no real hardware IRQ *affinity* to manage" rationale --
+ *     CPU pinning and interrupt masking are optimizations, not
+ *     correctness-load-bearing for anything this project's own boot
+ *     sequence currently reaches).
+ *
+ *     `rt_request_irq`/`rt_release_irq` are NOT safe no-ops, unlike
+ *     their siblings above: OA.ko's own real `CSTGComPort` UART driver
+ *     (the keybed serial handshake, sec 10.237) has no polling fallback
+ *     anywhere in its own confirmed reconstruction -- a byte the keybed
+ *     board (real or, in this VM, `kronos-keybed-superio`'s companion
+ *     UART) sends back can ONLY ever reach `CSTGComPort::
+ *     OnByteReceived()` via a genuine firing interrupt. A no-op
+ *     `rt_request_irq` (as this file used to treat the whole IRQ family)
+ *     would make CSTGComPort::Initialize()'s own real `if
+ *     (rtwrap_request_irq(...) != 0) return 0;` check fail 100% of the
+ *     time, for EVERY caller of CSTGComPort, regardless of any hardware
+ *     question -- confirmed live on `kronosvm` before this fix (boot
+ *     reached `OA_DEBUG_MARKER 14` then `insmod: ... -1 Operation not
+ *     permitted`, zero bytes ever transmitted since Initialize() failed
+ *     before CSTGKeybedInterface_Startup ever queued the probe byte).
+ *
+ *     Implemented as a real Linux `request_irq()`/`free_irq()` wrapper,
+ *     adapting the RTAI-style callback ABI (`void(*)(unsigned int,
+ *     void*)`, no return value) to the kernel's own `irqreturn_t(int,
+ *     void*)` handler signature via a small fixed-size table indexed by
+ *     IRQ line. Always requests `IRQF_SHARED`: the keybed UART's own
+ *     legacy ISA IRQ line (4, shared with COM1 in real PC IRQ routing)
+ *     may legitimately already be in use by the kernel's own serial8250
+ *     console driver, and ground truth's own real `rt_request_irq`
+ *     4th argument (`flags`) is a confirmed literal 0 at
+ *     CSTGComPort::Initialize()'s only real call site -- this
+ *     substitute chooses the flag value itself rather than trusting a
+ *     caller-supplied 0 (which would mean "not shared" and fail
+ *     outright on a genuinely shared legacy IRQ line).
  * ========================================================================= */
+
+#define RTAI_VIRT_MAX_IRQ 16
+static void (*rtai_virt_irq_handler[RTAI_VIRT_MAX_IRQ])(unsigned int, void *);
+static void *rtai_virt_irq_dev[RTAI_VIRT_MAX_IRQ];
+
+static irqreturn_t rtai_virt_irq_trampoline(int irq, void *dev_id)
+{
+	if ((unsigned int)irq < RTAI_VIRT_MAX_IRQ && rtai_virt_irq_handler[irq]) {
+		rtai_virt_irq_handler[irq]((unsigned int)irq, dev_id);
+		return IRQ_HANDLED;
+	}
+	return IRQ_NONE;
+}
+
+int rt_request_irq(unsigned int irq, void (*handler)(unsigned int, void *), void *dev,
+		    unsigned int flags)
+{
+	int ret;
+
+	(void)flags;
+	if (irq >= RTAI_VIRT_MAX_IRQ || !handler)
+		return -EINVAL;
+
+	rtai_virt_irq_handler[irq] = handler;
+	rtai_virt_irq_dev[irq] = dev;
+	ret = request_irq(irq, rtai_virt_irq_trampoline, IRQF_SHARED, "RTAIVirtualDriver", dev);
+	if (ret) {
+		rtai_virt_irq_handler[irq] = NULL;
+		rtai_virt_irq_dev[irq] = NULL;
+	}
+	return ret;
+}
+EXPORT_SYMBOL(rt_request_irq);
 
 int rt_assign_irq_to_cpu(unsigned int irq, unsigned int cpu)
 {
@@ -775,7 +846,11 @@ EXPORT_SYMBOL(rt_assign_irq_to_cpu);
 
 int rt_release_irq(unsigned int irq)
 {
-	(void)irq;
+	if (irq < RTAI_VIRT_MAX_IRQ && rtai_virt_irq_handler[irq]) {
+		free_irq(irq, rtai_virt_irq_dev[irq]);
+		rtai_virt_irq_handler[irq] = NULL;
+		rtai_virt_irq_dev[irq] = NULL;
+	}
 	return 0;
 }
 EXPORT_SYMBOL(rt_release_irq);

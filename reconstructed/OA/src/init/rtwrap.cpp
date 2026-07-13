@@ -102,6 +102,13 @@ int   rt_shutdown_irq(unsigned int irq);
 int   rt_release_irq(unsigned int irq);
 int   rt_assign_irq_to_cpu(unsigned int irq, unsigned int cpu);
 int   rt_startup_irq(unsigned int irq);
+/* rt_request_irq: confirmed real (via relocation) sibling of the irq
+ * family above -- see rtwrap_request_irq's own header comment (sec
+ * 10.237) for the ground-truthing detail (`objdump -d -r` on ground
+ * truth's own `rtwrap_request_irq`, a pure one-arg-marshalled forward
+ * to this exact symbol). */
+int   rt_request_irq(unsigned int irq, void (*handler)(unsigned int, void *), void *dev,
+		      unsigned int flags);
 void  rtheap_free(void *heap, void *ptr);
 /* rtheap_alloc/rt_task_init are both confirmed register-passed
  * (regparm(3) default, no override) via `rtwrap_pthread_create`'s own
@@ -138,6 +145,18 @@ static void *FromU32(unsigned int v) { return (void *)(unsigned long)v; }
 extern "C" {
 
 /* ---- Simple direct forwarders (irq family + set_runnable/clear_debug_traps) ---- */
+
+/*
+ * Confirmed real (`.text+0x119820`, sec 10.237): a pure one-arg-
+ * marshalled forward to `rt_request_irq` -- see this file's own header
+ * declaration comment above and oa_comport.h's own CSTGComPort::
+ * Initialize() call site (the ONLY real caller in this reconstruction).
+ */
+int rtwrap_request_irq(unsigned int irq, void (*handler)(unsigned int, void *), void *dev,
+			unsigned int flags)
+{
+	return rt_request_irq(irq, handler, dev, flags);
+}
 
 void rtwrap_shutdown_irq(unsigned int irq)
 {

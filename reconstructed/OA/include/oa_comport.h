@@ -200,6 +200,29 @@ public:
 		unsigned char tail;		/* +0x11 */
 		unsigned char head;		/* +0x12 */
 
+		/*
+		 * Confirmed real (sec 10.237): ground truth's own "global
+		 * constructors keyed to CSTGKeybedInterface::sInstance"
+		 * static ctor (`.text+0x33e800`) unconditionally writes
+		 * `movb $0x10, sInstance+0x4` -- i.e. THIS field,
+		 * capacity=16, matching the ring's own fixed 16-byte
+		 * `buffer[]` exactly. This was a genuine gap in an earlier
+		 * pass's reconstruction: capacity silently stayed 0 (this
+		 * project's own placement-new only zero-initializes),
+		 * which made `ComPortServiceLoop`'s own confirmed-real
+		 * `if (txFifo.capacity == 0) goto check_iir_pending;` guard
+		 * ALWAYS skip the TX-fifo-service block entirely -- so NO
+		 * byte was ever physically written to the UART's data
+		 * register, independent of any hardware/IRQ question.
+		 * Confirmed live on kronosvm: even after `CSTGComPort::
+		 * Initialize()`/`rtwrap_request_irq` both started
+		 * genuinely succeeding, a temporary diagnostic trace showed
+		 * `TriggerInterrupt()` being called every time yet the
+		 * companion virtual-keybed responder script still received
+		 * zero bytes -- this constructor is the fix.
+		 */
+		TransmitFifo() : capacity(16), tail(0), head(0) {}
+
 		void WriteByte(unsigned char value);
 	};
 
@@ -264,5 +287,89 @@ public:
 	 * port technique, not a fresh re-derivation of the loop). */
 	static void RTAIInterruptHandler(unsigned int irq, void *dev);
 };
+
+/*
+ * CSTGKeybedComPort : CSTGComPort -- the real derived class whose vtable
+ * `CSTGKeybedInterface::sInstance`'s own static constructor installs at
+ * +0x0 (confirmed via `objdump -sr` on the real "global constructors
+ * keyed to CSTGKeybedInterface::sInstance" static-init function,
+ * `.text+0x33e800`: `movl $vtable_for_CSTGKeybedComPort, 0x0
+ * (CSTGKeybedInterface::sInstance)`), NOT a generic never-overriding
+ * stub as an earlier pass in this project modeled it (`KeybedComPortStub`
+ * in keybed_init.cpp -- see that file's own updated comment). Confirmed
+ * real vtable slot 0 = `CSTGKeybedComPort::ReceiveByte(unsigned char)`
+ * (`.text+0x33e8e0`, 149 bytes); slot 1 is NOT overridden (the real
+ * vtable's second relocation targets the base `CSTGComPort::
+ * GetByteToTransmit()` directly, confirmed via `objdump -sr -j
+ * .rodata._ZTV17CSTGKeybedComPort`).
+ *
+ * This is THE missing piece that made `CSTGKeybedInterface_Startup`'s
+ * ACK flag (`KEYBED_OFF_ACK_FLAG`) permanently unreachable even in a
+ * hypothetical scenario with a real/virtual keybed board correctly
+ * answering over the UART: the previous `KeybedComPortStub::
+ * OnByteReceived` override was a confirmed-documented empty stub, so no
+ * received byte could ever have set the ACK flag, independent of any
+ * hardware question. Fixed here as a real reconstruction (sec 10.237),
+ * not a hardware substitute -- this is genuine OA.ko-internal software
+ * logic (message framing + ACK detection), not raw port I/O.
+ *
+ * Real confirmed object layout, extending CSTGComPort's own fields
+ * (which end exactly at +0x24, matching this class's first new field
+ * starting there with zero gap -- confirmed via objdump, not assumed):
+ *   +0x24  msgState (0 = waiting for a header/status byte, 1 =
+ *          mid-message accumulating data bytes)
+ *   +0x28  msgBuffer[4] (message assembly buffer, INCLUDES the leading
+ *          header byte as buffer[0] -- confirmed via the real
+ *          disassembly storing the header byte itself at cursor 0
+ *          before any data bytes)
+ *   +0x2c  msgExpectedLen (looked up from kNumBytesForMessageType by the
+ *          header byte's own (byte&0x70)>>4 "type" nibble)
+ *   +0x2d  msgCursor (next write index into msgBuffer)
+ */
+class CSTGKeybedComPort : public CSTGComPort {
+public:
+	int msgState;			/* +0x24 */
+	unsigned char msgBuffer[4];	/* +0x28 */
+	unsigned char msgExpectedLen;	/* +0x2c */
+	unsigned char msgCursor;	/* +0x2d */
+
+	void OnByteReceived(unsigned char receivedByte) override;
+};
+
+extern "C" {
+/*
+ * `CSTGKeybedInterface::ReceiveMessage(unsigned char const*, unsigned
+ * int)` -- confirmed real (`.text+0x33d9b0`, 456 bytes), called by
+ * `CSTGKeybedComPort::ReceiveByte` once a full message has been
+ * assembled. Modeled here as a free function taking the
+ * `CSTGKeybedInterface::sInstance` blob pointer directly (matching this
+ * project's own established convention for that singleton, see
+ * oa_keybed_init.h), rather than as a class method -- this project does
+ * not model `CSTGKeybedInterface` as a real C++ class elsewhere.
+ *
+ * Only the CONFIRMED, boot-reachable dispatch is faithfully
+ * reconstructed here: the `KEYBED_OFF_STATE == 0` early-ignore path, and
+ * the `KEYBED_OFF_STATE == 1` (mid-handshake) path, which is the one
+ * that sets `KEYBED_OFF_ACK_FLAG` when a 3-byte message with header
+ * byte `(buf[0] & 0xf0) == 0xa0` arrives (confirmed via `objdump -r`:
+ * `movb $0x1, 0xb50(%eax)` immediately follows storing `(buf[1]<<8) |
+ * buf[2]` into `STGAPIFrontPanelStatus::sInstance + 0x1084`).
+ *
+ * NOT reconstructed (a real, deliberately documented gap, matching this
+ * project's own established scope-decision convention): the
+ * `KEYBED_OFF_STATE == 2` ("fully running") dispatch, a large
+ * (~350-byte) block handling several other message types via
+ * `CSTGMessageProcessor::sInstance` (not yet modeled anywhere in this
+ * project) and further `STGAPIFrontPanelStatus` writes
+ * (`+0x1082/0x1083/0x1086-0x1089/0x108a/0x108d/0x29125`). This state is
+ * PROVABLY unreachable during `init_module()`'s own boot sequence --
+ * `CSTGKeybedInterface_Startup` only ever sets state to 2 on its own
+ * final success return, strictly AFTER the handshake loop this ACK flag
+ * feeds has already exited -- so this gap cannot affect the
+ * `init_module()` return-value question this pass targets.
+ */
+void CSTGKeybedInterface_ReceiveMessage(unsigned char *sInstance,
+					 const unsigned char *buf, unsigned int len);
+}
 
 #endif /* OA_COMPORT_H */

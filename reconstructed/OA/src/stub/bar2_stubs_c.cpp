@@ -182,8 +182,26 @@ extern "C" void cleanup_cpp_support() {}
  * src/init/rtwrap.cpp (batch 39 -- promoting it also uncovered and
  * fixed a real return-value-polarity bug in cpu_affinity.cpp's own
  * `CreateRealTimeWithCPUAffinity()`, see that function's header
- * comment). Still deferred here: rtwrap_request_irq (a real safe
- * non-bare-`{}` stub, unchanged). `rtwrap_set_debug_traps_in_rt_task`
+ * comment). `rtwrap_request_irq` FIXED (sec 10.237, 2026-07-13): its
+ * own unconditional `return -1` made EVERY caller of `CSTGComPort::
+ * Initialize()` (i.e. the whole keybed serial handshake,
+ * `CSTGKeybedInterface_Startup`) fail unconditionally, independent of
+ * any hardware question -- confirmed live on `kronosvm` (boot reached
+ * `OA_DEBUG_MARKER 14`, `insmod: ... -1 Operation not permitted`, zero
+ * bytes ever transmitted since `Initialize()` never got past this
+ * check). Ground-truthed via `objdump -d -r` on OA_real.ko's own
+ * `rtwrap_request_irq` (`.text+0x119820`, 31 bytes): a pure one-arg-
+ * marshalled forward to a confirmed real, undefined (`U`) RTAI symbol,
+ * `rt_request_irq` -- the exact same "simple direct forwarder" shape as
+ * its four siblings below (`rt_shutdown_irq`/`rt_release_irq`/
+ * `rt_assign_irq_to_cpu`/`rt_startup_irq`, already real via
+ * `rtwrap.cpp`). Moved there as a real forward (declared alongside its
+ * siblings); `RTAIVirtualDriver.ko` now provides a real (not safe-no-op)
+ * `rt_request_irq`/`rt_release_irq` pair too, since OA.ko's own
+ * `CSTGComPort` UART driver has no polling fallback -- a byte the
+ * keybed board sends back can only ever reach `OnByteReceived()` via a
+ * genuine firing interrupt (see that file's own comment for the full
+ * rationale). `rtwrap_set_debug_traps_in_rt_task`
  * FIXED (sec 10.235, 2026-07-13): its own unconditional `return -1`
  * made EVERY call to `CreateRealTimeWithCPUAffinity()` fail (see
  * cpu_affinity.cpp: `if (rtwrap_set_debug_traps_in_rt_task(taskHandle)
@@ -211,7 +229,9 @@ extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" int get_pthread_recursive_attr_constant(void) { return 1; }
 extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
 extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return 0; }
-extern "C" int rtwrap_request_irq(unsigned int, void (*)(unsigned int, void *), void *, unsigned int) { return -1; }
+/* rtwrap_request_irq: promoted to a real body in rtwrap.cpp (sec 10.237),
+ * matching its four irq-family siblings there -- see this file's own
+ * updated comment above. */
 
 /* ---- Low-level stg_* RTAI/CPU primitives (confirmed real, own bodies
  * not reconstructed) ---- */
