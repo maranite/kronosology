@@ -29,7 +29,7 @@
 #include "../bignum.h"
 
 extern "C" int  at88_chip_module_init(const unsigned char *blob, unsigned int blobLen);
-extern "C" void stgNV2AC_sync_cmd(unsigned char *address, unsigned int data);
+extern "C" int  stgNV2AC_sync_cmd(unsigned char *address, unsigned int data);
 extern int nv2ac_read_cmd_impl(const unsigned char *cmd, unsigned char *out);
 
 static int g_fail;

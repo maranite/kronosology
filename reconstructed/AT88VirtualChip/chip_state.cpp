@@ -201,6 +201,39 @@ int at88_chip_load_from_extract(struct AT88ChipState *chip,
 	return 0;
 }
 
+void at88_chip_load_synthetic(struct AT88ChipState *chip)
+{
+	for (int i = 0; i < 128; i++)
+		chip->configZone[i] = 0;
+
+	/* AAC byte -- see at88_chip.h's own header comment for this function
+	 * for the full derivation of why this MUST start saturated, not zero.
+	 * kNv2acStatusZone (reconstructed/OA/src/auth/nv2ac_handshake.cpp) is
+	 * {0x50,0x60,0x70,0x80} indexed by `sel` (0..3), but every real call
+	 * site in this project's own reconstruction hardcodes sel=0 (both
+	 * nv2ac_enable_cipher(0,...) and nv2ac_enable_encrypt(0,...)), so 0x50
+	 * is the only one of the four ever actually read here. 0x60/0x70 are
+	 * left at their zero default (never exercised, so harmless either
+	 * way); 0x80 (=128) is NOT touched deliberately -- it is one past the
+	 * end of this chip's own modeled 128-byte configZone (valid range
+	 * 0x00..0x7f) and would silently alias into zone0[0] if written
+	 * (caught by this file's own KAT, verify/test_chip_state.cpp). */
+	chip->configZone[0x50] = 0xff;
+
+	for (int i = 0; i < 40; i++)
+		chip->zone0[i] = 0;
+
+	chip->selectedZone = 0;
+	deax_init(&chip->session);
+	for (int i = 0; i < 8; i++) {
+		chip->p2[i] = 0;
+		chip->p3[i] = 0;
+	}
+	chip->b8RoundsAccepted = 0;
+
+	chip->dataLoaded = 0;	/* honest: not real per-device data -- see header comment */
+}
+
 int at88_chip_read_config(const struct AT88ChipState *chip,
 			   unsigned char addr, unsigned char len,
 			   unsigned char *out)

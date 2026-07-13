@@ -153,6 +153,22 @@ int main(void)
 	}
 	check_eq("all 12 steps match the independent Python implementation", (unsigned int)pyOk, 1);
 
+	printf("[7] at88_chip_load_synthetic() -- the VM/no-real-hardware fallback\n"
+	       "    (sec 10.233): AAC bytes must start pre-saturated at 0xff, not 0,\n"
+	       "    or the very first $B8 round can never report \"verified\" --\n"
+	       "    confirmed via a real OA.ko<->AT88VirtualChip integration run.\n");
+	AT88ChipState synth;
+	memset(&synth, 0xaa, sizeof(synth));	/* poison first, same convention as the rest of this project */
+	at88_chip_load_synthetic(&synth);
+	check_eq("dataLoaded stays 0 (honestly not real per-device data)",
+		 (unsigned int)synth.dataLoaded, 0);
+	check_eq("configZone[0x50] (AAC, the only sel==0 slot ever read) == 0xff",
+		 synth.configZone[0x50], 0xff);
+	check_eq("configZone[0x19] (IdN) == 0 (synthetic, no real secret)", synth.configZone[0x19], 0);
+	check_eq("zone0[0] == 0 (synthetic, no real secret -- NOT clobbered by an "
+		 "out-of-bounds configZone[0x80] write)", synth.zone0[0], 0);
+	check_eq("b8RoundsAccepted reset to 0", (unsigned int)synth.b8RoundsAccepted, 0);
+
 	printf("=============================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

@@ -68,7 +68,17 @@ SRC := chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp pairfact_fix
 # `.ko`. A distinct suffix makes the two build modes unable to collide.
 OBJ := $(SRC:.cpp=.hostobj)
 
-TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_nv2ac_exports verify/test_pairfact_fixture
+TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_nv2ac_exports verify/test_pairfact_fixture verify/test_oa_integration
+
+# reconstructed/OA/src/auth/*.cpp -- OA.ko's own real SetupAtmelForAuthorizations()
+# call chain, linked completely unmodified against this module's own real
+# chip-side logic. See verify/test_oa_integration.cpp's own header comment
+# for why this cross-module test exists (sec 10.233) and what it caught.
+OA_AUTH_DIR := ../OA/src/auth
+OA_INC_DIR  := ../OA/include
+OA_AUTH_SRC := $(OA_AUTH_DIR)/atmel_setup.cpp $(OA_AUTH_DIR)/atmel_zone_io.cpp \
+               $(OA_AUTH_DIR)/atmel_deax.cpp $(OA_AUTH_DIR)/atmel_primitives.cpp \
+               $(OA_AUTH_DIR)/atmel_challenge.cpp $(OA_AUTH_DIR)/nv2ac_handshake.cpp
 
 KDIR ?= /home/build/linux-kronos
 PWD  := $(shell pwd)
@@ -96,6 +106,24 @@ verify/test_nv2ac_exports: verify/test_nv2ac_exports.cpp chip_state.cpp bignum.c
 verify/test_pairfact_fixture: verify/test_pairfact_fixture.cpp pairfact_fixture.cpp pairfact_fixture.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_pairfact_fixture.cpp pairfact_fixture.cpp -o $@
 
+# nv2ac_exports.cpp's real stgNV2AC_sync_read_cmd(int,int) packs a pointer
+# into `int` -- lossless on the real 32-bit target, corrupts real pointers on
+# this 64-bit host (same documented issue as test_nv2ac_exports.cpp). Built
+# as its own object with that one symbol renamed away so
+# test_oa_integration.cpp's own pointer-safe bridge (calling the real
+# nv2ac_read_cmd_impl() core directly) can use the real name instead,
+# without a duplicate-symbol clash.
+verify/nv2ac_exports_hosttest.o: nv2ac_exports.cpp at88_chip.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -DstgNV2AC_sync_read_cmd=nv2ac_exports_read_wrapper_UNUSED \
+		-c nv2ac_exports.cpp -o $@
+
+verify/test_oa_integration: verify/test_oa_integration.cpp verify/nv2ac_exports_hosttest.o \
+                            chip_state.cpp bignum.cpp b8_handshake.cpp at88_chip.h bignum.h \
+                            $(OA_AUTH_SRC)
+	$(HOST_CXX) $(HOST_CXXFLAGS) -std=c++11 -I$(OA_INC_DIR) \
+		verify/test_oa_integration.cpp verify/nv2ac_exports_hosttest.o \
+		chip_state.cpp bignum.cpp b8_handshake.cpp $(OA_AUTH_SRC) -o $@
+
 # The real kernel-module build. Requires KDIR pointing at the Kronos
 # 2.6.32.11-korg kernel source tree (WSL-side, not this environment):
 #   make ko KDIR=/path/to/kronos/linux-source
@@ -106,6 +134,6 @@ ko-clean:
 	$(MAKE) -C $(KDIR) ARCH=i386 M=$(PWD) clean
 
 clean:
-	rm -f $(OBJ) $(TESTS)
+	rm -f $(OBJ) $(TESTS) verify/nv2ac_exports_hosttest.o
 
 endif

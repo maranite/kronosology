@@ -190,6 +190,54 @@ void at88_chip_post_b8_steps(struct AT88ChipState *chip);
 int at88_chip_load_from_extract(struct AT88ChipState *chip,
 				 const unsigned char *blob, unsigned int blobLen);
 
+/*
+ * at88_chip_load_synthetic -- populate `chip` with synthetic-but-
+ * self-consistent data for environments (VM/foreign-hardware boot
+ * testing) where no real hardware-extracted KronosExtract.bin exists.
+ * See README.md's "Open items"/module_main.c's own header comment for
+ * the RTAI/filp_open background on why such a file might legitimately
+ * be absent in a VM context.
+ *
+ * All-zero is a legitimate, self-consistent choice for configZone/zone0
+ * (beyond the AAC bytes below) specifically because the DEAX/GPA wire
+ * cipher has no per-device secret (README.md finding #2): both sides of
+ * the $B8 handshake derive the same expected Q from the same (here:
+ * zero) configZone bytes, so the cryptographic comparison itself
+ * genuinely matches -- confirmed empirically via a real cross-module
+ * integration run of OA.ko's actual SetupAtmelForAuthorizations() against
+ * this chip's actual at88_chip_handle_b8(), neither side mocked (see
+ * MASTER_REFERENCE.md sec 10.233).
+ *
+ * That same experiment also caught a SECOND real bug this function
+ * exists to work around: the AAC ("Authentication Attempt Counter") byte
+ * at configZone[0x50] starts at 0 in a plain zero-initialized chip.
+ * at88_chip_handle_b8()'s own update_aac() only ever INCREMENTS this
+ * byte on accept (saturating at 0xff) or decrements it on reject
+ * (saturating at 0) -- it never jumps straight to 0xff. OA.ko's own
+ * Nv2acVerifyRound requires reading back EXACTLY 0xff to consider a
+ * round "verified" (its real "chip status" sentinel). A real, healthy
+ * hardware chip that has been legitimately authenticated many times over
+ * its service life ships/operates with this counter already saturated
+ * at 0xff -- a brand-new all-zero synthetic chip would instead need 255
+ * consecutive successful $B8 rounds before its FIRST handshake attempt
+ * could ever report "verified", which is wrong for a fresh VM boot's
+ * very first authentication attempt. Pre-saturating this byte to 0xff
+ * here reproduces a healthy chip's real steady-state. (kNv2acStatusZone,
+ * reconstructed/OA/src/auth/nv2ac_handshake.cpp, is {0x50,0x60,0x70,0x80}
+ * indexed by `sel` 0..3, but every real call site in this project
+ * hardcodes sel=0, so 0x50 is the only one of the four ever actually
+ * read; 0x80 in particular is one past the end of this chip's own
+ * modeled 128-byte configZone and is deliberately left untouched.)
+ *
+ * `dataLoaded` is deliberately left 0 -- this is honestly NOT real
+ * per-device secret data (Zone0 stays all-zero), so operations that
+ * genuinely need it (e.g. real EXs auth-string validation against
+ * Zone0) are not expected to be meaningful against a synthetic chip;
+ * only SetupAtmelForAuthorizations()'s own GPA handshake (which has no
+ * per-device secret at all) is expected -- and confirmed -- to succeed.
+ */
+void at88_chip_load_synthetic(struct AT88ChipState *chip);
+
 /* Unencrypted config-zone read ($B6): copies `len` bytes starting at
  * `addr` out of `chip->configZone`. 0 on success, -1 if the read would run
  * past the 128-byte zone. */

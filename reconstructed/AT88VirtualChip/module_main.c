@@ -35,6 +35,26 @@
  * comfortably a static buffer, so no allocation is needed for it at all;
  * vmalloc is used here only for symmetry/documentation in case a future
  * change needs a larger buffer.
+ *
+ * Self-sufficiency (sec 10.233): a real hardware-extracted
+ * KronosExtract.bin can only ever exist after running kronos_extract.ko
+ * against a real physical AT88 chip -- there is no such chip in a VM or
+ * on foreign (non-Kronos) hardware, so blob_path genuinely will not exist
+ * there. Every failure path below (filp_open ENOENT, a short/failed
+ * vfs_read, or at88_chip_module_init() rejecting a malformed blob) now
+ * falls back to at88_chip_load_synthetic() (at88_chip.h/chip_state.cpp)
+ * instead of silently leaving the chip singleton at its untouched,
+ * all-zero, AAC-byte-at-0 C++ static-init default -- which, confirmed via
+ * a real cross-module integration test against OA.ko's actual
+ * SetupAtmelForAuthorizations() (MASTER_REFERENCE.md sec 10.233), makes
+ * the very first $B8 handshake round fail its own "verified" sentinel
+ * check (the AAC byte needs to start pre-saturated at 0xff, not 0 -- see
+ * at88_chip_load_synthetic()'s own header comment for the full reasoning).
+ * The GPA wire cipher itself has no per-device secret (README.md finding
+ * #2), so this synthetic chip is cryptographically self-consistent for
+ * SetupAtmelForAuthorizations()'s own handshake even though it carries no
+ * real per-device Zone0 secret -- real EXs auth-string validation is a
+ * separate concern this fallback does not (and cannot) address.
  */
 
 #include <linux/module.h>
@@ -47,7 +67,8 @@
 #include <linux/errno.h>
 
 int  at88_chip_module_init(const unsigned char *blob, unsigned int blobLen);
-void stgNV2AC_sync_cmd(unsigned char *address, unsigned int data);
+void at88_chip_module_init_synthetic(void);
+int  stgNV2AC_sync_cmd(unsigned char *address, unsigned int data);
 int  stgNV2AC_sync_read_cmd(int cmd4, int dest);
 
 /*
@@ -78,8 +99,15 @@ static void load_chip_blob_work(struct work_struct *w)
 
 	f = filp_open(blob_path, O_RDONLY, 0);
 	if (IS_ERR(f)) {
-		printk(KERN_ERR "AT88VirtualChip: filp_open(%s) failed: %ld\n",
+		printk(KERN_INFO "AT88VirtualChip: filp_open(%s) failed: %ld -- no real "
+		       "hardware-extracted chip data available (expected in a VM/"
+		       "foreign-hardware boot; there is no physical AT88 chip to have "
+		       "extracted it from). Falling back to a synthetic chip -- "
+		       "SetupAtmelForAuthorizations()'s own GPA handshake will still "
+		       "succeed (see at88_chip_load_synthetic()'s header comment), but "
+		       "real EXs auth-string validation will not be meaningful.\n",
 		       blob_path, PTR_ERR(f));
+		at88_chip_module_init_synthetic();
 		return;
 	}
 
@@ -90,15 +118,21 @@ static void load_chip_blob_work(struct work_struct *w)
 	filp_close(f, NULL);
 
 	if (n != (int)sizeof(buf)) {
-		printk(KERN_ERR "AT88VirtualChip: %s: read %d bytes, expected %zu\n",
+		printk(KERN_ERR "AT88VirtualChip: %s: read %d bytes, expected %zu -- "
+		       "falling back to a synthetic chip (see filp_open failure path "
+		       "above for why this fallback exists)\n",
 		       blob_path, n, sizeof(buf));
+		at88_chip_module_init_synthetic();
 		return;
 	}
 
 	if (at88_chip_module_init(buf, sizeof(buf)) != 0) {
 		printk(KERN_ERR "AT88VirtualChip: %s: not a valid captured chip blob "
-		       "(bad magic/CRC/overlap -- see at88_chip_load_from_extract())\n",
+		       "(bad magic/CRC/overlap -- see at88_chip_load_from_extract()) -- "
+		       "falling back to a synthetic chip (see filp_open failure path "
+		       "above for why this fallback exists)\n",
 		       blob_path);
+		at88_chip_module_init_synthetic();
 		return;
 	}
 
