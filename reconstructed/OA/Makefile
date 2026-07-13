@@ -453,7 +453,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_init_performances \
          verify/test_sequence_combi_init \
          verify/test_atmel_setup \
-         verify/test_init_module_real_atmel
+         verify/test_init_module_real_atmel \
+         verify/test_klm_authorize_builtins
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -787,6 +788,11 @@ verify/test_init_module_real_atmel: verify/test_init_module_real_atmel.cpp src/i
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_init_module_real_atmel.cpp src/init/init_module.cpp \
 	  src/auth/atmel_setup.cpp src/auth/atmel_zone_io.cpp src/auth/atmel_deax.cpp \
 	  src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp src/auth/nv2ac_handshake.cpp -o $@
+
+verify/test_klm_authorize_builtins: verify/test_klm_authorize_builtins.cpp src/auth/klm_manager.cpp \
+                          src/stub/bar2_stubs_auth.cpp include/auth.h include/oa_heap.h include/oa_types.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_klm_authorize_builtins.cpp src/auth/klm_manager.cpp \
+	  src/stub/bar2_stubs_auth.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)

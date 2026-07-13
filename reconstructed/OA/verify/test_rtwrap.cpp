@@ -489,8 +489,26 @@ int main(void)
 			 (long)(unsigned int)*(unsigned int *)(task + 0x5b4), 0x22222222);
 		check_eq("task+0x8 == 0", *(int *)(task + 0x8), 0);
 		check_ptr("rt_task_init: task == aligned pointer", g_lastTaskInitTask, task);
-		check_ptr("rt_task_init: entry == trampoline constant (.text+0x118e80)",
-			  g_lastTaskInitEntry, (void *)0x118e80);
+		/*
+		 * sec 10.235: RTWRAP_THREAD_TRAMPOLINE is no longer a raw
+		 * ground-truth literal address (0x118e80) -- that address is
+		 * never valid in THIS project's own freshly-linked OA.ko, and
+		 * RTAIVirtualDriver.ko's own real rt_task_init()/
+		 * rt_task_resume() genuinely jump straight to whatever entry
+		 * pointer they're given (confirmed via a live-boot Oops,
+		 * EIP==CR2==0x118e80, the first time this project's own
+		 * real-time thread creation actually ran end to end). Same
+		 * "call the captured function pointer back by hand" technique
+		 * as test_daemon_lifecycle.cpp's own sec 10.234 fix: confirm
+		 * it's non-NULL (a real, valid function, not a bare literal
+		 * address) and that calling it with the real `(long)task`
+		 * argument rt_task_init would actually pass does not crash. */
+		check_eq("rt_task_init: entry is a real function pointer (not the old 0x118e80 literal)",
+			 (long)(intptr_t)(g_lastTaskInitEntry != (void *)0x118e80), 1);
+		check_eq("rt_task_init: entry is non-NULL",
+			 (long)(intptr_t)(g_lastTaskInitEntry != 0), 1);
+		((void (*)(long))g_lastTaskInitEntry)((long)(intptr_t)task);
+		printf("  ok    %-58s\n", "dispatched the captured trampoline by hand without crashing");
 		check_eq("rt_task_init: data == (long)task", g_lastTaskInitData, (long)(intptr_t)task);
 		check_eq("rt_task_init: default stackSize == 0x2000", (long)g_lastTaskInitStackSize, 0x2000);
 		check_eq("rt_task_init: default priority == 0x3fffffff", (long)g_lastTaskInitPriority, 0x3fffffff);

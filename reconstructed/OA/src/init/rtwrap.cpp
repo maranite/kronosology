@@ -361,23 +361,52 @@ void rtwrap_task_suspend(void *task)
  *      type-3 and cond's type-1 uses above), `rt_task_resume(task)`,
  *      `*out = task`, returns 0.
  *
- * The `trampoline` entry point is a literal constant address,
- * `.text+0x118e80` in ground truth -- a real internal function (`T`)
- * this pass does NOT reconstruct (the actual RT thread entry point,
- * presumably dispatching through the `start`/`arg` fields this
+ * The `trampoline` entry point WAS modeled as a literal constant
+ * address, `.text+0x118e80` in ground truth -- a real internal function
+ * (`T`) this project does not reconstruct (the actual RT thread entry
+ * point, presumably dispatching through the `start`/`arg` fields this
  * function just stashed at task+0x5b0/+0x5b4 -- a separate, larger
- * task). Modeled here as an opaque forward-declared function pointer
- * constant (`RTWRAP_THREAD_TRAMPOLINE`): faithful either way, since
- * this function only ever passes the address THROUGH to
- * `rt_task_init` -- it never calls it directly itself, so leaving the
- * trampoline unreconstructed doesn't change any of THIS function's own
- * observable behavior. On the host KAT the trampoline is never
- * invoked either (no real RTAI scheduler running it), so an opaque
- * placeholder address is sufficient for both real hardware use
- * (rt_task_init receives the correct real address unconditionally,
- * regardless of whether that address's own target has been
- * reconstructed yet) and host testing (the KAT only asserts what
- * value gets passed to `rt_task_init`, not what it does).
+ * task). That was faithful as long as nothing in this project's own
+ * reconstruction ever actually RAN it (`rtwrap_pthread_create` only
+ * passes the address through to `rt_task_init`, never calls it
+ * directly) -- true right up until `RTAIVirtualDriver.ko` (this
+ * project's own from-scratch RTAI substitute) got a real,
+ * functioning `rt_task_init()`/`rt_task_resume()` (sec 10.190/batch 39
+ * onward) that genuinely spawns a kthread and jumps straight to
+ * whatever entry pointer it's given -- at which point the literal
+ * `0x118e80` becomes exactly the same "kernel API will actually jump
+ * to this address" hazard sec 10.234 already found and fixed once for
+ * `kernel_thread()`'s own `DAEMON_THREAD_TRAMPOLINE`/
+ * `DECRYPT_THREAD_TRAMPOLINE` (daemon_lifecycle.cpp).
+ *
+ * FIXED (sec 10.235, 2026-07-13, confirmed via live boot): live-tested
+ * on kronosvm once `rtwrap_set_debug_traps_in_rt_task`'s own blocking
+ * stub was fixed (bar2_stubs_c.cpp) -- `CreateRealTimeWithCPUAffinity()`
+ * finally reached the point of actually spawning and resuming a real-
+ * time kthread for the first time this project has ever recorded
+ * (`OA_DEBUG_MARKER 14` fired), which promptly Oopsed jumping to the
+ * literal `0x118e80` (`rtv_task/...` kthread, `EIP == CR2 == 0x118e80`,
+ * `Bad EIP value` -- nothing valid lives at that address in THIS
+ * project's freshly-linked `OA.ko`). Fixed with a real, minimal, SAFE
+ * stand-in entry point (`RtwrapThreadTrampoline`, matching
+ * `rt_task_init`'s own required `void(*)(long)` signature exactly),
+ * following the sec 10.234 precedent to the letter: it does NOT
+ * dispatch through the stashed `start`/`arg` fields at task+0x5b0/
+ * +0x5b4, even though this function's own header comment above
+ * documents that as the real trampoline's presumed job -- every
+ * CURRENT caller of `CreateRealTimeWithCPUAffinity()`
+ * (`CSTGAudioThread::AudioTickLoopRoutine`/`CSTGAudioManager::
+ * ASKThreadRoutine`/`AudioManagerThreadRoutine`, `audio_start.cpp`) is
+ * a genuine infinite real-time audio-DSP service loop -- out of scope
+ * per sec 10.185 -- and `ASKThreadRoutine`'s own real body calls
+ * `rtwrap_task_suspend(rtwrap_whoami())` on itself in a tight loop,
+ * whose interaction with this from-scratch substitute's own
+ * `rt_task_suspend()` semantics (an ordinary kthread, not a genuine
+ * hard-RT task) is NOT verified safe -- dispatching to it risks
+ * trading one live-boot Oops for a silent busy-loop/soft-lockup
+ * hazard. Honestly inert (like the sec 10.234 daemon entries) is the
+ * safe choice here, not a fabricated approximation of unreconstructed
+ * audio-DSP logic.
  *
  * BUG FOUND AND FIXED while ground-truthing this function (batch 39):
  * `CSTGThread::CreateRealTimeWithCPUAffinity()` (cpu_affinity.cpp,
@@ -396,7 +425,22 @@ void rtwrap_task_suspend(void *task)
  * IS ZERO). See cpu_affinity.cpp's own fix + updated
  * test_cpu_affinity.cpp mock polarity.
  */
-static void *const RTWRAP_THREAD_TRAMPOLINE = (void *)0x118e80;
+/*
+ * Real, minimal, SAFE stand-in for the ground-truth `.text+0x118e80`
+ * trampoline -- see the header comment above for why this deliberately
+ * does NOT dispatch through the stashed start/arg fields. Matches
+ * `rt_task_init`'s own required `void(*)(long)` signature exactly;
+ * `taskArg` is the RT_TASK block pointer itself (`(long)task`, per
+ * `rtwrap_pthread_create`'s own call below) -- unused here, but kept as
+ * a named, typed parameter (not `void`) so the signature documents what
+ * a real caller actually passes, matching this project's own
+ * established convention for confirmed-real call-site shapes.
+ */
+static void RtwrapThreadTrampoline(long taskArg)
+{
+	(void)taskArg;
+}
+static void *const RTWRAP_THREAD_TRAMPOLINE = (void *)&RtwrapThreadTrampoline;
 
 void *rtwrap_pthread_create(void *out, void *attr, void *(*start)(void *), void *arg)
 {

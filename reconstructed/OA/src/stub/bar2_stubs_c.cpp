@@ -182,15 +182,35 @@ extern "C" void cleanup_cpp_support() {}
  * src/init/rtwrap.cpp (batch 39 -- promoting it also uncovered and
  * fixed a real return-value-polarity bug in cpu_affinity.cpp's own
  * `CreateRealTimeWithCPUAffinity()`, see that function's header
- * comment). Still deferred here: rtwrap_request_irq/rtwrap_set_debug_
- * traps_in_rt_task (both already have safe non-bare-`{}` stub bodies
- * below, not part of the "smallest remaining" bare-`{}` tally). */
+ * comment). Still deferred here: rtwrap_request_irq (a real safe
+ * non-bare-`{}` stub, unchanged). `rtwrap_set_debug_traps_in_rt_task`
+ * FIXED (sec 10.235, 2026-07-13): its own unconditional `return -1`
+ * made EVERY call to `CreateRealTimeWithCPUAffinity()` fail (see
+ * cpu_affinity.cpp: `if (rtwrap_set_debug_traps_in_rt_task(taskHandle)
+ * == 0) { ...; return 1; }` -- a nonzero return always takes the
+ * teardown/failure path) -- confirmed via live boot to be the actual
+ * blocker behind `OA: CSTGAudioManager_StartAudioEngine failed`
+ * (`init_module()` step 13, the first real-time thread creation this
+ * project's own boot sequence reaches). Ground truth's real
+ * counterpart, `set_debug_traps_in_rt_task`, is a genuine external RTAI
+ * kernel-debug-facility symbol (installs hardware breakpoint/trap
+ * vectors for a real-time task's own debugger support) -- confirmed
+ * NOT exported anywhere in this project's own from-scratch
+ * `RTAIVirtualDriver.ko` (unlike its sibling `clear_debug_traps_in_rt_task`,
+ * which IS real there, `rtwrap.cpp`), and squarely RTAI-internal
+ * hardware-debug plumbing with zero bearing on whether a real-time
+ * thread can actually run -- out of scope per the sec 10.185 RTAI-
+ * substitution policy. Fixed to a safe no-op success (matching this
+ * project's own established RTAI-substitution convention throughout
+ * `RTAIVirtualDriver.ko`/`rtwrap.cpp`: a stubbed-out hardware facility
+ * reports success rather than artificially blocking every real-time
+ * thread creation in the entire boot sequence). */
 extern "C" unsigned int get_sizeof_rtwrap_pthread_attr(void) { return 64; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" int get_pthread_recursive_attr_constant(void) { return 1; }
 extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
-extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return -1; }
+extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return 0; }
 extern "C" int rtwrap_request_irq(unsigned int, void (*)(unsigned int, void *), void *, unsigned int) { return -1; }
 
 /* ---- Low-level stg_* RTAI/CPU primitives (confirmed real, own bodies
