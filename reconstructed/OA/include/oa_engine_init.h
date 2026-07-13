@@ -1343,28 +1343,51 @@ public:
 };
 
 /*
- * `Initialize()` (vtable slot 2) / `ProcessSubRate(unsigned int)` (slot
- * 18, `.text` offset +0x48) / `ProcessAudioRate(unsigned int)` (slot 19,
- * +0x4c) -- the only three of each model's 21 real virtual methods any
- * CURRENTLY-REACHABLE code in this reconstruction dispatches (slot 2 via
- * `CallVtableSlot` right after construction; slots 18/19 via
+ * `Initialize()` (vtable slot 2) / `GetId()` (const, slot 3) /
+ * `ProcessSubRate(unsigned int)` (slot 18, `.text` offset +0x48) /
+ * `ProcessAudioRate(unsigned int)` (slot 19, +0x4c) -- of each model's 21
+ * real virtual methods, these four are the ones CURRENTLY-REACHABLE code
+ * in this reconstruction dispatches (slot 2 via `CallVtableSlot` right
+ * after construction; slot 3 via `CSTGKLMManager::AuthorizeBuiltins()`'s
+ * own `VM_GET_ID` vcall, `klm_manager.cpp`, wired for real sec 10.234 --
+ * see `voice_models.cpp`'s own header note on the live-boot NULL-slot
+ * crash (`EIP=CR2=0`) this uncovered; slots 18/19 via
  * `CSTGVoiceModelManager::ProcessSubRate`/`ProcessAudioRate`, already
  * real since sec 10.137, once `Register()` -- new this batch -- actually
  * populates the array those two walk). All confirmed real in ground
- * truth (`nm -C -S`); `CSTGOffModel`'s own three are confirmed literally
- * 1 byte each (a bare `ret`) and are reconstructed for real (see
- * voice_models.cpp); the other 27 (9 models x 3 methods) are confirmed
- * substantial (up to ~2KB) genuine per-model DSP init/audio-tick bodies
- * -- out of scope per the sec 10.185 policy, given safe no-op stand-ins
- * in bar2_stubs.cpp (matching the `CSetListEQ::SetBand`/
+ * truth (`nm -C -S`); `CSTGOffModel`'s own `Initialize`/`ProcessSubRate`/
+ * `ProcessAudioRate` are confirmed literally 1 byte each (a bare `ret`)
+ * and are reconstructed for real (see voice_models.cpp), and EVERY
+ * model's own `GetId()` (3 or 5 bytes: `xor eax,eax; ret` for Off,
+ * `mov $N,%eax; ret` for the rest, `N` = that model's own
+ * `eSTGVoiceModelType` ordinal 1..9) is likewise reconstructed for real,
+ * not deferred -- trivially cheap, zero dependencies. The other 27
+ * (9 models x 3 methods, `Initialize`/`ProcessSubRate`/`ProcessAudioRate`)
+ * are confirmed substantial (up to ~2KB) genuine per-model DSP init/
+ * audio-tick bodies -- out of scope per the sec 10.185 policy, given safe
+ * no-op stand-ins in bar2_stubs.cpp (matching the `CSetListEQ::SetBand`/
  * `CSTGControllerInfo::SetPerfSwitch` precedent). Declared here as
  * `extern "C"` free functions (own vtable-slot signature, `void(*)(void*)`/
- * `void(*)(void*,unsigned int)`), NOT C++ methods -- matching the
- * `CStartupFile::Load`/`kCCostProfileVtbl` precedent (sec 10.186)
- * exactly, since nothing in this project ever calls them via `.`/`->`
- * syntax, only through a raw vtable-slot function pointer.
+ * `unsigned int(*)(const void*)`/`void(*)(void*,unsigned int)`), NOT C++
+ * methods -- matching the `CStartupFile::Load`/`kCCostProfileVtbl`
+ * precedent (sec 10.186) exactly, since nothing in this project ever
+ * calls them via `.`/`->` syntax, only through a raw vtable-slot function
+ * pointer.
  */
 extern "C" void OA_VoiceModel_Off_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Off_GetId(const void *self);
+/*
+ * GetAuthField()const / SetAuthField(int) / SetProductId(unsigned long) --
+ * real CSTGVoiceModel BASE-CLASS methods (ONE shared implementation for
+ * all ten models, confirmed via ground truth's own identical vtable slots
+ * across every derived class -- see voice_models.cpp's own header note).
+ * Newly reachable for the same reason as GetId (sec 10.234):
+ * klm_manager.cpp's stamp_object() dispatches through these slots from
+ * CSTGKLMManager::AuthorizeBuiltins().
+ */
+extern "C" unsigned int OA_VoiceModel_GetAuthField(const void *self);
+extern "C" void OA_VoiceModel_SetAuthField(void *self, unsigned int value);
+extern "C" void OA_VoiceModel_SetProductId(void *self, unsigned int value);
 extern "C" void OA_VoiceModel_Off_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick);
 
@@ -1373,34 +1396,45 @@ extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick
  * ProcessAudioRate() -- confirmed real, substantial (332-2097 bytes),
  * genuine per-model DSP -- deliberately deferred, safe no-op bodies
  * defined in bar2_stubs.cpp (matching the CSetListEQ::SetBand
- * precedent, sec 10.192). Declared here only so voice_models.cpp can
- * take their address for each model's own real vtable.
+ * precedent, sec 10.192). GetId() (unlike those three) is real for all
+ * nine too, see the header note above. Declared here only so
+ * voice_models.cpp can take their address for each model's own real
+ * vtable.
  */
 extern "C" void OA_VoiceModel_PCM_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_PCM_GetId(const void *self);
 extern "C" void OA_VoiceModel_PCM_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_PCM_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_AnalogSync_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_AnalogSync_GetId(const void *self);
 extern "C" void OA_VoiceModel_AnalogSync_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_AnalogSync_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Organ_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Organ_GetId(const void *self);
 extern "C" void OA_VoiceModel_Organ_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Organ_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Plucked_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Plucked_GetId(const void *self);
 extern "C" void OA_VoiceModel_Plucked_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Plucked_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_MS20_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_MS20_GetId(const void *self);
 extern "C" void OA_VoiceModel_MS20_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_MS20_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Polysix_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Polysix_GetId(const void *self);
 extern "C" void OA_VoiceModel_Polysix_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Polysix_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_VPM_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_VPM_GetId(const void *self);
 extern "C" void OA_VoiceModel_VPM_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_VPM_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Piano_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Piano_GetId(const void *self);
 extern "C" void OA_VoiceModel_Piano_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Piano_ProcessAudioRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_EP_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_EP_GetId(const void *self);
 extern "C" void OA_VoiceModel_EP_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_EP_ProcessAudioRate(void *self, unsigned int tick);
 

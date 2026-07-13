@@ -40,6 +40,7 @@ static void check_eq(const char *label, long got, long want)
 /* The four DSP-callee thunks this test exercises directly (address
  * identity checks against each model's own real vtable slots). */
 extern "C" void OA_VoiceModel_Off_Initialize(void *self);
+extern "C" unsigned int OA_VoiceModel_Off_GetId(const void *self);
 extern "C" void OA_VoiceModel_Off_ProcessSubRate(void *self, unsigned int tick);
 extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick);
 /* Link-satisfying host mocks: the other nine models' own Initialize()/
@@ -135,17 +136,55 @@ int main()
 	check_eq("slot 19 == OA_VoiceModel_Off_ProcessAudioRate",
 		 (long)(offVtbl[19] == (void *)&OA_VoiceModel_Off_ProcessAudioRate), 1);
 	check_eq("slot 0/1 (offset-to-top/RTTI) null", (long)(offVtbl[0] == 0 && offVtbl[1] == 0), 1);
-	check_eq("slot 3 (D0, never invoked) null", (long)(offVtbl[3] == 0), 1);
+	/* sec 10.234: real ABI slot 3 (GetId(), array index 5 / offVtbl[3])
+	 * was null here until this batch -- CSTGKLMManager::AuthorizeBuiltins()
+	 * (klm_manager.cpp) dispatches through exactly this slot for every
+	 * loaded voice model, and this project's own vtable being null there
+	 * live-boot-crashed (EIP=CR2=0). Now a real, ground-truth-confirmed
+	 * accessor returning this model's own eSTGVoiceModelType ordinal. */
+	check_eq("slot 3 (GetId) == OA_VoiceModel_Off_GetId",
+		 (long)(offVtbl[3] == (void *)&OA_VoiceModel_Off_GetId), 1);
+	/* sec 10.234 (second fix in the same pass): the SET_AUTH/RECOMPUTE
+	 * slots (real ABI slots 13/14/15 = offVtbl[13]/[14]/[15]) were the
+	 * SECOND live-boot NULL-call crash, one instruction further into
+	 * AuthorizeBuiltins()'s stamp_object() helper once GetId's own crash
+	 * was fixed -- these are shared CSTGVoiceModel base-class methods,
+	 * identical across all ten models. */
+	check_eq("slot 13 (GetAuthField) == OA_VoiceModel_GetAuthField",
+		 (long)(offVtbl[13] == (void *)&OA_VoiceModel_GetAuthField), 1);
+	check_eq("slot 14 (SetAuthField) == OA_VoiceModel_SetAuthField",
+		 (long)(offVtbl[14] == (void *)&OA_VoiceModel_SetAuthField), 1);
+	check_eq("slot 15 (SetProductId) == OA_VoiceModel_SetProductId",
+		 (long)(offVtbl[15] == (void *)&OA_VoiceModel_SetProductId), 1);
 	check_eq("slot 20 (never dispatched) null", (long)(offVtbl[20] == 0), 1);
 	/* Dispatch for real, exactly as engine_init.cpp's CallVtableSlot/
 	 * managers.cpp's ProcessSubRate/ProcessAudioRate would -- confirms no
 	 * crash through a real (non-null) function pointer. */
 	typedef void (*Slot2Fn)(void *);
+	typedef unsigned int (*Slot3Fn)(const void *);
 	typedef void (*SlotTickFn)(void *, unsigned int);
 	((Slot2Fn)offVtbl[2])(off);
+	check_eq("dispatched slot 3 (GetId) via vtable == 0 (eVoiceModel_Off)",
+		 (long)((Slot3Fn)offVtbl[3])(off), 0);
 	((SlotTickFn)offVtbl[18])(off, 42);
 	((SlotTickFn)offVtbl[19])(off, 42);
-	printf("  ok    dispatched slots 2/18/19 without crashing (Off model's real, empty bodies)\n");
+	printf("  ok    dispatched slots 2/3/18/19 without crashing (Off model's real bodies)\n");
+
+	/* Exercise slots 13/14/15 exactly the way klm_manager.cpp's
+	 * stamp_object() does: RECOMPUTE(obj, 0) [-> SetProductId, clears
+	 * +0x104], then SET_AUTH(obj, value) [-> SetAuthField, writes
+	 * +0x100], then confirm GET_AUTH reads it back. */
+	typedef void (*SlotWriteFn)(void *, unsigned int);
+	typedef unsigned int (*SlotReadFn)(const void *);
+	*(unsigned int *)(offBytes + 0x104) = 0xdeadbeef; /* poison before RECOMPUTE clears it */
+	((SlotWriteFn)offVtbl[15])(off, 0); /* RECOMPUTE -> SetProductId(0) */
+	check_eq("dispatched slot 15 (SetProductId) via vtable cleared +0x104",
+		 *(unsigned int *)(offBytes + 0x104), 0);
+	((SlotWriteFn)offVtbl[14])(off, 0x12345678); /* SET_AUTH -> SetAuthField(value) */
+	check_eq("dispatched slot 14 (SetAuthField) via vtable wrote +0x100",
+		 *(unsigned int *)(offBytes + 0x100), 0x12345678);
+	check_eq("dispatched slot 13 (GetAuthField) via vtable reads +0x100 back",
+		 (long)((SlotReadFn)offVtbl[13])(off), 0x12345678);
 
 	/* +8/+0x30 are packed 32-bit (target-pointer-wide) slots, NOT native
 	 * pointers -- compare against the truncated 32-bit representation,
@@ -173,6 +212,9 @@ int main()
 	void **pcmVtbl = *(void ***)pcm;
 	check_eq("PCM slot 2 == OA_VoiceModel_PCM_Initialize",
 		 (long)(pcmVtbl[2] == (void *)&OA_VoiceModel_PCM_Initialize), 1);
+	typedef unsigned int (*Slot3FnPcm)(const void *);
+	check_eq("PCM slot 3 (GetId) dispatched via vtable == 1 (eVoiceModel_PCM)",
+		 (long)((Slot3FnPcm)pcmVtbl[3])(pcm), 1);
 
 	check_eq("running count (+0x58) == 2 after second Register()",
 		 *(unsigned short *)(s_voiceModelManagerFake + 0x58), 2);

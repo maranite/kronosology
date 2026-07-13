@@ -124,12 +124,78 @@ extern "C" void OA_VoiceModel_Off_ProcessSubRate(void *self, unsigned int tick) 
 extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick) { (void)self; (void)tick; }
 
 /*
+ * GetId() (real ABI slot 3, immediately after Initialize) -- confirmed
+ * real and TRIVIAL in ground truth for all ten models
+ * (`.text._ZNK<Model>5GetIdEv`, 3-5 bytes: `xor eax,eax; ret` for Off,
+ * `mov $N,%eax; ret` for the rest, N = this model's own
+ * eSTGVoiceModelType ordinal, matching the Register(type,...) call each
+ * ctor already makes below exactly). Newly REACHABLE now that
+ * CSTGKLMManager::AuthorizeBuiltins() (klm_manager.cpp) is wired for
+ * real (sec 10.234): its own `VM_GET_ID` vcall(vm, 0x0c) dispatches
+ * through exactly this slot for every loaded voice model whose +0x104
+ * flag is clear, and this project's own vtable left it null -- a live
+ * boot crash (EIP=CR2=0, one instruction into AuthorizeBuiltins' first
+ * loop) that this batch fixes by reconstructing the real body (cheaper
+ * than Initialize() itself), not a stand-in.
+ */
+extern "C" unsigned int OA_VoiceModel_Off_GetId(const void *self) { (void)self; return 0; }
+extern "C" unsigned int OA_VoiceModel_PCM_GetId(const void *self) { (void)self; return 1; }
+extern "C" unsigned int OA_VoiceModel_AnalogSync_GetId(const void *self) { (void)self; return 2; }
+extern "C" unsigned int OA_VoiceModel_Organ_GetId(const void *self) { (void)self; return 3; }
+extern "C" unsigned int OA_VoiceModel_Plucked_GetId(const void *self) { (void)self; return 4; }
+extern "C" unsigned int OA_VoiceModel_MS20_GetId(const void *self) { (void)self; return 5; }
+extern "C" unsigned int OA_VoiceModel_Polysix_GetId(const void *self) { (void)self; return 6; }
+extern "C" unsigned int OA_VoiceModel_VPM_GetId(const void *self) { (void)self; return 7; }
+extern "C" unsigned int OA_VoiceModel_Piano_GetId(const void *self) { (void)self; return 8; }
+extern "C" unsigned int OA_VoiceModel_EP_GetId(const void *self) { (void)self; return 9; }
+
+/*
+ * GetAuthField()const / SetAuthField(int) / SetProductId(unsigned long) --
+ * real ABI slots 13/14/15 (byte offsets 0x34/0x38/0x3c from the adjusted
+ * vtable pointer, i.e. array indices 15/16/17). Confirmed via
+ * `objdump -r` on `OA_real.ko`'s own `.rodata._ZTV12CSTGOffModel`
+ * relocations (sec 10.234, same pass as GetId above) to be
+ * `CSTGVoiceModel` BASE-CLASS methods, not per-derived-model overrides
+ * (identical weak symbols at every model's own slot) -- confirmed
+ * trivial one-instruction accessors: `GetAuthField() const` reads
+ * `this+0x100`, `SetAuthField(int)` writes `edx` to `this+0x100`,
+ * `SetProductId(unsigned long)` writes `edx` to `this+0x104` (==
+ * `VM_EXTRA_OFF`, `oa_internal.h` -- the SAME field AuthorizeBuiltins'
+ * own loop already gates on being clear and IsAuthorizedVoiceModel's
+ * own `extra` read, now confirmed to also be this real slot's target).
+ * Newly REACHABLE for the identical reason as GetId: `klm_manager.cpp`'s
+ * `stamp_object()` (called from `AuthorizeBuiltins()`) dispatches
+ * through exactly these two slots (SET_AUTH/RECOMPUTE) for every stamped
+ * voice model -- previously null, the SECOND live-boot NULL-call crash
+ * this same session hit (one call further into `AuthorizeBuiltins()`
+ * once GetId's own crash was fixed). One shared implementation per
+ * method (matching ground truth's own base-class sharing), not ten.
+ */
+extern "C" unsigned int OA_VoiceModel_GetAuthField(const void *self)
+{
+	return *(const unsigned int *)((const unsigned char *)self + 0x100);
+}
+extern "C" void OA_VoiceModel_SetAuthField(void *self, unsigned int value)
+{
+	*(unsigned int *)((unsigned char *)self + 0x100) = value;
+}
+extern "C" void OA_VoiceModel_SetProductId(void *self, unsigned int value)
+{
+	*(unsigned int *)((unsigned char *)self + 0x104) = value;
+}
+
+/*
  * Each model's own real vtable. Layout (23 slots, matching ground
  * truth's confirmed 0x5c-byte size exactly):
  *   [0..1]  offset-to-top, RTTI (0, `-fno-rtti`)
  *   [2..3]  D1/D0 (null -- singletons, never destructed)
  *   [4]     slot 2 = Initialize()
- *   [5..19] slots 3..17 (null -- confirmed never dispatched)
+ *   [5]     slot 3 = GetId() const -- REAL (sec 10.234, see above)
+ *   [6..14] slots 4..12 (null -- confirmed never dispatched)
+ *   [15]    slot 13 = GetAuthField() const -- REAL (sec 10.234)
+ *   [16]    slot 14 = SetAuthField(int) -- REAL (sec 10.234)
+ *   [17]    slot 15 = SetProductId(unsigned long) -- REAL (sec 10.234)
+ *   [18..19] slots 16..17 (null -- confirmed never dispatched)
  *   [20]    slot 18 = ProcessSubRate(unsigned int)
  *   [21]    slot 19 = ProcessAudioRate(unsigned int)
  *   [22]    slot 20 (null -- confirmed never dispatched)
@@ -139,7 +205,12 @@ extern "C" void OA_VoiceModel_Off_ProcessAudioRate(void *self, unsigned int tick
 		0, 0, \
 		0, 0, \
 		(oa_vfn)&OA_VoiceModel_##name##_Initialize, \
-		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, \
+		(oa_vfn)&OA_VoiceModel_##name##_GetId, \
+		0, 0, 0, 0, 0, 0, 0, 0, 0, \
+		(oa_vfn)&OA_VoiceModel_GetAuthField, \
+		(oa_vfn)&OA_VoiceModel_SetAuthField, \
+		(oa_vfn)&OA_VoiceModel_SetProductId, \
+		0, 0, \
 		(oa_vfn)&OA_VoiceModel_##name##_ProcessSubRate, \
 		(oa_vfn)&OA_VoiceModel_##name##_ProcessAudioRate, \
 		0, \

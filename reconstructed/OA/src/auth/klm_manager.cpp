@@ -31,19 +31,33 @@ static inline unsigned int vcall(const void *obj, int slot)
 }
 
 /*
- * Stamp an object through its own virtual SET_AUTH, mirroring the binary's call dance:
- *   obj->vtbl[recompute]();  setAuth = obj->vtbl[set];  obj->vtbl[getId]();  setAuth();
- * The object's SET_AUTH writes the stamp; by construction (and as IsAuthorized* checks)
- * that stamp equals oa_auth_value(getId(), extra, dwBootKey) for this boot.
+ * Stamp an object through its own virtual SET_AUTH, mirroring the binary's call dance
+ * (`.text+0x2e3bd`..`.text+0x2e3e3`, disassembly-confirmed sec 10.234 while chasing the
+ * live-boot NULL-call crash this same slot cluster caused):
+ *   obj->vtbl[recompute](0);  setAuth = obj->vtbl[set];  id = obj->vtbl[getId]();
+ *   setAuth(oa_auth_value(id, 0, dwBootKey));
+ * RECOMPUTE (real ground truth: `CSTGVoiceModel::SetProductId(unsigned long)`) is called
+ * with a confirmed HARDCODED 0 (ground truth: `xor %edx,%edx` immediately before the call,
+ * not a computed value) -- for the builtin path this clears the same +0x104 "extra"/
+ * "locked" field `AuthorizeBuiltins`'s own loop already gated on being 0, a real but
+ * harmless no-op there. SET_AUTH (real ground truth: `CSTGVoiceModel::SetAuthField(int)`)
+ * DOES receive a real computed argument (id+1, multiplied by dwBootKey via the object's
+ * owning manager) -- `oa_auth_value(id, 0, dwBootKey)` here, matching
+ * `AuthorizeMultisampleBank`'s own "builtins carry extra = 0" convention exactly. An
+ * earlier draft of this function called both through zero-argument `void(*)(void*)`
+ * function-pointer types, silently dropping the real argument under -mregparm=3 (EDX left
+ * as whatever the caller's own code last used) -- functionally a no-op stamp that would
+ * never have verified correctly against IsAuthorized*()'s own recomputation. Fixed here
+ * to match ground truth's real per-slot signatures exactly.
  */
 static inline void stamp_object(void *obj, int idSlot, int setSlot, int recomputeSlot,
-				unsigned int /*bootKey*/)
+				unsigned int bootKey)
 {
 	void *const *vtbl = *(void *const *const *)obj;
-	((void (*)(void *))vtbl[recomputeSlot / 4])(obj);
-	void (*setAuth)(void *) = (void (*)(void *))vtbl[setSlot / 4];
-	((unsigned int (*)(const void *))vtbl[idSlot / 4])(obj);	/* primes the id used by setAuth */
-	setAuth(obj);
+	((void (*)(void *, unsigned int))vtbl[recomputeSlot / 4])(obj, 0);
+	void (*setAuth)(void *, unsigned int) = (void (*)(void *, unsigned int))vtbl[setSlot / 4];
+	unsigned int id = ((unsigned int (*)(const void *))vtbl[idSlot / 4])(obj);
+	setAuth(obj, oa_auth_value(id, 0, bootKey));
 }
 
 /*
