@@ -18,28 +18,31 @@ static const unsigned char KNOWN_PAIRFACT3_BLOB[PAIRFACT_BLOB_LEN] = {
 };
 
 /*
- * Raw 16-byte-per-volume key material, reconstructed from the known
- * confirmed-universal 31-char ASCII keys (docs/crypto/cryptoloop_keys.md's
- * "The recovered keys" table). Each raw16[i] is 15 full bytes decoded
- * directly from the first 30 hex chars, plus the 16th byte's HIGH nibble
- * from the 31st (last) hex char. The 16th byte's LOW nibble is set to 0 --
- * per that doc's own "Key format" analysis, loadmod.ko's HexEncode()
- * writes only 31 of the 32 hex characters a full 16-byte encoding would
- * produce, so this nibble is provably never emitted regardless of its
- * true value; 0 is as good as any other choice here.
+ * Raw 16-byte-per-volume key material. The first 15 bytes of each were
+ * already known from the confirmed-universal 31-char ASCII keys
+ * (docs/crypto/cryptoloop_keys.md's "The recovered keys" table); the 16th
+ * byte was, until 2026-07-16, an arbitrary guess (0 for the low nibble --
+ * loadmod.ko's HexEncode() provably never emits it in the 31-char ASCII
+ * form, so it couldn't be recovered via LOOP_GET_STATUS64 at all).
  *
- * Mod:        a336a15cd841ec8926b99e7c3884eaa + high nibble 'a' -> 0xa0
- * Eva:        342ee59d549c7d329d835537be0540d + high nibble 'd' -> 0xd0
- * WaveMotion: 3e72c0e59fc017a9eb7d7e1168a4cdb + high nibble 'b' -> 0xb0
+ * Now CONFIRMED, not guessed: decrypting two real `.reauth` files
+ * (independent of this fixture's own known `/.pairFact3` blob -- a
+ * different, per-device-encrypted artifact, see cryptoloop_keys.md) with
+ * nothing but each unit's own `KronosExtract.bin` Zone0 data yielded these
+ * exact 16 bytes, byte-for-byte identical on both real units tested.
+ *
+ * Mod:        a336a15cd841ec8926b99e7c3884eaa7  (16th byte was guessed 0xa0, real 0xa7)
+ * Eva:        342ee59d549c7d329d835537be0540d2  (16th byte was guessed 0xd0, real 0xd2)
+ * WaveMotion: 3e72c0e59fc017a9eb7d7e1168a4cdbe  (16th byte was guessed 0xb0, real 0xbe)
  */
 static const unsigned char RAW_KEY_MOD[PAIRFACT_KEY_LEN] = {
-	0xa3,0x36,0xa1,0x5c,0xd8,0x41,0xec,0x89,0x26,0xb9,0x9e,0x7c,0x38,0x84,0xea,0xa0,
+	0xa3,0x36,0xa1,0x5c,0xd8,0x41,0xec,0x89,0x26,0xb9,0x9e,0x7c,0x38,0x84,0xea,0xa7,
 };
 static const unsigned char RAW_KEY_EVA[PAIRFACT_KEY_LEN] = {
-	0x34,0x2e,0xe5,0x9d,0x54,0x9c,0x7d,0x32,0x9d,0x83,0x55,0x37,0xbe,0x05,0x40,0xd0,
+	0x34,0x2e,0xe5,0x9d,0x54,0x9c,0x7d,0x32,0x9d,0x83,0x55,0x37,0xbe,0x05,0x40,0xd2,
 };
 static const unsigned char RAW_KEY_WAVEMOTION[PAIRFACT_KEY_LEN] = {
-	0x3e,0x72,0xc0,0xe5,0x9f,0xc0,0x17,0xa9,0xeb,0x7d,0x7e,0x11,0x68,0xa4,0xcd,0xb0,
+	0x3e,0x72,0xc0,0xe5,0x9f,0xc0,0x17,0xa9,0xeb,0x7d,0x7e,0x11,0x68,0xa4,0xcd,0xbe,
 };
 
 int pairfact_fixture_lookup(const unsigned char *blob, unsigned int blobLen,

@@ -68,7 +68,7 @@ SRC := chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp pairfact_fix
 # `.ko`. A distinct suffix makes the two build modes unable to collide.
 OBJ := $(SRC:.cpp=.hostobj)
 
-TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_aac_lockout verify/test_nv2ac_exports verify/test_pairfact_fixture verify/test_oa_integration
+TESTS := verify/test_chip_state verify/test_b8_handshake verify/test_aac_lockout verify/test_nv2ac_exports verify/test_pairfact_fixture verify/test_pairfact_decrypt verify/test_oa_integration
 
 # reconstructed/OA/src/auth/*.cpp -- OA.ko's own real SetupAtmelForAuthorizations()
 # call chain, linked completely unmodified against this module's own real
@@ -79,6 +79,15 @@ OA_INC_DIR  := ../OA/include
 OA_AUTH_SRC := $(OA_AUTH_DIR)/atmel_setup.cpp $(OA_AUTH_DIR)/atmel_zone_io.cpp \
                $(OA_AUTH_DIR)/atmel_deax.cpp $(OA_AUTH_DIR)/atmel_primitives.cpp \
                $(OA_AUTH_DIR)/atmel_challenge.cpp $(OA_AUTH_DIR)/nv2ac_handshake.cpp
+
+# reconstructed/OA's already-verified moancjsd82 (Blowfish-CFB-64) + md5 --
+# reused by pairfact_decrypt.cpp and (for MD5-hash-instead-of-real-value
+# privacy, see that file's own comment) test_chip_state.cpp. Defined here,
+# ahead of every verify/* rule below, since := is immediately-expanded --
+# a rule earlier in this file referencing it before this point would see it
+# as empty.
+OA_CRYPTO_DIR := ../OA/src/crypto
+OA_CRYPTO_SRC := $(OA_CRYPTO_DIR)/moancjsd82.cpp $(OA_CRYPTO_DIR)/blowfish.cpp $(OA_CRYPTO_DIR)/md5.cpp
 
 KDIR ?= /home/build/linux-kronos
 PWD  := $(shell pwd)
@@ -94,8 +103,11 @@ objs: $(OBJ)
 verify: $(TESTS)
 	@for t in $(TESTS); do echo "== $$t =="; ./$$t; done
 
-verify/test_chip_state: verify/test_chip_state.cpp chip_state.cpp at88_chip.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_chip_state.cpp chip_state.cpp -o $@
+# Links the OA md5.cpp for privacy-preserving hash checks -- see
+# test_chip_state.cpp's own header comment (2026-07-16).
+verify/test_chip_state: verify/test_chip_state.cpp chip_state.cpp at88_chip.h $(OA_CRYPTO_DIR)/md5.cpp
+	$(HOST_CXX) $(HOST_CXXFLAGS) -I$(OA_INC_DIR) \
+		verify/test_chip_state.cpp chip_state.cpp $(OA_CRYPTO_DIR)/md5.cpp -o $@
 
 verify/test_b8_handshake: verify/test_b8_handshake.cpp chip_state.cpp bignum.cpp b8_handshake.cpp at88_chip.h bignum.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_b8_handshake.cpp chip_state.cpp bignum.cpp b8_handshake.cpp -o $@
@@ -103,11 +115,26 @@ verify/test_b8_handshake: verify/test_b8_handshake.cpp chip_state.cpp bignum.cpp
 verify/test_aac_lockout: verify/test_aac_lockout.cpp chip_state.cpp bignum.cpp b8_handshake.cpp at88_chip.h bignum.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_aac_lockout.cpp chip_state.cpp bignum.cpp b8_handshake.cpp -o $@
 
-verify/test_nv2ac_exports: verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp at88_chip.h bignum.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp -o $@
+# Links the OA md5.cpp for privacy-preserving hash checks -- see
+# test_chip_state.cpp's header comment (2026-07-16).
+verify/test_nv2ac_exports: verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp at88_chip.h bignum.h $(OA_CRYPTO_DIR)/md5.cpp
+	$(HOST_CXX) $(HOST_CXXFLAGS) -I$(OA_INC_DIR) \
+		verify/test_nv2ac_exports.cpp chip_state.cpp bignum.cpp b8_handshake.cpp nv2ac_exports.cpp $(OA_CRYPTO_DIR)/md5.cpp -o $@
 
 verify/test_pairfact_fixture: verify/test_pairfact_fixture.cpp pairfact_fixture.cpp pairfact_fixture.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_pairfact_fixture.cpp pairfact_fixture.cpp -o $@
+
+# pairfact_decrypt.cpp is HOST-TEST-ONLY (see its own header comment) --
+# deliberately not in SRC/AT88VirtualChip-objs above, unlike
+# pairfact_fixture.cpp which the real .ko build does include. Reuses
+# reconstructed/OA's already-verified moancjsd82 (Blowfish-CFB-64) + md5,
+# same $(OA_INC_DIR)/$(OA_AUTH_DIR)-style linkage as test_oa_integration.
+# ($(OA_CRYPTO_DIR)/$(OA_CRYPTO_SRC) defined earlier in this file, ahead of
+# every verify/* rule -- := is immediately-expanded.)
+
+verify/test_pairfact_decrypt: verify/test_pairfact_decrypt.cpp pairfact_decrypt.cpp pairfact_decrypt.h $(OA_CRYPTO_SRC)
+	$(HOST_CXX) $(HOST_CXXFLAGS) -I$(OA_INC_DIR) \
+		verify/test_pairfact_decrypt.cpp pairfact_decrypt.cpp $(OA_CRYPTO_SRC) -o $@
 
 # nv2ac_exports.cpp's real stgNV2AC_sync_read_cmd(int,int) packs a pointer
 # into `int` -- lossless on the real 32-bit target, corrupts real pointers on

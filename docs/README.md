@@ -35,6 +35,7 @@ remain authoritative for their topics and are linked from here.
 | `STGEnabler.ko` | Tiny helper module | [modules/STGEnabler.ko.md](modules/STGEnabler.ko.md) |
 | `STGGmp.ko` | GMP (multi-precision arithmetic) wrapper | [modules/STGGmp.ko.md](modules/STGGmp.ko.md) |
 | `DisplayUpdaterMessage` | Front-panel status display during updates | [modules/DisplayUpdaterMessage.md](modules/DisplayUpdaterMessage.md) |
+| `KRONOS_V06R06.VSB` | NKS4 panel sub-system firmware (own OMAP-L1x CPU, LCD/touch/PSoC/AT88 access) — the other side of `OmapNKS4Module.ko`'s USB link | [modules/KRONOS_V06R06.VSB.md](modules/KRONOS_V06R06.VSB.md) |
 
 ### Cryptography & security — `crypto/`
 

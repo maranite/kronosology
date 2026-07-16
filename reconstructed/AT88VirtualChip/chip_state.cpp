@@ -252,6 +252,15 @@ int at88_chip_read_zone0(struct AT88ChipState *chip, struct DeaxState *d,
 	if ((unsigned int)addr + (unsigned int)len > sizeof(chip->zone0))
 		return -1;
 
+	/* Pre-authentication: raw passthrough, no DEAX involved at all. See
+	 * this function's doc comment in at88_chip.h for the ground truth
+	 * (KRONOS_V06R06.VSB's CryptoAt88.cpp self-test) behind this branch. */
+	if (chip->b8RoundsAccepted < 2) {
+		for (unsigned char i = 0; i < len; i++)
+			out[i] = chip->zone0[addr + i];
+		return 0;
+	}
+
 	/* 12 pre-steps, matching kronos_extract.c's synth_zone0_read() exactly:
 	 * step(0)x5, step(addr), step(0)x5, step(len). */
 	deax_step(d, 0); deax_step(d, 0); deax_step(d, 0); deax_step(d, 0); deax_step(d, 0);
@@ -271,5 +280,16 @@ int at88_chip_read_zone0(struct AT88ChipState *chip, struct DeaxState *d,
 		deax_step(d, plain);
 		deax_step(d, 0); deax_step(d, 0); deax_step(d, 0); deax_step(d, 0); deax_step(d, 0);
 	}
+	return 0;
+}
+
+int at88_chip_write_zone0(struct AT88ChipState *chip, unsigned char addr,
+			   unsigned char len, const unsigned char *in)
+{
+	if ((unsigned int)addr + (unsigned int)len > sizeof(chip->zone0))
+		return -1;
+
+	for (unsigned char i = 0; i < len; i++)
+		chip->zone0[addr + i] = in[i];
 	return 0;
 }

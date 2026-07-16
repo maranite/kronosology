@@ -128,12 +128,29 @@ End-to-end flow inside `init_module`:
    - this 80-byte blob is the chip-encrypted pairFact data
 
 2. RetrieveSecurityICKey (at loadmod offset 0x3e10):
-   - sends the 80-byte blob to the stgNV2AC chip via
-     OmapNKS4Module.ko's stgNV2AC_sync_read_cmd
-   - the chip uses its tamper-resistant secret to decrypt the blob
-   - response contains 16 binary bytes of raw pairFact key material
-     for each of the 3 volumes (plus, plausibly, some integrity bytes
-     — we have not had occasion to RE the exact plaintext layout)
+   - reads the 24-byte Zone0 key material (the same `0x10`/`0x18`/`0x20`
+     zones the EX-auth chain uses) via the chip's already-documented
+     authenticated read path
+   - Blowfish-CFB-64-decrypts the 80-byte blob HOST-SIDE with that key
+     material (key=Zone0[0x00:0x10], iv=Zone0[0x10:0x18]) — this is
+     `moancjsd82` with `p3=80`, the exact same primitive the EX-auth chain
+     uses with `p3=15` (see `oa_crypto.h`'s header comment, and
+     `docs/crypto/cryptoloop_keys.md`'s own ".reauth" section below for the
+     confirmed 80-byte plaintext layout)
+
+   **Corrected 2026-07-16** — this step used to say "sends the 80-byte blob
+   to the stgNV2AC chip... the chip uses its tamper-resistant secret to
+   decrypt the blob." That's now confirmed wrong: decrypting the raw file
+   contents directly with plain host-side Blowfish (no chip involvement
+   beyond the already-solved Zone0 read) reproduces the correct,
+   MD5-integrity-checked plaintext on two real devices. Whatever the exact
+   original disassembly observation behind the old wording was (possibly a
+   misread of the chip call used to obtain Zone0 itself, conflated with
+   the blob-decrypt step, or a different function than `bbbbbbbba12` —
+   `oa_crypto.h`'s independently-arrived-at finding names `bbbbbbbba12`
+   specifically as the `p3=80` `moancjsd82` caller), the *algorithm* is now
+   settled by working end-to-end reproduction against real hardware data,
+   regardless of that naming detail.
 
 3. For each of the 3 volumes:
    - HexEncode the 16 binary bytes → 31 hex chars (writing into a
@@ -185,12 +202,19 @@ we can't confirm without observing the chip's decrypted output.
 
 ### What this file does NOT give us
 
-Cannot be decrypted offline — the stgNV2AC chip secret is tamper-
-resistant, never exposed to the host CPU. So `/.pairFact3` does not
-let us recover the raw 16-byte pairFact bytes; we only learned the
-*final* ASCII keys because the kernel briefly stores them in
-`loop_info64.lo_encrypt_key` and exposes them to root via
-`LOOP_GET_STATUS64`.
+**Corrected 2026-07-16 — this whole section was wrong.** Originally claimed
+`/.pairFact3` "cannot be decrypted offline — the stgNV2AC chip secret is
+tamper-resistant, never exposed to the host CPU." That's backwards. See
+[the section below](#reauth-is-pairfact3-and-it-decrypts-with-plain-host-side-blowfish)
+for the corrected mechanism — in short, `/.pairFact3` decrypts with the same
+plain Blowfish-CFB-64 as everything else in this document, entirely
+host-side, using nothing but the target device's own Zone0 data. The one
+thing genuinely gated behind tamper-resistant chip access is *obtaining
+Zone0* — a completely different, already-solved problem
+(`KronosExtract`/`AT88VirtualChip`). This specific file, `pairFact3.bin`, was
+never decrypted here for the mundane reason that no matching
+`KronosExtract.bin` for *that* device exists in this repo — not because
+decryption was impossible in principle.
 
 ### Why we keep it anyway
 
@@ -206,6 +230,115 @@ let us recover the raw 16-byte pairFact bytes; we only learned the
 - **Future RE.** If anyone instruments loadmod with kprobes on
   `stgNV2AC_sync_read_cmd` to dump the chip's response, this blob
   is the corresponding input.
+
+---
+
+## `.reauth` IS `.pairFact3`, and it decrypts with plain host-side Blowfish
+
+Found 2026-07-16 while investigating (for an unrelated question — whether the
+EX-auth chip secret is derivable from the Public ID) captured data that turned
+out to include full `KronosExtract.bin` captures **and matching `.reauth`
+files** for three real physical units (two Kronos, referred to here as
+`947e`/`6630`; one Nautilus, `2D68` — no `.reauth` for the Nautilus one).
+(Device identifiers/public IDs and the source file paths intentionally not
+reproduced here — private per-device info.)
+
+**`.reauth` and `.pairFact3` are the same file format, byte-for-byte —
+confirmed two ways, not assumed:**
+1. `KronosExtract/build/kronos.py` (already in this repo) implements both
+   `pf3_generate()`/`pf3_decrypt()` under a `# .reauth / .pairFact3
+   (bbbbbbbba12 path in loadmod.ko)` comment, one shared code path, no
+   format distinction anywhere.
+2. Directly confirmed on real hardware: a captured `.reauth` file renamed to
+   `.pairFact3` and placed at `/.pairFact3` works as the real thing.
+
+An **earlier version of this section got the mechanism wrong** — it guessed
+`.reauth` must be a separate, already-chip-processed artifact, re-encrypted
+for storage, because the *original* text above claims `/.pairFact3` "cannot
+be decrypted offline." That guess was unnecessary and incorrect. The real
+mechanism was already sitting in this repo, just not cross-referenced here:
+`reconstructed/OA/include/oa_crypto.h`'s own header comment on `moancjsd82`
+(the confirmed, hardware-verified Blowfish-CFB-64 primitive already
+documented above for EX-auth strings, called there with `p3=15`) states
+plainly:
+
+> `p3` is the expected plaintext length; OA.ko's `ParseAuth` calls it with
+> `p3=15` (EXs-style entries), **`loadmod.ko`'s `bbbbbbbba12` calls its own
+> separate copy with `p3=80` (`.pairFact3`/`.reauth`)**.
+
+So this was never an open "what wire format does `RetrieveSecurityICKey`
+use" question at all (see the correction to "How loadmod recovers these
+keys at boot" below) — `/.pairFact3` (or a `.reauth` file used in its
+place) decrypts with the **exact same CFB-64 decode** as an EX-auth string,
+just a different key source (Zone0 `0x00`-`0x17`, the same 24 bytes
+`KronosExtract`/`AT88VirtualChip` already read) and a different length
+(80 instead of 15). No chip interaction beyond the already-solved Zone0
+read is involved in the decrypt itself.
+
+```python
+from Crypto.Cipher import Blowfish
+key, iv = zone0[0:16], zone0[16:24]           # from KronosExtract.bin
+pt = Blowfish.new(key, Blowfish.MODE_CFB, iv=iv, segment_size=64).decrypt(reauth_bytes)
+```
+
+Ran this against both Kronos units' `.reauth` files (filenames omitted —
+they embed each device's public ID — confirmed **not** the same ciphertext
+as this document's own `pairFact3.bin` by MD5, i.e. a genuinely different,
+per-device blob, not something already captured). Both decrypt cleanly, and — checked
+against `kronos.py`'s own exact plaintext layout (`_pf3_plaintext`), not a
+guess this time — every field matches:
+
+| Offset | Field | `947e` | `6630` | Identical across units? |
+|---|---|---|---|---|
+| `0x00`-`0x0e` | nonce (15 bytes, random per generation) | `3e96a25e591c5b2960b291c6d7d3e1` | `5529663042a7cc5dc07a570298475e` | No — per-device, expected |
+| `0x0f`-`0x3f` | **FIXED block (49 bytes)**: `0x03` + Mod key(16) + Eva key(16) + WaveMotion key(16) | `03a336a15cd841ec8926b99e7c3884eaa7342ee59d549c7d329d835537be0540d23e72c0e59fc017a9eb7d7e1168a4cdbe` | (same) | **Yes, byte-exact** |
+| `0x40`-`0x4f` | `MD5(plaintext[0x00:0x40])` — integrity check, not secret material | `40712a60928dee54c6308a730ff49e52` | `b804eec221d8dbad90d48068e76af4de` | No — per-device (function of the per-device nonce) |
+
+The FIXED block matches the already-known 31-char ASCII keys ("The
+recovered keys" above) exactly on their first 15 bytes each, on **two
+independent, unrelated physical units**, and matches byte-for-byte between
+the two units including the 16th byte of each key — which the ASCII
+`LOOP_GET_STATUS64` capture could never reveal (`HexEncode` only ever emits
+31 of 32 hex chars, see "Key format" above). **The true, complete 16-byte
+raw keys are therefore now known for the first time:**
+
+| Volume | Full 16-byte key (previously: 15 bytes + unknown nibble) |
+|---|---|
+| Mod | `a336a15cd841ec8926b99e7c3884eaa7` → 16 bytes: `a3 36 a1 5c d8 41 ec 89 26 b9 9e 7c 38 84 ea a7` |
+| Eva | `342ee59d549c7d329d835537be0540d2` → 16 bytes: `34 2e e5 9d 54 9c 7d 32 9d 83 55 37 be 05 40 d2` |
+| WaveMotion | `3e72c0e59fc017a9eb7d7e1168a4cdbe` → 16 bytes: `3e 72 c0 e5 9f c0 17 a9 eb 7d 7e 11 68 a4 cd be` |
+
+(`AT88VirtualChip/pairfact_fixture.cpp` previously guessed `0xa0`/`0xd0`/`0xb0`
+for that unknown 16th byte, arbitrarily — turns out the real values are
+`0xa7`/`0xd2`/`0xbe`. Corrected there too, same day, alongside a new general
+`pf3_decrypt()` implementing this exact mechanism using
+`reconstructed/OA`'s already-verified `moancjsd82`/MD5 — see
+`AT88VirtualChip/pairfact_decrypt.h`.)
+
+**What this does and doesn't mean:**
+- `/.pairFact3` is **not** tamper-resistant or chip-processed at rest. The
+  only genuinely tamper-resistant step in this whole chain is obtaining
+  Zone0 in the first place (the AT88 `$B8` authenticated handshake) — a
+  completely different, already-fully-solved problem
+  (`KronosExtract`/`AT88VirtualChip`). Once you have a device's Zone0, its
+  `/.pairFact3`/`.reauth` is exactly as decryptable as an EX-auth string,
+  using the identical primitive.
+- It's an independent, second confirmation of "The recovered keys" above,
+  via a completely different method (direct decrypt vs. the
+  `LOOP_GET_STATUS64` side-channel), on two different physical units.
+- These are universal keys, confirmed identical on two independent physical
+  units once decrypted — the outer ciphertext is per-device (confirmed
+  different by MD5, since the nonce differs each time a `.reauth` is
+  generated), but what it decrypts to is fixed content, not secret
+  key-derivation material.
+- **Only 2 of 3 available units have a matching `.reauth` file** (`2D68`, the
+  Nautilus, doesn't). If a Nautilus `.reauth` ever turns up, decrypting it
+  would additionally confirm these keys are universal *across product lines*,
+  not just across Kronos units — plausible given the identical universal
+  config-zone constants already observed across all three units' config
+  zones (see [`atmel_nv2ac.md`](atmel_nv2ac.md)'s "Config-zone cross-check
+  across 3 real units"), but not yet directly tested for this specific
+  artifact.
 
 ---
 

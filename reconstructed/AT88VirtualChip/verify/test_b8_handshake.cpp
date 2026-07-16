@@ -3,21 +3,25 @@
  * test_b8_handshake.cpp  -  host-side known-answer tests for bignum.cpp
  * (the modexp/IdN->p2 derivation) and b8_handshake.cpp (the two-round $B8
  * challenge/response), plus an end-to-end check tying the handshake to a
- * real captured Zone0 read.
+ * Zone0 read.
  *
  * Honesty note on what's actually verified here vs. self-consistency only:
  * the bignum/p2 derivation IS checked against an independent oracle (a
- * from-scratch Python port using the real captured IdN, matching this
- * project's usual standard). The $B8 handshake ROUND-TRIP itself, though,
- * has no independent oracle available -- there's no captured real Nc/Q
- * exchange to compare against, so tests [2]-[4] verify INTERNAL
- * consistency (the handler's verification math matches its own challenge-
- * generation math, exactly mirroring what kronos_extract.c's synth_try()
- * does when talking to a REAL chip) rather than independent ground truth.
- * Test [5] is the strongest evidence available: after a self-consistent
- * handshake, the resulting cipher state must still correctly decrypt the
- * REAL captured Zone0 secret -- tying the (self-consistency-only)
- * handshake to the (real-data) zone reads.
+ * from-scratch Python port, gen_bignum_vectors.py). The $B8 handshake
+ * ROUND-TRIP itself has no independent oracle available -- there's no
+ * captured real Nc/Q exchange to compare against, so tests [2]-[4] verify
+ * INTERNAL consistency (the handler's verification math matches its own
+ * challenge-generation math, exactly mirroring what kronos_extract.c's
+ * synth_try() does when talking to a real chip) rather than independent
+ * ground truth. Test [5] extends that: after a self-consistent handshake,
+ * the resulting cipher state must still correctly decrypt whatever was
+ * loaded as Zone0 -- an internal round-trip check, not a comparison
+ * against a specific real device's secret.
+ *
+ * All IdN/config-zone/Zone0 values below are SYNTHETIC (generated for this
+ * test, not read from any real device) -- see gen_bignum_vectors.py for
+ * the matching independent-oracle input. Real per-device values are
+ * intentionally not committed to this repo.
  */
 
 #include <cstdio>
@@ -43,30 +47,28 @@ int main(void)
 	printf("==========================================================\n");
 
 	printf("[1] synth_sdflkjsvnd2g vs. independent Python (gen_bignum_vectors.py),\n"
-	       "    using the real captured IdN (cfg[0x19..0x1f]=[REDACTED-PUBLIC-ID])\n");
-	static const unsigned char idn[7] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+	       "    using a synthetic IdN (not real device data)\n");
+	static const unsigned char idn[7] = {0xde,0x00,0xad,0x00,0xbe,0x00,0xef};
 	unsigned char p2[8];
 	synth_sdflkjsvnd2g(idn, p2);
-	static const unsigned char wantP2[8] = {0xc4,0xd8,0x27,0x12,0xd9,0xf2,0xf6,0x4c};
+	static const unsigned char wantP2[8] = {0xbc,0x56,0x9c,0xa3,0xa8,0x62,0x15,0xd8};
 	bool p2Ok = memcmp(p2, wantP2, 8) == 0;
-	check_eq("p2 == c4d82712d9f2f64c", (unsigned int)p2Ok, 1);
+	check_eq("p2 == bc569ca3a86215d8", (unsigned int)p2Ok, 1);
 
-	/* Build a chip preloaded with a synthetic (not the real captured)
-	 * config/zone0, so this test doesn't depend on the real file being
-	 * present on disk -- the bignum check above already used the real
-	 * IdN directly, which is what mattered for grounding that specific
-	 * result. */
+	/* Build a chip preloaded with fully synthetic config/zone0 -- this test
+	 * never touches a real captured file, so every value here is
+	 * self-consistent test data, not real per-device secret material. */
 	AT88ChipState chip;
 	memset(&chip, 0, sizeof(chip));
 	memcpy(&chip.configZone[0x19], idn, 7);
-	static const unsigned char cfg50[8] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+	static const unsigned char cfg50[8] = {0xff,0xcc,0xbb,0xaa,0x99,0x88,0x77,0x66};
 	memcpy(&chip.configZone[0x50], cfg50, 8);
-	static const unsigned char realZone0[40] = {
-		0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-		0x0d,0x12,0x5e,0x12,0x11,0xd8,0x61,0xe9,0x10,0x0d,0x09,0x73,0xe8,0x76,0x08,0x9f,
-		0x5c,0x29,0x3c,0x97,0xe3,0xc2,0xdc,0xc1,
+	static const unsigned char synthZone0[40] = {
+		0xa5,0x92,0x77,0xd3,0xcf,0x9a,0xb2,0x22,0xcc,0x2d,0x7a,0x47,0x6c,0x32,0x8c,0x8b,
+		0xee,0xec,0x7e,0x64,0x20,0x8e,0x3d,0xbe,0x61,0x12,0x3c,0xbb,0x53,0xda,0xa9,0x1d,
+		0xda,0x29,0xc1,0x02,0x06,0x3a,0x9a,0x93,
 	};
-	memcpy(chip.zone0, realZone0, 40);
+	memcpy(chip.zone0, synthZone0, 40);
 	deax_init(&chip.session);
 	chip.dataLoaded = 1;
 	chip.b8RoundsAccepted = 0;
@@ -86,11 +88,11 @@ int main(void)
 	deax_init(&hostSession);
 	deax_compute_challenges(&hostSession, nc1, hostP2, hostP3, q1, p5_1);
 
-	/* The real captured AAC byte (cfg[0x50]) happens to be 0xff -- already
+	/* The synthetic AAC byte (cfg[0x50]) is set to 0xff -- already
 	 * saturated at its max, so "increment on accept" correctly no-ops
 	 * there rather than overflowing. Check the saturating direction (>=,
-	 * not strictly >) so this test is correct regardless of which real
-	 * value happened to be captured. */
+	 * not strictly >) so this test is correct regardless of the starting
+	 * value. */
 	unsigned char aacBefore = chip.configZone[0x50];
 	int rc = at88_chip_handle_b8(&chip, 0x00, nc1, q1);
 	check_eq("round 1 accepted", (unsigned int)rc, 1);
@@ -119,8 +121,8 @@ int main(void)
 	check_eq("round 2 accepted", (unsigned int)rc, 1);
 	check_eq("b8RoundsAccepted == 2", (unsigned int)chip.b8RoundsAccepted, 2);
 
-	printf("[5] End-to-end: post-handshake session correctly decrypts the REAL\n"
-	       "    captured Zone0 secret (ties the handshake to real hardware data)\n");
+	printf("[5] End-to-end: post-handshake session correctly decrypts the\n"
+	       "    synthetic Zone0 data it was loaded with (round-trip check)\n");
 	unsigned char cipher[8];
 	rc = at88_chip_read_zone0(&chip, &chip.session, 0, 8, cipher);
 	check_eq("read_zone0(0,8) after handshake rc==0", (unsigned int)(rc == 0), 1);
@@ -163,8 +165,8 @@ int main(void)
 		deax_step(&hostZone0State, 0); deax_step(&hostZone0State, 0);
 		deax_step(&hostZone0State, 0);
 	}
-	bool zone0Ok = memcmp(recovered, realZone0, 8) == 0;
-	check_eq("recovered bytes match the real captured Zone0[0..7]", (unsigned int)zone0Ok, 1);
+	bool zone0Ok = memcmp(recovered, synthZone0, 8) == 0;
+	check_eq("recovered bytes match the synthetic Zone0[0..7] loaded above", (unsigned int)zone0Ok, 1);
 
 	printf("==========================================================\n");
 	if (g_fail) {

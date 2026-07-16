@@ -22,6 +22,21 @@
  *                             "Not yet implemented" note; only zone 0 is
  *                             ever emulated so there is nothing else to
  *                             select into).
+ *   $B0 (zone0 write)      -- at88_chip_write_zone0(). New 2026-07-16,
+ *                             ground-truthed against KRONOS_V06R06.VSB (the
+ *                             NKS4 panel board's own firmware, a second,
+ *                             independent AT88 master besides OA.ko) --
+ *                             its CryptoAt88.cpp self-test issues exactly
+ *                             this opcode. Wire format inferred by
+ *                             extending this file's own existing $B8
+ *                             convention (one buffer pointer + one total
+ *                             length): {0xb0, 0x00, addr, len} header
+ *                             followed by `len` raw payload bytes, all in
+ *                             the same `address` buffer -- OA.ko itself
+ *                             never issues $B0 (confirmed read-only, see
+ *                             README.md's scope table), so there is no
+ *                             independent ground truth for this specific
+ *                             packing; see README.md Open Item #5.
  *   $B8 (verify crypto)    -- at88_chip_handle_b8(). Note this is a
  *                             "write" command -- accept/reject is NOT
  *                             signaled back directly through this call's
@@ -30,8 +45,10 @@
  *                             only reveals it via a SUBSEQUENT $B6 read of
  *                             the AAC byte increasing or decreasing.
  *   $B6 (config zone read) -- at88_chip_read_config().
- *   $B2 (zone0 read)       -- at88_chip_read_zone0(), using the chip's
- *                             persistent session cipher state.
+ *   $B2 (zone0 read)       -- at88_chip_read_zone0(). Pre-$B8, a RAW
+ *                             passthrough (see at88_chip.h); post-$B8,
+ *                             DEAX-encrypted using the chip's persistent
+ *                             session cipher state, exactly as before.
  *
  * REAL BUG FOUND AND FIXED HERE (sec 10.233): this function used to be
  * declared `void`, but OA.ko's own real ABI/declaration -- confirmed in
@@ -109,6 +126,15 @@ extern "C" int stgNV2AC_sync_cmd(unsigned char *address, unsigned int data)
 			return -1;
 		g_chip.selectedZone = address[2];
 		return 0;
+	case 0xb0: {	/* zone0 write: {0xb0, 0x00, addr, len, data[len]} */
+		if (data < 4)
+			return -1;
+		unsigned char addr = address[2];
+		unsigned char len  = address[3];
+		if (data < (unsigned int)4 + len)
+			return -1;
+		return at88_chip_write_zone0(&g_chip, addr, len, address + 4);
+	}
 	case 0xb8:	/* verify crypto: {0xb8, zone, 0x00, 0x10, Nc[8], Q[8]} */
 		if (data < 20)
 			return -1;

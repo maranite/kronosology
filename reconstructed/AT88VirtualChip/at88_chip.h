@@ -96,9 +96,12 @@ struct AT88ChipState {
 
 	/* $B4 zone-select target -- stored for protocol fidelity only. Every
 	 * zone this project has ever needed to emulate is zone 0 (the only
-	 * zone SetupAtmelForAuthorizations/the EX auth chain touch), so
-	 * nothing currently gates behavior on this value; see
-	 * nv2ac_exports.cpp's header comment. */
+	 * zone SetupAtmelForAuthorizations/the EX auth chain touch, and the
+	 * only one this chip has real captured data for), so $B0/$B2 still
+	 * always operate on zone0[] regardless of this value -- gating on
+	 * *authentication state* (b8RoundsAccepted, see at88_chip_read_zone0())
+	 * was added 2026-07-16, gating on *which zone was selected* was not.
+	 * See nv2ac_exports.cpp's header comment and README.md Open Item #5. */
 	unsigned char selectedZone;
 
 	/* ---- $B8 handshake / live session state -----------------------------
@@ -282,17 +285,62 @@ int at88_chip_read_config(const struct AT88ChipState *chip,
 			   unsigned char *out);
 
 /*
- * DEAX-encrypted Zone0 read ($B2, mode=2): the chip-side counterpart to
- * kronos_extract.c's synth_zone0_read(). `d` must already be in the
- * correct session state (post-$B8 handshake) -- this function only does
- * the per-byte "step forward, XOR the real plaintext byte with the
- * keystream, step again on the *plaintext*" sequence confirmed there;
- * it does not run the $B8 handshake itself (that's
- * deax_compute_challenges(), driven by the not-yet-written nv2ac_exports.cpp).
- * 0 on success, -1 if the read would run past the 40-byte zone.
+ * Zone0 read ($B2). Two modes, gated on chip->b8RoundsAccepted -- ground-
+ * truthed 2026-07-16 against KRONOS_V06R06.VSB (the NKS4 panel board's own
+ * firmware, independent of OA.ko): its CryptoAt88.cpp runs a self-test that
+ * $B4-selects zone 0, $B0-writes a known 16-byte pattern, and $B2-reads it
+ * straight back -- with NO $B8 call anywhere in that routine, and no
+ * encrypt/decrypt step visible around the write either. That's inconsistent
+ * with the always-DEAX-enciphered model this function used to implement
+ * unconditionally (see chip_state.cpp's git history / the prior revision of
+ * this comment) -- a chip that always requires a live $B8 session for zone 0
+ * couldn't pass its own factory self-test before that session ever exists.
+ * Reconciled as: zone 0's crypto-auth gate (AR0=0xd5 per CLAUDE.md's AT88SC
+ * protocol summary) is a chip CONFIGURATION, not a permanent hardwired
+ * property -- this self-test most plausibly runs before that gate is
+ * provisioning-locked (factory test, or simply before this boot's first
+ * $B8), when zone 0 still reads/writes in the clear like the confirmed-
+ * unauthenticated zone 1 does. This is the strongest evidence-based
+ * reconciliation available, not a certainty -- no independent oracle
+ * confirms it (see README.md Open Item #5).
+ *
+ *   b8RoundsAccepted < 2 (no live session yet): RAW passthrough, no DEAX
+ *     stepping at all -- returns chip->zone0[addr..addr+len) unmodified.
+ *     This is the branch that makes the panel firmware's self-test
+ *     round-trip correctly against this emulator (see
+ *     at88_chip_write_zone0() immediately below).
+ *   b8RoundsAccepted >= 2 (post-handshake): DEAX-encrypted, exactly as
+ *     before -- the chip-side counterpart to kronos_extract.c's
+ *     synth_zone0_read(). `d` must already be in the correct session state;
+ *     this function only does the per-byte "step forward, XOR the real
+ *     plaintext byte with the keystream, step again on the *plaintext*"
+ *     sequence confirmed there. This is the ONLY branch OA.ko's own real
+ *     call sequence ever reaches (it always completes both $B8 rounds
+ *     before its first $B2), so this change is behavior-preserving for
+ *     every existing OA.ko-facing test.
+ *
+ * 0 on success, -1 if the read would run past the 40-byte zone (checked
+ * before either branch runs).
  */
 int at88_chip_read_zone0(struct AT88ChipState *chip, struct DeaxState *d,
 			  unsigned char addr, unsigned char len,
 			  unsigned char *out);
+
+/*
+ * Zone0 write ($B0) -- new 2026-07-16, ground-truthed against the same
+ * KRONOS_V06R06.VSB self-test described above. Always a RAW copy into
+ * chip->zone0[addr..addr+len), regardless of b8RoundsAccepted -- matches
+ * the self-test's own visible behavior (it builds its 16-byte pattern and
+ * writes it directly, with no encrypt call in between). Deliberately does
+ * NOT attempt to model an encrypted/authenticated write path: nothing in
+ * this project's scope (OA.ko/loadmod.ko are confirmed read-only AT88
+ * consumers) ever issues a post-handshake $B0, so there is no ground truth
+ * to build one from -- see README.md Open Item #5. If that's ever needed,
+ * it needs its own investigation first, not a guess bolted on here.
+ *
+ * 0 on success, -1 if the write would run past the 40-byte zone.
+ */
+int at88_chip_write_zone0(struct AT88ChipState *chip, unsigned char addr,
+			   unsigned char len, const unsigned char *in);
 
 #endif /* AT88_CHIP_H */

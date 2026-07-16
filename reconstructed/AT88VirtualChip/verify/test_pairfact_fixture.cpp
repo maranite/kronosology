@@ -103,6 +103,30 @@ int main(void)
 	rc = pairfact_fixture_lookup(wrongBlob, 79, keys48);
 	check_eq("wrong-length blob returns nonzero", (unsigned int)(rc != 0), 1);
 
+	printf("[6] Full 16-byte keys (not just the 31-char truncated form) match\n"
+	       "    what two real .reauth files independently decrypt to -- see\n"
+	       "    cryptoloop_keys.md's 2026-07-16 \".reauth\" section. This is the\n"
+	       "    check that caught the previous 16th-byte guess (0xa0/0xd0/0xb0)\n"
+	       "    being wrong (real: 0xa7/0xd2/0xbe).\n");
+	blob = read_file("/home/share/kronosology/docs/crypto/pairFact3.bin", &blobLen);
+	pairfact_fixture_lookup(blob, blobLen, keys48);
+	free(blob);
+	static const unsigned char realMod[16] = {
+		0xa3,0x36,0xa1,0x5c,0xd8,0x41,0xec,0x89,0x26,0xb9,0x9e,0x7c,0x38,0x84,0xea,0xa7
+	};
+	static const unsigned char realEva[16] = {
+		0x34,0x2e,0xe5,0x9d,0x54,0x9c,0x7d,0x32,0x9d,0x83,0x55,0x37,0xbe,0x05,0x40,0xd2
+	};
+	static const unsigned char realWaveMotion[16] = {
+		0x3e,0x72,0xc0,0xe5,0x9f,0xc0,0x17,0xa9,0xeb,0x7d,0x7e,0x11,0x68,0xa4,0xcd,0xbe
+	};
+	check_eq("Mod full 16 bytes == real .reauth-decrypted key",
+		 (unsigned int)(memcmp(keys48, realMod, 16) == 0), 1);
+	check_eq("Eva full 16 bytes == real .reauth-decrypted key",
+		 (unsigned int)(memcmp(keys48 + 16, realEva, 16) == 0), 1);
+	check_eq("WaveMotion full 16 bytes == real .reauth-decrypted key",
+		 (unsigned int)(memcmp(keys48 + 32, realWaveMotion, 16) == 0), 1);
+
 	printf("=====================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

@@ -86,6 +86,57 @@ These are bookmarked with category `patch_for_auth` in the Ghidra project.
 
 ---
 
+## Config-zone cross-check across 3 real units (2026-07-16)
+
+Full `KronosExtract.bin`-format captures from three physically different
+units — two Kronos (referred to here as `947e`, `6630`) and one Nautilus
+(`2D68`) — became available, the first time this project has had more than
+one unit's data to compare. (Device identifiers/public IDs intentionally
+not reproduced here — private per-device info.) Diffed the full 128-byte
+config zone across all three:
+
+- **`cfg[0x00:0x10]`, `cfg[0x20:0x28]` (`d508d549d58ad7cb`), and
+  `cfg[0x40:0x50]` (`4142434445464748494a4b4c4d4e4f50` — literally the ASCII
+  string `"ABCDEFGHIJKLMNOP"`) are byte-for-byte identical across all three
+  units, including across the Kronos/Nautilus product-line boundary.** These
+  are template/manufacturer constants baked into the config-zone layout
+  itself, not per-device data — `"ABCDEFGHIJKLMNOP"` in particular has the
+  unmistakable look of a factory read/write self-test pattern (the same
+  flavor of thing found independently in the NKS4 panel firmware's own
+  `CryptoAt88.cpp` self-test, which writes a sequential `0..15` pattern —
+  see `docs/modules/KRONOS_V06R06.VSB.md`). Not secret, not per-device,
+  useful mainly as a sanity check that config-zone addressing is aligned the
+  same way across units and product lines.
+- **`cfg[0x50]`, `cfg[0x60]`, `cfg[0x70]` each start a 16-byte-aligned
+  record: `[0xff status byte][7 per-unit, non-repeating bytes][8 zero
+  bytes]`.** `cfg[0x50..0x57]` is the already-documented AAC/IV zone (see
+  `AT88VirtualChip/at88_chip.h`'s `p3` field, and `kNv2acStatusZone` in
+  `reconstructed/OA/src/auth/nv2ac_handshake.cpp`, which lists exactly these
+  three addresses plus `0x80` as a 4-entry table indexed by `sel`). What's
+  new: **`0x60` and `0x70` are not blank or default-filled on any of the
+  three real units** — they hold real, structurally-identical, per-device
+  data, exactly like the slot at `0x50` that's actually used. But no
+  currently-reconstructed code path (`OA.ko`, `loadmod.ko`) ever calls with
+  `sel != 0` — every real call site hardcodes `sel=0`. So these two slots are
+  **provisioned but functionally unconfirmed**: something writes real
+  per-device secret-shaped material there, but nothing in this project's
+  reconstructed call graph reads it back. Worth investigating whether
+  `sel=1`/`sel=2` correspond to the other two auth systems `CLAUDE.md`
+  tracks (boot auth's RSA-PRNG system, or the `.reauth`/`pairFact3` system —
+  see `cryptoloop_keys.md`), which use the AT88 chip via entirely different
+  call paths (`loadmod.ko`'s `RetrieveSecurityICKey`, or the boot_auth
+  tooling) not yet cross-checked against this table.
+- Checked whether any of the config-zone slot data or the freely-readable
+  IdN (`cfg[0x19:0x20]`) has any derivable relationship to the Zone0 secret
+  (`0x00`-`0x27`) — direct substring match, byte-wise XOR (pairwise across
+  units and within a unit), and hashing (MD5/SHA1/SHA256 of IdN, salted and
+  unsalted) all came up negative on all three units. No evidence of any
+  derivation; see `auth_string_algorithm.md`'s existing "no known way to
+  forge without the chip secret" conclusion, now checked empirically rather
+  than only argued from the chip's designed security properties.
+
+---
+
 ## Implications for our project
 
 | Goal | What we need from the chip |

@@ -96,7 +96,57 @@ lookup for loadmod's specific need.
    fire and `loadmod.ko` will get a wrong/undefined answer. Simplest mitigation:
    ship the VM's own `/.pairFact3` as the exact captured `pairFact3.bin`, so the
    fixture is guaranteed to match by construction.
-5. **`useEightStepAac` (b8_handshake.cpp's real `$B8` lockout, added 2026-07-13)
+5. ~~**`$B0` (write) is entirely unimplemented — falls into `stgNV2AC_sync_cmd`'s
+   silent-no-op default case.**~~ **RESOLVED 2026-07-16.** Found the same day
+   while tracing `KRONOS_V06R06.VSB` (the NKS4 panel board's own firmware —
+   see `kronosology/docs/modules/KRONOS_V06R06.VSB.md`): that firmware's
+   `CryptoAt88.cpp` runs a self-test that `$B4`-selects zone 0, `$B0`-writes a
+   known 16-byte pattern to address 0, `$B2`-reads it back, and calls a fatal
+   assert-and-hang handler (`do {} while(true)` after drawing an error screen —
+   the same code path behind `"SYSTEM STARTUP FAILED"`) if the two don't match.
+
+   **Fix**: added `at88_chip_write_zone0()` (`chip_state.cpp`) and wired `$B0`
+   into `stgNV2AC_sync_cmd`'s dispatch (`nv2ac_exports.cpp`), inferring the
+   wire packing by extending this file's existing $B8-style "one buffer
+   pointer + one total length" convention: `{0xb0, 0x00, addr, len}` header
+   followed by `len` payload bytes in the same buffer. Writes are always raw
+   (no DEAX), matching the self-test's own visible behavior (it builds its
+   pattern and writes it with no encrypt step in between) — deliberately NOT
+   extended to a hypothetical authenticated-write path, since nothing in this
+   project's scope ever issues a post-handshake `$B0` and there is no ground
+   truth to build one from.
+
+   This alone wasn't enough to make the self-test's round trip work, though:
+   `at88_chip_read_zone0()`'s `$B2` dispatch was (still is, for zone routing —
+   see below) unconditionally DEAX-encrypted, and a chip that always requires
+   a live `$B8` session for zone 0 couldn't pass its own factory self-test
+   before that session ever exists. Reconciled by gating `$B2` on
+   `chip->b8RoundsAccepted`: `< 2` (no session yet, e.g. a freshly-loaded
+   chip) reads raw, matching the self-test's own no-`$B8`-visible behavior;
+   `>= 2` (post-handshake) keeps the exact prior DEAX-encrypted behavior,
+   which is the only branch `OA.ko`'s real call sequence ever reaches (it
+   always completes both rounds before its first `$B2`) — so this is
+   behavior-preserving for every existing OA.ko-facing test, confirmed by the
+   full suite staying green (one pre-existing test, `test_chip_state.cpp`'s
+   zone0 self-consistency check, needed one line — explicitly setting
+   `b8RoundsAccepted = 2` — to keep reaching the encrypted branch it was
+   always meant to exercise). New KAT coverage reproduces the panel
+   firmware's exact scenario end to end, both at the `chip_state.cpp` level
+   and through the real exported `stgNV2AC_sync_cmd`/`nv2ac_read_cmd_impl`
+   symbols, plus a check that post-auth reads of the same written pattern
+   come back different (proving the gate has a real effect, not just two
+   branches that happen to agree).
+
+   **Deliberately still open, not touched by this fix**: `$B2`'s dispatch
+   remains unconditional on zone 0 regardless of `g_chip.selectedZone` —
+   consistent with today's stated scope ("only zone 0 is ever emulated"), but
+   the panel firmware's zone-select call is explicit and structural on its
+   side of the wire, not vestigial. Also open: whether a real chip's `$B0`
+   is *always* raw regardless of auth state, or only pre-lock (this emulator
+   currently implements the former, the simpler of the two, since nothing in
+   scope distinguishes them) — see `at88_chip.h`'s `at88_chip_write_zone0()`
+   doc comment.
+6. **`useEightStepAac` (b8_handshake.cpp's real `$B8` lockout, added 2026-07-13)
    defaults to the 4-attempt decay sequence** (`$FF,$EE,$CC,$88,$00`) per the
    Atmel CryptoMemory datasheet's stated default ("ETA=1"). The real Kronos
    chip's actual ETA config bit has not been characterized from a live capture —
@@ -115,7 +165,10 @@ AT88VirtualChip/
   at88_chip.h           shared zone/state-machine types
   gpa_cipher.cpp/.h      the GPA wire cipher (real implementation, fixed key)
   chip_state.cpp/.h      zone storage, zone-select/read state machine, secret data
-  pairfact_fixture.cpp   the loadmod.ko response-fixture lookup
+  pairfact_fixture.cpp   one known /.pairFact3 blob's key material (superseded
+                         by pairfact_decrypt.cpp below for anything general)
+  pairfact_decrypt.cpp   GENERAL .pairFact3/.reauth decrypt (host-test-only,
+                         reuses reconstructed/OA's moancjsd82 + md5)
   nv2ac_exports.cpp      stgNV2AC_sync_cmd / stgNV2AC_sync_read_cmd (the two real
                          exported symbols; matches OmapNKS4Module.ko's ABI exactly
                          so OA.ko/loadmod.ko link against this module unmodified)
@@ -256,7 +309,8 @@ independent Nc/Q oracle).
 
 **`loadmod.ko` pairFact3 fixture done and KAT-verified**
 (`pairfact_fixture.h`/`pairfact_fixture.cpp`,
-`verify/test_pairfact_fixture.cpp`, 7/7 checks passing). Recognizes the one
+`verify/test_pairfact_fixture.cpp`, 10/10 checks passing — 3 more added
+2026-07-16 validating the full 16-byte keys, see below). Recognizes the one
 known captured `/.pairFact3` blob (80 bytes, MD5
 `817956d550647905828e115f9eae7a0e`) by exact byte match and returns raw
 16-byte-per-volume key material for Mod/Eva/WaveMotion, reconstructed from
@@ -286,18 +340,21 @@ byte (a manual hex-transcription slip while hand-splitting the 31-char
 string into byte pairs) — the round-trip test failed immediately with the
 mismatch, exactly the kind of error this test methodology exists to catch.
 
-**Explicit scoping note, not an oversight**: this fixture is deliberately
-NOT wired into `nv2ac_exports.cpp`'s opcode dispatch. The actual AT88 wire
-command `RetrieveSecurityICKey` uses to move an 80-byte blob to the chip
-and get 48 bytes back has never been reverse-engineered at the byte level
-— neither `cryptoloop_keys.md` nor `docs/modules/loadmod.ko_analysis.md`
-documents an opcode for it, and the former explicitly says so ("we have
-not had occasion to RE the exact plaintext layout") and suggests kprobing
-`stgNV2AC_sync_read_cmd` as the way to find out. Guessing that wire format
-isn't warranted — this project's standing rule is ground truth over
-paraphrase, and none exists for it yet. This fixture is implemented at the
-logical level (blob in, raw key material out) so it's ready to wire in the
-moment that wire format is actually confirmed.
+**Scoping note, corrected 2026-07-16**: this fixture is deliberately NOT
+wired into `nv2ac_exports.cpp`'s opcode dispatch — but not because of an
+unconfirmed wire format, as this note used to claim. There is no such wire
+format to confirm: `/.pairFact3`/`.reauth` decryption is plain host-side
+Blowfish-CFB-64 (`moancjsd82`, `p3=80` — see `oa_crypto.h`'s own header
+comment, already documenting this before this fixture was written) keyed
+by Zone0 data this project already reads via the ordinary authenticated
+protocol. No special chip opcode moves an 80-byte blob anywhere. Confirmed
+by direct reproduction against two real `.reauth` files (see
+`pairfact_decrypt.h`/`pairfact_decrypt.cpp`, and
+`docs/crypto/cryptoloop_keys.md`'s "`.reauth` IS `.pairFact3`" section).
+It's *correctly* not wired into `nv2ac_exports.cpp` because it isn't chip
+protocol at all — it's host-side logic (`loadmod.ko`'s job, not the AT88
+chip's), so it doesn't belong in a chip-opcode dispatch table by
+definition, not because of a missing piece of reverse engineering.
 
 **Kernel-module scaffolding done** (`module_main.cpp`, plus a Kbuild
 section added to the `Makefile`). Covers:
@@ -355,10 +412,14 @@ directly from `kronos_extract.c`'s own already-hardware-proven idioms
 line-for-line rather than guessed, which is the strongest confidence
 available short of an actual compile.
 
-**Still open**: wiring the pairFact3 fixture into `nv2ac_exports.cpp`
-once `RetrieveSecurityICKey`'s wire format is confirmed, and actually
-verifying the `.ko` build + a real/VM boot test once a proper `KDIR` is
-available. Every piece of chip-side protocol logic itself — zone
-storage, `$B6`/`$B2` reads, the full `$B8` handshake, the two real
-exported symbols, and the pairFact3 fixture — is complete and
-KAT-verified (32/32 checks across four host test binaries).
+**Still open**: actually verifying the `.ko` build + a real/VM boot test
+once a proper `KDIR` is available. The pairFact3/`.reauth` wiring item
+that used to be listed here is resolved, not open — see `pairfact_decrypt.h`
+(2026-07-16): there was no chip wire format to confirm, so there's nothing
+to wire into `nv2ac_exports.cpp`. Every piece of chip-side protocol logic
+itself — zone storage, `$B0`/`$B6`/`$B2` reads and writes, the full `$B8`
+handshake, the two real exported symbols, the pairFact3 fixture, and the
+general `.pairFact3`/`.reauth` decrypt — is complete and KAT-verified
+(97/97 checks across all seven host test binaries, after Open Item #5's
+`$B0` write support and the `pairfact_decrypt` correction, both
+2026-07-16).

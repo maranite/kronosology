@@ -106,3 +106,16 @@ Full writeup in [`../modules/OmapNKS4Module.ko_chip_wedge.md`](../modules/OmapNK
 None deployed. The ELF-surgery `usb_reset_device` import experiment is preserved at
 [`../../tools/patch_omapnks4_cleanup.py`](../../tools/patch_omapnks4_cleanup.py) for future work
 on adding kernel-symbol imports to relocatable `.ko` files.
+
+---
+
+## The other end of the wire
+
+The USB `0944:1005` device this module talks to is not a dumb chip — it's a full
+standalone embedded system (its own TI OMAP-L1x CPU, LCD controller, touch panel,
+PSoC button/LED scan chip, and possibly its own AT88 access) running the firmware
+shipped as `KRONOS_Vxxxxx.VSB`. See
+[`KRONOS_V06R06.VSB.md`](KRONOS_V06R06.VSB.md) for what a disassembly pass of that
+firmware turned up, including the authoritative switch/LED name table and
+confirmation that the panel receives an 8bpp palette-indexed framebuffer (matching
+`KronosScreenRemoteDaemon`'s `/dev/fb1` model) rather than RGB.

@@ -8,9 +8,12 @@ there's no need, Python ints make the modexp itself trivial to get right;
 what this catches is a transcription bug in the FIXED CONSTANTS N1/N2/e0,
 or in the IdN-packing/output-byte-selection steps, ported into bignum.cpp).
 
-Uses the real captured IdN from KronosExtract.bin (cfg[0x19..0x1f] =
-[REDACTED-PUBLIC-ID]) as its input, so the resulting p2 vector is grounded in
-real hardware data, not an arbitrary made-up IdN.
+Originally used a real captured IdN as input; switched 2026-07-16 to a
+synthetic IdN (private per-device info, not committed to this repo). The
+oracle-cross-check property this script exists for -- does an independent
+Python implementation of the modexp agree with bignum.cpp's C++ port --
+doesn't depend on the IdN being real hardware data, only on both
+implementations being fed the SAME input.
 """
 
 N1 = int("275870082984435801508285927170653268036")
@@ -36,8 +39,8 @@ def synth_sdflkjsvnd2g(idn: bytes) -> bytes:
 
 
 if __name__ == "__main__":
-    # cfg[0x19..0x1f] from the real captured KronosExtract.bin
-    idn = bytes.fromhex("[REDACTED-PUBLIC-ID]")
+    # Synthetic IdN (not real device data) -- see module docstring.
+    idn = bytes.fromhex("de00ad00be00ef")
     p2 = synth_sdflkjsvnd2g(idn)
     print("idn:", idn.hex())
     print("p2: ", p2.hex())

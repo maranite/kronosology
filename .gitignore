@@ -33,5 +33,14 @@ reconstructed/*/verify/test_*
 !reconstructed/*/verify/test_*.cpp
 !reconstructed/*/verify/test_*.py
 
+# This one test's ground truth is real captured per-device data (Zone0 key
+# material + a matching .reauth pair) that can't be meaningfully replaced
+# with synthetic values the way the other AT88VirtualChip tests were
+# (2026-07-16) -- it hardcodes real device file paths/public IDs, which are
+# private and must not be committed. Excluded from git entirely rather than
+# reworked; still runs locally (make verify) as long as the file exists on
+# disk, it's just never tracked. See AT88VirtualChip/pairfact_decrypt.h.
+reconstructed/AT88VirtualChip/verify/test_pairfact_decrypt.cpp
+
 # Claude memories
 .claude/*

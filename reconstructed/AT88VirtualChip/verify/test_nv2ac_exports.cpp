@@ -27,6 +27,22 @@
 #include <cstdlib>
 #include "../at88_chip.h"
 #include "../bignum.h"
+#include "oa_md5.h"
+
+/* MD5 hash of a byte buffer, printed as lowercase hex -- see
+ * test_chip_state.cpp's matching helper/comment (2026-07-16): used here so
+ * this file can still verify it read the real, correct private per-device
+ * bytes without embedding their actual value in this repo. */
+static void md5_hex(const unsigned char *data, unsigned int len, char out[33])
+{
+	struct md5_state_t ctx;
+	unsigned char digest[16];
+	md5_init(&ctx);
+	md5_append(&ctx, data, (int)len);
+	md5_finish(&ctx, digest);
+	for (int i = 0; i < 16; i++)
+		snprintf(out + i * 2, 3, "%02x", digest[i]);
+}
 
 extern "C" int  at88_chip_module_init(const unsigned char *blob, unsigned int blobLen);
 extern "C" int  stgNV2AC_sync_cmd(unsigned char *address, unsigned int data);
@@ -78,7 +94,10 @@ int main(void)
 	}
 	int rc = at88_chip_module_init(blob, blobLen);
 	check_eq("at88_chip_module_init succeeds", (unsigned int)(rc == 0), 1);
-	free(blob);
+	/* blob kept alive (not freed here) -- [2b] below overwrites zone0[0..15]
+	 * via a real $B0 write, and needs to reload from the same blob to
+	 * restore the real captured secret before [4]-[6]'s $B8/$B2 checks,
+	 * which depend on zone0 still holding it. Freed after that reload. */
 
 	printf("[2] $B4 zone select (zone 0) via stgNV2AC_sync_cmd\n");
 	unsigned char zoneSel[4] = {0xb4, 0x03, 0x00, 0x00};
@@ -87,14 +106,54 @@ int main(void)
 	 * just confirms the call doesn't crash / mishandle the opcode. */
 	check_eq("zone select call completes", 1, 1);
 
+	printf("[2b] $B0 write + pre-auth $B2 read, through the REAL exported\n"
+	       "     stgNV2AC_sync_cmd/nv2ac_read_cmd_impl entry points -- the\n"
+	       "     panel-firmware self-test scenario (KRONOS_V06R06.VSB's\n"
+	       "     CryptoAt88.cpp, 2026-07-16). Deliberately BEFORE the $B8\n"
+	       "     rounds below, matching the self-test's own observed behavior\n"
+	       "     (no $B8 call anywhere in it) and the only chip state\n"
+	       "     (b8RoundsAccepted==0) this project has evidence for that\n"
+	       "     scenario running in.\n");
+	static const unsigned char pattern16[16] = {
+		0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+	};
+	unsigned char writeCmd[4 + 16];
+	writeCmd[0] = 0xb0; writeCmd[1] = 0x00; writeCmd[2] = 0x00; writeCmd[3] = 16;
+	memcpy(writeCmd + 4, pattern16, 16);
+	rc = stgNV2AC_sync_cmd(writeCmd, sizeof(writeCmd));
+	check_eq("$B0 write(0,16, 0..15) rc==0", (unsigned int)(rc == 0), 1);
+
+	unsigned char readCmd[4] = {0xb2, 0x00, 0x00, 16};
+	unsigned char readBack[16];
+	rc = nv2ac_read_cmd_impl(readCmd, readBack);
+	check_eq("pre-auth $B2 read(0,16) rc==0", (unsigned int)(rc == 0), 1);
+	check_eq("pre-auth $B2 read returns the exact written pattern",
+		 (unsigned int)(memcmp(readBack, pattern16, 16) == 0), 1);
+
+	printf("[2c] Malformed $B0 (declared length longer than the buffer actually\n"
+	       "     passed) is rejected, not read out of bounds\n");
+	unsigned char shortWriteCmd[4] = {0xb0, 0x00, 0x00, 16};	/* claims 16 payload
+									 * bytes, data says 4 */
+	rc = stgNV2AC_sync_cmd(shortWriteCmd, 4);
+	check_eq("malformed $B0 (data < 4+len) rejected", (unsigned int)(rc != 0), 1);
+
+	printf("[2d] Reload from the same blob to undo [2b]'s zone0[0..15] overwrite --\n"
+	       "     [4]-[6] below need the real captured secret back in place\n");
+	rc = at88_chip_module_init(blob, blobLen);
+	check_eq("reload after $B0 test succeeds", (unsigned int)(rc == 0), 1);
+	free(blob);
+
 	printf("[3] Read IdN via $B6 (stgNV2AC_sync_read_cmd) -- must match the\n"
-	       "    real captured cfg[0x19..0x1f]\n");
+	       "    real captured cfg[0x19..0x1f] (checked by MD5 hash: private\n"
+	       "    per-device data, real value intentionally not in this file)\n");
 	unsigned char idnCmd[4] = {0xb6, 0x00, 0x19, 7};
 	unsigned char idn[7];
 	rc = nv2ac_read_cmd_impl(idnCmd, idn);
 	check_eq("$B6 IdN read rc==0", (unsigned int)(rc == 0), 1);
-	static const unsigned char wantIdn[7] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-	check_eq("IdN == [REDACTED-PUBLIC-ID]", (unsigned int)(memcmp(idn, wantIdn, 7) == 0), 1);
+	char idnHash[33];
+	md5_hex(idn, 7, idnHash);
+	check_eq("md5(IdN) == 7ef30bc254cdda94f8b607ac4f6f227d",
+		 (unsigned int)(strcmp(idnHash, "7ef30bc254cdda94f8b607ac4f6f227d") == 0), 1);
 
 	printf("[4] Round 1: a self-consistent $B8 challenge (zone 0x00) is accepted\n"
 	       "    (observed only indirectly, via the AAC byte -- $B8 is a\n"
@@ -103,8 +162,15 @@ int main(void)
 	unsigned char aacBefore;
 	nv2ac_read_cmd_impl(aacCmd, &aacBefore);
 
-	unsigned char hostP2[8], hostP3[8] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-	synth_sdflkjsvnd2g(wantIdn, hostP2);
+	/* p3/IV zone (cfg[0x50:0x58]) read dynamically rather than hardcoded --
+	 * same privacy reasoning as IdN above, and this additionally means the
+	 * value used to build a valid $B8 challenge always matches whatever
+	 * chip data is actually loaded, not a value frozen in source. */
+	unsigned char p3Cmd[4] = {0xb6, 0x00, 0x50, 8};
+	unsigned char hostP2[8], hostP3[8];
+	rc = nv2ac_read_cmd_impl(p3Cmd, hostP3);
+	check_eq("$B6 p3/IV zone read rc==0", (unsigned int)(rc == 0), 1);
+	synth_sdflkjsvnd2g(idn, hostP2);
 	static const unsigned char nc1[8] = {0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88};
 	unsigned char q1[8], p5_1[8];
 	DeaxState hostSession;
@@ -138,7 +204,9 @@ int main(void)
 	check_eq("AAC did not decrease after round 2 (accepted)",
 		 (unsigned int)(aacAfterRound2 >= aacAfterRound1), 1);
 
-	printf("[6] Post-handshake $B2 Zone0 read matches the REAL captured secret\n");
+	printf("[6] Post-handshake $B2 Zone0 read matches the real captured secret\n"
+	       "    (checked by MD5 hash -- private per-device data, real value\n"
+	       "    intentionally not in this file)\n");
 	unsigned char z0Cmd[4] = {0xb2, 0x00, 0x00, 8};
 	unsigned char z0cipher[8];
 	rc = nv2ac_read_cmd_impl(z0Cmd, z0cipher);
@@ -176,11 +244,10 @@ int main(void)
 		deax_step(&hostZone0State, 0); deax_step(&hostZone0State, 0);
 		deax_step(&hostZone0State, 0);
 	}
-	static const unsigned char wantZone0First8[8] = {
-		0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
-	};
-	check_eq("recovered Zone0[0..7] matches the real captured secret",
-		 (unsigned int)(memcmp(recovered, wantZone0First8, 8) == 0), 1);
+	char zone0Hash[33];
+	md5_hex(recovered, 8, zone0Hash);
+	check_eq("md5(recovered Zone0[0..7]) == 9302b155418fdacbd093c06e98d77669",
+		 (unsigned int)(strcmp(zone0Hash, "9302b155418fdacbd093c06e98d77669") == 0), 1);
 
 	printf("[7] Unrecognized opcodes are rejected / no-op rather than crashing\n");
 	unsigned char badCmd[4] = {0xff, 0, 0, 0};

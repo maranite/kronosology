@@ -7,9 +7,13 @@
  *
  *   1. The REAL captured KronosExtract.bin file (loaded from disk, not
  *      embedded/assumed) -- its magic/CRC/overlap must check out exactly
- *      as the real 188-byte file on disk, and the specific zone bytes this
- *      test asserts (0x19, 0x50) are cross-checked against a raw Python-
- *      style manual read of the same file (recorded in the comments).
+ *      as the real 188-byte file on disk. The specific zone bytes this
+ *      test asserts (0x19, 0x50) are per-device private data (IdN / IV
+ *      seed), so -- 2026-07-16 -- checked via MD5 hash comparison rather
+ *      than embedding the real values directly: still catches any
+ *      regression in the read/parse path (any wrong byte changes the
+ *      hash), without putting real device-identifying bytes in this
+ *      repo's source or history.
  *   2. A fresh, from-scratch Python re-implementation of deax_step(),
  *      written independently from the same kronos_extract.c source this
  *      C++ port came from, to catch transcription bugs the port itself
@@ -22,6 +26,21 @@
 #include <cstring>
 #include <cstdlib>
 #include "../at88_chip.h"
+#include "oa_md5.h"
+
+/* MD5 hash of a byte buffer, printed as lowercase hex -- used below to
+ * verify real-device-derived fields without embedding their actual value
+ * in this file (private per-device info; see this file's header comment). */
+static void md5_hex(const unsigned char *data, unsigned int len, char out[33])
+{
+	struct md5_state_t ctx;
+	unsigned char digest[16];
+	md5_init(&ctx);
+	md5_append(&ctx, data, (int)len);
+	md5_finish(&ctx, digest);
+	for (int i = 0; i < 16; i++)
+		snprintf(out + i * 2, 3, "%02x", digest[i]);
+}
 
 static int g_fail;
 
@@ -76,23 +95,23 @@ int main(void)
 	check_eq("chip.dataLoaded set", (unsigned int)chip.dataLoaded, 1);
 	free(blob);
 
-	printf("[2] Confirmed real zone bytes (hand-verified against the file directly)\n");
-	/* python3 -c "d=open('KronosExtract.bin','rb').read(); print(d[8+0x19:8+0x20].hex())"
-	 * -> [REDACTED-PUBLIC-ID] */
+	printf("[2] Confirmed real zone bytes (checked by MD5 hash -- private\n"
+	       "    per-device data, real value intentionally not in this file)\n");
 	unsigned char cfg19[7];
 	rc = at88_chip_read_config(&chip, 0x19, 7, cfg19);
 	check_eq("read_config(0x19,7) rc==0", (unsigned int)(rc == 0), 1);
-	static const unsigned char want19[7] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-	bool ok19 = memcmp(cfg19, want19, 7) == 0;
-	check_eq("cfg[0x19..0x1f] == [REDACTED-PUBLIC-ID]", (unsigned int)ok19, 1);
+	char cfg19Hash[33];
+	md5_hex(cfg19, 7, cfg19Hash);
+	check_eq("md5(cfg[0x19..0x1f]) == 7ef30bc254cdda94f8b607ac4f6f227d",
+		 (unsigned int)(strcmp(cfg19Hash, "7ef30bc254cdda94f8b607ac4f6f227d") == 0), 1);
 
-	/* python3 -c "... print(d[8+0x50:8+0x58].hex())" -> [REDACTED-DEVICE-DATA] */
 	unsigned char cfg50[8];
 	rc = at88_chip_read_config(&chip, 0x50, 8, cfg50);
 	check_eq("read_config(0x50,8) rc==0", (unsigned int)(rc == 0), 1);
-	static const unsigned char want50[8] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-	bool ok50 = memcmp(cfg50, want50, 8) == 0;
-	check_eq("cfg[0x50..0x57] == [REDACTED-DEVICE-DATA]", (unsigned int)ok50, 1);
+	char cfg50Hash[33];
+	md5_hex(cfg50, 8, cfg50Hash);
+	check_eq("md5(cfg[0x50..0x57]) == 0b602c4a1fa060835c82a3c2e6d254bf",
+		 (unsigned int)(strcmp(cfg50Hash, "0b602c4a1fa060835c82a3c2e6d254bf") == 0), 1);
 
 	printf("[3] Out-of-range config read rejected\n");
 	unsigned char scratch[8];
@@ -101,6 +120,13 @@ int main(void)
 
 	printf("[4] Zone0 read/step self-consistency (encrypt with one DeaxState,\n"
 	       "    decrypt with a freshly-seeded second one, recover the plaintext)\n");
+	/* Forces the post-handshake DEAX branch of at88_chip_read_zone0() (see
+	 * its at88_chip.h doc comment, 2026-07-16) -- this test's own point is
+	 * to check DEAX self-consistency, which only the authenticated branch
+	 * exercises; a freshly-loaded chip's b8RoundsAccepted starts at 0
+	 * (no real $B8 has run), matching how a real caller only ever reaches
+	 * this branch after completing both $B8 rounds. */
+	chip.b8RoundsAccepted = 2;
 	DeaxState chipSide, hostSide;
 	deax_init(&chipSide);
 	deax_init(&hostSide);
@@ -130,6 +156,56 @@ int main(void)
 	deax_init(&d2);
 	rc = at88_chip_read_zone0(&chip, &d2, 35, 8, scratch);	/* 35+8=43 > 40 */
 	check_eq("read_zone0 past the end returns nonzero", (unsigned int)(rc != 0), 1);
+
+	printf("[5b] $B0 write + pre-auth $B2 read -- the panel-firmware self-test\n"
+	       "     scenario (KRONOS_V06R06.VSB's CryptoAt88.cpp, 2026-07-16): a\n"
+	       "     fresh chip (b8RoundsAccepted==0, no $B8 ever run) writes a known\n"
+	       "     16-byte pattern to zone0 and reads it straight back. Uses its own\n"
+	       "     freshly-loaded chip instance so it can't be affected by test [4]\n"
+	       "     forcing b8RoundsAccepted=2 above.\n");
+	AT88ChipState freshChip;
+	memset(&freshChip, 0, sizeof(freshChip));
+	blob = read_file("/home/share/KronosExtract/build/KronosExtract.bin", &blobLen);
+	rc = at88_chip_load_from_extract(&freshChip, blob, blobLen);
+	free(blob);
+	check_eq("fresh chip load succeeds", (unsigned int)(rc == 0), 1);
+	check_eq("fresh chip starts pre-auth (b8RoundsAccepted==0)",
+		 (unsigned int)freshChip.b8RoundsAccepted, 0);
+
+	static const unsigned char pattern16[16] = {
+		0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+	};
+	rc = at88_chip_write_zone0(&freshChip, 0, 16, pattern16);
+	check_eq("write_zone0(0,16, 0..15) rc==0", (unsigned int)(rc == 0), 1);
+
+	DeaxState preAuthState;
+	deax_init(&preAuthState);	/* pre-auth branch ignores this entirely -- passed
+					 * only because the function signature requires it */
+	unsigned char readBack[16];
+	rc = at88_chip_read_zone0(&freshChip, &preAuthState, 0, 16, readBack);
+	check_eq("pre-auth read_zone0(0,16) rc==0", (unsigned int)(rc == 0), 1);
+	bool patternRoundTrips = memcmp(readBack, pattern16, 16) == 0;
+	check_eq("pre-auth read returns the exact written pattern (0..15)",
+		 (unsigned int)patternRoundTrips, 1);
+	check_eq("pre-auth read did not touch the passed-in DeaxState",
+		 (unsigned int)preAuthState.gpa, 0);
+
+	printf("[5c] The SAME written pattern, read back post-auth, is NOT the raw\n"
+	       "     pattern -- proves the gate actually switches behavior rather\n"
+	       "     than the two branches coincidentally agreeing\n");
+	freshChip.b8RoundsAccepted = 2;
+	DeaxState postAuthState;
+	deax_init(&postAuthState);
+	unsigned char readBackEnc[16];
+	rc = at88_chip_read_zone0(&freshChip, &postAuthState, 0, 16, readBackEnc);
+	check_eq("post-auth read_zone0(0,16) rc==0", (unsigned int)(rc == 0), 1);
+	bool encMatchesRaw = memcmp(readBackEnc, pattern16, 16) == 0;
+	check_eq("post-auth read does NOT equal the raw pattern (gate has an effect)",
+		 (unsigned int)encMatchesRaw, 0);
+
+	printf("[5d] Out-of-range zone0 write rejected\n");
+	rc = at88_chip_write_zone0(&freshChip, 35, 8, pattern16);	/* 35+8=43 > 40 */
+	check_eq("write_zone0 past the end returns nonzero", (unsigned int)(rc != 0), 1);
 
 	printf("[6] deax_step vs. an independent from-scratch Python re-implementation\n"
 	       "    (gen_deax_vectors.py, written straight from kronos_extract.c, not\n"
