@@ -11,8 +11,17 @@
  *  Command-register bytes recovered from the binary:
  *      0xee  communication check          0xf0  get version (reg=index)
  *      0x90  set #analog inputs           0x70  set #LED banks
- *      0x00  configure scanning (reg=enable bitmask)
- *  (a few setter regs are noted inline where not yet disassembled.)
+ *      0x00  configure scanning (reg=enable bitmask, no opcode byte - confirmed real)
+ *      0x71  read port config (reg=0x71, folded into opcode 0x01 - see driver.cpp's
+ *            ReceiveEventBuffer idx==0x71 special case, NOT a generic idx<<16 echo)
+ *      0xB0  set all analog input filter (opcode 0x01, data=(a<<4)|b)
+ *      0x80  set rotary encoder sample speed (opcode 0x00, data=n)
+ *      0x81/0x83/0x82  configure rotary encoders (opcode 0x01, 3-word sequence)
+ *      0xC7  set LCD brightness (reg=level itself, not a data byte)
+ *      0x06  reset module (reg=mode itself, not a data byte)
+ *  All setter regs re-verified via fresh Ghidra decompile + disassembly, 2026-07-15
+ *  (OmapNKS4Module.ko 3.2.2) - see KronosNKS4/docs/gaps.md "Setter command word
+ *  encodings - RESOLVED" for the full derivation and what was wrong before.
  */
 
 #include "omapnks4_internal.h"
@@ -105,24 +114,42 @@ bool SetAllAnalogInputFilter(unsigned char a, unsigned char b)	/* both in [0,0x0
 {
 	if (a >= 0x10 || b >= 0x10)
 		return false;
-	/* reg/encoding assembled in EAX from a,b (see binary 0x2ec0) */
-	return WaitForNKS4CommandWrite(((unsigned int)b << 8) | a) == 0;
+	/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+	 * SetAllAnalogInputFilter@0x12ec0): word = 0x01B00000 | ((a<<4)|b) - opcode 0x01,
+	 * reg 0xB0, data byte = high-nibble a / low-nibble b. The previous version
+	 * (`(b<<8)|a`) omitted the opcode/reg bytes entirely - not a real command word. */
+	return WaitForNKS4CommandWrite(0x01B00000 | (((unsigned int)a << 4) | b)) == 0;
 }
 
 bool SetRotaryEncoderSampleSpeed(unsigned int n)	/* n in [0,0xff] */
 {
 	if (n >= 0x100)
 		return false;
-	return WaitForNKS4CommandWrite((n << 8) & 0xff00) == 0;
+	/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+	 * SetRotaryEncoderSampleSpeed@0x12fc0): word = 0x00800000 | (n<<8) - opcode 0x00,
+	 * reg 0x80. Previously missing the reg byte entirely. */
+	return WaitForNKS4CommandWrite(0x00800000 | ((n << 8) & 0xff00)) == 0;
 }
 
-bool ConfigureRotaryEncoders(unsigned int n, bool a, bool b)	/* n in [1,4]; 3 cmds */
+bool ConfigureRotaryEncoders(unsigned int n, bool a, bool b)
 {
-	if (n == 0 || n >= 5)
+	/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+	 * ConfigureRotaryEncoders@0x12f40): n==0 is a VALID no-op that returns success
+	 * without sending anything - previously treated as an error. n in [1,4] sends a
+	 * real 3-word sequence (opcode 0x01 throughout):
+	 *   word1 = 0x01810000 | (((n-1) | (a?0x80:0) | (b?0x40:0)) << 8)
+	 *   word2 = 0x01830000  (fixed, no data)
+	 *   word3 = 0x01820100  (fixed, no data)
+	 * The previous version sent three completely different, unopcoded words
+	 * (`n<<8`, `a?0x100:0`, `b?0x100:0`) and rejected n==0. */
+	if (n == 0)
+		return true;
+	if (n >= 5)
 		return false;
-	return WaitForNKS4CommandWrite((n << 8)) == 0 &&
-	       WaitForNKS4CommandWrite((a ? 0x100 : 0)) == 0 &&
-	       WaitForNKS4CommandWrite((b ? 0x100 : 0)) == 0;
+	unsigned int flags = (n - 1) | (a ? 0x80 : 0) | (b ? 0x40 : 0);
+	return WaitForNKS4CommandWrite(0x01810000 | (flags << 8)) == 0 &&
+	       WaitForNKS4CommandWrite(0x01830000) == 0 &&
+	       WaitForNKS4CommandWrite(0x01820100) == 0;
 }
 
 /*
@@ -141,12 +168,18 @@ bool ConfigureScanning(bool keys, bool ctrls, bool wheels, bool spdif,
 
 bool SetLCDBrightness(unsigned char level)
 {
-	return WaitForNKS4CommandWrite(((unsigned int)level << 8)) == 0;
+	/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+	 * SetLCDBrightness@0x12ff0): word = 0xC7000000 | (level<<16) - level goes in the
+	 * REG byte (opcode fixed at 0xC7), not dataHi as previously assumed. */
+	return WaitForNKS4CommandWrite(0xC7000000 | ((unsigned int)level << 16)) == 0;
 }
 
 bool ResetModule(unsigned char mode)
 {
-	return WaitForNKS4CommandWrite(((unsigned int)mode << 8)) == 0;
+	/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+	 * ResetModule@0x13010): word = 0x06000000 | (mode<<16) - same reg-byte placement
+	 * as SetLCDBrightness, previously assumed to be dataHi (<<8). */
+	return WaitForNKS4CommandWrite(0x06000000 | ((unsigned int)mode << 16)) == 0;
 }
 
 /* ---- response classifiers (echo of the reg in the high 16 bits) -------- */

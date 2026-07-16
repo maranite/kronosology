@@ -12,6 +12,59 @@
 #include "omapnks4_internal.h"
 
 /* ========================================================================= *
+ *  CSTGThread - simplified implementation.
+ *
+ *  Ground truth (Ghidra, 2026-07-16): the real CreateRealTimeWithCPUAffinity
+ *  routes through a whole local pthread-style layer this module also
+ *  compiles in (rtwrap_pthread_attr_init/setrtpriority/setstacksize/create/
+ *  destroy, rtwrap_set_debug_traps_in_rt_task, rtwrap_set_runnable_on_cpuid,
+ *  rtwrap_pthread_cancel - roughly 9 more small functions, each individually
+ *  decompiled and reproducible but not done here given time constraints and
+ *  this function's non-critical-path status). NOT reproduced faithfully:
+ *  this simplified version spawns a plain kernel thread (no RT priority
+ *  elevation, no CPU affinity, no real join/cancel on Delete) rather than a
+ *  true RTAI real-time task. Deliberately acceptable here because
+ *  CActiveSenseThread::Setup()'s return value is never checked in
+ *  OmapNKS4Init (see main.cpp) - this thread existing only affects the
+ *  panel "active sense" keepalive tick, not USB probe/comm-check/Configure,
+ *  which is everything this session's hardware testing actually exercises.
+ *  Revisit with the real rtwrap_pthread_* chain if active-sense timing
+ *  turns out to matter in practice. */
+extern "C" int kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
+
+static stg_thread_fn sCSTGThreadFn;
+static void *sCSTGThreadArg;
+static volatile int sCSTGThreadRunning;
+
+static int cstgthread_trampoline(void *unused)
+{
+	(void)unused;
+	sCSTGThreadRunning = 1;
+	sCSTGThreadFn(sCSTGThreadArg);
+	sCSTGThreadRunning = 0;
+	return 0;
+}
+
+int CSTGThread::CreateRealTimeWithCPUAffinity(stg_thread_fn fn, void *arg,
+					      int priority, int stack, void *cpumask)
+{
+	(void)priority; (void)stack; (void)cpumask;
+	sCSTGThreadFn = fn;
+	sCSTGThreadArg = arg;
+	int pid = kernel_thread(cstgthread_trampoline, 0, 0xe00);
+	return pid >= 0;
+}
+
+void CSTGThread::Delete(void)
+{
+	sCSTGThreadRunning = 0;	/* best-effort signal; no real join/cancel */
+}
+
+void CSTGThread::Wait(void) { }
+
+int CSTGThread::GetMaxRealTimePriority(void) { return 0; }
+
+/* ========================================================================= *
  *  CSTGOmapNKS4Fifos  (singleton)
  * ========================================================================= */
 
@@ -41,7 +94,7 @@ void CSTGOmapNKS4Fifos::TriggerOutputInterrupt(void)
 	if (dwEnabled &&
 	    (outputFifo.dwWriteIndex != outputFifo.dwReadIndex || outputFifo.bPending)) {
 		s_ullLastTickSRQ = now;
-		rtwrap_pend_linux_srq(0);
+		rt_pend_linux_srq(0);
 	}
 }
 
@@ -58,7 +111,7 @@ int CSTGOmapNKS4OutputFifo::WriteCommand(unsigned int cmd)
 		if (CSTGOmapNKS4Fifos::sInstance.dwEnabled &&
 		    (dwWriteIndex != dwReadIndex || bPending)) {
 			s_ullLastTickSRQ = omapnks4_rdtsc();
-			rtwrap_pend_linux_srq(0);
+			rt_pend_linux_srq(0);
 		}
 	}
 	return ret;
@@ -83,7 +136,7 @@ static void wait_until_deadline(CActiveSenseThread *t)
 		if ((long long)((double)delta * t->flNanosPerCycle) > 0) {
 			unsigned long long nanos =
 				(unsigned long long)((double)delta * t->flNanosPerCycle);
-			rtwrap_sleep(rtwrap_nano2count(nanos));
+			rt_sleep(nano2count(nanos));
 			next = t->qwNextTickCycles;
 		}
 	}

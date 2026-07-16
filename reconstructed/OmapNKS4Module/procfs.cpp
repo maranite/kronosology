@@ -23,19 +23,53 @@ static int sBlockOnRead;
 void *gProc, *gProcProgress, *gProcHardwareVersion, *gProcOmapVersion;
 
 /* installer-support event id -> name (index by the id passed to OmapNKS4ProcAddEvent) */
-extern const char *sEvents[];
+/* NOT extern: previously declared extern with no definition anywhere
+ * ("Unknown symbol sEvents" at insmod, confirmed on real hardware,
+ * 2026-07-16). Found the real 15-entry array at 0x191e0 via Ghidra
+ * (get_xrefs_to -> OmapNKS4ProcRead's own sEvents[proc_read_event()] read)
+ * and its string pool at 0x1a8dd-0x1a9f5 via read_memory - confirmed real
+ * strings, but this specific array's pointer-to-string ORDER was
+ * reconstructed by hand from a dense packed string pool and not
+ * independently re-verified byte-by-byte against each of the 15 pointer
+ * values - lower confidence than the aftertouch tables above. Purely
+ * cosmetic either way: only affects the text returned by reading /proc/nks4
+ * in installer-support mode (a debug feature), never the driver's actual
+ * behavior - revisit if that mode is ever actually exercised. */
+static const char *sEvents[] = {
+	"null", "zero", "one", "two", "three", "four", "five", "six",
+	"seven", "eight", "nine", "enter", "exit", "dec", "inc",
+};
+
+/* spinlock_t is 4 bytes on this target (matches the size already established for
+ * the embedded lock half of wait_queue_head_t elsewhere this session). */
+static unsigned char sEventQueueLock[4];
+
+/* proc_dir_entry's real read_proc/write_proc field offsets - see
+ * omapnks4_internal.h's own comment for the derivation. mode=0644 (rw for owner,
+ * r for group/other) matches every proc entry this driver creates being a plain
+ * status/control file, parent=0 (top-level /proc entry, matching
+ * remove_proc_entry's own parent=0 established earlier this session). */
+void *make_proc_entry(const char *name)
+{
+	return create_proc_entry(name, 0644, 0);
+}
+void proc_set(void *entry, void *read_fn, void *write_fn)
+{
+	*(void **)((char *)entry + 0x3c) = read_fn;
+	*(void **)((char *)entry + 0x40) = write_fn;
+}
 
 /* ---- event ring -------------------------------------------------------- */
 
 void OmapNKS4ProcAddEvent(unsigned char event)
 {
-	_spin_lock();
+	_spin_lock(sEventQueueLock);
 	((unsigned char *)sEventQueue)[sEventQueueWriteIndex] = event;
 	if (sNumEventsInQueue < 0x400)
 		__sync_fetch_and_add(&sNumEventsInQueue, 1);
 	else
 		sEventQueueReadIndex = (sEventQueueReadIndex + 1) & 0x3ff;
-	_spin_unlock();
+	_spin_unlock(sEventQueueLock);
 	sEventQueueWriteIndex = (sEventQueueWriteIndex + 1) & 0x3ff;
 }
 
@@ -141,19 +175,19 @@ int OmapNKS4ProcReadHardwareVersion(char *page, char **start, int off, int count
 
 int OmapNKS4ProcInitialize(void)
 {
-	gProc = create_proc_entry("nks4");
+	gProc = make_proc_entry("nks4");
 	if (!gProc) { printk("<6>OmapNKS4: cannot create proc entry\n"); return -1; }
 	proc_set(gProc, OmapNKS4ProcRead, OmapNKS4ProcWrite);
 
-	gProcProgress = create_proc_entry("nks4progress");
+	gProcProgress = make_proc_entry("nks4progress");
 	if (!gProcProgress) { printk("<6>OmapNKS4: cannot create progress proc entry\n"); return -1; }
 	proc_set(gProcProgress, OmapNKS4ProcReadProgress, OmapNKS4ProcWriteProgress);
 
-	gProcHardwareVersion = create_proc_entry("nks4hwversion");
+	gProcHardwareVersion = make_proc_entry("nks4hwversion");
 	if (!gProcHardwareVersion) { printk("<6>OmapNKS4: cannot create hwversion proc entry\n"); return -1; }
 	proc_set(gProcHardwareVersion, OmapNKS4ProcReadHardwareVersion, 0);
 
-	gProcOmapVersion = create_proc_entry("nks4omapversion");
+	gProcOmapVersion = make_proc_entry("nks4omapversion");
 	if (!gProcOmapVersion) { printk("<6>OmapNKS4: cannot create omapversion proc entry\n"); return -1; }
 	proc_set(gProcOmapVersion, OmapNKS4ProcReadOmapVersion, 0);
 	return 0;

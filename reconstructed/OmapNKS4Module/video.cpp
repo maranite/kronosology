@@ -19,8 +19,15 @@
 extern "C" {
 volatile int    sEventsToProcess;	/* events queued for the worker */
 unsigned char  *sCurrentRegionTransferInfo;	/* frame-buffer cursor for the blit */
-extern int      DAT_0000ed0c;		/* remaining columns in current row */
-extern int      DAT_0000ed10;		/* row width (pixels) of the region */
+/* NOT extern: module-private state, assigned throughout this file, never
+ * given a real definition anywhere - confirmed genuinely unresolved at
+ * insmod ("Unknown symbol DAT_0000ed0c/DAT_0000ed10", 2026-07-16). Same bug
+ * class as usb.cpp's sBulkFreeCommandURBList/etc (extern where a plain
+ * local definition was needed), just for a leftover Ghidra placeholder name
+ * instead of a real one - kept as-is (not renamed) since it's already
+ * documented above. */
+int             DAT_0000ed0c;		/* remaining columns in current row */
+int             DAT_0000ed10;		/* row width (pixels) of the region */
 }
 
 struct COmapNKS4VideoAPI g_video;	/* COmapNKS4VideoAPI::sInstance */
@@ -269,4 +276,18 @@ int  OmapNKS4UpdateScreenInfo(char *base, int x, int y) { return g_video.UpdateS
 /* used by driver.cpp's progress bar */
 int  OmapNKS4VideoAPI_SendFillData(struct COmapNKS4VideoAPI *self, unsigned char color,
 				   int w, int base, int h) { return self->SendFillData(color, w, base, h); }
+/* Ground truth (fresh Ghidra decompile + disassembly, 2026-07-15,
+ * COmapNKS4_SetMaxBulkOutMsgSize@0x17540): a one-line setter for
+ * dwTransferRowSize (the pixel-data-chunk copy-loop bound ContinueProcessingEvent
+ * uses - see that function's own comment). Was previously entirely undefined
+ * (only forward-declared in main.cpp, never implemented anywhere) - found while
+ * fixing a real Kbuild build attempt. usb.cpp's call site (OmapNKS4Probe,
+ * `MOVZX EAX,word ptr [outEp+4]` immediately before the call) passes the bulk-OUT
+ * endpoint's raw wMaxPacketSize - NOT divided by 4 like COmapNKS4Driver_Initialize's
+ * argument - so at runtime this overrides the constructor's default 0x200 with the
+ * real negotiated USB max packet size. */
+void COmapNKS4_SetMaxBulkOutMsgSize(unsigned int maxPacketSize)
+{
+	g_video.dwTransferRowSize = maxPacketSize;
+}
 }

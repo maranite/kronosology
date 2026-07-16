@@ -18,8 +18,30 @@
 #define OMAPNKS4_H
 
 #ifdef __KERNEL__
-#include <linux/types.h>
-#include <linux/usb.h>
+/* NOT <linux/types.h> - this kernel's <linux/stddef.h> (pulled in transitively)
+ * defines a C-style `enum { false=0, true=1 }` bool emulation for pre-C99 C code,
+ * which collides head-on with C++'s own built-in bool/true/false keywords
+ * ("expected identifier before 'false'") - confirmed 2026-07-15 via a real Kbuild
+ * build attempt. Nothing in this module actually uses a linux/types.h typedef
+ * (grepped: no size_t/u8/u16/u32/u64 anywhere) - it's plain unsigned char/int
+ * throughout, matching the project-wide pattern (see omapnks4_internal.h's own
+ * extern declarations for the stg_ and rtwrap_ prefixed functions instead of
+ * including real kernel headers for them) of avoiding real kernel headers from
+ * C++ translation units on this toolchain rather than fighting their C-only
+ * constructs. */
+/* NOT <linux/usb.h> - nothing below actually uses a real USB core type (usb.cpp does
+ * its own raw offset arithmetic into `struct urb`/`struct usb_device`, see that
+ * file's own header comment for the exact offsets), and unconditionally pulling it
+ * in here broke every OTHER consumer of this header: this kernel's RTAI/ipipe-
+ * patched <linux/spinlock.h> chain (via usb.h's own struct usb_anchor) uses
+ * __builtin_types_compatible_p/typeof inside spin_lock_init in a way g++'s C++ mode
+ * on this toolchain can't parse, so any C++ translation unit that merely included
+ * this header for the shared NKS4Command/COmapNKS4Driver types (not for USB device
+ * registration itself) failed to compile - confirmed 2026-07-15 via a real Kbuild
+ * build attempt on the build server, command.cpp/driver.cpp never even reaching
+ * their own bodies. Files that genuinely need real USB registration types
+ * (usb_driver, usb_device_id, MODULE_DEVICE_TABLE) should #include <linux/usb.h>
+ * directly themselves - only usb.cpp actually needs that. */
 #endif
 
 /* ------------------------------------------------------------------------- *
