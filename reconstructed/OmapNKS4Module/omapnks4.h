@@ -102,6 +102,14 @@ struct COmapNKS4Driver {
 	unsigned char bField_0x23;		/* 0x23 */
 	unsigned int  dwNumberOfKeys;		/* 0x24 (0x58==88 -> fIs88Key)  */
 
+	/* Ground truth (fresh Ghidra decompile, 2026-07-18, @0x13330): a real,
+	 * separately-exported member function setting the exact same 7 fields, same
+	 * values, as the free-function COmapNKS4Driver_Initialize (driver.cpp) - a
+	 * second, distinctly-named symbol carrying identical logic, not a different
+	 * initialization path. Zero internal callers (get_xrefs_to: none inside
+	 * OmapNKS4Module.ko itself) - exported for some other module to call, same
+	 * pattern as SendNKS4EventToSTG below. */
+	void Initialize(unsigned int maxWritePacketInts);
 	/* the bytes at 0x1d..0x20 double as an embedded CNKS4EventFilter */
 	void ReceiveEventBuffer(NKS4Command *cmd, unsigned int numInts);
 	static void SetProgressBarPercent(unsigned char pct);
@@ -113,6 +121,10 @@ struct COmapNKS4Driver {
 	void SendAtmelCommand(const unsigned char *data, int len);
 	int  ReadAtmelData(const unsigned char *cmd4, unsigned char *dest);
 	void NotifyTransmittedCommandComplete(NKS4Command *cmd, unsigned int len);
+	/* Push cmd into the host<-panel input FIFO (CSTGOmapNKS4Fifos::sInstance.
+	 * inputFifo), gated by the embedded CNKS4EventFilter's sustain-suppression
+	 * logic - ground truth (fresh Ghidra decompile, 2026-07-17). */
+	void SendNKS4EventToSTG(unsigned int cmd);
 	void Cleanup(void);
 	static void HandleOutputSysReq(void);
 };
@@ -160,6 +172,7 @@ struct COmapNKS4VideoAPI {
 	int SendFillData(unsigned char color, int width, int base, int height); /* op 0xc4 */
 	int UpdateColorPal(char a, char b, char c, char d);	/* op 0xc5 */
 	int UpdateScreenInfo(char *base, int x, int y);
+	unsigned char GetProgressBarPercent(void);
 } __attribute__((packed));
 
 /* ------------------------------------------------------------------------- *
@@ -196,10 +209,21 @@ struct CSTGOmapNKS4Fifos {
  *  CActiveSenseThread  -  RTAI real-time thread that re-arms the panel output
  *  interrupt at a fixed tick (derived from the CPU TSC).  Heap object; the
  *  singleton CActiveSenseThread::sInstance is a *pointer* to it.  28 bytes.
+ *
+ *  CORRECTION (2026-07-18, CSTGThread disassembly pass): the first two
+ *  fields below are NOT a CActiveSenseThread-owned vtable pointer + its own
+ *  bActive flag - they are CSTGThread's base-class fields (pTask, bActive),
+ *  flattened in here at offset 0 the same way every other base-relationship
+ *  in this codebase is represented (plain struct, no real C++ inheritance).
+ *  See omapnks4_internal.h's CSTGThread block comment for the disassembly
+ *  evidence (CActiveSenseThread's own constructor @0x17b50 never writes
+ *  offset 0 at all, which a real vtable-bearing polymorphic class would have
+ *  to). Kept named/offset-identical here (still 28 bytes total) since fixing
+ *  the label doesn't change layout - just stop calling it "pVTable".
  * ------------------------------------------------------------------------- */
 struct CActiveSenseThread {
-	void         *pVTable;			/* 0x00 (derives from CSTGThread) */
-	unsigned char bActive;			/* 0x04 */
+	void         *pTask;			/* 0x00 - CSTGThread::pTask (base)   */
+	unsigned char bActive;			/* 0x04 - CSTGThread::bActive (base) */
 	unsigned long long qwNextTickCycles;	/* 0x08 next deadline (TSC)       */
 	unsigned long long qwIntervalCycles;	/* 0x10 tick period (TSC)         */
 	float         flNanosPerCycle;		/* 0x18 */
@@ -210,12 +234,13 @@ struct CActiveSenseThread {
 	void Sleep(void);		/* block until the next tick deadline          */
 	void Ping(void);		/* re-arm the deadline one interval out        */
 
-	static bool Setup(void);	/* C-ABI: new + start the RT thread            */
-	static void Cleanup(void);
-	static void DoPing(void);	/* C-ABI CActiveSenseThread_Ping               */
-
 	static CActiveSenseThread *sInstance;	/* heap object pointer */
 };
+
+/* Real free-function C-ABI (not mangled static methods - see realtime.cpp). */
+extern "C" bool CActiveSenseThread_Setup(void);
+extern "C" void CActiveSenseThread_Cleanup(void);
+extern "C" void CActiveSenseThread_Ping(void);
 
 /* ------------------------------------------------------------------------- *
  *  CNKS4EventFilter  -  sustain-pedal aware event suppression (4 bytes).

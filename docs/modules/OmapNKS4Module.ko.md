@@ -16,6 +16,34 @@ uses to talk to that chip.
 
 ---
 
+## ⚠ Binary version warning (found 2026-07-17)
+
+**There are two different builds of this module in the repo — do not conflate them.**
+
+| File | Size | MD5 | Notes |
+|---|---|---|---|
+| `RestoreDVD_SystemMNT/mnt/sbin/OmapNKS4Module.ko`, and the byte-identical copies in `3.2.1 update contents/` and `3.2.2 update contents/mnt/sbin/` | 89849 | `461156bba7...` | **The correct, factory-current target.** |
+| `docs/ASM Docs/OmapNKS4Module/OmapNKS4Module.ko` (paired with the raw `OmapNKS4Module_ASM.txt` Ghidra dump) | 79376 | `325923e47b...` | **A different, older build.** |
+
+The older 79376-byte build is missing entire subsystems present in the real
+89849-byte target: SCSI-based graceful SSD-shutdown-on-panel-power-button handling
+(`ShutdownSSDRoutine`/`ShutdownSSDWait`/`SignalShutdownSSD`, `scsi_device_lookup`/
+`scsi_device_put`), `COmapNKS4Driver_ApplyAftertouchTable`, `GetPanelLVersion`/
+`GetPanelRVersion`/`GetJackVersion`, `SetNumberOfKeys`, and two
+`OmapNKS4ProcRead*HardwareVersion/OmapVersion` proc handlers. It's ~90%
+code-identical to the real target (same driver, earlier revision) but **is not
+reliable ground truth for anything that differs** — confirmed by diffing `nm`
+symbol tables, not just file size.
+
+`kronosology/reconstructed/OmapNKS4Module/` and `KronosNKS4/docs/protocol.md` were
+already built from/verified against the **correct** 89849-byte binary (confirmed by
+their own cited source paths) — they remain the right starting point. No saved
+Ghidra project existed anywhere in the repo for the correct binary until a fresh
+import in the 2026-07-17 session (see `KronosNKS4/docs/gaps.md`'s
+`CActiveSenseThread` writeup for what came out of it).
+
+---
+
 ## Exported kernel symbols (the keys to the kingdom)
 
 `OmapNKS4Module.ko` exports (`__ksymtab_*`) at least:
@@ -61,8 +89,8 @@ self-contained) — see [`GetPubIdMod.ko.md`](GetPubIdMod.ko.md).
 | Phase 1 prototypes | 56 applied (of 72 attempted; 16 errors are template instantiations) |
 | Phase 2 struct layouts | 0 built (no class-pattern field-access evidence — mostly C-style code) |
 | Phase 3a return types | 20 refined |
-| Versioned in Ghidra | No |
-| Deep RE | Not pursued — the only thing we needed (the exported symbols) is well-known |
+| Versioned in Ghidra | No — a fresh, unpersisted Ghidra MCP session was run against the correct 89849-byte binary on 2026-07-17 (see below), but no `.gpr` project file was saved as part of that pass |
+| Deep RE | Mostly not pursued (the exported symbols are well-known), **except** `CActiveSenseThread`/`CSTGOmapNKS4Fifos::TriggerOutputInterrupt`, freshly and fully decompiled 2026-07-17 — see `KronosNKS4/docs/gaps.md` |
 
 The full chip protocol is in scope for future work if we want a userspace re-implementation
 of `nv2ac_read_data`. The cleaner solution remains a helper `.ko` that just calls the

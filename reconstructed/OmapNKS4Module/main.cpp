@@ -63,6 +63,48 @@
 #define MODULE_DESCRIPTION(x)
 #define MODULE_AUTHOR(x)
 
+/* VM-testing affordance, 2026-07-17: hand-rolled module_param(int), same
+ * "reproduce just what's needed" convention as the macros above (real
+ * <linux/moduleparam.h> pulls in the same C++-unparseable header chain).
+ * kernel_param's real layout (include/linux/moduleparam.h) is just
+ * {name, perm, flags, set, get, arg} - param_set_int/param_get_int are
+ * ordinary EXPORT_SYMBOL()-exported core kernel functions (kernel/params.c),
+ * always present, no STGEnabler/RTAI dependency. Default 0: completely inert
+ * on real hardware, and on a VM boot where the operator wants the real
+ * dummy_hcd/gadget path exercised instead - only insmod ...
+ * vm_virtual_probe=1 enables the self-injection below. */
+struct kernel_param {
+	const char *name;
+	unsigned short perm;
+	unsigned short flags;
+	int (*set)(const char *val, struct kernel_param *kp);
+	int (*get)(char *buffer, struct kernel_param *kp);
+	union { void *arg; };
+};
+extern "C" int param_set_int(const char *val, struct kernel_param *kp);
+extern "C" int param_get_int(char *buffer, struct kernel_param *kp);
+
+int sVmVirtualProbe;
+static const char __param_str_vm_virtual_probe[] = "vm_virtual_probe";
+static struct kernel_param __param_vm_virtual_probe
+	__attribute__((used, section("__param"), aligned(sizeof(void *)))) =
+	{ __param_str_vm_virtual_probe, 0644, 0, param_set_int, param_get_int,
+	  { &sVmVirtualProbe } };
+
+/* VM-only, 2026-07-18: separate opt-in for video.cpp's concurrency stress test
+ * (vm_virtual_probe_stress_test_video) - deliberately its OWN module parameter
+ * rather than piggybacking on vm_virtual_probe alone, so every existing
+ * vm_virtual_probe=1 boot test this README already documents keeps behaving
+ * exactly as before; the stress test only runs when BOTH are set
+ * (vm_virtual_probe=1 vm_video_stress=1). Default 0: completely inert
+ * otherwise, same convention as sVmVirtualProbe above. */
+int sVmVideoStress;
+static const char __param_str_vm_video_stress[] = "vm_video_stress";
+static struct kernel_param __param_vm_video_stress
+	__attribute__((used, section("__param"), aligned(sizeof(void *)))) =
+	{ __param_str_vm_video_stress, 0644, 0, param_set_int, param_get_int,
+	  { &sVmVideoStress } };
+
 /* Definition for the extern declared in omapnks4_internal.h - see that declaration's
  * own comment. Zero-initialized; real initialization happens via init_completion()
  * (not yet added - see docs/gaps.md), matching the pattern struct completion needs
@@ -103,6 +145,25 @@ unsigned char sProbeComplete[0x10];
 unsigned char sOmapNKS4UsbDriver[0x70];
 static unsigned char sOmapNKS4UsbDeviceIdTable[2][0x14]; /* struct usb_device_id[2], 0x14B each */
 
+/* Structural note (full-coverage re-audit, 2026-07-18): this function itself
+ * has NO counterpart in the real binary. Fresh disassembly of OmapNKS4Init@
+ * 0x18d06 shows it loading `EAX=0x1afa0` (sOmapNKS4UsbDriver's address) as a
+ * bare immediate directly before `CALL stg_usb_register_driver`, with zero
+ * calls to anything resembling a setup/init helper in between (confirmed via
+ * get_function_info's own callee list for OmapNKS4Init: no such function is
+ * ever called). Ground truth's struct is compile-time-initialized static
+ * data (an ordinary `struct usb_driver x = { .name = ..., .probe = ..., ... };`
+ * in Korg's real source) with no runtime population code at all - this
+ * reconstruction's runtime-zero-then-poke approach produces byte-identical
+ * memory content before first use (every field value here was independently
+ * read_memory-confirmed against the real 0x1afa0/0x1b040 dumps, see this
+ * function's own field comments above), so it is behaviorally faithful, just
+ * structured differently (a function + call, where ground truth has neither).
+ * Documented rather than restructured into a static initializer: doing so
+ * safely would require modeling real relocations (function pointers, a
+ * nested table address) inside a raw byte array, a materially higher-risk
+ * change for a purely cosmetic/structural difference with no runtime-visible
+ * effect. */
 static void init_omap_nks4_usb_driver(void)
 {
 	for (unsigned i = 0; i < sizeof(sOmapNKS4UsbDriver); i++)
@@ -148,7 +209,24 @@ void COmapNKS4Driver_HandleOutputSysReq(void); /* driver.cpp - the SRQ handler, 
 int  rt_request_srq(unsigned int label, void (*handler)(void), void *rt_handler);
 long wait_for_completion_timeout(void *completion, unsigned long timeout);
 void daemonize(const char *name, ...);
-void block_all_signals(void);
+/* block_all_signals() is NOT a real external call in this binary - ground truth
+ * (fresh disassembly, 2026-07-18, OmapNKS4Module.ko@0x1048c-0x104b5 and its
+ * ShutdownSSDRoutine twin @0x105ac-0x105d5) shows the classic open-coded
+ * "block every signal" idiom fully inlined instead:
+ *   spin_lock_irq(&current->sighand->siglock);
+ *   current->blocked.sig[1] = ~0; current->blocked.sig[0] = ~0;  (sigfillset)
+ *   recalc_sigpending();
+ *   spin_unlock_irq(&current->sighand->siglock);
+ * A previous session's `void block_all_signals(void);` extern called with zero
+ * arguments doesn't exist under that name/signature in this kernel at all (the
+ * real 2.6.32 block_all_signals() is a 3-arg NFS-lockd notifier helper with
+ * completely different semantics) - this would have failed symbol resolution
+ * at insmod, or if it happened to resolve, done nothing resembling "block every
+ * signal". Task-struct offsets confirmed via disassembly: sighand @ +0x2a0,
+ * blocked.sig[0]/[1] @ +0x2a4/+0x2a8; sighand_struct.siglock @ +0x504. */
+void _spin_lock_irq(void *lock);
+void _spin_unlock_irq(void *lock);
+void recalc_sigpending(void);
 void complete_and_exit(void *completion, int exit_code);
 void msleep(unsigned int msecs);
 void mutex_lock(void *lock);
@@ -159,11 +237,54 @@ void scsi_device_set_state(void *sdev, int state);
 void scsi_device_put(void *sdev);
 void scsi_host_put(void *shost);
 /* real STGEnabler.c signature: (struct task_struct*, int policy, struct sched_param*) -
- * opaque void* for the first/third (this module never dereferences a named field of
- * either). */
+ * opaque void* for the first (this module never dereferences a named field of it).
+ * The third arg is NOT opaque - see ProcessMsgRoutine/ShutdownSSDRoutine's own call
+ * sites below for why a real struct sched_param is required. */
 int  stg_sched_setscheduler(void *task, int policy, void *param);
+/* Real kernel layout (`struct sched_param { int sched_priority; };`, <linux/sched.h>) -
+ * a single int, safe to reproduce directly without pulling in that header (matching
+ * this file's own established "reproduce just the layout" pattern for wait_queue_head_t/
+ * struct completion above the extern "C" block). Ground truth (fresh Ghidra disassembly,
+ * 2026-07-17, ProcessMsgRoutine@0x10450 and ShutdownSSDRoutine@0x10570): both threads
+ * construct `struct sched_param{.sched_priority=2}` on the stack and pass its address -
+ * NOT NULL, which this reconstruction previously passed and which real-kernel
+ * sched_setscheduler() NULL-derefs on immediately (`param->sched_priority`), confirmed
+ * via a real "BUG: unable to handle kernel NULL pointer dereference... __sched_setscheduler"
+ * oops on a live VM boot test (the first test ever to actually run either thread routine -
+ * every earlier test failed/unloaded before OmapNKS4Init reached create_thread()). */
+struct sched_param { int sched_priority; };
 void *__kmalloc(unsigned int size, unsigned int flags);
 extern unsigned int cpu_khz;
+void *rt_whoami(void);
+unsigned int ksize(void *p);
+unsigned int hweight32(unsigned int x);
+/* FIX (goal: clean VM-bootable build, 2026-07-17): `cpu_online_map` itself
+ * (a raw exported symbol) is confirmed real ground truth for the actual
+ * shipped Kronos kernel (see stg_num_online_cpus's own comment below) -
+ * but this project's own /home/build/linux-kronos build tree, used for
+ * VM-boot-test compilation, does not export it as a standalone symbol on
+ * this specific kernel build/config (confirmed via a real "Unknown symbol
+ * cpu_online_map" insmod failure). This kernel's own real replacement,
+ * `cpu_online_mask` (`include/linux/cpumask.h`: `extern const struct
+ * cpumask *const cpu_online_mask`), IS exported - opaque-typed here as a
+ * raw `unsigned int *` rather than pulling in the full `<linux/cpumask.h>`
+ * header (this project's own established convention for C++ translation
+ * units against this kernel's C-only headers, see omapnks4.h's own
+ * documented reason for avoiding <linux/usb.h>/<linux/types.h> the same
+ * way). `struct cpumask` is a bitmap sized for this kernel's NR_CPUS; this
+ * project's own target (Kronos 1-3 hardware, max 4 logical CPUs) fits
+ * entirely within that bitmap's first 32-bit word, so reading it as a
+ * plain `unsigned int` and applying the SAME hweight32() primitive
+ * ground truth already uses is exact, not an approximation. */
+extern unsigned int *cpu_online_mask;
+/* Real Linux 2.6.32 wait-queue primitive (EXPORT_SYMBOL'd in kernel/sched.c) -
+ * ground truth: ProcessMsgRoutine/ShutdownSSDRoutine both open-code the classic
+ * pre-2.6.35 wait_event_timeout() expansion (prepare_to_wait()/schedule_timeout()/
+ * finish_wait() - already declared in omapnks4_internal.h, same as submit.cpp's
+ * use of them). autoremove_wake_function is the real DEFINE_WAIT() default wake
+ * callback each wait_queue_t construction below points at, same as submit.cpp's
+ * own struct omap_wait_entry usage. */
+int  autoremove_wake_function(void *wait, unsigned int mode, int sync, void *key);
 }
 
 /* ===================================================================== *
@@ -184,18 +305,55 @@ extern unsigned int cpu_khz;
  *    init_cpp_support() -> empty (confirmed: a single `ret`, no .ctors walk -
  *      this compiled binary has no global C++ objects needing runtime init)
  *  cleanup_cpp_support() in the real binary walks __DTOR_END__ then calls a
- *  further "stg_cpp_exit()" - NOT reproduced: this module (like the real
- *  one, per init_cpp_support being empty) has no global destructors needing
- *  it either, and adding a new unresolved "stg_cpp_exit" extern for a
- *  module-unload-path no-op isn't worth the risk; left as a no-op with this
- *  note rather than silently claimed identical to the real binary. */
+ *  further "stg_cpp_exit()" - CORRECTED 2026-07-18 (full-coverage re-audit):
+ *  an earlier note here claimed reproducing this call "isn't worth the risk"
+ *  of a new unresolved extern. That was wrong on the facts: stg_cpp_exit is
+ *  ALSO a real local function inside this .ko (0x17f30, single `ret`, same
+ *  category as the four above), not an extern at all - zero risk, now called
+ *  unconditionally from cleanup_cpp_support() exactly as ground truth does
+ *  (see stg_cpp_exit's own definition below). */
 extern "C" {
 void *stg_kmalloc(unsigned int size) { return __kmalloc(size, 0xd0); }
 void  stg_kfree(void *p) { kfree(p); }
 void  stg_msleep(unsigned int ms) { msleep(ms); }
 unsigned int stg_get_cpu_khz(void) { return cpu_khz; }
+/* Ground truth (fresh Ghidra decompile, 2026-07-17): stg_ksize/stg_is_linux_context/
+ * stg_hweight32/stg_num_online_cpus are ALSO real, local functions inside this .ko
+ * (0x17fd0-0x18020), same as the four above - not external STG-framework imports
+ * either, contrary to this file's own header comment (now corrected). Each is a
+ * thin wrapper over a real kernel/RTAI primitive. */
+unsigned int stg_ksize(void *p) { return ksize(p); }
+/* Same "am I called from Linux/non-RT context, or a real RT task" sentinel check
+ * as rtwrap_pthread_join's (rtwrap.cpp) - rt_whoami()'s priority field ==
+ * 0x7fffffff means the caller isn't a real RTAI task. */
+int stg_is_linux_context(void)
+{
+	void *self = rt_whoami();
+	return *(int *)((unsigned char *)self + 0x1c) == 0x7fffffff;
+}
+unsigned int stg_hweight32(unsigned int x) { return hweight32(x); }
+/* Ground truth: real disassembly shows this calls the exact same hweight32()
+ * primitive as stg_hweight32 above, over the kernel's real cpu_online_map bitmask -
+ * i.e. "count of set bits in the online-CPU mask", the standard num_online_cpus()
+ * definition from this kernel era (pre-cpumask_t rewrite).
+ * FIX (goal: clean VM-bootable build, 2026-07-17): reads through
+ * `cpu_online_mask` instead of `cpu_online_map` - see that extern's own
+ * declaration comment above for why; same real value, real exported
+ * symbol on this build tree. */
+unsigned int stg_num_online_cpus(void) { return hweight32(*cpu_online_mask); }
 void init_cpp_support(void) { }
-void cleanup_cpp_support(void) { }
+/* Ground truth (fresh decompile, 2026-07-18, stg_cpp_exit@0x17f30): a real
+ * LOCAL function inside this .ko (not an STGEnabler/RTAI extern - same
+ * "compiled directly into the module" category as stg_kmalloc/stg_msleep
+ * above), whose entire body is `{ return; }` (a single `ret`, 1 byte).
+ * cleanup_cpp_support's previous no-op simplification was justified by
+ * "adding a new unresolved extern isn't worth the risk" - that reasoning was
+ * factually wrong: this is not an extern at all, it's a trivial local no-op
+ * with zero link risk, so ground truth's own unconditional call to it (after
+ * the, also empty in this binary, __DTOR_END__ walk) is now reproduced
+ * exactly rather than skipped. */
+void stg_cpp_exit(void) { }
+void cleanup_cpp_support(void) { stg_cpp_exit(); }
 }
 void *operator new(unsigned int size) { return stg_kmalloc(size); }
 void  operator delete(void *p) { stg_kfree(p); }
@@ -234,13 +392,22 @@ static int create_thread_impl(const char *name, int (*fn)(void *), int *running)
 	*running = 1;
 	int pid = kernel_thread(fn, completion, 0xe00);
 	if (pid < 0) {
-		printk("<6>OmapNKS4:%s: create_thread() failed. err %ld\n", name, pid);
+		/* Ground truth (fresh disassembly + read_memory, 2026-07-18,
+		 * create_thread@0x18c71): the real format string at 0x00019a58 is
+		 * "%s: create_thread() failed. err %ld\n" - NO "<6>OmapNKS4:" prefix,
+		 * unlike every other printk in this file. This is create_thread()'s
+		 * own message, not routed through the module's usual log-prefix
+		 * convention. Previous "<6>OmapNKS4:" prefix here was an unverified
+		 * guess-by-analogy with the rest of the file - confirmed wrong. */
+		printk("%s: create_thread() failed. err %ld\n", name, pid);
 		*running = 0;
 		return -1;
 	}
 	wait_for_completion(completion);
 	if (*running == 0) {
-		printk("<6>OmapNKS4:%s thread failed in some way\n", name);
+		/* Ground truth (read_memory @0x0001a884): "%s thread failed in some
+		 * way\n" - also no "<6>OmapNKS4:" prefix, confirmed via raw bytes. */
+		printk("%s thread failed in some way\n", name);
 		return -1;
 	}
 	return 0;
@@ -265,6 +432,48 @@ static inline void *stg_get_current_task_nks4(void)
 	return current_task;
 }
 
+/* Real, fully-inlined block_all_signals() idiom - see the extern block comment
+ * above for the ground truth this reproduces. */
+static inline void block_all_signals_nks4(void *current_task)
+{
+	unsigned char *task = (unsigned char *)current_task;
+	void *siglock = *(void **)(task + 0x2a0);	/* current->sighand */
+	siglock = (unsigned char *)siglock + 0x504;	/* &current->sighand->siglock */
+	_spin_lock_irq(siglock);
+	*(unsigned int *)(task + 0x2a8) = 0xffffffff;	/* blocked.sig[1] = ~0 */
+	*(unsigned int *)(task + 0x2a4) = 0xffffffff;	/* blocked.sig[0] = ~0 */
+	recalc_sigpending();
+	_spin_unlock_irq(siglock);
+}
+
+/* Real, fully-inlined wait_event_timeout() expansion - see prepare_to_wait's own
+ * extern comment (omapnks4_internal.h) for ground truth. wait_queue_t layout (the
+ * real DEFINE_WAIT() stack object): unsigned flags(4) + struct task_struct *task(4)
+ * + wait_queue_func_t func(4) + struct list_head task_list(8) = 20 bytes,
+ * self-linked like every other list_head this codebase already models this way
+ * (sProbeComplete etc. above). Same layout as submit.cpp's own struct
+ * omap_wait_entry - not shared across translation units since each file already
+ * has its own established "opaque byte buffer" convention for kernel structs. */
+static inline void init_wait_entry_nks4(unsigned char *wait, void *task)
+{
+	*(unsigned int *)(wait + 0)  = 0;					/* flags */
+	*(void **)(wait + 4)         = task;					/* task */
+	*(void **)(wait + 8)         = (void *)autoremove_wake_function;	/* func */
+	*(void **)(wait + 12) = wait + 12;					/* task_list, self-linked */
+	*(void **)(wait + 16) = wait + 12;
+}
+
+/* wait_queue_head_t-sized storage (12 bytes: spinlock_t + list_head), same
+ * convention as usb.cpp's sCommandWaitQueue/sVideoWaitQueue/sReadWaitQueue.
+ * Ground truth: OmapNKS4Exit's own __wake_up() call sites target these exact
+ * addresses (0x1af60/0x1af7c in the real binary), and they sit immediately
+ * before sMsgThreadComplete/sSsdThreadComplete respectively in the real .bss
+ * layout - confirmed via fresh disassembly, 2026-07-18. Initialized via
+ * __init_waitqueue_head() in OmapNKS4Init, below. */
+static unsigned char sVideoMsgWaitQueue[0xc];
+static unsigned char sShutdownSSDWaitQueue[0xc];
+static const char sMainWaitQueueLockKeyDummy[1] = {0};
+
 /* extern, not static: real, shared definitions live in usb.cpp - see its own
  * comments on each of these three for why (duplicate-static bug, confirmed
  * on real hardware, 2026-07-16). */
@@ -277,15 +486,26 @@ int sProcessMsgThreadRunning, sVideoMsgSignalled;
 int sShutdownSSDThreadRunning, sShutdownSSDSignaled;
 static int sIsSSDReadyToShutdown;
 
-/* Completion objects for the two service threads' startup/exit sync - same 16-byte
- * struct-completion storage convention as sProbeComplete. NOT independently
- * ground-truthed per-object (unlike sProbeComplete's 10000-jiffy timeout, confirmed
- * via OmapNKS4Init's own disassembly) - best-effort: each thread complete()s its own
- * object once at startup (matching decompiled ProcessMsgRoutine/ShutdownSSDRoutine),
- * and OmapNKS4Exit waits on the SAME object after signalling shutdown. This means
- * the exit-time wait could in principle observe the startup completion rather than
- * a genuine exit signal if both race - a known simplification, not a fully
- * ground-truthed thread-join protocol. See docs/gaps.md. */
+/* Completion objects for the two service threads' exit-join sync - same 16-byte
+ * struct-completion storage convention as sProbeComplete.
+ *
+ * RESOLVED 2026-07-17 (fresh disassembly of `OmapNKS4Exit@0x18f1d`): the "race"
+ * this comment used to flag doesn't actually exist. `arg` (see create_thread_impl
+ * above) is a completion object allocated ON THE STACK of the *calling* thread's
+ * `create_thread()` invocation, used exactly once to synchronize "the new kernel
+ * thread has started" back to the caller - it is a structurally different piece of
+ * memory from `sMsgThreadComplete`/`sSsdThreadComplete` (static globals) in every
+ * possible execution, not just in practice. There is no reuse of one object for two
+ * purposes, so no race is possible between "thread started" and "thread exited"
+ * signals - the original worry was unfounded.
+ *
+ * What WAS wrong, and is now fixed: the exit-time timeout. `OmapNKS4Exit`'s two
+ * `wait_for_completion_timeout()` calls (one per thread) both use the literal
+ * immediate `MOV EDX,0x7d0` (2000 jiffies = 2 seconds at this kernel's 1000 Hz
+ * timer) immediately before each call - not 10000 (10 seconds) as this file
+ * previously guessed by analogy with `sProbeComplete`'s real (and different)
+ * 10000-jiffy probe-wait timeout. The two timeouts are simply unrelated constants
+ * in the real binary; guessing they'd match was the error. */
 static unsigned char sMsgThreadComplete[0x10];
 static unsigned char sSsdThreadComplete[0x10];
 
@@ -294,10 +514,26 @@ int ShutdownSSDRoutine(void *arg);
 
 /* ===================================================================== */
 
+/* Ground truth (fresh disassembly + search_strings, 2026-07-18, OmapNKS4Init@
+ * 0x18d06): EVERY printk in this function - and, per the same pass, in
+ * OmapNKS4ProcWrite/OmapNKS4ProcWriteProgress/OmapNKS4ProcInitialize/
+ * OmapNKS4ProcDone (procfs.cpp) too - carries a real "<6>OmapNKS4:%s: line
+ * %d: <message>\n" format, with the function's own name string and a real
+ * embedded source-line-number literal as the first two args (the same
+ * convention already established/fixed for WriteCallback's "%s: line %d:
+ * ERROR..." messages in usb.cpp, and for the SubmitNKS4CommandWrite/
+ * WaitForNKS4CommandWrite messages in submit.cpp). This file's printks had
+ * never been checked against this convention before - confirmed via
+ * search_strings against the real .rodata pool (0x1a29c-0x1a460) and
+ * cross-checked instruction-by-instruction. Line numbers below are the real
+ * embedded immediates, Korg's own original source line numbers (meaningless
+ * to us as line numbers, but part of the exact byte-for-byte message). */
+#define OMAPNKS4INIT_FN "OmapNKS4Init"
+
 static int __init OmapNKS4Init(void)
 {
 	init_cpp_support();		/* run C++ global constructors */
-	printk("<6>OmapNKS4: OmapNKS4Init: enter\n");
+	printk("<6>OmapNKS4:%s: line %d: OmapNKS4Init: enter\n", OMAPNKS4INIT_FN, 0x571);
 	sDriverState = 0;
 	/* Real completion-struct init, not just BSS-zero - see
 	 * init_completion_struct's own comment for why this is load-bearing
@@ -308,6 +544,11 @@ static int __init OmapNKS4Init(void)
 	init_completion_struct(sProbeComplete);
 	init_completion_struct(sMsgThreadComplete);
 	init_completion_struct(sSsdThreadComplete);
+	/* Same "must be genuinely initialized, not just BSS-zero" requirement as the
+	 * completions above applies to these two wait queues - see their own
+	 * declaration comment. */
+	__init_waitqueue_head(sVideoMsgWaitQueue, (void *)sMainWaitQueueLockKeyDummy);
+	__init_waitqueue_head(sShutdownSSDWaitQueue, (void *)sMainWaitQueueLockKeyDummy);
 	init_omap_nks4_usb_driver();
 
 	/* Ground truth (fresh disassembly, 2026-07-15, OmapNKS4Init@0x18d06):
@@ -317,48 +558,75 @@ static int __init OmapNKS4Init(void)
 	 * 0x14a80 matches that function exactly), rt_handler=NULL. */
 	sSTG2NKS4SrqNumber = rt_request_srq(0x4e4b5334u, COmapNKS4Driver_HandleOutputSysReq, 0);
 	if (sSTG2NKS4SrqNumber < 1) {
-		printk("<6>OmapNKS4: could not get srq!\n");
+		printk("<6>OmapNKS4:%s: line %d: OmapNKS4Init: could not get srq!\n", OMAPNKS4INIT_FN, 0x578);
 		goto fail;
 	}
 	if (stg_usb_register_driver((struct usb_driver *)sOmapNKS4UsbDriver, &__this_module,
 	                             "OmapNKS4") != 0) {
-		printk("<6>OmapNKS4: Cannot register nks4 usb driver!\n");
+		printk("<6>OmapNKS4:%s: line %d: OmapNKS4Init: Cannot register nks4 usb driver!\n",
+		       OMAPNKS4INIT_FN, 0x581);
 		goto cleanup;
+	}
+
+	/* VM-only, vm_virtual_probe=1: synthesize a virtual NKS4 board and call the
+	 * real OmapNKS4Probe() directly, on this same thread, before the wait below
+	 * even starts. NOT a workqueue/second-module handoff - a real (separate,
+	 * insmod-time) OmapNKS4ProbeInject.ko was tried first and failed with a
+	 * genuine kernel "gave up waiting for init of module OmapNKS4Module."
+	 * message: the kernel's own module loader refuses to resolve a symbol
+	 * exported by a module still in MODULE_STATE_COMING (i.e. still inside its
+	 * own init_module(), which is exactly this function) - confirmed on a live
+	 * VM boot test, 2026-07-17. Calling OmapNKS4Probe() inline sidesteps that
+	 * entirely: OmapNKS4Probe()'s own complete(&sProbeComplete) at the end just
+	 * pre-satisfies the completion the wait below is about to check - a
+	 * well-defined complete-before-wait ordering, not a race. */
+	if (sVmVirtualProbe) {
+		printk("<6>OmapNKS4: vm_virtual_probe=1, synthesizing a virtual NKS4 board\n");
+		vm_virtual_probe_inject();
 	}
 
 	/* probe() runs from the USB core and completes this; wait for it. Ground truth
-	 * (fresh disassembly): timeout = 0x2710 = 10000 (jiffies). */
+	 * (fresh disassembly): timeout = 0x2710 = 10000 (jiffies).
+	 *
+	 * Ground truth ALSO brackets this wait in a pair of rdtsc() reads and two
+	 * further printks ("Waited %lu cycles..." / "current = %llu, before =
+	 * %llu") - entirely missing from this reconstruction until now (fresh
+	 * disassembly, 2026-07-18: the real string pool has both formats at
+	 * 0x1a354/0x1a3a8, and OmapNKS4Init's own decompile shows the real
+	 * printk args exactly: name, line, (after_tsc_lo - before_tsc_lo) as the
+	 * "%lu cycles" value, then the full 64-bit after/before pair for the
+	 * second line). "cycles" is a crude, truncated low-dword-only delta,
+	 * faithfully reproduced as such rather than "improved" to a real 64-bit
+	 * subtraction - that's what the real binary computes. */
+	unsigned long long tsc_before, tsc_after;
+	asm volatile("rdtsc" : "=A"(tsc_before));
 	wait_for_completion_timeout(sProbeComplete, 10000);
-	printk("<6>OmapNKS4: Waited for OmapNKS4Probe(). driver state is %d\n", sDriverState);
+	asm volatile("rdtsc" : "=A"(tsc_after));
+	printk("<6>OmapNKS4:%s: line %d: Waited %lu cycles for OmapNKS4Probe(). driver state is %d\n",
+	       OMAPNKS4INIT_FN, 0x58a,
+	       (unsigned long)((unsigned int)tsc_after - (unsigned int)tsc_before), sDriverState);
+	printk("<6>OmapNKS4:%s: line %d: current = %llu, before = %llu\n",
+	       OMAPNKS4INIT_FN, 0x58b, tsc_after, tsc_before);
 	if (sDriverState != 1) {
-		printk("<6>OmapNKS4: probe failed\n");
+		printk("<6>OmapNKS4:%s: line %d: OmapNKS4Init: probe failed\n", OMAPNKS4INIT_FN, 0x58f);
 		goto cleanup;
 	}
 
-	if (OmapNKS4ProcInitialize() != 0) { goto cleanup; }
+	/* Ground truth (fresh disassembly, 2026-07-18, OmapNKS4Init@0x18e72-0x18e7c):
+	 * OmapNKS4ProcInitialize()'s return value is NOT checked at all in the real
+	 * binary - it's called unconditionally and execution falls straight through
+	 * to the interrupt-URB submit regardless of success/failure (no TEST/JZ
+	 * between the two CALLs). A previous session's `if (... != 0) goto cleanup;`
+	 * was a plausible-looking but ground-truth-contradicted defensive check;
+	 * removed to match the real (arguably sloppy, but that's what the real
+	 * driver does) control flow exactly. The 1000ms "DIAG" sleep and interrupt-
+	 * URB field dump that used to sit here were a same-session timing
+	 * experiment, never grounded in disassembly evidence, and are also absent
+	 * from the real binary (confirmed: only 10 bytes / two instructions
+	 * separate the OmapNKS4ProcInitialize() and stg_usb_submit_urb() call sites
+	 * in the real code - no room for a msleep or extra printk) - removed. */
+	OmapNKS4ProcInitialize();
 
-	/* TEMP EXPERIMENT (2026-07-16 debug session) - stock's own extra setup
-	 * code between USB probe success and its first CommunicationCheck call
-	 * takes some nonzero wall-clock time to execute; this leaner
-	 * reconstruction may reach the same point faster. If the panel's own
-	 * OMAP firmware needs some settle time after USB enumeration before
-	 * it'll answer protocol commands, stock could be satisfying that
-	 * incidentally just by being slower to get there, while we race past it.
-	 * Testing this directly - not grounded in any specific disassembly
-	 * evidence, this is a timing hypothesis static analysis can't evaluate.
-	 * Remove if this doesn't change the result. */
-	printk("<6>OmapNKS4: DIAG sleeping 1000ms before CommunicationCheck (timing experiment)\n");
-	msleep(1000);
-
-	/* TEMP diagnostic (2026-07-16 debug session) - dump the interrupt URB's
-	 * configured fields right before submission - remove once the
-	 * comm-check timeout is root-caused. */
-	printk("<6>OmapNKS4: DIAG sInterruptURB=%p pipe=0x%x len=%u interval=%u flags=0x%x\n",
-	       sInterruptURB,
-	       *(unsigned int *)((char *)sInterruptURB + 0x30),
-	       *(unsigned int *)((char *)sInterruptURB + 0x50),
-	       *(unsigned int *)((char *)sInterruptURB + 0x68),
-	       *(unsigned int *)((char *)sInterruptURB + 0x3c));
 	/* mem_flags=0xd0 (GFP_KERNEL) - ground truth: real OmapNKS4Init@0x18e77
 	 * disassembly - this is the interrupt URB's initial submit, running in
 	 * process context (init_module's own calling context), unlike the
@@ -367,19 +635,57 @@ static int __init OmapNKS4Init(void)
 	 * were previously hardcoded 0 - not blocking submission (confirmed:
 	 * rc==0 either way in live testing), but a genuine deviation from
 	 * ground truth, confirmed 2026-07-16. */
-	if (stg_usb_submit_urb(sInterruptURB, 0xd0) != 0) {	/* start the interrupt-IN xfer */
-		printk("<6>OmapNKS4: error submitting interrupt xfer\n");
+	if (vm_usb_submit_urb(sInterruptURB, 0xd0) != 0) {	/* start the interrupt-IN xfer */
+		/* Ground truth (search_strings @0x1a418): real text is "error
+		 * stg_usb_submit_urb for interrupt xfer", not "error submitting
+		 * interrupt xfer" - both the wording and the %s/%d prefix were
+		 * wrong before this pass. */
+		printk("<6>OmapNKS4:%s: line %d: error stg_usb_submit_urb for interrupt xfer\n",
+		       OMAPNKS4INIT_FN, 0x598);
 		goto cleanup;
 	}
-	printk("<6>OmapNKS4: DIAG interrupt submit rc=0\n");
+	/* REMOVED (Opus review, 2026-07-18): this "TEMP diagnostic" printk does
+	 * not exist in ground truth - fresh disassembly of OmapNKS4Init@0x18d06
+	 * proceeds straight from the interrupt-URB submit success path to
+	 * COmapNKS4Driver_Configure(), no printk in between. Same class of finding
+	 * as the other "TEMP diagnostic"/"DIAG" printks removed this pass. */
 	if (COmapNKS4Driver_Configure() != 0) {
-		printk("<6>OmapNKS4: Problem configuring OmapNKS4 in Init\n");
+		printk("<6>OmapNKS4:%s: line %d: Problem configuring OmapNKS4 in Init\n",
+		       OMAPNKS4INIT_FN, 0x5a1);
 		goto cleanup;
 	}
 
 	create_thread("kOmapNKS4MsgRoutine", ProcessMsgRoutine, &sProcessMsgThreadRunning);
 	create_thread("kShutdownSSDRoutine", ShutdownSSDRoutine, &sShutdownSSDThreadRunning);
-	CActiveSenseThread::Setup();
+	CActiveSenseThread_Setup();
+
+	/* VM-only, 2026-07-17 continuation of the vm_virtual_probe work above: the
+	 * board is now fully probed/configured/running (COmapNKS4Driver_Configure()
+	 * succeeded, both worker threads + the active-sense thread are up) - the
+	 * same point a real device would already be sending interrupt-IN traffic
+	 * for actual front-panel activity. Feed one synthetic runtime event
+	 * through the real InterruptCallback()/ReceiveEventBuffer() decode path
+	 * here, so this test also covers "board stays running and correctly
+	 * processes runtime traffic", not just the boot/probe/configure sequence
+	 * the two functions above already proved. See
+	 * vm_virtual_probe_inject_event()'s own comment (usb.cpp) for the exact
+	 * packet layout and ground-truth byte patterns it's based on. */
+	if (sVmVirtualProbe) {
+		vm_virtual_probe_inject_event();
+		/* SetLCDBrightness/ResetModule (command.cpp): neither is on this
+		 * module's own real boot/configure path (see
+		 * vm_virtual_probe_test_setters()'s own comment, usb.cpp), so
+		 * nothing above would exercise their new vm_usb_submit_urb
+		 * dispatch coverage - call them directly here instead. */
+		vm_virtual_probe_test_setters();
+		/* VM-only, 2026-07-18: real-concurrency video-ring stress test (see
+		 * video.cpp's own definition) - runs only when vm_video_stress=1 is
+		 * ALSO set (checked internally); the board is fully configured and
+		 * kOmapNKS4MsgRoutine is already alive at this point, exactly the
+		 * real single-consumer configuration this test needs. */
+		vm_virtual_probe_stress_test_video();
+	}
+
 	return 0;
 
 cleanup:
@@ -391,22 +697,25 @@ fail:
 
 static void __exit OmapNKS4Exit(void)
 {
-	CActiveSenseThread::Cleanup();
+	CActiveSenseThread_Cleanup();
 
-	/* Ground truth shows a real __wake_up(0) between setting the running flag to 0
-	 * and the join-wait, presumably to kick each thread out of its own
-	 * wait_event()/wait_event_timeout() sleep so it re-checks the flag promptly.
-	 * wait_event/wait_event_timeout are modeled here as plain polling loops (same
-	 * simplification this file's own WaitForFreeBulkWriteURB already uses for an
-	 * equivalent real-wait-queue case, see usb.cpp) rather than real wait-queue
-	 * blocking, so there is no real wait queue object here to wake - the poll loop
-	 * notices the flag change on its own next iteration regardless. __wake_up
-	 * omitted rather than passed a wrong/unrelated object. */
+	/* Ground truth (fresh disassembly, 2026-07-18, OmapNKS4Exit@0x18f2c-0x18f8f):
+	 * a real __wake_up(q, mode=3 [TASK_INTERRUPTIBLE|TASK_UNINTERRUPTIBLE],
+	 * nr_exclusive=1, key=NULL) IS present between setting each running flag to 0
+	 * and its join-wait, targeting the SAME wait_queue_head_t object each
+	 * thread's own ProcessMsgRoutine/ShutdownSSDRoutine wait_event_timeout() loop
+	 * waits on (confirmed: identical addresses on both sides) - kicking the
+	 * thread out of its sleep immediately rather than waiting for the loop's own
+	 * short timeout to lapse. A previous session's polling-loop simplification
+	 * for those two wait loops (since fixed - see their own comments) made this
+	 * __wake_up() a no-op and it was passed queue=0/NULL to match; now real. */
 	sProcessMsgThreadRunning = 0;
-	wait_for_completion_timeout(sMsgThreadComplete, 10000);	/* join the msg thread */
+	__wake_up(sVideoMsgWaitQueue, 3, 1, 0);
+	wait_for_completion_timeout(sMsgThreadComplete, 2000);	/* join the msg thread */
 
 	sShutdownSSDThreadRunning = 0;
-	wait_for_completion_timeout(sSsdThreadComplete, 10000);	/* join the ssd thread */
+	__wake_up(sShutdownSSDWaitQueue, 3, 1, 0);
+	wait_for_completion_timeout(sSsdThreadComplete, 2000);	/* join the ssd thread */
 
 	CleanupOmapNKS4Driver();
 	cleanup_cpp_support();
@@ -415,14 +724,20 @@ static void __exit OmapNKS4Exit(void)
 /* ===================================================================== */
 
 /* Video message-processor: wake on SignalVideoMessageProcessor(), drain the ring.
- * wait_event(sVideoMsgSignalled) modeled as a plain poll loop (stg_msleep), same
- * simplification already established in this file for WaitForFreeBulkWriteURB - see
- * OmapNKS4Exit's own comment on why. */
+ * Ground truth (fresh disassembly, 2026-07-18, OmapNKS4Module.ko@0x104d8-0x1053d):
+ * the real code does NOT poll - it open-codes the classic pre-2.6.35
+ * wait_event_timeout(sVideoMsgWaitQueue, sVideoMsgSignalled, 3) expansion (a real
+ * wait-queue sleep with prepare_to_wait() called every loop iteration, per that
+ * macro's real 2.6.32 form - not an inefficiency, the actual compiled shape).
+ * timeout=3 jiffies is a tight safety-net poll granularity in case a wakeup is
+ * ever missed; the real wake normally comes from __wake_up() (SignalVideo-
+ * MessageProcessor / OmapNKS4Exit), not from this timeout lapsing. */
 int ProcessMsgRoutine(void *arg)
 {
 	daemonize("kOmapNKS4MsgRoutine");
-	stg_sched_setscheduler(stg_get_current_task_nks4(), 2 /* SCHED_RR */, 0);
-	block_all_signals();
+	struct sched_param sp; sp.sched_priority = 2;
+	stg_sched_setscheduler(stg_get_current_task_nks4(), 2 /* SCHED_RR */, &sp);
+	block_all_signals_nks4(stg_get_current_task_nks4());
 	/* `arg` is create_thread's own transient on-stack completion object (see
 	 * its definition above) - completing THIS, not a separate static, is what
 	 * actually releases create_thread's wait and lets OmapNKS4Init proceed.
@@ -436,8 +751,20 @@ int ProcessMsgRoutine(void *arg)
 	complete(arg);
 
 	while (sProcessMsgThreadRunning) {
-		while (!sVideoMsgSignalled && sProcessMsgThreadRunning)
-			stg_msleep(20);
+		if (!sVideoMsgSignalled) {
+			unsigned char wait[20];
+			long timeout = 3;	/* ground truth: real EBX=0x3, @0x10503 */
+			init_wait_entry_nks4(wait, stg_get_current_task_nks4());
+			for (;;) {
+				prepare_to_wait(sVideoMsgWaitQueue, wait, 2 /* TASK_UNINTERRUPTIBLE */);
+				if (sVideoMsgSignalled)
+					break;
+				timeout = schedule_timeout(timeout);
+				if (!timeout)
+					break;
+			}
+			finish_wait(sVideoMsgWaitQueue, wait);
+		}
 		sVideoMsgSignalled = 0;
 		if (!sProcessMsgThreadRunning)
 			break;
@@ -457,18 +784,32 @@ int ProcessMsgRoutine(void *arg)
 int ShutdownSSDRoutine(void *arg)
 {
 	daemonize("kShutdownSSDRoutine");
-	stg_sched_setscheduler(stg_get_current_task_nks4(), 2 /* SCHED_RR */, 0);
-	block_all_signals();
+	struct sched_param sp; sp.sched_priority = 2;
+	stg_sched_setscheduler(stg_get_current_task_nks4(), 2 /* SCHED_RR */, &sp);
+	block_all_signals_nks4(stg_get_current_task_nks4());
 	/* see ProcessMsgRoutine's own comment above - same fix, same reasoning. */
 	complete(arg);
 
 	for (;;) {
-		/* wait_event_timeout(sShutdownSSDSignaled, 10000) - same poll-loop
-		 * simplification as ProcessMsgRoutine above; 10000 is a best-effort
-		 * placeholder (not independently ground-truthed for this specific call
-		 * site the way OmapNKS4Init's probe-wait timeout was). */
-		for (int waited = 0; !sShutdownSSDSignaled && waited < 10000; waited += 20)
-			stg_msleep(20);
+		/* Real wait_event_timeout(sShutdownSSDWaitQueue, sShutdownSSDSignaled,
+		 * 10000) - ground truth (fresh disassembly, 2026-07-18,
+		 * OmapNKS4Module.ko@0x105f0-0x10658): same real wait-queue mechanism as
+		 * ProcessMsgRoutine's fix above, not a poll loop. 10000 (jiffies) is
+		 * ground-truthed via the real MOV EBX,0x2710 immediate at this call site. */
+		if (!sShutdownSSDSignaled) {
+			unsigned char wait[20];
+			long timeout = 10000;
+			init_wait_entry_nks4(wait, stg_get_current_task_nks4());
+			for (;;) {
+				prepare_to_wait(sShutdownSSDWaitQueue, wait, 2 /* TASK_UNINTERRUPTIBLE */);
+				if (sShutdownSSDSignaled)
+					break;
+				timeout = schedule_timeout(timeout);
+				if (!timeout)
+					break;
+			}
+			finish_wait(sShutdownSSDWaitQueue, wait);
+		}
 		if (!sShutdownSSDThreadRunning) {
 			sShutdownSSDThreadRunning = 0;
 			complete_and_exit(sSsdThreadComplete, 0);
@@ -477,63 +818,103 @@ int ShutdownSSDRoutine(void *arg)
 		if (sIsSSDReadyToShutdown || !sShutdownSSDSignaled)
 			continue;
 
-		/* flush + stop every SCSI device on every host (the internal SSD).
-		 * scsi_device_set_state's real Linux 2.6.32 enum values: SDEV_QUIESCE=6,
-		 * SDEV_OFFLINE=1 - not independently ground-truthed against this specific
-		 * binary (this whole SSD-shutdown path is low priority relative to the
-		 * NKS4 panel protocol itself - out of this session's main focus). A real
-		 * per-thread lock object is needed for mutex_lock/unlock; declared here
-		 * as a best-effort placeholder-sized (32 byte) buffer, not ground-truthed. */
-		static unsigned char sScsiShutdownLock[32];
-		for (int host = 0; ; host++) {
+		/* Stop the internal SSD's SCSI device - ground truth corrected via fresh
+		 * disassembly, 2026-07-17 (`ShutdownSSDRoutine@0x10570`). Two real bugs in
+		 * the previous version of this block, both now fixed:
+		 *
+		 * 1. This is NOT "walk every host, shut down every device found" (the old
+		 *    open-ended `for (host = 0; ; host++)` model). The real code tries
+		 *    exactly FOUR fixed SCSI host indices in order - 0, then 1, then 2,
+		 *    then 3 (four distinct `scsi_host_lookup(N)` call sites at fixed
+		 *    immediates in the disassembly, not a loop) - and shuts down only the
+		 *    FIRST one that yields a device at channel 0/id 0/lun 0, then jumps
+		 *    straight back to the outer wait loop. If none of the four hosts have
+		 *    a device, it falls through to the sleep/signal-clear tail having
+		 *    shut down nothing.
+		 * 2. `scsi_device_set_state`'s real values are SDEV_CANCEL=3 then
+		 *    SDEV_DEL=4 (confirmed against this kernel tree's
+		 *    include/scsi/scsi_device.h: SDEV_CREATED=1, SDEV_RUNNING=2,
+		 *    SDEV_CANCEL=3, SDEV_DEL=4, SDEV_QUIESCE=5, SDEV_OFFLINE=6) - the
+		 *    previous guess (6 then 1) was wrong on both the values AND which
+		 *    named state they corresponded to. CANCEL-then-DEL is exactly the
+		 *    same two-step sequence the kernel's own __scsi_remove_device() uses -
+		 *    this routine is essentially a manual, inlined scsi_remove_device().
+		 * CORRECTION (re-verification pass, 2026-07-17): two real bugs found in
+		 * the block below via fresh disassembly, both now fixed:
+		 *  1. Both shutdown_fn(...) calls previously passed the wrong argument.
+		 *     The first call's real disassembly is `LEA EAX,[EBX+0xb0]` (EBX=sdev)
+		 *     immediately before `CALL EDX` - it passes `sdev+0xb0` (the embedded
+		 *     device struct), NOT `dev` (the function-pointer lookup object
+		 *     itself). The second call's real disassembly is `MOV EAX,EBX` before
+		 *     `CALL EDX` - it passes `sdev` itself, NOT the computed `bus`. In
+		 *     both cases the function-pointer LOOKUP (via `dev`/`bus`) was already
+		 *     correct; only the call's own argument was wrong - a real instance of
+		 *     this project's recurring "function pointer resolved via one object,
+		 *     but a DIFFERENT related object is passed as the argument" pattern.
+		 *  2. `sScsiShutdownLock` was a placeholder static buffer, not a real
+		 *     lock object. Ground truth: `mutex_lock`/`mutex_unlock` operate on
+		 *     `shost + 0x30` - a field embedded in the looked-up `Scsi_Host`
+		 *     itself (`LEA EAX,[EDI+0x30]`, EDI=shost), not a module-private
+		 *     static. Removed the placeholder; using the real field instead. */
+		for (int host = 0; host < 4; host++) {
 			void *shost = scsi_host_lookup(host);
 			if (!shost)
-				break;
+				continue;
 			void *sdev = scsi_device_lookup(shost);
-			if (sdev) {
-				mutex_lock(sScsiShutdownLock);
-				scsi_device_set_state(sdev, 6 /* SDEV_QUIESCE */);
-				/* Ground truth (fresh disassembly, 2026-07-16): NOT plain
-				 * external dev_shutdown()/bus_shutdown() calls - those
-				 * genuinely don't appear anywhere in the stock module's
-				 * import list. The real code walks raw struct offsets off
-				 * `sdev` and calls a function pointer it finds there
-				 * (matching the kernel's device_driver->shutdown(dev)
-				 * callback convention), same "raw offset into an opaque
-				 * kernel struct" technique already used throughout this
-				 * codebase (e.g. struct usb_driver in this same file).
-				 * Lower confidence than the panel-protocol fixes elsewhere
-				 * this session - this path only fires on a real
-				 * power-button event, not during normal driver bring-up,
-				 * so it wasn't prioritized for deeper verification. */
-				{
-					void *dev = ((void **)sdev)[0x3e];
-					if (dev) {
-						void (*shutdown_fn)(void *) =
-							*(void (**)(void *))((char *)dev + 0x1c);
-						if (shutdown_fn) shutdown_fn(dev);
-					}
-				}
-				scsi_device_set_state(sdev, 1 /* SDEV_OFFLINE */);
-				{
-					void *bus = *(void **)(*(void **)sdev);
-					bus = *(void **)((char *)bus + 0x60);
-					void (*shutdown_fn)(void *) =
-						*(void (**)(void *))((char *)bus + 0x3c);
-					if (shutdown_fn) shutdown_fn(bus);
-				}
-				mutex_unlock(sScsiShutdownLock);
-				scsi_device_put(sdev);
+			if (!sdev) {
+				scsi_host_put(shost);
+				continue;
 			}
+			mutex_lock((char *)shost + 0x30);
+			scsi_device_set_state(sdev, 3 /* SDEV_CANCEL */);
+			{
+				void *dev = ((void **)sdev)[0x3e];
+				if (dev) {
+					void (*shutdown_fn)(void *) =
+						*(void (**)(void *))((char *)dev + 0x1c);
+					if (shutdown_fn) shutdown_fn((char *)sdev + 0xb0);
+				}
+			}
+			scsi_device_set_state(sdev, 4 /* SDEV_DEL */);
+			{
+				void *bus = *(void **)(*(void **)sdev);
+				bus = *(void **)((char *)bus + 0x60);
+				void (*shutdown_fn)(void *) =
+					*(void (**)(void *))((char *)bus + 0x3c);
+				if (shutdown_fn) shutdown_fn(sdev);
+			}
+			mutex_unlock((char *)shost + 0x30);
+			scsi_device_put(sdev);
 			scsi_host_put(shost);
+			break;	/* only the first host with a device is shut down */
 		}
 
-		msleep(500);
+		/* msleep(1000) - ground-truthed via the literal `MOV EAX,0x3e8` immediate
+		 * immediately before this call (was msleep(500), an unverified guess). */
+		msleep(1000);
 		sShutdownSSDSignaled = 0;
-		/* COmapNKS4Driver_ShutDown's real parameter meaning is unconfirmed - see its
-		 * definition in driver.cpp. 0 is a placeholder pending a real trace of this
-		 * call site's ground truth. */
-		COmapNKS4Driver_ShutDown(0);
+		/* CORRECTION (re-verification pass, 2026-07-17): the literal 0 argument
+		 * here was confirmed WRONG via fresh disassembly - the real call site is
+		 * `MOV EAX,[0x1b6b4]` immediately before the call, i.e. it loads a global
+		 * (bss, address 0x1b6b4 in the real binary) and passes that, not a
+		 * constant. The global's own symbol name/real meaning couldn't be
+		 * resolved this pass (unreadable statically from an uninitialized bss
+		 * address in the .ko) - left as an honestly-flagged extern rather than a
+		 * guessed literal. COmapNKS4Driver_ShutDown's own parameter meaning is
+		 * still unconfirmed - see its definition in driver.cpp.
+		 *
+		 * FIX (goal: clean VM-bootable build, 2026-07-17): this is a real
+		 * internal-to-this-module global (BSS, address 0x1b6b4 sits well
+		 * inside OmapNKS4Module.ko's own image, not an external kernel/RTAI
+		 * symbol) - it must be DEFINED here, not left as a dangling extern
+		 * with no definition anywhere (an "Unknown symbol" insmod failure
+		 * waiting to happen). No write site to this global was found this
+		 * pass, so it's modeled as a plain static int, zero-initialized by
+		 * BSS semantics same as the real binary's own uninitialized data
+		 * section - matches the real load site's own observed behavior
+		 * (nothing in this reconstruction has ever seen a non-zero read). */
+		static int sOmapNKS4DriverShutdownArg;
+		COmapNKS4Driver_ShutDown(sOmapNKS4DriverShutdownArg);
 		sIsSSDReadyToShutdown = 1;
 	}
 }

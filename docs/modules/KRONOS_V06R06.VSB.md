@@ -127,8 +127,41 @@ warning, it's the same code path behind the `"SYSTEM STARTUP FAILED"` string.
 `FUN_c0005e9c` (a second caller of the same write/read primitives) is a generic
 queued-command relay dispatching on the command byte's LSB (odd/even) rather than
 the fixed `$B0`/`$B2`/`$B4`/`$B8` opcode set — meaning the panel firmware's AT88
-command surface may be broader than the four opcodes ground-truthed here. Not
-chased further.
+command surface may be broader than the four opcodes ground-truthed here.
+
+**Chased further, 2026-07-17 — traces all the way to the wire, and closes a loop
+with the host-side protocol docs.** `FUN_c0005e9c` pops a 32-byte queue entry
+(`FUN_c0000fc8` — a 2-deep ring buffer, index masked `& 1`, at queue-handle offsets
+`+0x41`/`+0x42`) and dispatches on the low bit of the command byte: LSB clear →
+write path (`FUN_c0000ef4`, the same primitive `$B0`'s trace already used); LSB set
+→ read path (`FUN_c0000f30`, same as `$B2`'s trace), **then relays the read result
+onward via `FUN_c0005da0`.**
+
+`FUN_c0005da0` builds a wire-format event record and hands it to `FUN_c000acec`
+(a USB-endpoint transmit-queue submit, gated on a "buffer available" check +
+128-byte outstanding-byte budget — the firmware-side mirror of the host's own
+`CSTGOmapNKS4Fifos` input-FIFO consumer). The record it builds has the literal byte
+**`0xe1`** hardcoded into it — the exact same **AtmelRead** opcode this repo's own
+host-side docs (`OmapNKS4Module.ko`'s `driver.cpp`/`ReceiveEventBuffer`,
+`KronosNKS4/docs/protocol.md`) already decode on the *receiving* end. Reading
+`FUN_c0005da0`'s stack-variable layout in address order (not assignment order —
+Ghidra's `local_XX` naming decreases toward the frame pointer, so `&local_70`'s
+first 4 bytes in memory are `[local_70, local_6f, local_6e, local_6d]`) gives the
+literal first wire word as `[cmd_data[2], cmd_data[1], cmd_data[0], 0xe1]` — the
+same **per-dword byte-reversal** convention already reverse-engineered from the
+host side (`ContinueProcessingEvent`'s pixel-chunk swap, `KronosNKS4`'s
+"pairwise-halfword swap" documentation for `AtmelRead` decode). This is the first
+time this project has traced a specific NKS4 event type's construction on *both*
+ends of the wire and found them to agree exactly — the two independent RE efforts
+(host-side decompile, firmware-side decompile) corroborate each other, which is
+about as strong a confirmation as this protocol work gets without a live capture.
+
+Not chased further this pass: `FUN_c0000ef4`'s write-path equivalent event
+(presumably a similar record for whatever the write acknowledges, if anything —
+`$B0`/`$B4`/`$B8` writes may not generate a host-visible event at all, unlike
+`$B2` reads), and the exact command-byte encoding the *host* side uses to enqueue
+into this 2-deep queue in the first place (i.e., what writes into the ring buffer
+`FUN_c0000fc8` dequeues from — not yet traced back to its producer/caller).
 
 **Compared against `kronosology/reconstructed/AT88VirtualChip`** (the project's
 software AT88 emulator, built for host-side `OA.ko`/`loadmod.ko` VM boot-testing):
@@ -182,6 +215,15 @@ and talking USB back to the host.
 `FUN_c0008618` (xrefs to the two format strings below) implements a hidden
 diagnostic screen: an up/down-scrollable list, index `0..0x48` (0-72, 73 entries),
 printing:
+
+**Extended, 2026-07-17** (reconstructed as `NKS4PanelFirmware/cpsoc.c`): navigation
+key codes confirmed - `0x28` moves down the list (index++, capped at `0x48`), `0x27`
+moves up (index--, floored at `0`). Screen layout confirmed from the real draw-call
+y-coordinates: `y=0x208` (520) is the idle header line, `y=0x21c` (540) is the live
+switch/LED readout for the current index, `y=0x230` (560) is a third, distinct
+action triggered by key code `8` while a separate "menu active" latch (set/cleared
+by key code `0x17`) is held - that third action's own effect (`FUN_c0000ba0`) isn't
+yet identified, plausibly an exit/reset of the diagnostic menu.
 
 ```
 Switch : %15s
@@ -270,6 +312,39 @@ and the firmware's static table has placeholder black. Read together, this confi
    `/dev/fb1`, now confirmed from the other end of the wire.
 
 ---
+
+## The wire-protocol command dispatcher — ties every subsystem together
+
+**Found 2026-07-17** while chasing `cpsoc.cpp`'s callers: `FUN_c0007d1c` is the
+firmware's single entry point for every incoming 32-bit command word from the host -
+the direct counterpart to the host-side `COmapNKS4Command` wire protocol
+(`kronosology/reconstructed/OmapNKS4Module/command.cpp`). One function, dispatching
+on the opcode byte, routes to essentially every subsystem reconstructed so far:
+
+| Opcode | Routes to | Matches |
+|---|---|---|
+| `0xc0` | `clcdc_reg_write`/`_set_bits`/`_clear_bits` (via a reg-byte sub-select) | `InitLCDRegs` |
+| `0x81` | `clcdc_cursor_set_stride` | `XAxisByteSize` |
+| `0xc2` | sets up a pixel-region transfer context | `SendPixelDataRegion` |
+| `0x83` | clears the pixel-region transfer context | region-end marker |
+| `0xc5` | palette update (`FUN_c0015018`) | `UpdateColorPal` |
+| `0xc6`/`0xc4` | returns early, deferred to a streaming continuation (the panel-side mirror of `ContinueProcessingEvent`) | pixel-data chunk / fill |
+| `0xc7` | LCD brightness (`FUN_c0007ccc`) | `SetLCDBrightness` |
+| `0xe0` | AT88 relay write path, reassembles a variable-length payload | `stgNV2AC_sync_cmd` |
+| `0xe1` | AT88 relay read path | `stgNV2AC_sync_read_cmd` / AtmelRead |
+| `0x50`/`0x51`/`0x52` (op-byte `0`) | `cpsoc`'s three register-bank read wrappers | switch/LED state reads |
+| `0xee` | comm-check | `CommunicationCheck` |
+| `0xf0` | version query (asserts via the same hard-halt handler if a state byte is `-1`) | `GetVersion` |
+| `0xd0`/`0xd1`/`0x80` | not yet attributed to a known host-side command | - |
+
+This single finding retroactively explains *why* `clcdc.cpp` and `cpsoc.cpp` (and by
+extension `CryptoAt88.cpp`'s queue-relay bit-13 trigger from `FUN_c0008b64`, a
+sibling dispatcher one level up) all showed up as separately-reconstructed
+subsystems with no obvious common caller before now - they share this one dispatch
+point, not because they call each other, but because they're each addressed by a
+distinct opcode range of the same wire protocol. `EvaBoardMain.cpp`'s own bring-up
+almost certainly wires this dispatcher to the USB receive path; that connection
+itself hasn't been traced yet (see `EvaBoardMain.cpp`'s own "not started" status).
 
 ## Status
 

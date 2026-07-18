@@ -83,12 +83,24 @@ int main(void)
 	// port had them swapped before the fix). idx=7 triggers the sAfterTouch table
 	// remap path in the real driver, so use idx=1 here to exercise the plain
 	// passthrough path with calibration as identity (host_stub_calibration_passthrough).
+	//
+	// UPDATED (residual-list audit, 2026-07-18): the calibration INPUT itself was a
+	// separate, previously-undiscovered bug - ApplyNKS4Calibration is fed
+	// raw10 = (dLo<<2)|(dHi>>6) in ground truth (confirmed via fresh disassembly of
+	// TWO independently-compiled instances of ReceiveEventBuffer's own op==3 case,
+	// @0x13618 and @0x14d08 - see driver.cpp's own fix comment there), not the naive
+	// dLo|dHi<<8 combine this test's "want" value used to assume. Updated below to
+	// match; the test-mode event-1 (0x61) case a few lines down already used the
+	// correct raw10 formula for its OWN local packing (that part was never wrong),
+	// which is what made the mismatch between it and this calibration-input
+	// assumption easy to cross-check once flagged.
 	COmapNKS4Driver_sInstance.fTestMode = false;
-	feed_one_record(0x34, 0x12, 0x01, 0x03); // raw dLo|dHi<<8 = 0x1234, calibrated v = 0x1234 (passthrough)
+	feed_one_record(0x34, 0x12, 0x01, 0x03); // raw10 = (dLo<<2)|(dHi>>6) = 0xd0, calibrated v = 0xd0 (passthrough)
 	{
-		// v = 0x1234 (as short, positive). val = v. word = idx<<16 | (val>>2)&0xff |
+		// v = 0xd0 (as short, positive). val = v. word = idx<<16 | (val>>2)&0xff |
 		// ((v<<6)&0xff)<<8 | 0x3000000.
-		int v = 0x1234;
+		unsigned int raw10 = ((unsigned int)0x34 << 2) | (0x12 >> 6);
+		int v = (short)raw10;
 		int val = v;
 		unsigned int expect = (1u << 16) | ((unsigned int)(val >> 2) & 0xff) |
 		                       (((unsigned int)(v << 6) & 0xff) << 8) | 0x3000000u;
@@ -113,9 +125,10 @@ int main(void)
 		                       0x61000000u;
 		check_eq("Aftertouch test-mode event 1 (0x61, raw)", w1, expect1);
 
-		// Event 2 (0x62): calibrated val/v (passthrough -> 0x1234), bits[0:7]=high
-		// byte of val, bits[8:15]=low byte of v.
-		int v = 0x1234, val = v;
+		// Event 2 (0x62): calibrated val/v (passthrough -> raw10 = 0xd0, see the
+		// non-test-mode case above for why - updated 2026-07-18 along with it),
+		// bits[0:7]=high byte of val, bits[8:15]=low byte of v.
+		int v = (short)raw10, val = v;
 		unsigned int expect2 = (1u << 16) | (((unsigned int)val >> 8) & 0xff) |
 		                       (((unsigned int)(unsigned char)v) << 8) | 0x62000000u;
 		check_eq("Aftertouch test-mode event 2 (0x62, calibrated)", w2, expect2);

@@ -6,6 +6,24 @@ binary — this subsystem has no shipping-binary counterpart). Target:
 only — this module does not actually depend on RTAI being loaded), x86-32,
 `gcc -mregparm=3`.
 
+## Extended 2026-07-17 for OmapNKS4Module.ko's own live boot test
+
+Originally built for `OA.ko`'s own 26+3 symbols (see below). `OmapNKS4Module.ko`'s own
+`rtwrap.cpp` needed ~17 more real RTAI symbols this module didn't yet export
+(`rt_cond_wait`/`_timed`/`_until`, `rt_sem_broadcast`, `rt_sem_wait_timed`/`_barrier`,
+`rt_sched_lock`/`unlock`, `rt_get_priorities`/`_time_cpuid`, `nano2count`/`_cpuid`,
+`rt_sleep`, `set_debug_traps_in_rt_task`, `rt_task_masked_unblock`, plus the
+`_nano2count_cpuid`/`rtai_cpu_lock` per-CPU data symbols) — added as a new numbered
+section (see the source's own "9. Additional RTAI symbols..." comment), using the same
+"match the caller's currently-declared convention, flag what wasn't independently
+re-confirmed" discipline as every symbol below. **Real bug found and fixed in this
+pass**: `rt_sleep`'s own new implementation used plain 64-bit `/` on a runtime `long
+long` value, which needs GCC's `__divdi3` helper — unavailable in 32-bit kernel space,
+a genuine "Unknown symbol `__divdi3`" insmod failure on the first live attempt. Fixed
+with the kernel's own `do_div()` macro. Confirmed via a real, successful live boot test
+(`OmapNKS4Module.ko`'s own `init_module()` running to completion) — see that module's
+own README.md.
+
 ## What this replaces, and why
 
 `OA.ko`'s own reconstructed `rtwrap_*` wrapper layer

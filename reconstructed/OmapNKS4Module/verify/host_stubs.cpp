@@ -58,7 +58,7 @@ int WaitForNKS4ReadEvent(unsigned int *resp)
 int SubmitNKS4CommandMultipleWriteNONBLOCKING(unsigned int *, unsigned int) { return 0; }
 int SubmitOmapNKS4CmdBulkWrite(unsigned char, unsigned char *, unsigned int) { return 0; }
 int SubmitOmapNKS4BulkWrite(unsigned int *, unsigned int) { return 0; }
-int OmapNKS4WriteQueueNotFull(void) { return 1; }
+bool OmapNKS4WriteQueueNotFull(int) { return true; }
 void SignalShutdownSSD(void) { }
 void SetShutdownDelay(int) { }
 void WaitOnAtmelRead(void) { }
@@ -110,7 +110,11 @@ int ApplyNKS4Calibration(unsigned int, short raw)
 // without it, the linker doesn't see these as satisfying driver.cpp's references.
 extern const unsigned char sAfterTouch1ConvertTable[256] = {0};
 extern const unsigned char sAfterTouch2ConvertTable[256] = {0};
-double _DAT_0000af38 = 1.0 / 100.0;
+/* _DAT_0000af38 removed (re-verification pass, 2026-07-17): driver.cpp now
+ * defines this itself as a real global (see its own comment there) - this
+ * stub had become a stale duplicate definition, a link error the moment
+ * both translation units were linked together (the same class of bug as
+ * the project's already-documented sMaxWritePacketSize duplicate). */
 }
 
 // ---- CNKS4EventFilter::FilterEvent - always allow through (host_stub_filter_allow
@@ -133,4 +137,4 @@ void CSTGOmapNKS4Fifos::TriggerOutputInterrupt(void) { }
 // just so g_video's static initialization resolves.
 COmapNKS4VideoAPI::COmapNKS4VideoAPI(void) { std::memset(this, 0, sizeof(*this)); }
 struct COmapNKS4VideoAPI g_video;
-int OmapNKS4VideoAPI_SendFillData(struct COmapNKS4VideoAPI *, unsigned char, int, int, int) { return 0; }
+extern "C" int OmapNKS4VideoAPI_SendFillData(struct COmapNKS4VideoAPI *, unsigned char, int, int, int) { return 0; }

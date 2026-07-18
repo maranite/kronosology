@@ -365,12 +365,25 @@ synth cores get freed up for more voices.
 | `mCpuVoiceCount[4]` | `CModelVoiceRequirementsData` layout | Per-synth voice counters | Struct layout — hard |
 | `rtwrap_set_runnable_on_cpuid` | RTAI wrapper | Per-thread CPU pinning | n/a — works with any count |
 
+**Correction (per `kronosology/reconstructed/OmapNKS4Module/rtwrap.cpp`'s header comment
+and that module's README "Continued RE, 2026-07-17 (session 2)" section)**: the
+`rtwrap_*` row above used to link to `loadmod.ko.md` as the symbol's "provider,"
+implying `rtwrap_*` is a shared library export resolved from `loadmod.ko` at insmod
+time. That's wrong. Verified directly against the real binaries (`nm`): `loadmod.ko`
+has **zero** `rtwrap_*`/`stg_*` symbols of any kind, and `OA.ko`'s own `rtwrap_*`
+functions (e.g. `rtwrap_set_runnable_on_cpuid` @ `0x118ff0`) are `T` (defined, real
+code) inside `OA.ko` itself — genuine RTAI primitives like `rt_task_init`/`rt_sem_wait`
+are the actual `U` (undefined/imported) externs, resolved against the real
+`rtai_*.ko` stack, not against `loadmod.ko`. Each STG-family module (`OA.ko`,
+`OmapNKS4Module.ko`, …) carries its own private, statically-linked `rtwrap_*` veneer.
+
 ---
 
 ## See also
 
 - [../modules/OA.ko.md](../modules/OA.ko.md) — where the threading classes live
-- [../modules/loadmod.ko.md](../modules/loadmod.ko.md) — RTAI wrapper provider (`rtwrap_*`)
+- [../modules/loadmod.ko.md](../modules/loadmod.ko.md) — boot-integrity module (**not**
+  the `rtwrap_*` provider — that claim was wrong; see note below)
 - [../preload/extension_points.md](../preload/extension_points.md) — companion doc on
   hardcoded resource limits
 - [export_patched_ko.md](export_patched_ko.md) — how to ship a patched OA.ko once

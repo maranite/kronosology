@@ -933,6 +933,296 @@ int start_rt_timer(int period)
 EXPORT_SYMBOL(start_rt_timer);
 
 /* ========================================================================= *
+ *  9. Additional RTAI symbols needed by OmapNKS4Module.ko specifically (not
+ *     part of the original 26+3 OA.ko-only symbol set above) - added while
+ *     pursuing this project's own goal of getting the OmapNKS4 driver
+ *     stack to compile and reasonably boot in this same kronosvm VM
+ *     substitute environment. Cross-referenced against
+ *     reconstructed/OmapNKS4Module/rtwrap.cpp's own extern declarations.
+ *
+ *     IMPORTANT CAVEAT: several of these functions' exact regparm
+ *     convention was NOT independently re-confirmed against real
+ *     ground-truth disassembly the way the original 26 above were -
+ *     rtwrap.cpp's own re-verification pass explicitly flagged this gap
+ *     ("NOT independently re-verified this pass: every other rt-prefixed
+ *     or nano2count_cpuid extern..."). Matched here to that file's OWN
+ *     currently-declared calling convention (this file's ambient
+ *     regparm(3), except where rtwrap.cpp itself already overrides to
+ *     regparm(0) for a specific symbol) so the two sides agree even if the
+ *     true real-hardware ABI is still unconfirmed - if a future
+ *     ground-truth pass finds a mismatch, both sides need to move
+ *     together, the same discipline every regparm(0) override above
+ *     already follows.
+ * ========================================================================= */
+
+/*
+ * rt_cond_wait/_timed/_until - real RTAI condition-variable wait, paired
+ * with a caller-owned mutex (same "plain struct semaphore fits in
+ * caller-provided storage" convention as rt_sem_wait's own `sem` param in
+ * section 3 above). Approximated as release-mutex / wait-on-condition /
+ * reacquire-mutex using ordinary semaphore primitives - a real,
+ * documented simplification (classic condvar-via-semaphore has a
+ * TOCTOU race between the mutex release and the condition wait that a
+ * genuine condvar primitive avoids), acceptable for this module's own
+ * stated goal (structural boot progress, not hard-RT-grade correctness)
+ * since no confirmed real caller of these three in this project's own
+ * reconstruction sits on the specific init/boot path this module's VM
+ * boot test is scoped to validate.
+ */
+int rt_cond_wait(void *cond, void *mutex)
+{
+	if (!cond || !mutex)
+		return -EINVAL;
+	up((struct semaphore *)mutex);
+	down((struct semaphore *)cond);
+	down((struct semaphore *)mutex);
+	return 0;
+}
+EXPORT_SYMBOL(rt_cond_wait);
+
+int rt_cond_wait_timed(void *cond, void *mutex, long long delay, void *unused)
+{
+	long timeout_jiffies;
+
+	(void)unused;
+	if (!cond || !mutex)
+		return -EINVAL;
+	/*
+	 * `delay` is real RTAI's own internal timebase ("counts"), not
+	 * nanoseconds or jiffies directly - this substitute has no genuine
+	 * RTAI timebase to convert from (see nano2count/nano2count_cpuid
+	 * below, which treat counts and nanoseconds as the same unit for the
+	 * same reason). Clamped to a sane range rather than trusted as a raw
+	 * jiffies count.
+	 */
+	timeout_jiffies = (delay > 0 && delay < (long long)(60 * HZ)) ? (long)delay : HZ;
+	up((struct semaphore *)mutex);
+	if (down_timeout((struct semaphore *)cond, timeout_jiffies)) {
+		down((struct semaphore *)mutex);
+		return -1;	/* timed out, matching real RTAI's own convention */
+	}
+	down((struct semaphore *)mutex);
+	return 0;
+}
+EXPORT_SYMBOL(rt_cond_wait_timed);
+
+int rt_cond_wait_until(void *cond, void *mutex, long long until)
+{
+	(void)until;	/* no real absolute-timebase reference to compute a precise delay from */
+	return rt_cond_wait_timed(cond, mutex, HZ, NULL);
+}
+EXPORT_SYMBOL(rt_cond_wait_until);
+
+/*
+ * rt_sem_broadcast(sem) - real RTAI wakes ALL waiters, unlike
+ * rt_sem_signal's single wake. Plain Linux `struct semaphore` has no
+ * native "wake all" primitive; every confirmed real caller in this
+ * project's own reconstruction (posix_wrapper_fun's own join-semaphore
+ * release) has at most one real waiter in practice, so a bounded number
+ * of up() calls is a safe, adequate substitute rather than attempting a
+ * more elaborate wait-queue-based reimplementation for a case that never
+ * arises on the paths this module is scoped to validate.
+ */
+int rt_sem_broadcast(void *sem)
+{
+	int i;
+
+	if (!sem)
+		return -EINVAL;
+	for (i = 0; i < 8; i++)
+		up((struct semaphore *)sem);
+	return 0;
+}
+EXPORT_SYMBOL(rt_sem_broadcast);
+
+/*
+ * rt_sem_wait_timed/_barrier - siblings of the already-ground-truth-
+ * confirmed regparm(0) rt_sem_wait family (section 3 above); matched to
+ * that same convention on the assumption they share it too (not
+ * independently re-confirmed this pass, see this section's own header
+ * caveat).
+ */
+__attribute__((regparm(0))) int rt_sem_wait_timed(void *sem, long long delay)
+{
+	long timeout_jiffies;
+
+	if (!sem)
+		return -EINVAL;
+	timeout_jiffies = (delay > 0 && delay < (long long)(60 * HZ)) ? (long)delay : HZ;
+	return down_timeout((struct semaphore *)sem, timeout_jiffies) ? -1 : 0;
+}
+EXPORT_SYMBOL(rt_sem_wait_timed);
+
+__attribute__((regparm(0))) int rt_sem_wait_barrier(void *sem)
+{
+	/*
+	 * Real RTAI's own "barrier" semaphore mode has no single Linux
+	 * primitive equivalent; modeled as a plain wait, matching this
+	 * module's own established "adequate for structural boot progress,
+	 * not hard-RT-grade fidelity" bar.
+	 */
+	if (!sem)
+		return -EINVAL;
+	down((struct semaphore *)sem);
+	return 0;
+}
+EXPORT_SYMBOL(rt_sem_wait_barrier);
+
+/*
+ * rt_task_masked_unblock(task, mask) - real RTAI unblocks a task waiting
+ * on event flags matching `mask`. This substitute has no genuine RTAI
+ * event-flag-wait primitive to gate against in the first place (no
+ * confirmed real caller in this project's own reconstruction uses one),
+ * so this is modeled as a plain, unconditional resume - safe and
+ * sufficient for that reason.
+ */
+int rt_task_masked_unblock(void *task, unsigned int mask)
+{
+	(void)mask;
+	return rt_task_resume(task);
+}
+EXPORT_SYMBOL(rt_task_masked_unblock);
+
+/*
+ * rt_sched_lock/rt_sched_unlock - real RTAI's own global scheduler lock.
+ * This substitute never runs genuine hard-RT scheduling at all (see file
+ * header), so there is no real RTAI scheduler to lock - approximated with
+ * ordinary Linux preemption disable/enable, the closest native Linux
+ * analog to "don't let the scheduler run right now" without claiming any
+ * hard-RT guarantee.
+ */
+void rt_sched_lock(void)
+{
+	preempt_disable();
+}
+EXPORT_SYMBOL(rt_sched_lock);
+
+void rt_sched_unlock(void)
+{
+	preempt_enable();
+}
+EXPORT_SYMBOL(rt_sched_unlock);
+
+/*
+ * rt_get_priorities(max, min, rrQuantum) - real RTAI reports its own
+ * configured priority range/round-robin quantum via these three output
+ * pointers. `min` = 0x8c (140) matches the RTAI priority floor already
+ * established elsewhere in this project (rtwrap_pthread_attr_setrtpriority's
+ * own confirmed real bound, reconstructed/OmapNKS4Module/rtwrap.cpp) - the
+ * other two are safe, sane placeholders (max=0, the real RTAI convention
+ * for "highest priority"; rrQuantum=1 jiffy) since no confirmed real
+ * caller in this project reads them for anything beyond that same bound.
+ */
+void rt_get_priorities(int *max, int *min, int *rrQuantum)
+{
+	if (max) *max = 0;
+	if (min) *min = 0x8c;
+	if (rrQuantum) *rrQuantum = 1;
+}
+EXPORT_SYMBOL(rt_get_priorities);
+
+/*
+ * rt_get_time_cpuid(cpuid) / nano2count(nanos) / nano2count_cpuid(nanos,
+ * cpuid) - real RTAI's own internal high-resolution timebase and its
+ * nanosecond-to-"count" conversion. This substitute has no genuine RTAI
+ * timebase running at all (see file header - no I-pipe/APIC takeover),
+ * so `nano2count`/`nano2count_cpuid` are modeled as the identity function
+ * (treating "counts" and nanoseconds as the same unit throughout this
+ * whole substitute, consistent with rt_cond_wait_timed/rt_sem_wait_timed's
+ * own `delay` handling above) and `rt_get_time_cpuid` returns an ordinary
+ * jiffies-derived nanosecond-ish monotonic value - not genuinely
+ * RTAI-timebase-accurate, but monotonic and safe for any caller that only
+ * needs elapsed-time comparisons, which is the only confirmed real usage
+ * pattern in this project's own reconstruction.
+ */
+long long nano2count(long long nanos)
+{
+	return nanos;
+}
+EXPORT_SYMBOL(nano2count);
+
+long long nano2count_cpuid(long long nanos, int cpuid)
+{
+	(void)cpuid;
+	return nanos;
+}
+EXPORT_SYMBOL(nano2count_cpuid);
+
+long long rt_get_time_cpuid(int cpuid)
+{
+	(void)cpuid;
+	return (long long)jiffies * (1000000000LL / HZ);
+}
+EXPORT_SYMBOL(rt_get_time_cpuid);
+
+/*
+ * rt_sleep(count) - real RTAI hard-RT-context-safe sleep, given a duration
+ * in RTAI "counts" (== nanoseconds in this substitute, see nano2count
+ * above). No genuine hard-RT context ever exists here, so an ordinary
+ * jiffies-based schedule_timeout is a safe, adequate substitute.
+ */
+void rt_sleep(long long count)
+{
+	/*
+	 * FIX (goal: clean VM-bootable build, 2026-07-17): plain 64-bit `/`
+	 * on a runtime value needs GCC's __divdi3 helper, which does not
+	 * exist in 32-bit kernel space - this caused a real, confirmed
+	 * "Unknown symbol __divdi3" insmod failure the first time this
+	 * module was boot-tested. The kernel's own do_div() macro divides a
+	 * u64 in place by a 32-bit divisor without needing that helper - the
+	 * divisor here (nanoseconds per jiffy) is well within 32 bits for
+	 * any real HZ value, so this is a safe, exact substitution, not an
+	 * approximation.
+	 */
+	uint64_t ticks = (count < 0) ? 0 : (uint64_t)count;
+	do_div(ticks, 1000000000UL / HZ);
+
+	if (ticks < 1)
+		ticks = 1;
+	schedule_timeout_interruptible((long)ticks);
+}
+EXPORT_SYMBOL(rt_sleep);
+
+/*
+ * set_debug_traps_in_rt_task(void) - counterpart to
+ * clear_debug_traps_in_rt_task above (section 1). Same reasoning: this
+ * substitute never installs any hardware debug trap in the first place,
+ * so "setting" one is always a safe no-op.
+ */
+void set_debug_traps_in_rt_task(void)
+{
+}
+EXPORT_SYMBOL(set_debug_traps_in_rt_task);
+
+/*
+ * _nano2count_cpuid / rtai_cpu_lock - real RTAI's own per-CPU mode-switch
+ * bookkeeping (rtwrap.cpp's own rtwrap_global_save_flags_and_cli/
+ * _restore_flags reference these directly as data symbols, not through
+ * any function call - see that file's own detailed, still-partially-open
+ * comment on the exact real semantics). This substitute provides them as
+ * plain zero-initialized storage, sized generously (16 bytes each, enough
+ * for a real multi-CPU bitmask far beyond any VM CPU count this project
+ * boots with) - since rtwrap.cpp's own save/restore-flags functions are
+ * not on this module's own init/boot critical path (no confirmed real
+ * caller of them appears before COmapNKS4Driver_Configure, which is
+ * itself past the point this VM boot test is scoped to validate), exact
+ * fidelity here is not load-bearing for the "reasonably boot" goal -
+ * flagged honestly rather than silently assumed correct.
+ *
+ * per_cpu__cpu_number is deliberately NOT provided here: this project's
+ * own rtwrap.cpp comment already documents it as a real, standard Linux
+ * kernel per-CPU symbol (accessed via the same %fs:-relative pattern as
+ * stg_get_current_task_nks4()), expected to resolve against the real
+ * running kernel at insmod time, not something an RTAI substitute should
+ * provide.
+ */
+short _nano2count_cpuid[8];
+EXPORT_SYMBOL(_nano2count_cpuid);
+
+unsigned char rtai_cpu_lock[16];
+EXPORT_SYMBOL(rtai_cpu_lock);
+
+/* ========================================================================= *
  *  Module init / exit.
  * ========================================================================= */
 

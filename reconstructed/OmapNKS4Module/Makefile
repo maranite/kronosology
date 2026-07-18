@@ -26,11 +26,31 @@ obj-m := OmapNKS4Module.o
 # are compiled as C++ so the whole module links with one toolchain (the STG build does
 # the same; the .c-looking units use only C constructs).
 OmapNKS4Module-objs := realtime.o command.o driver.o video.o \
-		       usb.o procfs.o submit.o main.o softfloat.o
+		       usb.o procfs.o submit.o main.o softfloat.o rtwrap.o
 
 # C++-kernel build flags matching the original toolchain.
 ccflags-y := -mregparm=3 -fno-exceptions -fno-rtti -fno-threadsafe-statics \
              -fno-use-cxa-atexit -fpermissive -I$(src)
+
+# The kernel build's own inherited -msoft-float default makes GCC emit calls to
+# libgcc soft-float helpers (__mulsf3/__fixsfsi/__muldf3/etc, see softfloat.cpp)
+# for these three files' genuine float/double arithmetic (aftertouch calibration
+# curve, active-sense tick pacing, progress-bar pixel-fill percentage). Adversarial
+# re-verification (2026-07-18) disassembled all three real call sites in the
+# ground-truth binary (ApplyGenericCalibration.clone.0@0x17960, CActiveSenseThread
+# ctor@0x17b50 + its tick-wait helper@0x17be0, COmapNKS4Driver::SetProgressBarPercent
+# .clone.3@0x13060) and found zero CALL instructions to anything float-related in
+# any of them - all three do their arithmetic with real x87 instructions directly
+# (FILD/FMUL/FDIVR/FADD/FISTTP/FSTP). This is the same class of issue OA.ko's own
+# Makefile already documents and fixes (CFLAGS_engine_startup_bits.o and siblings) -
+# overriding just these files' flags to allow real hardware FP codegen is the
+# faithful fix, not a workaround. Using plain -mhard-float (not OA.ko's
+# -msse2 -mfpmath=sse) because ground truth here is confirmed x87, not SSE2 - this
+# keeps gcc's default -mfpmath=387 in effect, matching the FILD/FMUL/FISTTP shapes
+# above instruction-for-instruction rather than just functionally.
+CFLAGS_submit.o   := -mhard-float
+CFLAGS_realtime.o := -mhard-float
+CFLAGS_driver.o   := -mhard-float
 
 # Teach Kbuild to compile .cpp with g++ (STG modules ship a similar rule).
 $(obj)/%.o: $(src)/%.cpp
@@ -64,8 +84,8 @@ verify: $(TESTS)
 verify/test_command: verify/test_command.cpp verify/host_stubs.cpp command.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_command.cpp verify/host_stubs.cpp command.cpp -o $@
 
-verify/test_driver_receive_event_buffer: verify/test_driver_receive_event_buffer.cpp verify/host_stubs.cpp driver.cpp
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_driver_receive_event_buffer.cpp verify/host_stubs.cpp driver.cpp -o $@
+verify/test_driver_receive_event_buffer: verify/test_driver_receive_event_buffer.cpp verify/host_stubs.cpp driver.cpp command.cpp
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_driver_receive_event_buffer.cpp verify/host_stubs.cpp driver.cpp command.cpp -o $@
 
 clean:
 	rm -f $(TESTS)

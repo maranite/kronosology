@@ -4,13 +4,9 @@
  * that aren't in this host's libgcc.a.
  *
  * Why this file exists: the kernel build passes -msoft-float -mno-sse
- * -mno-mmx -mno-3dnow (kernel context can't safely touch FPU/SSE state
- * without an explicit save/restore, which this driver's code never does),
- * so GCC emits calls to libgcc-style helper routines for every float/double
- * operation instead of hardware instructions. The real, production
- * OmapNKS4Module.ko has none of these as unresolved imports (confirmed via
- * its own import list) - Korg's actual build toolchain links a genuine
- * soft-float-capable libgcc into the final .ko. This host's libgcc.a
+ * -mno-mmx -mno-3dnow, so GCC emits calls to libgcc-style helper routines for
+ * every float/double operation in this reconstruction's C++ source instead of
+ * hardware instructions. This host's libgcc.a
  * (/usr/lib/gcc/x86_64-linux-gnu/12/32/libgcc.a) was built for a normal
  * hardware-FP target and simply does not contain arithmetic soft-float
  * routines (__addsf3/__mulsf3/__divsf3/__muldf3/conversions) - confirmed via
@@ -34,12 +30,77 @@
  * inputs are always small positive finite values (CPU kHz in the low
  * thousands, calibration deltas in [0,1023], progress percentages in
  * [0,100]), so plain round-to-nearest via integer arithmetic on the
- * mantissa is enough to match real driver behavior for every value this
- * code will ever actually see. Using real hardware FPU/SSE instructions
- * instead (trivial to implement, but WRONG) was deliberately rejected: doing
- * so from raw kernel context without save/restore risks corrupting another
- * process's floating-point state - not an acceptable shortcut for code that
- * runs on real, in-use hardware.
+ * mantissa was thought to be enough to match real driver behavior for every
+ * value this code will ever actually see.
+ *
+ * CORRECTED, adversarial re-verification pass, 2026-07-18 (see README.md's
+ * matching dated entry for the full writeup): the premise above - that "the
+ * real, production OmapNKS4Module.ko has none of these as unresolved imports
+ * because Korg's actual build toolchain links a genuine soft-float-capable
+ * libgcc into the final .ko" - is WRONG, and using real hardware FPU/SSE
+ * instructions here was NOT actually rejected in ground truth. The earlier
+ * "trivial to implement, but WRONG... risks corrupting another process's
+ * floating-point state" reasoning above was this reconstruction's own safety
+ * judgment call, not something ground truth agrees with.
+ *
+ * Ground truth (disassembly, OmapNKS4Module.ko firmware 3.2.2, 89849 bytes,
+ * /home/share/3.2.2 update contents/mnt/sbin/OmapNKS4Module.ko): every one of
+ * this module's three real float/double call sites uses genuine x87 hardware
+ * FPU instructions DIRECTLY, with zero CALL instructions to anything
+ * float-related:
+ *   - ApplyGenericCalibration.clone.0 @0x17960 (aftertouch calibration curve,
+ *     driver.cpp/submit.cpp's ApplyGenericCalibration) - FILD/FMUL/FADD/
+ *     FISTTP, confirmed zero callees via get_function_info.
+ *   - CActiveSenseThread::CActiveSenseThread @0x17b50 (500ms tick constant,
+ *     realtime.cpp) - FILD/FDIVR/FSTP computing flNanosPerCycle; only callee
+ *     is stg_get_cpu_khz, confirmed via get_function_info.
+ *   - the active-sense tick-wait helper @0x17be0 (realtime.cpp's
+ *     wait_until_deadline) - FILD/FMUL/FISTTP computing the sleep duration.
+ *   - COmapNKS4Driver::SetProgressBarPercent.clone.3 @0x13060 (driver.cpp) -
+ *     FILD/FMUL(qword @0x1af38, the real .rodata.cst8 double constant
+ *     1.0/100.0)/FISTTP.
+ * This is exhaustive, not just "not found so far": every one of this
+ * binary's 85 real EXTERNAL-segment thunks was enumerated by name (list_functions
+ * + the segment map) and none is __addsf3/__mulsf3/__divsf3/__muldf3/
+ * __floatsisf/__fixsfsi/__fixdfsi or any other libgcc soft-float symbol; all
+ * 255 real functions inside .text/.init.text/.exit.text are named (zero
+ * anonymous FUN_ entries anywhere), so there is no function in this binary,
+ * named or anonymous, that any of these helpers could even resolve to. The
+ * real OmapNKS4Module.ko was evidently built WITHOUT -msoft-float (or with it
+ * overridden for these translation units) - it relies on the same lazy
+ * FPU-context-switch (#NM/TS-flag) mechanism the x86 kernel already uses for
+ * ordinary userspace FPU state, not on an explicit save/restore this
+ * reconstruction's code never had either.
+ *
+ * This exact phenomenon - the KERNEL BUILD's own inherited -msoft-float
+ * default forcing GCC to emit unresolvable soft-float calls for a
+ * reconstruction's C/C++ source, even though ground truth genuinely uses
+ * hardware FPU instructions - independently recurred in this project's OA.ko
+ * reconstruction (reconstructed/OA/src/engine/audio_input_mixer.cpp's
+ * FMul()/FAdd()/FLess()/FLessEq() comment, and reconstructed/OA/Makefile's
+ * CFLAGS_engine_startup_bits.o and ~9 sibling overrides) - a second,
+ * independent data point that predates this pass and used the identical
+ * fix: override the affected translation units' CFLAGS to allow real
+ * hardware FP codegen instead of hand-implementing soft-float helpers.
+ * OmapNKS4Module's own Makefile now does the same for submit.o/realtime.o/
+ * driver.o (see its comment there) using plain -mhard-float rather than
+ * OA.ko's -msse2 -mfpmath=sse, because ground truth here is confirmed x87
+ * (FILD/FMUL/FISTTP), not SSE2 - matching gcc's i386 default -mfpmath=387.
+ *
+ * NET RESULT: the functions below are no longer referenced by any translation
+ * unit in this module (confirmed: submit.cpp/realtime.cpp/driver.cpp compiled
+ * under -mhard-float emit real FPU instructions instead of calls to them) and
+ * were never referenced by anything in the real binary either. They are kept
+ * here, unused, purely as a defensive fallback in case some future
+ * translation unit does genuine float/double arithmetic without a matching
+ * CFLAGS_*.o override (in which case the build would need them to link at
+ * all, even though ground truth would still be using hardware FPU at the
+ * real call site) - not because any currently-known call site needs them.
+ * Their own arithmetic was never verified against ground truth by any means
+ * tried (there is no real callee of this shape anywhere in the target binary
+ * to diff against), and per the above, none now exists to verify against -
+ * this isn't a gap that further RE effort on this binary can close, since
+ * the real driver simply never calls anything like these.
  */
 
 typedef unsigned int u32;
