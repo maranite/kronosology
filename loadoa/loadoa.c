@@ -413,7 +413,7 @@ static void LoadAll(void)
             FILE *af = fopen(irq_path, "w");
             if (af) {
                 fputc('8', af);  /* bitmask '8' = 0x8 = CPU3 */
-                fclose(af);Please keep going
+                fclose(af);
             }
         }
 
