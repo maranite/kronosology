@@ -77,7 +77,11 @@ the Ghidra MCP bridge; the ELF-wrapper trick sidesteps that.)
 ```
 ../McAspHandler.cpp          - audio serial port (McASP) driver
 ../CryptoAt88.cpp            - talks to the AT88 crypto chip directly (see note below)
-../I2cByGpio.cpp             - bit-banged I2C over GPIO
+../I2cByGpio.cpp             - bit-banged I2C over GPIO (reconstructed 2026-07-18 as
+                                NKS4PanelFirmware/i2c_by_gpio.c - the genuinely shared
+                                driver underneath both CryptoAt88.cpp and CDix4192.cpp;
+                                previously only framing-traced/cross-referenced, not
+                                itself a real file in this repo)
 ../MCU/OmapL108.cpp          - SoC bring-up
 ../MCU/Component/OmapL137Mcasp.cpp
 ../MCU/Component/OmapL108Spi.cpp
@@ -277,13 +281,44 @@ on/off LED, confirmed structurally rather than guessed.
 
 A raw, uncompressed, 8bpp palette-indexed 800×600 framebuffer image (no container/
 header — literally row-major pixel bytes) is embedded starting at payload offset
-`0x32800` (VSB file offset `0x32900`). Content: the "KORG" wordmark top-left, a row
-of Kronos EXi-engine badge icons (MS-20ex, Polysix ex, MOD-7, STR-1, HD-1, SGX-1,
-EP-1, CX-3, AL-1), the "KRONOS / MUSIC WORKSTATION" title lockup, and a solid green
-footer band starting around row 527-540 (palette index `0xFF`). This is almost
-certainly the boot/startup splash rendered directly by `clcdc.cpp` while the rest of
-the system comes up — **not reproduced in this repo** (it's Korg's copyrighted
-artwork, not a protocol fact), but useful to know it's there and exactly where.
+`0x25235` (VSB file offset `0x25335`; runtime VA `0xC0025235`, since the firmware
+links flat at `0xC0000000` — see "Target hardware" above). Content: 68px of black margin, then the
+"KORG" wordmark centered, a centered row of 9 Kronos EXi-engine badge icons (left
+to right: SGX-1, EP-1, CX-3, AL-1, MS-20ex, Polysix ex, MOD-7, STR-1, HD-1), the
+centered "KRONOS / MUSIC WORKSTATION" title lockup, and a solid green footer band
+starting around row 527-540 (palette index `0xFF`). This is almost certainly the
+boot/startup splash rendered directly by `clcdc.cpp` while the rest of the system
+comes up — **not reproduced in this repo** (it's Korg's copyrighted artwork, not a
+protocol fact), but useful to know it's there and exactly where.
+
+**Offset correction (2026-07-19, two passes):** earlier revisions of this doc gave
+`0x32800` (VSB file offset `0x32900`; runtime VA `0xC0032800`). That offset decodes to a real image, but a
+horizontally-*rolled* one — every row starts 331 bytes into its true content and
+wraps, so the badge row and title lockup each appear as two swapped half-width
+copies side by side (e.g. `AL-1` wrapping around to sit next to `MS-20ex` instead
+of ending against a black margin) and the whole splash reads as off-center to the
+right. Caught by cross-referencing `KronosScreenRemoteDaemon`'s own boot-splash
+compositing work against a real device photo
+(`KronosScreenRemoteDaemon/../BootScreen/Main.png`): `0x32800 - 331 = 0x326b5`
+renders as a single clean copy with the KORG wordmark, badge row, and title lockup
+all landing within a pixel of dead-center — matching the photo's horizontal
+centering. (An intermediate guess of `0x32800 - 420 = 0x3265c` fixed the
+wraparound but was still ~89px off-center; the wraparound-free byte range is much
+wider than the range that's actually centered, so "doesn't wrap" alone isn't
+sufficient to confirm the true offset — check centering against a real reference
+image too.)
+
+That first pass fixed column alignment but not row alignment: `0x326b5` places the
+top of the KORG lettering flush against row 0, but on the real screen it sits 68px
+down. Column and row alignment are independent for a flat row-major image (a shift
+of a whole number of rows, i.e. a multiple of 800 bytes, changes only which row
+content lands in, not where within the row) - shifting 68 rows (`68*800` bytes)
+earlier moves the whole image down by exactly 68px on output without disturbing
+the already-confirmed horizontal centering: `0x326b5 - 68*800 = 0x25235`, and the
+KORG glyph's first non-black row does land at exactly row 68 of the result. The
+palette offset (`0x1ef80` payload / `0x1f080` file) is unaffected by either
+correction — cross-checked independently below and not sensitive to the same
+row-roll failure mode.
 
 ### Palette cross-check against KronosScreenRemoteDaemon
 
@@ -318,7 +353,14 @@ and the firmware's static table has placeholder black. Read together, this confi
 **Found 2026-07-17** while chasing `cpsoc.cpp`'s callers: `FUN_c0007d1c` is the
 firmware's single entry point for every incoming 32-bit command word from the host -
 the direct counterpart to the host-side `COmapNKS4Command` wire protocol
-(`kronosology/reconstructed/OmapNKS4Module/command.cpp`). One function, dispatching
+(`kronosology/reconstructed/OmapNKS4Module/command.cpp`). **Fully reconstructed
+2026-07-18** as `wire_dispatch_command` in
+[`NKS4PanelFirmware/wire_dispatch.c`](../../reconstructed/NKS4PanelFirmware/wire_dispatch.c)
+— that file also reconstructs its sibling, the master per-tick status-bit dispatcher
+`FUN_c0008b64` (`master_dispatch_tick`), and resolves this dispatcher's own real
+callers (the USB receive path in `omap_l137_usbdc.c`'s own address neighborhood, not
+`eva_board_main.c`'s main loop directly, as this doc previously left open — see
+`wire_dispatch.c`'s own header for the full trace). One function, dispatching
 on the opcode byte, routes to essentially every subsystem reconstructed so far:
 
 | Opcode | Routes to | Matches |
@@ -352,9 +394,9 @@ itself hasn't been traced yet (see `EvaBoardMain.cpp`'s own "not started" status
 |---|---|
 | Container header | Parsed, mostly understood (2 fields unidentified — `0x2c` and `0x40`) |
 | Load address / architecture | Confirmed: ARM, `0xC0000000`, TI OMAP-L1x |
-| Ghidra project | Not versioned yet — analyzed via a throwaway ELF-wrapped import; redo via `workflow/ghidra_setup.md` conventions before deep work |
+| Ghidra project | Still not versioned on the shared Ghidra Server — still a throwaway local import; redo via `workflow/ghidra_setup.md` conventions before deep work. As of the 2026-07-18 systematic pass, this throwaway import is now used heavily via a bulk pre-fetched static dump (`all_decompiled.json`/`all_data.json`) rather than live per-call MCP queries, specifically to work around a real concurrency bug in the live Ghidra MCP bridge under multiple simultaneous agent sessions — see `NKS4PanelFirmware/README.md`'s own 2026-07-18 pass section for the full methodology note |
 | Switch/LED name table | Fully extracted (73 entries) |
 | Boot splash + palette | Located, dimensions/offsets documented; image itself not extracted into the repo |
-| `CryptoAt88.cpp` | Self-test routine fully traced (opcodes, framing, halt behavior); zone-0-without-visible-`$B8` question and the broader queued-command relay left open |
-| PSoC protocol details | Not investigated beyond string evidence |
-| Deep RE (full function coverage) | Not pursued — this pass was scoped to "what's useful for KronosScreenRemoteDaemon" |
+| `CryptoAt88.cpp` | Fully reconstructed as `NKS4PanelFirmware/crypto_at88.c` (self-test opcodes/framing/halt behavior, the full I2C bit-bang layer, the queued-command relay and its host-side producer/consumer, byte-order-corrected wire events) — see that file's own status section. The self-test's zone-0-without-visible-`$B8` question is now moot: `crypto_at88_self_test` is confirmed to have zero static callers anywhere in the full 691-function xref data, i.e. it does not run in this build's normal boot path |
+| PSoC protocol details | Substantially investigated beyond string evidence — see `NKS4PanelFirmware/cpsoc.c` (register-bank dispatch, event queues, LED-bargraph handlers) and `NKS4PanelFirmware/panelbus_dispatch.c` (the second, genuine hardware I2C0/I2C1 command channel feeding it) |
+| Deep RE (full function coverage) | **COMPLETE as of 2026-07-19**: all 691 real functions in the image now have a genuine, compilable C definition, verified by direct address-by-address grep against the real file contents (not just the project's own coverage-tracking script, which needed its own bug fixes along the way). 53 `K1_V06R06/*.c` files (renamed from `NKS4PanelFirmware/` when the sibling Kronos 2 port project, `K2_V01R10/`, was started). Coverage-complete does not mean behaviorally proven — individual files still carry their own honest "STILL OPEN" notes for unconfirmed register semantics, unresolved constant identities, and a couple of cases the decompiler itself couldn't fully disambiguate; see `K1_V06R06/README.md`'s own 2026-07-19 section and each file's own header |
