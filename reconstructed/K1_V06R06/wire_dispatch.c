@@ -47,19 +47,28 @@
  *  Two real callers (both confirmed via xrefs_to, not guessed):
  *   - FUN_c0003e24, call site 0xc0004360 - a large (1812-byte) USB
  *     status-register-driven state machine in the same low address range as
- *     omap_l137_usbdc.c's own confirmed functions; plausibly that file's own
- *     USB interrupt/poll handler, not independently traced this pass (out
- *     of this file's scope - omap_l137_usbdc.c is owned by other work).
+ *     omap_l137_usbdc.c's own confirmed functions; that file's own USB
+ *     interrupt/poll handler.
  *   - FUN_c000a918, call site 0xc000a96c - a thin shim: reads a length via
  *     FUN_c0004b5c, copies the payload via FUN_c0004858, then calls
  *     straight into wire_dispatch_command. FUN_c000a918 itself is one
  *     `case` (value 5) of a larger switch in FUN_c000aae0 (cases 0/1/2/3/
  *     5/7/9 - case 0 also calls FUN_c0004b5c/FUN_c0004858 directly, cases
  *     1/2 call other FUN_c0009xxx-range functions), all clearly USB
- *     receive-path plumbing. Neither FUN_c000a918 nor FUN_c000aae0 nor
- *     FUN_c0003e24 are reconstructed here - they sit in omap_l137_usbdc.c's
- *     own address neighborhood and are that file's own scope, not this
- *     one's; cited only to complete the trace this pass was asked for.
+ *     receive-path plumbing.
+ *
+ *   RESOLVED 2026-07-19: all three (FUN_c0003e24 = usbdc_core_isr,
+ *   FUN_c000a918 = usbdc_ep_recv_bulk, FUN_c000aae0 =
+ *   usbdc_endpoint_event_dispatch) are now fully reconstructed - in
+ *   omap_l137_usbdc_ext.c, NOT this file (they sit in omap_l137_usbdc.c's
+ *   own address neighborhood/scope, out of this file's own scope). A
+ *   SECOND, previously-undocumented wire_dispatch_command call site was
+ *   found in the process, inside usbdc_core_isr's own EP0 SETUP-packet
+ *   handling path (distinct from usbdc_ep_recv_bulk's bulk-OUT call site
+ *   above) - see omap_l137_usbdc_ext.c's own header and per-function
+ *   comments for the full trace, live-Ghidra-verified DAT_ constant values,
+ *   and two real bugs the earlier static-dump-only draft of that file had
+ *   (fixed there, not here).
  *
  *  This confirms the wiring this project's own KRONOS_V06R06.VSB.md doc
  *  left as "not yet traced": eva_board_main's main loop does NOT call this
@@ -589,10 +598,13 @@ void master_dispatch_tick(void *handle)	/* FUN_c0008b64 */
  *    own endpoint configure/halt bookkeeping, not attributed or
  *    transcribed - that file's own address range and scope, out of this
  *    file's own scope this pass.
- *  - FUN_c0003e24 and FUN_c000a918/FUN_c000aae0 (wire_dispatch_command's
- *    two real callers) - confirmed as the USB receive path via xrefs_to,
- *    but not reconstructed here; they belong to omap_l137_usbdc.c's own
- *    address neighborhood and scope.
+ *  - RESOLVED 2026-07-19: FUN_c0003e24 and FUN_c000a918/FUN_c000aae0
+ *    (wire_dispatch_command's two real USB-receive-path callers) are now
+ *    fully reconstructed in omap_l137_usbdc_ext.c (they still belong to
+ *    omap_l137_usbdc.c's own address neighborhood/scope, not this file's -
+ *    that's why the reconstruction lives there, not here). See that file's
+ *    own header for the live-Ghidra verification pass and two corrected
+ *    bugs.
  *  - The exact meaning of DAT_c00084b4 vs DAT_c00084b8 (op-byte-9's two
  *    text buffers) - which is source and which is destination for
  *    eva_wire_diag_fill is inferred from argument position, not confirmed.

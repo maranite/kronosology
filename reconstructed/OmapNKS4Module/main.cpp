@@ -655,9 +655,33 @@ static int __init OmapNKS4Init(void)
 		goto cleanup;
 	}
 
+	/* TEMPORARY DIAGNOSTIC (2026-07-19 rate-study continuation session) - not
+	 * ground-truthed, remove once the hang below is root-caused. Ungated
+	 * (matches this file's existing PMR#/SSD# diagnostic convention) since
+	 * these three calls always run, VM or real hardware, and this is exactly
+	 * the gap a 20-run hang-rate study (README.md "Hang-rate study") plus a
+	 * live QEMU-monitor capture of a real hang (run_20260719_150641) narrowed
+	 * the recurring 45%-of-runs stall down to: that capture showed both
+	 * worker threads already alive and ticking normally (proving
+	 * create_thread() x2 below had already succeeded and returned), yet
+	 * "vm_virtual_probe_inject_event"'s own first printk ("installer support
+	 * enabled", usb.cpp) - the very next tracked milestone - was never
+	 * reached in ANY of the 9 hung runs. The only code between "both worker
+	 * threads alive" and that printk is CActiveSenseThread_Setup() (a real
+	 * RTAI real-time task creation - a DIFFERENT earlier session refuted this
+	 * exact function as the cause, but against an older, simpler main.cpp
+	 * before the video-stress/event-injection additions changed what runs
+	 * concurrently with it) and the bare `if (sVmVirtualProbe)` guard/call
+	 * itself. These markers will show, on the next live hang, whether
+	 * execution ever gets past CActiveSenseThread_Setup() at all. */
+	printk("<6>OmapNKS4: DIAG about to create_thread(kOmapNKS4MsgRoutine)\n");
 	create_thread("kOmapNKS4MsgRoutine", ProcessMsgRoutine, &sProcessMsgThreadRunning);
+	printk("<6>OmapNKS4: DIAG kOmapNKS4MsgRoutine create_thread() returned, running=%d\n", sProcessMsgThreadRunning);
 	create_thread("kShutdownSSDRoutine", ShutdownSSDRoutine, &sShutdownSSDThreadRunning);
+	printk("<6>OmapNKS4: DIAG kShutdownSSDRoutine create_thread() returned, running=%d\n", sShutdownSSDThreadRunning);
+	printk("<6>OmapNKS4: DIAG about to call CActiveSenseThread_Setup()\n");
 	CActiveSenseThread_Setup();
+	printk("<6>OmapNKS4: DIAG CActiveSenseThread_Setup() returned\n");
 
 	/* VM-only, 2026-07-17 continuation of the vm_virtual_probe work above: the
 	 * board is now fully probed/configured/running (COmapNKS4Driver_Configure()
@@ -686,6 +710,10 @@ static int __init OmapNKS4Init(void)
 		vm_virtual_probe_stress_test_video();
 	}
 
+	/* TEMPORARY DIAGNOSTIC (2026-07-19 continuation session) - not ground-truthed,
+	 * remove before final commit. Confirms whether OmapNKS4Init's own bare `return 0`
+	 * is actually reached and whether control genuinely leaves this function. */
+	printk("<6>OmapNKS4: DIAG OmapNKS4Init about to return 0\n");
 	return 0;
 
 cleanup:
@@ -750,6 +778,26 @@ int ProcessMsgRoutine(void *arg)
 	 * complete_and_exit, not this startup signal). */
 	complete(arg);
 
+	/* TEMPORARY DIAGNOSTIC (2026-07-19 continuation session) - not ground-truthed,
+	 * remove before final commit. Confirms whether this thread's schedule_timeout()
+	 * call ever genuinely blocks (large TSC delta between prints, consistent with a
+	 * real ~3-jiffy sleep) vs spins (schedule_timeout returns near-instantly, so the
+	 * outer while() re-enters this loop thousands of times/sec - tiny TSC deltas,
+	 * print counter racing to its cap almost immediately). Capped at 40 total prints
+	 * so a genuine spin can't flood/starve the console further. */
+	static int sDiagPmrPrints;
+	/* NOTE: deliberately unsigned int (32-bit), not unsigned long long - a 64-bit/
+	 * 64-bit or 64-bit/32-bit division here lowers to a libgcc __udivdi3 call, which
+	 * does NOT exist in-kernel (confirmed the hard way: an earlier version of this
+	 * diagnostic using `unsigned long long diag_khz` and `diag_delta / diag_khz`
+	 * produced a real "OmapNKS4Module: Unknown symbol __udivdi3" insmod failure -
+	 * the module never loaded at all, which would have been silently misread as
+	 * "the hang is fixed" by the test script's milestone matching. Printing the raw
+	 * cycle delta and khz separately and doing the ms math by hand avoids any
+	 * in-kernel 64-bit division entirely). */
+	unsigned int diag_khz = stg_get_cpu_khz();
+	printk("<6>OmapNKS4: DIAG ProcessMsgRoutine alive, cpu_khz=%u, entering main loop\n", diag_khz);
+
 	while (sProcessMsgThreadRunning) {
 		if (!sVideoMsgSignalled) {
 			unsigned char wait[20];
@@ -759,7 +807,18 @@ int ProcessMsgRoutine(void *arg)
 				prepare_to_wait(sVideoMsgWaitQueue, wait, 2 /* TASK_UNINTERRUPTIBLE */);
 				if (sVideoMsgSignalled)
 					break;
+				unsigned long long diag_before = omapnks4_rdtsc();
 				timeout = schedule_timeout(timeout);
+				if (sDiagPmrPrints < 40) {
+					unsigned long long diag_delta = omapnks4_rdtsc() - diag_before;
+					unsigned int diag_delta_hi = (unsigned int)(diag_delta >> 32);
+					unsigned int diag_delta_lo = (unsigned int)diag_delta;
+					sDiagPmrPrints++;
+					printk("<6>OmapNKS4: DIAG PMR#%d schedule_timeout returned %ld, delta_hi=%u delta_lo=%u cycles, khz=%u\n",
+					       sDiagPmrPrints, timeout, diag_delta_hi, diag_delta_lo, diag_khz);
+					if (sDiagPmrPrints == 40)
+						printk("<6>OmapNKS4: DIAG PMR suppressing further prints (cap reached)\n");
+				}
 				if (!timeout)
 					break;
 			}
@@ -790,6 +849,17 @@ int ShutdownSSDRoutine(void *arg)
 	/* see ProcessMsgRoutine's own comment above - same fix, same reasoning. */
 	complete(arg);
 
+	/* TEMPORARY DIAGNOSTIC (2026-07-19 continuation session) - not ground-truthed,
+	 * remove before final commit. See ProcessMsgRoutine's own identical diagnostic
+	 * above for the reasoning; same spin-vs-block check, this thread's 10000-jiffy
+	 * (~10s) timeout. */
+	static int sDiagSsdPrints;
+	/* unsigned int, not unsigned long long - see ProcessMsgRoutine's identical note
+	 * above (real __udivdi3 insmod failure hit once by dividing 64-bit values in our
+	 * own code; avoided here by never dividing, only printing raw values). */
+	unsigned int diag_ssd_khz = stg_get_cpu_khz();
+	printk("<6>OmapNKS4: DIAG ShutdownSSDRoutine alive, cpu_khz=%u, entering main loop\n", diag_ssd_khz);
+
 	for (;;) {
 		/* Real wait_event_timeout(sShutdownSSDWaitQueue, sShutdownSSDSignaled,
 		 * 10000) - ground truth (fresh disassembly, 2026-07-18,
@@ -804,7 +874,18 @@ int ShutdownSSDRoutine(void *arg)
 				prepare_to_wait(sShutdownSSDWaitQueue, wait, 2 /* TASK_UNINTERRUPTIBLE */);
 				if (sShutdownSSDSignaled)
 					break;
+				unsigned long long diag_ssd_before = omapnks4_rdtsc();
 				timeout = schedule_timeout(timeout);
+				if (sDiagSsdPrints < 20) {
+					unsigned long long diag_ssd_delta = omapnks4_rdtsc() - diag_ssd_before;
+					unsigned int diag_ssd_delta_hi = (unsigned int)(diag_ssd_delta >> 32);
+					unsigned int diag_ssd_delta_lo = (unsigned int)diag_ssd_delta;
+					sDiagSsdPrints++;
+					printk("<6>OmapNKS4: DIAG SSD#%d schedule_timeout returned %ld, delta_hi=%u delta_lo=%u cycles, khz=%u\n",
+					       sDiagSsdPrints, timeout, diag_ssd_delta_hi, diag_ssd_delta_lo, diag_ssd_khz);
+					if (sDiagSsdPrints == 20)
+						printk("<6>OmapNKS4: DIAG SSD suppressing further prints (cap reached)\n");
+				}
 				if (!timeout)
 					break;
 			}

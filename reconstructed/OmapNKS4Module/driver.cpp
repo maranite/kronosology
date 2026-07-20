@@ -820,32 +820,68 @@ extern "C" int COmapNKS4Driver_Configure(void)
 		bScanArgC = sInstance.bPsocRevision != 0;
 	}
 
+	/* TEMPORARY DIAGNOSTIC (2026-07-19 rate-study continuation session) - not
+	 * ground-truthed, remove once the hang below is root-caused. Deliberately
+	 * UNGATED (no sVmVirtualProbe check) - this file is also compiled
+	 * standalone into the host-side `make verify` suite (verify/host_stubs.cpp),
+	 * which does not link main.cpp/sVmVirtualProbe's own definition; gating on
+	 * it here broke that host build with an undefined-reference link error
+	 * (caught before this pass finished, not left broken). Matches this
+	 * codebase's existing convention for other TEMPORARY DIAGNOSTIC printks
+	 * (main.cpp's PMR#/SSD# lines) already being unconditional for the same
+	 * reason. Real-hardware impact is a handful of extra harmless printk lines
+	 * during Configure(), same as those.
+	 *
+	 * Rationale: a 20-run hang-rate study (tools/run_vm_virtual_probe_test.sh,
+	 * see README.md "Hang-rate study") found 9/20 (45%) of clean runs stall,
+	 * and EVERY stall's furthest TRACKED milestone is "Configure(): NKS4
+	 * versions reported" (the printk two lines above the first call below).
+	 * A live QEMU-monitor capture of one such hang (run_20260719_150641)
+	 * showed both kOmapNKS4MsgRoutine's AND kShutdownSSDRoutine's own wait
+	 * loops ticking normally on schedule throughout the ENTIRE stall -
+	 * meaning both worker threads were already alive, which (since
+	 * create_thread() for both is called from OmapNKS4Init only AFTER this
+	 * function returns) means Configure() itself had ALREADY returned
+	 * successfully in that specific hang - the real stuck point in that run
+	 * was later (see the main.cpp instrumentation added the same pass, right
+	 * after the create_thread()/CActiveSenseThread_Setup() calls). These
+	 * per-call markers are added here anyway as a secondary net, in case a
+	 * DIFFERENT run's hang (this bug's stall point has not been proven to be
+	 * single-cause) turns out to be inside this function's own tail instead. */
+	printk("<6>OmapNKS4: DIAG Configure tail: calling SetNumberOfAnalogInputs\n");
 	if (!SetNumberOfAnalogInputs(0x3f)) {
 		printk("<6>OmapNKS4:Configure: line 174: setting num of analog ports failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: calling SetAllAnalogInputFilter\n");
 	if (!SetAllAnalogInputFilter(2, 8)) {
 		printk("<6>OmapNKS4:Configure: line 182: setting all analog input filter failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: calling SetNumberOfLEDs\n");
 	if (!SetNumberOfLEDs(0x80)) {
 		printk("<6>OmapNKS4:Configure: line 189: setting num of LEDs failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: calling ConfigureRotaryEncoders\n");
 	if (!ConfigureRotaryEncoders(1, true, true)) {
 		printk("<6>OmapNKS4:Configure: line 196: setting num of LEDs failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: calling SetRotaryEncoderSampleSpeed\n");
 	if (!SetRotaryEncoderSampleSpeed(100)) {
 		printk("<6>OmapNKS4:Configure: line 203: setting rotary encoder's scan interval failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: calling ConfigureScanning\n");
 	if (!ConfigureScanning(true, true, true, false,
 			       sInstance.bOmapRevision != 0, bScanArgB, bScanArgC)) {
 		printk("<6>OmapNKS4:Configure: line 219: setting scanning failed!\n");
 		return -1;
 	}
+	printk("<6>OmapNKS4: DIAG Configure tail: ConfigureScanning done, calling SetProgressBarPercent\n");
 	COmapNKS4Driver_SetProgressBarPercent(0x0f);
+	printk("<6>OmapNKS4: DIAG Configure tail: SetProgressBarPercent done, Configure() returning 0\n");
 	return 0;
 }
 

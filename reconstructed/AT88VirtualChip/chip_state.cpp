@@ -283,6 +283,26 @@ int at88_chip_read_zone0(struct AT88ChipState *chip, struct DeaxState *d,
 	return 0;
 }
 
+int at88_chip_read_zone(struct AT88ChipState *chip, struct DeaxState *d,
+			 unsigned char zone, unsigned char addr,
+			 unsigned char len, unsigned char *out)
+{
+	/* Zone 0: the one real, ground-truthed, per-device secret -- unchanged
+	 * behavior, see at88_chip_read_zone0()'s own doc comment. */
+	if (zone == 0)
+		return at88_chip_read_zone0(chip, d, addr, len, out);
+
+	/* Any other zone: no captured ground truth exists (see this function's
+	 * at88_chip.h doc comment) -- synthetic all-zero placeholder, always a
+	 * raw passthrough. Bound check uses zone0[]'s own size purely for
+	 * consistency; not a claim about any real zone's actual size. */
+	if ((unsigned int)addr + (unsigned int)len > sizeof(chip->zone0))
+		return -1;
+	for (unsigned char i = 0; i < len; i++)
+		out[i] = 0;
+	return 0;
+}
+
 int at88_chip_write_zone0(struct AT88ChipState *chip, unsigned char addr,
 			   unsigned char len, const unsigned char *in)
 {

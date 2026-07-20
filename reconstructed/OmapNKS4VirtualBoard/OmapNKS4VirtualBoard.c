@@ -69,6 +69,23 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 
+/* BUG FIX (2026-07-19, dummy_hcd full-chain boot test): usb_ep_autoconfig() is not an
+ * exported kernel symbol on this kernel version - it lives in epautoconf.c, which every
+ * real Linux gadget driver of this vintage (confirmed against this exact kernel tree's
+ * own drivers/usb/gadget/zero.c: `#include "usbstring.c"`/`"epautoconf.c"`) compiles
+ * directly into its own module via a source-level #include, not a shared/linked symbol -
+ * this project's own reconstruction was missing that and failed insmod with "Unknown
+ * symbol usb_ep_autoconfig" the first time it was actually boot-tested against real
+ * usb_gadget/dummy_hcd core (previous testing only exercised the vm_virtual_probe
+ * in-process shortcut, which never needed this). epautoconf.c and its own
+ * "gadget_chips.h" dependency are copied verbatim (GPL, unmodified) from
+ * /home/build/linux-kronos/drivers/usb/gadget/ into this directory rather than included
+ * via a kernel-tree-relative path, so this module keeps building standalone against
+ * KDIR without depending on exact kernel-source-tree layout at include time. Only
+ * usb_ep_autoconfig() itself is used below (no usb_string()/config-buf helpers), so
+ * usbstring.c/config.c were not needed. */
+#include "epautoconf.c"
+
 #define NKS4_VENDOR_ID   0x0944	/* confirmed real value, usb.cpp OmapNKS4Probe */
 #define NKS4_PRODUCT_ID  0x1005	/* confirmed real value, usb.cpp OmapNKS4Probe */
 
@@ -219,6 +236,18 @@ static int nks4_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c
 	u8 *buf;
 	int len = -EOPNOTSUPP;
 
+	/* DIAGNOSTIC (2026-07-19, dummy_timer NULL-deref investigation): temporary,
+	 * see README.md's dated section - logs every control request this gadget
+	 * sees, to find out whether OUR setup() ever stalls/mishandles a request
+	 * during the "device number 2/3/4" re-enumeration churn seen just before
+	 * dummy_timer's own crash. Cheap (one printk per control transfer, which
+	 * is at most a few dozen per boot), left in rather than ripped out since
+	 * it's genuinely useful for any future gadget-side enumeration debugging. */
+	printk(KERN_INFO "OmapNKS4VirtualBoard: setup bRequestType=0x%02x bRequest=0x%02x "
+	       "wValue=0x%04x wIndex=0x%04x wLength=%u\n",
+	       ctrl->bRequestType, ctrl->bRequest, wValue,
+	       le16_to_cpu(ctrl->wIndex), wLength);
+
 	if (!dev || !dev->req_ep0)
 		return -ENODEV;
 
@@ -236,21 +265,41 @@ static int nks4_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c
 		case USB_DT_CONFIG: {
 			/* config + interface + 2 endpoint descriptors, back to back -
 			 * the real wTotalLength every USB host parses to walk the
-			 * whole descriptor set in one control transfer. */
+			 * whole descriptor set in one control transfer.
+			 *
+			 * BUG FIX (2026-07-20, struct-urb-fix boot test follow-up):
+			 * struct usb_endpoint_descriptor (ch9.h) is __attribute__((packed))
+			 * but carries 2 trailing audio-only fields (bRefresh,
+			 * bSynchAddress) beyond the real 7-byte wire format - the header's
+			 * own comment says so explicitly ("use USB_DT_ENDPOINT*_SIZE in
+			 * bLength, not sizeof"). Each descriptor's own bLength was already
+			 * correctly USB_DT_ENDPOINT_SIZE (7), but this code was using
+			 * sizeof(nks4_int_ep_desc)/sizeof(nks4_bulk_ep_desc) (9) to lay out
+			 * the buffer and compute wTotalLength - a 2-byte-per-endpoint gap
+			 * between what bLength claims and where the next descriptor
+			 * actually starts. The real host's config parser walks the buffer
+			 * by bLength (7), landing on the 2 leftover zero bytes mid-gap and
+			 * reading them as a bogus zero-length descriptor - exactly the
+			 * "invalid descriptor of length 0, skipping remainder of the
+			 * config" seen live, which also explains why only 1 of the 2
+			 * endpoint descriptors was ever found (parsing aborted right there,
+			 * before reaching the real second one). Confirmed by boot-testing
+			 * this exact fix - see OmapNKS4DummyHCDFix/README.md's "Eleventh
+			 * pass" section. */
 			int off = 0;
 
 			nks4_config_desc.wTotalLength = cpu_to_le16(
 				sizeof(nks4_config_desc) + sizeof(nks4_intf_desc) +
-				sizeof(nks4_int_ep_desc) + sizeof(nks4_bulk_ep_desc));
+				USB_DT_ENDPOINT_SIZE + USB_DT_ENDPOINT_SIZE);
 
 			memcpy(buf + off, &nks4_config_desc, sizeof(nks4_config_desc));
 			off += sizeof(nks4_config_desc);
 			memcpy(buf + off, &nks4_intf_desc, sizeof(nks4_intf_desc));
 			off += sizeof(nks4_intf_desc);
-			memcpy(buf + off, &nks4_int_ep_desc, sizeof(nks4_int_ep_desc));
-			off += sizeof(nks4_int_ep_desc);
-			memcpy(buf + off, &nks4_bulk_ep_desc, sizeof(nks4_bulk_ep_desc));
-			off += sizeof(nks4_bulk_ep_desc);
+			memcpy(buf + off, &nks4_int_ep_desc, USB_DT_ENDPOINT_SIZE);
+			off += USB_DT_ENDPOINT_SIZE;
+			memcpy(buf + off, &nks4_bulk_ep_desc, USB_DT_ENDPOINT_SIZE);
+			off += USB_DT_ENDPOINT_SIZE;
 			len = off;
 			break;
 		}
@@ -288,11 +337,16 @@ static int nks4_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c
 	}
 
 	if (len >= 0) {
+		int qret;
+
 		dev->req_ep0->length = min_t(int, len, wLength);
 		dev->req_ep0->zero = (len < wLength);
 		dev->req_ep0->complete = nks4_ep0_complete;
-		return usb_ep_queue(gadget->ep0, dev->req_ep0, GFP_ATOMIC);
+		qret = usb_ep_queue(gadget->ep0, dev->req_ep0, GFP_ATOMIC);
+		printk(KERN_INFO "OmapNKS4VirtualBoard: setup -> len=%d qret=%d\n", len, qret);
+		return qret;
 	}
+	printk(KERN_INFO "OmapNKS4VirtualBoard: setup -> STALL (len=%d)\n", len);
 	return len;
 }
 

@@ -1010,6 +1010,54 @@ int vm_usb_submit_urb(struct urb *urb, unsigned int mem_flags)
 				haveReply = 0;
 				break;
 			}
+			/* TEMPORARY DIAGNOSTIC / VM-ONLY TEST SCAFFOLDING, added 2026-07-19
+			 * while confirming a REAL (non-vm_video_stress) caller's video-bulk
+			 * traffic decodes correctly on this synthetic board - see README's
+			 * "Confirming a real caller (progress bar)" section for context.
+			 * NOT ground truth (this whole function only exists under
+			 * sVmVirtualProbe, already checked above), not a fidelity claim
+			 * about anything - just decodes ProcessEvents' (video.cpp) own
+			 * documented wire formats for the 5 video-bulk opcodes
+			 * (0x81/0xc0/0xc2/0xc4/0xc5, matched by opcode byte alone, same
+			 * style as the SetLCDBrightness/ResetModule checks just above) so
+			 * any caller's actual on-the-wire fields are visible in dmesg
+			 * without needing the vm_video_stress capture-ring machinery to be
+			 * active. pack_field19 decode (video.cpp): 3-byte field b0..b2 ->
+			 * (b0&7)<<16 | b1<<8 | b2. Left in place as reusable VM
+			 * infrastructure rather than reverted - safe on real hardware
+			 * (this whole function is never reached there). */
+			if (len >= 8 && (((cmd >> 24) & 0xff) == 0xc4)) {	/* SendFillData */
+				unsigned int width  = ((buf[0] & 7) << 16) | (buf[1] << 8) | buf[2];
+				unsigned int base   = (len >= 12) ?
+					(((buf[4] & 7) << 16) | (buf[5] << 8) | buf[6]) : 0;
+				unsigned int color  = (len >= 8) ? buf[7] : 0;
+				unsigned int height = (len >= 12) ?
+					(((buf[8] & 7) << 16) | (buf[9] << 8) | buf[10]) : 0;
+				printk("<6>OmapNKS4: vm_virtual_probe: DIAG SendFillData wire "
+				       "decode: width=%u base=%u color=%u height=%u "
+				       "(raw cmd=0x%08x len=%u)\n",
+				       width, base, color, height, cmd, len);
+			} else if (len >= 4 && (((cmd >> 24) & 0xff) == 0x81)) { /* XAxisByteSize */
+				unsigned int bytes = ((buf[0] & 7) << 16) | (buf[1] << 8) | buf[2];
+				printk("<6>OmapNKS4: vm_virtual_probe: DIAG XAxisByteSize wire "
+				       "decode: bytes=%u (raw cmd=0x%08x len=%u)\n",
+				       bytes, cmd, len);
+			} else if (len >= 4 && (((cmd >> 24) & 0xff) == 0xc0)) { /* InitLCDRegs */
+				printk("<6>OmapNKS4: vm_virtual_probe: DIAG InitLCDRegs wire "
+				       "decode: reg=%u val=%u data_lo=%u (raw cmd=0x%08x len=%u)\n",
+				       buf[2], buf[1], buf[0], cmd, len);
+			} else if (len >= 12 && (((cmd >> 24) & 0xff) == 0xc2)) { /* SendPixelDataRegion */
+				unsigned int width    = ((buf[0] & 7) << 16) | (buf[1] << 8) | buf[2];
+				unsigned int offset   = ((buf[4] & 7) << 16) | (buf[5] << 8) | buf[6];
+				unsigned int rowBytes = ((buf[8] & 7) << 16) | (buf[9] << 8) | buf[10];
+				printk("<6>OmapNKS4: vm_virtual_probe: DIAG SendPixelDataRegion wire "
+				       "decode: width=%u offset=%u rowBytes=%u (raw cmd=0x%08x len=%u)\n",
+				       width, offset, rowBytes, cmd, len);
+			} else if (len >= 8 && (((cmd >> 24) & 0xff) == 0xc5)) { /* UpdateColorPal */
+				printk("<6>OmapNKS4: vm_virtual_probe: DIAG UpdateColorPal wire "
+				       "decode: a=%u b=%u c=%u d=%u (raw cmd=0x%08x len=%u)\n",
+				       buf[2], buf[1], buf[0], buf[7], cmd, len);
+			}
 			/* every other setter (SetNumberOfAnalogInputs,
 					 * SetAllAnalogInputFilter, SetNumberOfLEDs,
 					 * ConfigureRotaryEncoders, SetRotaryEncoderSample-
@@ -1188,6 +1236,92 @@ void vm_virtual_probe_inject_event(void)
 	 * other interrupt-IN completion: vm_usb_submit_urb's own `urb ==
 	 * sInterruptURB` case (above) just accepts without completing again, so
 	 * this does not recurse. */
+	InterruptCallback((struct urb *)sInterruptURB);
+}
+
+/* ---- VM-only, 2026-07-19: general host-driven event injection --------------
+ *
+ * TEST SCAFFOLDING, NOT GROUND TRUTH: everything else in this file is a
+ * reconstruction of real disassembled behavior; this function is not - there is
+ * no real-hardware counterpart, no disassembly citation, and none is possible
+ * (it does not correspond to anything the shipping module does). It exists
+ * purely to close a real coverage gap: vm_virtual_probe_inject_event() (above)
+ * proved the InterruptCallback()/COmapNKS4Driver_ReceiveEventBuffer() decode
+ * path works for exactly ONE hardcoded packet, baked in at compile time -
+ * nothing let external test tooling drive arbitrary key/knob/analog-input/AT88-
+ * read traffic through it. This function is that general mechanism: given an
+ * arbitrary caller-supplied byte buffer in the SAME wire format
+ * vm_virtual_probe_inject_event()'s own header comment documents ([dLo][dHi]
+ * [idx][op] 4-byte records, terminated by a Sync record), it stages those
+ * bytes into sInterruptURB's real transfer buffer and invokes the real,
+ * unmodified InterruptCallback() on it - exactly the same two steps
+ * vm_virtual_probe_inject_event() already does for its one fixed packet, just
+ * parameterized. Intentionally does NOT introduce any second/parallel decode
+ * logic of its own - all actual interpretation of the bytes still happens
+ * inside the real ReceiveEventBuffer(), so a test driven through this function
+ * exercises exactly the same production code a genuine interrupt completion
+ * would.
+ *
+ * Caller (currently: procfs.cpp's OmapNKS4ProcWriteInjectEvent(), the write
+ * handler for the new VM-only /proc/OmapNKS4InjectEvent entry) is expected to
+ * hand this raw bytes copied straight from a userspace write() - no parsing or
+ * validation beyond the length clamp below happens here or there.
+ *
+ * Bounds: `len` is silently clamped to sInterruptURB's own negotiated buffer
+ * size (urb+0x50 - the same wMaxPacketSize configure_interrupt_urb() stored
+ * there at probe time, see this file's own top-of-file offset table) so an
+ * oversized write can never overrun the real transfer buffer, then rounded
+ * down to a whole number of 4-byte records - InterruptCallback() computes
+ * `numInts = actual_length / 4` for its ReceiveEventBuffer() call (same as
+ * vm_virtual_probe_inject_event() above), so a trailing partial record would
+ * just be silently dropped by that real division anyway; clamping here instead
+ * keeps the actual_length this writes consistent with what the real decode
+ * path will actually consume.
+ */
+void vm_inject_event_buffer(const unsigned char *data, unsigned int len)
+{
+	unsigned char *buf;
+	unsigned int cap;
+	unsigned int i;
+
+	if (!sVmVirtualProbe || !sInterruptURB || !data)
+		return;
+
+	buf = *(unsigned char **)((char *)sInterruptURB + 0x40);
+	if (!buf) {
+		printk("<6>OmapNKS4: vm_inject_event_buffer: interrupt URB has no buffer, "
+		       "cannot inject event\n");
+		return;
+	}
+
+	cap = *(unsigned int *)((char *)sInterruptURB + 0x50);	/* negotiated wMaxPacketSize */
+	if (len > cap)
+		len = cap;
+	len &= ~3u;		/* whole 4-byte records only - see this function's own comment above */
+	if (len == 0) {
+		printk("<6>OmapNKS4: vm_inject_event_buffer: nothing to inject after "
+		       "clamping to the %u-byte interrupt buffer (dword-aligned)\n", cap);
+		return;
+	}
+
+	for (i = 0; i < len; i++)
+		buf[i] = data[i];
+	/* actual_length (+0x54) / status (+0x38) - same two fields
+	 * vm_virtual_probe_inject_event() sets above, and for the same reason: this
+	 * is what a real HCD would have written on a genuine interrupt-IN
+	 * completion, and it's exactly what InterruptCallback() reads back out. */
+	*(unsigned int *)((char *)sInterruptURB + 0x54) = len;
+	*(int *)((char *)sInterruptURB + 0x38) = 0;	/* status = 0 (OK) */
+
+	printk("<6>OmapNKS4: vm_inject_event_buffer: injecting %u host-supplied bytes "
+	       "via the real InterruptCallback()/ReceiveEventBuffer() decode path\n", len);
+
+	/* Same real, unmodified completion handler as vm_virtual_probe_inject_event()
+	 * calls above - see that call's own comment for why the unconditional
+	 * resubmit InterruptCallback() performs at its end is safe to call
+	 * repeatedly from here (this function may be invoked many times over a
+	 * module's VM lifetime, driven by however many /proc writes test tooling
+	 * makes, unlike vm_virtual_probe_inject_event()'s single boot-time call). */
 	InterruptCallback((struct urb *)sInterruptURB);
 }
 

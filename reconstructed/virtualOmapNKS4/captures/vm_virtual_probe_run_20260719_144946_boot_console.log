@@ -1,0 +1,412 @@
+[H[J[H[J
+    GNU GRUB  version 0.97  (639K lower / 3144576K upper memory)
+
+[m[4;2H+-------------------------------------------------------------------------+[5;2H|[5;76H|[6;2H|[6;76H|[7;2H|[7;76H|[8;2H|[8;76H|[9;2H|[9;76H|[10;2H|[10;76H|[11;2H|[11;76H|[12;2H|[12;76H|[13;2H|[13;76H|[14;2H|[14;76H|[15;2H|[15;76H|[16;2H|[16;76H|[17;2H+-------------------------------------------------------------------------+[m
+      Use the ^ and v keys to select which entry is highlighted.
+      Press enter to boot the selected OS, 'e' to edit the
+      commands before booting, 'a' to modify the kernel arguments
+      before booting, or 'c' for a command-line.[5;78H [m[7m[5;3H Kronos 2.6.32.11-korg (VM, legacy GRUB, loglevel=8)                     [5;75H[m[m[6;3H                                                                         [6;75H[m[m[7;3H                                                                         [7;75H[m[m[8;3H                                                                         [8;75H[m[m[9;3H                                                                         [9;75H[m[m[10;3H                                                                         [10;75H[m[m[11;3H                                                                         [11;75H[m[m[12;3H                                                                         [12;75H[m[m[13;3H                                                                         [13;75H[m[m[14;3H                                                                         [14;75H[m[m[15;3H                                                                         [15;75H[m[m[16;3H                                                                         [16;75H[m[16;78H [5;75H[23;4HThe highlighted entry will be booted automatically in 3 seconds.    [5;75H[23;4HThe highlighted entry will be booted automatically in 2 seconds.    [5;75H[23;4HThe highlighted entry will be booted automatically in 1 seconds.    [5;75H[H[J  Booting 'Kronos 2.6.32.11-korg (VM, legacy GRUB, loglevel=8)'
+
+root (hd0,0)
+ Filesystem type is ext2fs, partition type 0x83
+kernel /bzImage root=/dev/hda2 max_loop=16 fbcon=map:0 vga=0x0303 elevator=noop
+ loglevel=8 printk.devkmsg=on console=ttyS0,115200 console=tty0 init=/korg/kron
+os_init
+   [Linux-bzImage, setup=0x2c00, size=0x25d910]
+
+Linux version 2.6.32.11-korg (root@kronos) (gcc version 4.5.0 (GCC) ) #31 SMP PREEMPT Thu Oct 10 08:41:36 JST 2024
+KERNEL supported cpus:
+  Intel GenuineIntel
+  AMD AuthenticAMD
+  NSC Geode by NSC
+  Cyrix CyrixInstead
+  Centaur CentaurHauls
+  Transmeta GenuineTMx86
+  Transmeta TransmetaCPU
+  UMC UMC UMC UMC
+BIOS-provided physical RAM map:
+ BIOS-e820: 0000000000000000 - 000000000009fc00 (usable)
+ BIOS-e820: 000000000009fc00 - 00000000000a0000 (reserved)
+ BIOS-e820: 00000000000f0000 - 0000000000100000 (reserved)
+ BIOS-e820: 0000000000100000 - 00000000bffe0000 (usable)
+ BIOS-e820: 00000000bffe0000 - 00000000c0000000 (reserved)
+ BIOS-e820: 00000000fffc0000 - 0000000100000000 (reserved)
+ BIOS-e820: 0000000100000000 - 0000000140000000 (usable)
+DMI 2.8 present.
+last_pfn = 0xbffe0 max_arch_pfn = 0x100000
+MTRR default type: write-back
+MTRR fixed ranges enabled:
+  00000-9FFFF write-back
+  A0000-BFFFF uncachable
+  C0000-FFFFF write-protect
+MTRR variable ranges enabled:
+  0 base 0C0000000 mask 0C0000000 uncachable
+  1 disabled
+  2 disabled
+  3 disabled
+  4 disabled
+  5 disabled
+  6 disabled
+  7 disabled
+initial memory mapped : 0 - 00c00000
+init_memory_mapping: 0000000000000000-00000000b77fe000
+ 0000000000 - 0000400000 page 4k
+ 0000400000 - 00b7400000 page 2M
+ 00b7400000 - 00b77fe000 page 4k
+kernel direct mapping tables up to b77fe000 @ 7000-c000
+ACPI: RSDP 000f59b0 00014 (v00 BOCHS )
+ACPI: RSDT bffe1c30 00034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: FACP bffe1acc 00074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: DSDT bffe0040 01A8C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: FACS bffe0000 00040
+ACPI: APIC bffe1b40 00090 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: HPET bffe1bd0 00038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: WAET bffe1c08 00028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+ACPI: Local APIC address 0xfee00000
+135MB HIGHMEM available.
+2935MB LOWMEM available.
+  mapped low ram: 0 - b77fe000
+  low ram: 0 - b77fe000
+  node 0 low ram: 00000000 - b77fe000
+  node 0 bootmap 00008000 - 0001ef00
+(8 early reservations) ==> bootmem [0000000000 - 00b77fe000]
+  #0 [0000000000 - 0000001000]   BIOS data page ==> [0000000000 - 0000001000]
+  #1 [0000001000 - 0000002000]    EX TRAMPOLINE ==> [0000001000 - 0000002000]
+  #2 [0000006000 - 0000007000]       TRAMPOLINE ==> [0000006000 - 0000007000]
+  #3 [0000100000 - 00005f86dc]    TEXT DATA BSS ==> [0000100000 - 00005f86dc]
+  #4 [000009fc00 - 0000100000]    BIOS reserved ==> [000009fc00 - 0000100000]
+  #5 [00005f9000 - 00005fc08d]              BRK ==> [00005f9000 - 00005fc08d]
+  #6 [0000007000 - 0000008000]          PGTABLE ==> [0000007000 - 0000008000]
+  #7 [0000008000 - 000001f000]          BOOTMAP ==> [0000008000 - 000001f000]
+found SMP MP-table at [400f5ba0] f5ba0
+Zone PFN ranges:
+  DMA      0x00000000 -> 0x00001000
+  Normal   0x00001000 -> 0x000b77fe
+  HighMem  0x000b77fe -> 0x000bffe0
+Movable zone start PFN for each node
+early_node_map[2] active PFN ranges
+    0: 0x00000000 -> 0x0000009f
+    0: 0x00000100 -> 0x000bffe0
+On node 0 totalpages: 786303
+free_area_init_node: node 0, pgdat 40564740, node_mem_map 41001000
+  DMA zone: 32 pages used for memmap
+  DMA zone: 0 pages reserved
+  DMA zone: 3967 pages, LIFO batch:0
+  Normal zone: 5840 pages used for memmap
+  Normal zone: 741678 pages, LIFO batch:31
+  HighMem zone: 272 pages used for memmap
+  HighMem zone: 34514 pages, LIFO batch:7
+Using APIC driver default
+ACPI: PM-Timer IO Port: 0x608
+ACPI: Local APIC address 0xfee00000
+ACPI: LAPIC (acpi_id[0x00] lapic_id[0x00] enabled)
+ACPI: LAPIC (acpi_id[0x01] lapic_id[0x01] enabled)
+ACPI: LAPIC (acpi_id[0x02] lapic_id[0x02] enabled)
+ACPI: LAPIC (acpi_id[0x03] lapic_id[0x03] enabled)
+ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+ACPI: IOAPIC (id[0x00] address[0xfec00000] gsi_base[0])
+IOAPIC[0]: apic_id 0, version 32, address 0xfec00000, GSI 0-23
+ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+ACPI: IRQ0 used by override.
+ACPI: IRQ2 used by override.
+ACPI: IRQ5 used by override.
+ACPI: IRQ9 used by override.
+ACPI: IRQ10 used by override.
+ACPI: IRQ11 used by override.
+Using ACPI (MADT) for SMP configuration information
+SMP: Allowing 4 CPUs, 0 hotplug CPUs
+nr_irqs_gsi: 24
+Allocating PCI resources starting at c0000000 (gap: c0000000:3ffc0000)
+NR_CPUS:4 nr_cpumask_bits:4 nr_cpu_ids:4 nr_node_ids:1
+PERCPU: Embedded 13 pages/cpu @42c00000 s30936 r0 d22312 u1048576
+pcpu-alloc: s30936 r0 d22312 u1048576 alloc=1*4194304
+pcpu-alloc: [0] 0 1 2 3 
+Built 1 zonelists in Zone order, mobility grouping on.  Total pages: 780159
+Kernel command line: root=/dev/hda2 max_loop=16 fbcon=map:0 vga=0x0303 elevator=noop loglevel=8 printk.devkmsg=on console=ttyS0,115200 console=tty0 init=/korg/kronos_init
+PID hash table entries: 4096 (order: 2, 16384 bytes)
+Dentry cache hash table entries: 524288 (order: 9, 2097152 bytes)
+Inode-cache hash table entries: 262144 (order: 8, 1048576 bytes)
+Enabling fast FPU save and restore... done.
+Enabling unmasked SIMD FPU exception support... done.
+Initializing CPU#0
+Initializing HighMem for node 0 (000b77fe:000bffe0)
+Memory: 3111512k/3145600k available (3293k kernel code, 33080k reserved, 1227k data, 324k init, 139144k highmem)
+virtual kernel memory layout:
+    fixmap  : 0xfff6b000 - 0xfffff000   ( 592 kB)
+    pkmap   : 0xff800000 - 0xffc00000   (4096 kB)
+    vmalloc : 0xf7ffe000 - 0xff7fe000   ( 120 MB)
+    lowmem  : 0x40000000 - 0xf77fe000   (2935 MB)
+      .init : 0x4056b000 - 0x405bc000   ( 324 kB)
+      .data : 0x40437460 - 0x4056a098   (1227 kB)
+      .text : 0x40100000 - 0x40437460   (3293 kB)
+SLUB: Genslabs=13, HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+Hierarchical RCU implementation.
+NR_IRQS:384
+I-pipe 2.6-03: pipeline enabled.
+Console: colour *CGA 0x25
+console [tty0] enabled
+console [ttyS0] enabled
+Fast TSC calibration failed
+TSC: Unable to calibrate against PIT
+TSC: using PMTIMER reference calibration
+Detected 2294.538 MHz processor.
+Calibrating delay loop (skipped), value calculated using timer frequency.. 4589.07 BogoMIPS (lpj=2294538)
+Mount-cache hash table entries: 512
+CPU: L1 I cache: 32K, L1 D cache: 32K
+CPU: L2 cache: 4096K
+CPU: L3 cache: 16384K
+CPU: Physical Processor ID: 0
+CPU: Processor Core ID: 0
+mce: CPU supports 10 MCE banks
+Checking 'hlt' instruction... OK.
+ACPI: Core revision 20090903
+Enabling APIC mode:  Flat.  Using 1 I/O APICs
+..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+..MP-BIOS bug: 8254 timer not connected to IO-APIC
+...trying to set up timer (IRQ0) through the 8259A ...
+..... (found apic 0 pin 2) ...
+....... works.
+CPU0: Intel(R) Atom(TM) CPU N270   @ 1.60GHz stepping 02
+Booting processor 1 APIC 0x1 ip 0x6000
+Initializing CPU#1
+CPU: L1 I cache: 32K, L1 D cache: 32K
+CPU: L2 cache: 4096K
+CPU: L3 cache: 16384K
+CPU: Physical Processor ID: 0
+CPU: Processor Core ID: 0
+CPU1: Intel(R) Atom(TM) CPU N270   @ 1.60GHz stepping 02
+checking TSC synchronization [CPU#0 -> CPU#1]: passed.
+Booting processor 2 APIC 0x2 ip 0x6000
+Initializing CPU#2
+CPU: L1 I cache: 32K, L1 D cache: 32K
+CPU: L2 cache: 4096K
+CPU: L3 cache: 16384K
+CPU: Physical Processor ID: 0
+CPU: Processor Core ID: 1
+CPU2: Intel(R) Atom(TM) CPU N270   @ 1.60GHz stepping 02
+checking TSC synchronization [CPU#0 -> CPU#2]: passed.
+Booting processor 3 APIC 0x3 ip 0x6000
+Initializing CPU#3
+CPU: L1 I cache: 32K, L1 D cache: 32K
+CPU: L2 cache: 4096K
+CPU: L3 cache: 16384K
+CPU: Physical Processor ID: 0
+CPU: Processor Core ID: 1
+CPU3: Intel(R) Atom(TM) CPU N270   @ 1.60GHz stepping 02
+checking TSC synchronization [CPU#0 -> CPU#3]: passed.
+Brought up 4 CPUs
+Total of 4 processors activated (18405.04 BogoMIPS).
+NET: Registered protocol family 16
+ACPI: bus type pci registered
+PCI: PCI BIOS revision 2.10 entry at 0xfd1ca, last bus=0
+PCI: Using configuration type 1 for base access
+mtrr: your CPUs had inconsistent fixed MTRR settings
+mtrr: your CPUs had inconsistent variable MTRR settings
+mtrr: your CPUs had inconsistent MTRRdefType settings
+mtrr: probably your BIOS does not setup all CPUs.
+mtrr: corrected configuration.
+bio: create slab <bio-0> at 0
+ACPI: EC: Look up EC in DSDT
+ACPI: Interpreter enabled
+ACPI: (supports S0 S3 S5)
+ACPI: Using IOAPIC for interrupt routing
+ACPI: No dock devices found.
+ACPI: PCI Root Bridge [PCI0] (0000:00)
+pci 0000:00:01.1: reg 20 io port: [0xc000-0xc00f]
+pci 0000:00:01.3: quirk: region 0600-063f claimed by PIIX4 ACPI
+pci 0000:00:01.3: quirk: region 0700-070f claimed by PIIX4 SMB
+pci_bus 0000:00: on NUMA node 0
+ACPI: PCI Interrupt Routing Table [\_SB_.PCI0._PRT]
+ACPI: PCI Interrupt Link [LNKA] (IRQs 5 *10 11)
+ACPI: PCI Interrupt Link [LNKB] (IRQs 5 *10 11)
+ACPI: PCI Interrupt Link [LNKC] (IRQs 5 10 *11)
+ACPI: PCI Interrupt Link [LNKD] (IRQs 5 10 *11)
+ACPI: PCI Interrupt Link [LNKS] (IRQs *9)
+vgaarb: loaded
+SCSI subsystem initialized
+libata version 3.00 loaded.
+usbcore: registered new interface driver usbfs
+usbcore: registered new interface driver hub
+usbcore: registered new device driver usb
+PCI: Using ACPI for IRQ routing
+Switching to clocksource tsc
+pnp: PnP ACPI init
+ACPI: bus type pnp registered
+pnp: PnP ACPI: found 12 devices
+ACPI: ACPI bus type pnp unregistered
+pci_bus 0000:00: resource 0 io:  [0x00-0xffff]
+pci_bus 0000:00: resource 1 mem: [0x000000-0xffffffff]
+NET: Registered protocol family 2
+IP route cache hash table entries: 131072 (order: 7, 524288 bytes)
+TCP established hash table entries: 524288 (order: 10, 4194304 bytes)
+TCP bind hash table entries: 65536 (order: 7, 524288 bytes)
+TCP: Hash tables configured (established 524288 bind 65536)
+TCP reno registered
+NET: Registered protocol family 1
+pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+pci 0000:00:01.0: PIIX3: Enabling Passive Release
+pci 0000:00:01.0: Activating ISA DMA hang workarounds
+highmem bounce pool size: 64 pages
+NTFS driver 2.1.29 [Flags: R/W].
+msgmni has been set to 5806
+alg: No test for stdrng (krng)
+io scheduler noop registered (default)
+io scheduler anticipatory registered
+io scheduler deadline registered
+io scheduler cfq registered
+input: Power Button as /devices/LNXSYSTM:00/LNXPWRBN:00/input/input0
+ACPI: Power Button [PWRF]
+processor LNXCPU:00: registered as cooling_device0
+processor LNXCPU:01: registered as cooling_device1
+processor LNXCPU:02: registered as cooling_device2
+processor LNXCPU:03: registered as cooling_device3
+Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+serial8250: ttyS0 at I/O 0x3f8 (irq = 4) is a 16550A
+serial8250: ttyS1 at I/O 0x2f8 (irq = 3) is a 16550A
+00:08: ttyS1 at I/O 0x2f8 (irq = 3) is a 16550A
+00:09: ttyS0 at I/O 0x3f8 (irq = 4) is a 16550A
+brd: module loaded
+loop: module loaded
+Uniform Multi-Platform E-IDE driver
+piix 0000:00:01.1: IDE controller (0x8086:0x7010 rev 0x00)
+piix 0000:00:01.1: not 100% native mode: will probe irqs later
+pci 0000:00:01.1: setting latency timer to 64
+    ide0: BM-DMA at 0xc000-0xc007
+    ide1: BM-DMA at 0xc008-0xc00f
+Probing IDE interface ide0...
+hda: QEMU HARDDISK, ATA DISK drive
+hda: host max PIO4 wanted PIO255(auto-tune) selected PIO4
+hda: MWDMA2 mode selected
+Probing IDE interface ide1...
+hdc: QEMU DVD-ROM, ATAPI CD/DVD-ROM drive
+hdc: host max PIO4 wanted PIO255(auto-tune) selected PIO0
+hdc: MWDMA2 mode selected
+ide0 at 0x1f0-0x1f7,0x3f6 on irq 14
+ide1 at 0x170-0x177,0x376 on irq 15
+ide-gd driver 1.18
+hda: max request size: 512KiB
+hda: 4194304 sectors (2147 MB) w/256KiB Cache, CHS=4161/255/63
+hda: cache flushes supported
+ hda: hda1 hda2 hda3 hda4 < hda5 hda6 >
+ide-cd driver 5.00
+ide-cd: hdc: ATAPI 4X DVD-ROM drive, 512kB Cache
+Uniform CD-ROM driver Revision: 3.20
+ieee1394: raw1394: /dev/raw1394 device initialized
+ehci_hcd: USB 2.0 'Enhanced' Host Controller (EHCI) Driver
+ohci_hcd: USB 1.1 'Open' Host Controller (OHCI) Driver
+uhci_hcd: USB Universal Host Controller Interface driver
+Initializing USB Mass Storage driver...
+usbcore: registered new interface driver usb-storage
+USB Mass Storage support registered.
+usbcore: registered new interface driver ums-freecom
+PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+serio: i8042 KBD port at 0x60,0x64 irq 1
+serio: i8042 AUX port at 0x60,0x64 irq 12
+mice: PS/2 mouse device common for all mice
+i2c /dev entries driver
+input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+piix4_smbus 0000:00:01.3: SMBus Host Controller at 0x700, revision 0
+input: ImExPS/2 Generic Explorer Mouse as /devices/platform/i8042/serio1/input/input2
+device-mapper: ioctl: 4.15.0-ioctl (2009-04-01) initialised: dm-devel@redhat.com
+cpuidle: using governor ladder
+usbcore: registered new interface driver usbhid
+usbhid: v2.6:USB HID core driver
+nf_conntrack version 0.5.0 (16384 buckets, 65536 max)
+ip_tables: (C) 2000-2006 Netfilter Core Team
+TCP cubic registered
+NET: Registered protocol family 17
+Using IPI No-Shortcut mode
+VFS: Mounted root (ext2 filesystem) readonly on device 3:2.
+Freeing unused kernel memory: 324k freed
+Failed to execute /korg/kronos_init.  Attempting defaults...
+usbcore: registered new interface driver asix
+usbcore: registered new interface driver smsc7500
+hrtimer: interrupt took 8314141 ns
+EXT2-fs warning: mounting unchecked fs, running e2fsck is recommended
+kjournald starting.  Commit interval 1 seconds
+EXT3-fs warning: mounting fs with errors, running e2fsck is recommended
+EXT3 FS on hda6, internal journal
+EXT3-fs: mounted filesystem with writeback data mode.
+EXT2-fs error (device hda2): ext2_free_blocks: bit already cleared for block 238593
+[loadoa] OmapNKS4Module.ko self-contained virtual-board test (vm_virtual_probe=1)
+RTAIVirtualDriver: loading (software substitute for rtai_hal.ko/rtai_sched.ko/rtai_sem.ko/rtai_fifos.ko/rtai_ndbg.ko/rtai_debug.ko -- see README.md; NOT genuine hard-real-time, VM/QEMU-TCG boot-testing use only)
+[loadoa] RTAIVirtualDriver.ko: loaded OK
+[loadoa] STGEnabler.ko: loaded OK
+[loadoa] STGGmp.ko: loaded OK
+[loadoa] insmod OmapNKS4Module.ko vm_virtual_probe=1 ...
+OmapNKS4:OmapNKS4Init: line 1393: OmapNKS4Init: enter
+usbcore: registered new interface driver OmapNKS4
+OmapNKS4: vm_virtual_probe=1, synthesizing a virtual NKS4 board
+OmapNKS4: vm_virtual_probe: calling OmapNKS4Probe() with a synthetic vendor=0944 product=1005, 1 int-IN + 1 bulk-OUT ep
+OmapNKS4:OmapNKS4Probe: line 1165: Probe() found: vendor 0x00000944, product 0x00001005, version 0x00000000
+OmapNKS4:OmapNKS4Probe: line 1273: probe success
+OmapNKS4: vm_virtual_probe: OmapNKS4Probe() returned 0
+OmapNKS4:OmapNKS4Init: line 1418: Waited 126323 cycles for OmapNKS4Probe(). driver state is 1
+OmapNKS4:OmapNKS4Init: line 1419: current = 116295114284, before = 116294987961
+OmapNKS4: vm_virtual_probe: queuing reply 0x00660000 for cmd 0x00ee0000
+OmapNKS4: vm_virtual_probe: queuing reply 0x01710001 for cmd 0x01f10000
+OmapNKS4:ReadPortConfiguration: line 317: sw1 00, sw2 01
+OmapNKS4:Configure: line 109: is88Key: 0
+OmapNKS4:Configure: line 110: HardwareVersion: 1
+OmapNKS4: vm_virtual_probe: queuing reply 0x00701805 for cmd 0x00f00000
+OmapNKS4:Configure: line 168: OMAP NKS4 versions: OMAP V01 R08, PSoc V00 R05
+
+OmapNKS4: DIAG ProcessMsgRoutine alive, cpu_khz=2294538, entering main loop
+OmapNKS4: DIAG ShutdownSSDRoutine alive, cpu_khz=2294538, entering main loop
+OmapNKS4: vm_virtual_probe: enabling installer support and injecting one synthetic interrupt-IN event packet (button idx=0x50 + aftertouch idx=0x01)
+OmapNKS4: DIAG PMR#1 schedule_timeout returned 0, delta_hi=0 delta_lo=11470613 cycles, khz=2294538
+OmapNKS4: vm_virtual_probe: DIAG SendFillData wire decode: width=553 base=172 color=192 height=553 (raw cmd=0xc4290200 len=12)
+OmapNKS4: vm_virtual_probe: DIAG SendFillData wire decode: width=553 base=172 color=192 height=553 (raw cmd=0xc4290200 len=12)
+OmapNKS4: vm_virtual_probe: DIAG SendFillData wire decode: width=97 base=75 color=9 height=97 (raw cmd=0xc4610000 len=12)
+OmapNKS4: vm_virtual_probe: DIAG SendFillData wire decode: width=97 base=75 color=1 height=97 (raw cmd=0xc4610000 len=12)
+OmapNKS4: DIAG PMR#2 schedule_timeout returned 0, delta_hi=0 delta_lo=8290642 cycles, khz=2294538
+OmapNKS4: DIAG PMR#3 schedule_timeout returned 0, delta_hi=0 delta_lo=9000866 cycles, khz=2294538
+OmapNKS4: DIAG PMR#4 schedule_timeout returned 0, delta_hi=0 delta_lo=8876604 cycles, khz=2294538
+OmapNKS4: DIAG PMR#5 schedule_timeout returned 0, delta_hi=0 delta_lo=8755672 cycles, khz=2294538
+OmapNKS4: DIAG PMR#6 schedule_timeout returned 0, delta_hi=0 delta_lo=6242975 cycles, khz=2294538
+OmapNKS4: DIAG PMR#7 schedule_timeout returned 0, delta_hi=0 delta_lo=7793927 cycles, khz=2294538
+OmapNKS4: DIAG PMR#8 schedule_timeout returned 0, delta_hi=0 delta_lo=7838943 cycles, khz=2294538
+OmapNKS4: DIAG PMR#9 schedule_timeout returned 0, delta_hi=0 delta_lo=6890570 cycles, khz=2294538
+OmapNKS4: DIAG PMR#10 schedule_timeout returned 0, delta_hi=0 delta_lo=7950341 cycles, khz=2294538
+OmapNKS4: DIAG PMR#11 schedule_timeout returned 0, delta_hi=0 delta_lo=8918563 cycles, khz=2294538
+OmapNKS4: DIAG PMR#12 schedule_timeout returned 0, delta_hi=0 delta_lo=5524163 cycles, khz=2294538
+OmapNKS4: DIAG PMR#13 schedule_timeout returned 0, delta_hi=0 delta_lo=6603484 cycles, khz=2294538
+OmapNKS4: DIAG PMR#14 schedule_timeout returned 0, delta_hi=0 delta_lo=10912810 cycles, khz=2294538
+OmapNKS4: DIAG PMR#15 schedule_timeout returned 0, delta_hi=0 delta_lo=4384849 cycles, khz=2294538
+OmapNKS4: DIAG PMR#16 schedule_timeout returned 0, delta_hi=0 delta_lo=8524145 cycles, khz=2294538
+OmapNKS4: DIAG PMR#17 schedule_timeout returned 0, delta_hi=0 delta_lo=8405679 cycles, khz=2294538
+OmapNKS4: DIAG PMR#18 schedule_timeout returned 0, delta_hi=0 delta_lo=7366840 cycles, khz=2294538
+OmapNKS4: DIAG PMR#19 schedule_timeout returned 0, delta_hi=0 delta_lo=6945770 cycles, khz=2294538
+OmapNKS4: DIAG PMR#20 schedule_timeout returned 0, delta_hi=0 delta_lo=6366607 cycles, khz=2294538
+OmapNKS4: DIAG PMR#21 schedule_timeout returned 0, delta_hi=0 delta_lo=10725452 cycles, khz=2294538
+OmapNKS4: DIAG PMR#22 schedule_timeout returned 0, delta_hi=0 delta_lo=11976507 cycles, khz=2294538
+OmapNKS4: DIAG PMR#23 schedule_timeout returned 0, delta_hi=0 delta_lo=7344123 cycles, khz=2294538
+OmapNKS4: DIAG PMR#24 schedule_timeout returned 0, delta_hi=0 delta_lo=6886177 cycles, khz=2294538
+OmapNKS4: DIAG PMR#25 schedule_timeout returned 0, delta_hi=0 delta_lo=6046217 cycles, khz=2294538
+OmapNKS4: DIAG PMR#26 schedule_timeout returned 0, delta_hi=0 delta_lo=10228123 cycles, khz=2294538
+OmapNKS4: DIAG PMR#27 schedule_timeout returned 0, delta_hi=0 delta_lo=6013764 cycles, khz=2294538
+OmapNKS4: DIAG PMR#28 schedule_timeout returned 0, delta_hi=0 delta_lo=8856849 cycles, khz=2294538
+OmapNKS4: DIAG PMR#29 schedule_timeout returned 0, delta_hi=0 delta_lo=6999475 cycles, khz=2294538
+OmapNKS4: DIAG PMR#30 schedule_timeout returned 0, delta_hi=0 delta_lo=7256691 cycles, khz=2294538
+OmapNKS4: DIAG PMR#31 schedule_timeout returned 0, delta_hi=0 delta_lo=6843137 cycles, khz=2294538
+OmapNKS4: DIAG PMR#32 schedule_timeout returned 0, delta_hi=0 delta_lo=5414552 cycles, khz=2294538
+OmapNKS4: DIAG PMR#33 schedule_timeout returned 0, delta_hi=0 delta_lo=16685019 cycles, khz=2294538
+OmapNKS4: DIAG PMR#34 schedule_timeout returned 0, delta_hi=0 delta_lo=8677012 cycles, khz=2294538
+OmapNKS4: DIAG PMR#35 schedule_timeout returned 0, delta_hi=0 delta_lo=7421371 cycles, khz=2294538
+OmapNKS4: DIAG PMR#36 schedule_timeout returned 0, delta_hi=0 delta_lo=6246922 cycles, khz=2294538
+OmapNKS4: DIAG PMR#37 schedule_timeout returned 0, delta_hi=0 delta_lo=13198012 cycles, khz=2294538
+OmapNKS4: DIAG PMR#38 schedule_timeout returned 0, delta_hi=0 delta_lo=7965190 cycles, khz=2294538
+OmapNKS4: DIAG PMR#39 schedule_timeout returned 0, delta_hi=0 delta_lo=5202301 cycles, khz=2294538
+OmapNKS4: DIAG PMR#40 schedule_timeout returned 0, delta_hi=0 delta_lo=7290089 cycles, khz=2294538
+OmapNKS4: DIAG PMR suppressing further prints (cap reached)
+OmapNKS4: vm_virtual_probe: calling SetLCDBrightness(0x80)/ResetModule(0x00) directly to exercise their new vm_usb_submit_urb dispatch coverage
+OmapNKS4: vm_virtual_probe: SetLCDBrightness accepted, level=128 (cmd=0xc7800000)
+OmapNKS4: vm_virtual_probe: ResetModule accepted, mode=0 (cmd=0x06000000)
+OmapNKS4: vm_virtual_probe: SetLCDBrightness(0x80) -> ok, ResetModule(0x00) -> ok
+OmapNKS4: DIAG OmapNKS4Init about to return 0
+[loadoa] OmapNKS4Module.ko: LOADED OK
+[loadoa] done

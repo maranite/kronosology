@@ -193,6 +193,54 @@ not needed by `OA.ko` itself, but needed by `STGEnabler.ko`'s own
 - **Live VM boot test**: see `MASTER_REFERENCE.md`'s own dated section for
   this batch's actual boot-test transcript and result.
 
+## BUG FIX, 2026-07-19: `set_debug_traps_in_rt_task()` was `void` with an empty body — a real ABI mismatch that caused an intermittent (~40-45%) `OmapNKS4Module.ko` `vm_virtual_probe` boot hang
+
+Root-caused and fixed from the `OmapNKS4Module.ko` side (see that module's own
+README.md, "Hang ROOT-CAUSED AND FIXED, 2026-07-19" section, for the full
+live-evidence trail — this note is the short version, from this module's own
+perspective).
+
+`set_debug_traps_in_rt_task()` was declared `void` with a completely empty
+body — a function that never writes `EAX` at all. `OmapNKS4Module.ko`'s own
+`rtwrap.cpp`, however, declares this exact exported symbol as `int
+set_debug_traps_in_rt_task(void)` and genuinely branches on the returned
+value (`CSTGThread::CreateRealTimeWithCPUAffinity`, confirmed load-bearing
+against real ground-truth disassembly) — a real, silent signature mismatch
+across this module's own symbol-export boundary, not merely a documentation
+gap. Every call returned whatever stale value happened to be in `EAX` at the
+call site (a deterministic-but-meaningless **71** on every observed boot,
+confirmed live), which meant the caller's "debug-trap setup failed, roll the
+task back" branch fired on **100% of calls**, not just the fraction that
+went on to actually hang. The rollback path (`rtwrap_pthread_cancel()` ->
+`rt_task_delete()` -> this module's own `kthread_stop()`) is not safe to
+take unconditionally on a task whose entry point is an intentional infinite
+RTAI-style service loop with no `kthread_should_stop()` check (real RTAI
+tasks are torn down by forcible deletion, not cooperative return) — whether
+`kthread_stop()` then blocks forever depends entirely on a scheduling race
+against the kthread having already reached its `entry()` call, which is
+exactly the ~40-45% intermittency that was observed.
+
+**Fix**: `set_debug_traps_in_rt_task()` is now `int`, explicitly `return 0;`
+(success) — this module never installed any hardware debug trap in the
+first place, so "success" is the only meaningful answer, and it matches
+what the real ground-truth caller-side disassembly already established this
+return value means. Confirmed via 19 consecutive clean `vm_virtual_probe`
+boot passes on `kronosvm` post-fix (0 hangs), against a measured ~48%
+combined pre-fix hang rate across 23 runs spanning two sessions — see
+`OmapNKS4Module/README.md` for the full run-by-run numbers.
+
+**What this does NOT fix**: `rt_task_delete()`'s reliance on `kthread_stop()`
+genuinely cannot forcibly cancel a kthread already executing an entry
+function with no stop-check, unlike real RTAI's own forcible task deletion —
+this remains a real, structural gap in this substitute (already partially
+documented by `rt_task_suspend()`'s own "best-effort only" comment above) for
+any future caller that legitimately needs to cancel an already-running RT
+task. No confirmed caller in this project currently does (the one call site
+that reached it was this exact bug, now unreachable since the spurious
+rollback trigger is gone) — flagged here rather than spending this pass's
+scope on a speculative rewrite of `rt_task_delete()`'s own cancellation
+semantics.
+
 ## Module load order (VM boot test only — do NOT use this order on real hardware)
 
 This module is a **substitute for the entire RTAI load-order step**, not an

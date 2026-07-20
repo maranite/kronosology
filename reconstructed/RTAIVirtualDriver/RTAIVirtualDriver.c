@@ -1188,9 +1188,59 @@ EXPORT_SYMBOL(rt_sleep);
  * clear_debug_traps_in_rt_task above (section 1). Same reasoning: this
  * substitute never installs any hardware debug trap in the first place,
  * so "setting" one is always a safe no-op.
+ *
+ * BUG FIX (2026-07-19, vm_virtual_probe hang root-cause pass - see
+ * OmapNKS4Module/README.md's "Hang-rate study, 2026-07-19" and its
+ * dated follow-up section for the full live-evidence trail): this was
+ * declared `void`, with an empty body - GCC never writes EAX for a `void`
+ * return, so the caller sees whatever stale value happened to already be in
+ * EAX at the call site (confirmed live: a consistent-but-meaningless 71 on
+ * every single boot, not a rare fluke). OmapNKS4Module.ko's own
+ * reconstructed rtwrap.cpp, however, declares this exact external as
+ * `int set_debug_traps_in_rt_task(void)` and its only caller
+ * (CSTGThread::CreateRealTimeWithCPUAffinity, realtime.cpp) treats the
+ * returned EAX as a real, load-bearing success/failure code - ground truth
+ * from the original OA.ko-family disassembly (realtime.cpp's own comment,
+ * `omapnks4_internal.h`'s `rtwrap_set_debug_traps_in_rt_task` comment) shows
+ * this really is a genuine return value on real hardware, not incidental
+ * register content. `int` vs `void` at the two ends of the same symbol name
+ * is a real, silent signature mismatch across this module boundary.
+ *
+ * Effect confirmed live, three independent kronosvm runs, identical
+ * `printk`-bracketed evidence each time (`OmapNKS4Module/realtime.cpp`'s
+ * `rtwrap_set_debug_traps_in_rt_task() returned 71` diagnostic,
+ * `run_20260719_161546`/`_161919`/`_162122`): every single call took the
+ * "failed" branch and rolled the just-created RT task back down again
+ * (`rtwrap_pthread_cancel` -> `rt_task_delete` -> this module's own
+ * `kthread_stop()`) - not just on the ~40-45% of runs that actually hung.
+ * That rollback is not safe to take unconditionally: it races the
+ * just-`rt_task_resume()`d kthread actually reaching its `entry()` call
+ * (`CActiveSenseThread::ThreadRoutine()`, an intentional infinite RTAI-style
+ * service loop with no `kthread_should_stop()` check by design - real RTAI
+ * tasks are torn down by forcible deletion, not a cooperative return). If
+ * the kthread wins that race (i.e. the scheduler already dispatched it
+ * before `rt_task_delete()` sets `t->stopping=1`), `kthread_stop()` blocks
+ * forever waiting for a thread function that will never return -
+ * `run_20260719_161546`/`_162122` both hung there indefinitely;
+ * `run_20260719_161919` lost the race the other way (`stopping` got set
+ * first) and `rt_task_delete()` returned promptly, letting that boot PASS
+ * with the same garbage-71 return.
+ *
+ * Explicitly returning 0 (success) removes the ONLY code path that reaches
+ * that unsafe rollback during OmapNKS4Module.ko's own vm_virtual_probe boot
+ * sequence: CreateRealTimeWithCPUAffinity now always takes its intended
+ * success path (rtwrap_set_runnable_on_cpuid + return 1), never calling
+ * rt_task_delete() on a task it just successfully created. This does NOT
+ * fix the deeper, structural limitation that a plain Linux kthread cannot be
+ * forcibly cancelled mid-infinite-loop the way a real RTAI hard-RT task can
+ * (see rt_task_delete()'s own comment above) - that remains a real gap for
+ * any caller that legitimately needs to cancel a running RT task (none do,
+ * on this module's own boot path) - but it eliminates the one call site that
+ * was spuriously triggering it on every single run.
  */
-void set_debug_traps_in_rt_task(void)
+int set_debug_traps_in_rt_task(void)
 {
+	return 0;
 }
 EXPORT_SYMBOL(set_debug_traps_in_rt_task);
 

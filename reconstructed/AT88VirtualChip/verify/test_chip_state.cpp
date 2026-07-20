@@ -207,6 +207,47 @@ int main(void)
 	rc = at88_chip_write_zone0(&freshChip, 35, 8, pattern16);	/* 35+8=43 > 40 */
 	check_eq("write_zone0 past the end returns nonzero", (unsigned int)(rc != 0), 1);
 
+	printf("[5e] at88_chip_read_zone() -- $B2 zone-dispatch plumbing, new 2026-07-19\n"
+	       "     (see at88_chip.h's doc comment). freshChip currently has\n"
+	       "     b8RoundsAccepted==2 (set in [5c] above) and zone0[0..15]==\n"
+	       "     pattern16 (written in [5b]) -- reused as-is.\n");
+	DeaxState zoneDispState, zone0DirectState;
+	deax_init(&zoneDispState);
+	deax_init(&zone0DirectState);
+	unsigned char viaDispatch[16], viaDirect[16];
+	rc = at88_chip_read_zone(&freshChip, &zoneDispState, 0, 0, 16, viaDispatch);
+	check_eq("read_zone(zone=0) rc==0", (unsigned int)(rc == 0), 1);
+	rc = at88_chip_read_zone0(&freshChip, &zone0DirectState, 0, 16, viaDirect);
+	check_eq("read_zone0() direct rc==0", (unsigned int)(rc == 0), 1);
+	check_eq("read_zone(zone=0) == read_zone0() direct (dispatch unchanged for zone 0)",
+		 (unsigned int)(memcmp(viaDispatch, viaDirect, 16) == 0), 1);
+
+	static const unsigned char allZero16[16] = {0};
+	DeaxState zone1State;
+	deax_init(&zone1State);	/* ignored by the zone!=0 branch -- passed only
+					 * because the function signature requires it */
+	unsigned char viaZone1[16];
+	rc = at88_chip_read_zone(&freshChip, &zone1State, 1, 0, 16, viaZone1);
+	check_eq("read_zone(zone=1) rc==0", (unsigned int)(rc == 0), 1);
+	check_eq("read_zone(zone=1) is the documented all-zero synthetic placeholder",
+		 (unsigned int)(memcmp(viaZone1, allZero16, 16) == 0), 1);
+	check_eq("read_zone(zone=1) != read_zone(zone=0) (dispatch actually routes differently)",
+		 (unsigned int)(memcmp(viaZone1, viaDispatch, 16) == 0), 0);
+
+	unsigned char viaZone7[4];
+	DeaxState zone7State;
+	deax_init(&zone7State);
+	rc = at88_chip_read_zone(&freshChip, &zone7State, 7, 0, 4, viaZone7);
+	check_eq("read_zone(zone=7) rc==0 (any non-zero zone works, not just 1)",
+		 (unsigned int)(rc == 0), 1);
+
+	printf("[5f] Out-of-range read_zone() rejected for both the zone-0 and\n"
+	       "     non-zone-0 branches\n");
+	rc = at88_chip_read_zone(&freshChip, &zone1State, 0, 35, 8, scratch);	/* 35+8=43 > 40 */
+	check_eq("read_zone(zone=0) past the end returns nonzero", (unsigned int)(rc != 0), 1);
+	rc = at88_chip_read_zone(&freshChip, &zone1State, 1, 35, 8, scratch);	/* 35+8=43 > 40 */
+	check_eq("read_zone(zone=1) past the end returns nonzero", (unsigned int)(rc != 0), 1);
+
 	printf("[6] deax_step vs. an independent from-scratch Python re-implementation\n"
 	       "    (gen_deax_vectors.py, written straight from kronos_extract.c, not\n"
 	       "    from this C++ port -- catches transcription bugs the port alone can't)\n");

@@ -18,10 +18,11 @@
  * Dispatch: which AT88 opcode (address[0] / ((u8*)cmd4)[0]) selects which
  * chip_state.cpp/b8_handshake.cpp entry point to call, confirmed against
  * every real command byte this project has ground-truthed:
- *   $B4 (zone select)      -- stored, not yet gated on (see at88_chip.h's
- *                             "Not yet implemented" note; only zone 0 is
- *                             ever emulated so there is nothing else to
- *                             select into).
+ *   $B4 (zone select)      -- stored in g_chip.selectedZone. As of
+ *                             2026-07-19, $B2's dispatch actually gates on
+ *                             it (at88_chip_read_zone(), at88_chip.h) --
+ *                             previously it was stored but never consulted,
+ *                             a real fidelity gap (README.md Open Item #5).
  *   $B0 (zone0 write)      -- at88_chip_write_zone0(). New 2026-07-16,
  *                             ground-truthed against KRONOS_V06R06.VSB (the
  *                             NKS4 panel board's own firmware, a second,
@@ -45,10 +46,17 @@
  *                             only reveals it via a SUBSEQUENT $B6 read of
  *                             the AAC byte increasing or decreasing.
  *   $B6 (config zone read) -- at88_chip_read_config().
- *   $B2 (zone0 read)       -- at88_chip_read_zone0(). Pre-$B8, a RAW
- *                             passthrough (see at88_chip.h); post-$B8,
- *                             DEAX-encrypted using the chip's persistent
- *                             session cipher state, exactly as before.
+ *   $B2 (zone0 read)       -- at88_chip_read_zone(), dispatching on
+ *                             g_chip.selectedZone (the most recent $B4).
+ *                             Zone 0 reaches at88_chip_read_zone0()
+ *                             unchanged: pre-$B8, a RAW passthrough (see
+ *                             at88_chip.h); post-$B8, DEAX-encrypted using
+ *                             the chip's persistent session cipher state,
+ *                             exactly as before. Any other selected zone
+ *                             gets a synthetic all-zero placeholder --
+ *                             see at88_chip_read_zone()'s doc comment for
+ *                             why (no captured ground truth for non-zero
+ *                             zones).
  *
  * REAL BUG FOUND AND FIXED HERE (sec 10.233): this function used to be
  * declared `void`, but OA.ko's own real ABI/declaration -- confirmed in
@@ -120,8 +128,11 @@ extern "C" int stgNV2AC_sync_cmd(unsigned char *address, unsigned int data)
 		return -1;
 
 	switch (address[0]) {
-	case 0xb4:	/* zone select -- stored for protocol fidelity, unused
-			 * (see file header: only zone 0 is ever emulated) */
+	case 0xb4:	/* zone select -- consulted by $B2's read dispatch below
+			 * (see file header and at88_chip_read_zone()'s doc
+			 * comment, at88_chip.h). Still NOT consulted by $B0
+			 * (zone0 write, immediately below) -- that write-side
+			 * gap remains open, see README.md Open Item #5. */
 		if (data < 3)
 			return -1;
 		g_chip.selectedZone = address[2];
@@ -171,8 +182,11 @@ int nv2ac_read_cmd_impl(const unsigned char *cmd, unsigned char *out)
 	switch (cmd[0]) {
 	case 0xb6:	/* config zone read: {0xb6, 0x00, addr, len} */
 		return at88_chip_read_config(&g_chip, cmd[2], cmd[3], out);
-	case 0xb2:	/* zone0 (authenticated) read: {0xb2, 0x00, addr, len} */
-		return at88_chip_read_zone0(&g_chip, &g_chip.session, cmd[2], cmd[3], out);
+	case 0xb2:	/* zone read: {0xb2, 0x00, addr, len} -- routed through
+			 * whatever zone the most recent $B4 selected (see
+			 * at88_chip_read_zone()'s doc comment, at88_chip.h) */
+		return at88_chip_read_zone(&g_chip, &g_chip.session,
+					    g_chip.selectedZone, cmd[2], cmd[3], out);
 	default:
 		return -1;	/* unrecognized opcode */
 	}

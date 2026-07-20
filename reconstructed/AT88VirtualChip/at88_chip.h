@@ -94,14 +94,21 @@ struct AT88ChipState {
 	unsigned char zone0[40];
 	int           dataLoaded;	/* 0 until at88_chip_load_from_extract() succeeds */
 
-	/* $B4 zone-select target -- stored for protocol fidelity only. Every
-	 * zone this project has ever needed to emulate is zone 0 (the only
-	 * zone SetupAtmelForAuthorizations/the EX auth chain touch, and the
-	 * only one this chip has real captured data for), so $B0/$B2 still
-	 * always operate on zone0[] regardless of this value -- gating on
-	 * *authentication state* (b8RoundsAccepted, see at88_chip_read_zone0())
-	 * was added 2026-07-16, gating on *which zone was selected* was not.
-	 * See nv2ac_exports.cpp's header comment and README.md Open Item #5. */
+	/* $B4 zone-select target. Every zone this project has ever needed to
+	 * emulate for real is zone 0 (the only zone SetupAtmelForAuthorizations/
+	 * the EX auth chain touch, and the only one this chip has real captured
+	 * data for), so zone0[] remains the sole GROUND-TRUTHED storage in this
+	 * struct. As of 2026-07-19, though, $B2's read dispatch (see
+	 * at88_chip_read_zone() below) DOES gate on this value: zone 0 routes to
+	 * the real data via at88_chip_read_zone0() unchanged; any other
+	 * selected zone routes to a synthetic all-zero placeholder instead of
+	 * silently aliasing zone 0's secret. $B0 (write) still always targets
+	 * zone0[] regardless of this value -- that half of the gap is
+	 * unresolved, see README.md Open Item #5. Gating on *authentication
+	 * state* (b8RoundsAccepted, see at88_chip_read_zone0()) was added
+	 * 2026-07-16; gating $B2 on *which zone was selected* was added
+	 * 2026-07-19. See nv2ac_exports.cpp's header comment and README.md
+	 * Open Item #5. */
 	unsigned char selectedZone;
 
 	/* ---- $B8 handshake / live session state -----------------------------
@@ -325,6 +332,43 @@ int at88_chip_read_config(const struct AT88ChipState *chip,
 int at88_chip_read_zone0(struct AT88ChipState *chip, struct DeaxState *d,
 			  unsigned char addr, unsigned char len,
 			  unsigned char *out);
+
+/*
+ * at88_chip_read_zone -- new 2026-07-19. The REAL $B2 dispatch entry point:
+ * routes to whichever zone `zone` names, matching the real chip's own
+ * behavior (zone selection via $B4, then $B2 reads whatever was last
+ * selected). Previously (before this function existed) `nv2ac_exports.cpp`
+ * called at88_chip_read_zone0() directly and unconditionally, ignoring
+ * chip->selectedZone entirely -- a real fidelity gap flagged in this
+ * project's own README.md (Open Item #5, "Deliberately still open") and in
+ * chip_state.cpp's own git history: the plumbing stored the $B4 argument
+ * but never consulted it.
+ *
+ *   zone == 0: delegates to at88_chip_read_zone0() UNCHANGED -- same
+ *     pre-/post-$B8 gating, same DEAX stepping, same real captured secret
+ *     data. This function does not alter zone 0's behavior in any way.
+ *
+ *   zone != 0: THIS PROJECT HAS NO CAPTURED GROUND TRUTH for any zone other
+ *     than zone 0 (OA.ko/loadmod.ko are confirmed to only ever select zone
+ *     0 -- see README.md's scope table). Modeled as a clearly-synthetic,
+ *     all-zero placeholder, always a raw passthrough (no DEAX stepping --
+ *     there's no evidence a non-zero zone is even auth-gated the same way
+ *     zone 0 is, so this deliberately does not invent that behavior). The
+ *     bound checked is the same 40 bytes as zone0[]'s own size, an
+ *     arbitrary-but-consistent choice; no real zone-size ground truth
+ *     exists for any zone but 0 either. The entire point of this branch is
+ *     correct DISPATCH PLUMBING (different zones really do route
+ *     differently, proven by non-zone-0 reads NOT equaling zone 0's real
+ *     data) -- it is NOT an attempt to model real non-zero-zone contents,
+ *     and must never be read as such if this project's scope ever widens
+ *     to a zone-0-external consumer like GetPubIdMod.ko.
+ *
+ * 0 on success, -1 if the read would run past the 40-byte bound (checked
+ * for both branches).
+ */
+int at88_chip_read_zone(struct AT88ChipState *chip, struct DeaxState *d,
+			 unsigned char zone, unsigned char addr,
+			 unsigned char len, unsigned char *out);
 
 /*
  * Zone0 write ($B0) -- new 2026-07-16, ground-truthed against the same

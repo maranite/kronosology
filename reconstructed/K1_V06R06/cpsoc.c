@@ -479,6 +479,71 @@ int cpsoc_event_queue_pop(void *pool_base, int instance, uint32_t *out_value)	/*
  *  resolved `DAT_` finds it immediately, no search needed.)
  * ========================================================================= */
 
+/* ========================================================================= *
+ *  CORRECTED (SPI/I2C0 mis-attribution pass, 2026-07-19): the "SPI" label on
+ *  this chain's own command-relay primitives (`cpsoc_i2c0_submit_write`/
+ *  `cpsoc_i2c0_submit_read`, below - formerly `cpsoc_spi_submit_write`/
+ *  `cpsoc_spi_submit_read`) was WRONG. They are the real, on-chip TI
+ *  OMAP-L138/AM1808 I2C0 hardware controller, not SPI - confirmed
+ *  definitively, not just by the register-offset shape `panelbus_dispatch.c`
+ *  first flagged as suspicious ("Flagged, not corrected here" in that file's
+ *  own header, and in this project's README under "Known cross-file
+ *  discrepancies surfaced this pass", 2026-07-18). Fresh live-Ghidra
+ *  decompile/xref evidence this pass, against the wrapped
+ *  `KRONOS_V06R06.VSB` ELF image:
+ *
+ *   1. `cpsoc_i2c0_submit_write`'s (`FUN_c00032f8`) `handle` argument is
+ *      fetched via `cpsoc_get_scan_handle(DAT_c0010dec, 0)` inside
+ *      `cpsoc_queue_command_with_retry` below (`FUN_c0010d44`, confirmed by
+ *      fresh decompile: `uVar3 = FUN_c0001a00(DAT_c0010dec,0); ...
+ *      FUN_c00032f8(uVar3,...)`). `cpsoc_get_scan_handle` IS
+ *      `panelbus_dispatch.c`'s own `panelbus_i2c_base` - the EXACT SAME
+ *      function at the EXACT SAME address, `0xc0001a00` (confirmed by
+ *      decompile: `FUN_c0001a00(p1,p2){ return p2 ? DAT_c0001a14 :
+ *      DAT_c0001a18; }`, byte-identical logic to `panelbus_i2c_base`).
+ *   2. That function's own literal pool, read directly via `read_memory` at
+ *      `0xc0001a14`/`0xc0001a18` this pass: `DAT_c0001a14 = 0x01e28000`
+ *      (I2C1), `DAT_c0001a18 = 0x01c22000` (I2C0) - the real TI
+ *      OMAP-L138/AM1808 I2C1/I2C0 peripheral base addresses per the public
+ *      TRM, byte-for-byte the same constants `panelbus_dispatch.c` already
+ *      cites for its own `panelbus_i2c_base`. Every real call site in this
+ *      file passes selector=0 (I2C0), same as every call site in
+ *      `panelbus_dispatch.c`.
+ *   3. Stronger still: `cpsoc_i2c0_submit_read` (`FUN_c00033f0`) is not just
+ *      structurally similar to `panelbus_dispatch.c`'s `panelbus_i2c_read_bytes`
+ *      - it is THE SAME FUNCTION AT THE SAME ADDRESS. `get_xrefs_to
+ *      0xc00033f0` returns exactly 3 static callers: `FUN_c00073fc`
+ *      (cad.c-range), `FUN_c0010b58` (`panelbus_rx_dispatch_loop` in
+ *      `panelbus_dispatch.c`), and `FUN_c0010f60` (`cpsoc_read_event_pair`
+ *      below). This one real hardware I2C0 read primitive is shared,
+ *      unmodified, across both files - not two coincidentally-similar
+ *      implementations.
+ *   4. Contrast with the chain's genuine SPI use: `cpsoc_analog_poll_channel`
+ *      and `cpsoc_hw_reset_toggle` below really DO call `omap_spi_write`
+ *      (`FUN_c00035a4`, see `omap_l108_spi.c`) via a DIFFERENT
+ *      handle-selector, `cpsoc_get_handle`/`FUN_c0001a1c` - its own literal
+ *      pool (read this pass at `0xc0001a30`/`0xc0001a34`) holds
+ *      `0x01f0e000`/`0x01c41000`, NEITHER of which matches any OMAP-L138
+ *      I2C/TRM peripheral base - consistent with a genuine, separate SPI
+ *      chip-select/handle constant. `omap_spi_write`'s own register shape
+ *      (`+0x3c` ctrl, `+0x40` status - see `omap_l108_spi.c`) is also
+ *      structurally distinct from the `+0x08`/`+0x14`/`+0x1c`/`+0x20`/`+0x24`
+ *      I2C0 shape `cpsoc_i2c0_submit_write`/`_read` use. So this device's ADC
+ *      channel reads are real SPI; only its command-relay submit/read pair
+ *      (the "third SPI device" name's own origin) was ever I2C0.
+ *
+ *  Net effect: `cpsoc_led_set`/`cpsoc_led_clear`/`cpsoc_queue_command_with_retry`/
+ *  `cpsoc_read_event_pair` (and, transitively, `cpsoc_queue_push_validated`'s
+ *  shared instance queue) all relay over the SAME physical I2C0 bus
+ *  `panelbus_dispatch.c` uses for its own internal command channel - not a
+ *  private SPI link. Whether they contend for the bus with
+ *  `panelbus_dispatch.c` at runtime (no locking was found around either
+ *  side's access) is not resolved here. Functions renamed
+ *  `cpsoc_spi_submit_write`/`_read` -> `cpsoc_i2c0_submit_write`/`_read`
+ *  below to stop asserting the wrong bus in their own names; old names kept
+ *  in citations for continuity with earlier passes/other files' cross-refs.
+ * ========================================================================= */
+
 /* cpsoc_led_clear/cpsoc_led_set - "clear the old LED index, light the new
  * one" pair: both compute a register (0x79 for index>=0x21, 0x7a for
  * index<=0x20 - every value is one or the other, so the tag byte written
@@ -509,9 +574,11 @@ void cpsoc_led_clear(void *cpsoc, int led_index)	/* FUN_c0010fe8 */
 }
 
 /* ------------------------------------------------------------------------- *
- *  cpsoc_spi_submit_write - RESOLVED this pass (was `FUN_c00032f8`, "the
- *  underlying SPI submit primitive... not traced further"). Real body,
- *  fully re-decompiled:
+ *  cpsoc_i2c0_submit_write (formerly misnamed `cpsoc_spi_submit_write` -
+ *  REATTRIBUTED SPI->I2C0, 2026-07-19 pass, see the file-level correction
+ *  note above this device's section) - RESOLVED 2026-07-17 pass (was
+ *  `FUN_c00032f8`, "the underlying SPI submit primitive... not traced
+ *  further"). Real body, fully re-decompiled:
  *
  *      bool FUN_c00032f8(int handle, reg, byte *data, int len)
  *      {
@@ -538,23 +605,27 @@ void cpsoc_led_clear(void *cpsoc, int led_index)	/* FUN_c0010fe8 */
  *          return <last per-byte wait succeeded>;
  *      }
  *
- *  A real, bounded SPI byte-stream write: pre-checks a "device busy" status
- *  bit (0x1000 at handle+8) clearing within 1000x1-tick polls, programs
- *  length/reg-select/a control-word snapshot into the register block, then
- *  writes each byte of `data` into a TX-data register (handle+0x20),
- *  polling a SEPARATE status bit (0x10, opposite polarity - must SET, not
- *  clear) per byte with the same 1000-iteration bound. Sets a "transaction
- *  done" flag bit (0x800) unconditionally at the end. Returns false if the
- *  initial busy-wait times out OR the last byte's ready-wait times out.
- *  The inner per-byte poll's own delay call (`cad_delay_ticks(DAT_c00033e8)`
- *  with no explicit second argument in the real disassembly) is another
- *  instance of this project's "phantom forwarded parameter" pattern - the
- *  tick-count argument rides through from an earlier register value rather
- *  than being freshly loaded; its real value wasn't isolated this pass.
+ *  A real, bounded I2C0 byte-stream write (`handle` is the real OMAP-L138
+ *  I2C0 peripheral base `0x01c22000` - see the file-level correction note
+ *  above; `handle+8`/`+0x14`/`+0x1c`/`+0x20`/`+0x24` are that controller's
+ *  ICSTR/ICCNT/ICSAR/ICDXR/ICMDR registers, matching `panelbus_dispatch.c`'s
+ *  own `struct omap_i2c_regs`): pre-checks a "device busy" status bit
+ *  (ICSTR.BB, 0x1000 at handle+8) clearing within 1000x1-tick polls, programs
+ *  length/reg-select(slave addr)/a control-word snapshot into the register
+ *  block, then writes each byte of `data` into ICDXR (handle+0x20), polling a
+ *  SEPARATE status bit (0x10, opposite polarity - must SET, not clear) per
+ *  byte with the same 1000-iteration bound. Sets a "transaction done" flag
+ *  bit (0x800) unconditionally at the end. Returns false if the initial
+ *  busy-wait times out OR the last byte's ready-wait times out. The inner
+ *  per-byte poll's own delay call (`cad_delay_ticks(DAT_c00033e8)` with no
+ *  explicit second argument in the real disassembly) is another instance of
+ *  this project's "phantom forwarded parameter" pattern - the tick-count
+ *  argument rides through from an earlier register value rather than being
+ *  freshly loaded; its real value wasn't isolated this pass.
  *  Sole real caller: cpsoc_queue_command_with_retry, below. @0xc00032f8. */
 extern void cad_delay_ticks(void *unused_param, int32_t target);	/* FUN_c00085a8, see omap_l108.c */
 
-int cpsoc_spi_submit_write(void *handle, uint8_t reg, const uint8_t *data, int len)	/* FUN_c00032f8 */
+int cpsoc_i2c0_submit_write(void *handle, uint8_t reg, const uint8_t *data, int len)	/* FUN_c00032f8, formerly cpsoc_spi_submit_write */
 {
 	volatile uint32_t *status = (volatile uint32_t *)((uint8_t *)handle + 8);
 	int i, j;
@@ -592,17 +663,27 @@ int cpsoc_spi_submit_write(void *handle, uint8_t reg, const uint8_t *data, int l
 	return last_byte_ok;
 }
 
-/* cpsoc_spi_submit_read - the SIBLING read primitive (`FUN_c00033f0`),
- * found and reconstructed this pass while resolving `cpsoc_dispatch_tick`
- * below. Structurally near-identical to cpsoc_spi_submit_write above -
- * SAME initial busy-wait on status bit 0x1000, SAME register-block
- * programming, SAME per-byte 0x10-bit poll - but the per-byte loop READS
- * INTO `data[i]` from `*(handle+0x18)` instead of writing OUT from it, and
- * there's a real extra wrinkle on the LAST byte: when `i == len-1`, it
- * ALSO ORs `0x8000` into `*(handle+0x24)` before that final byte's poll
- * (a "this is the last byte, latch differently" flag - real meaning not
- * determined, structurally cited not guessed at). @0xc00033f0. */
-int cpsoc_spi_submit_read(void *handle, uint8_t reg, uint8_t *data, int len)	/* FUN_c00033f0 */
+/* cpsoc_i2c0_submit_read (formerly misnamed `cpsoc_spi_submit_read` -
+ * REATTRIBUTED SPI->I2C0, 2026-07-19 pass) - the SIBLING read primitive
+ * (`FUN_c00033f0`), found and reconstructed 2026-07-17 while resolving
+ * `cpsoc_dispatch_tick` below. Structurally near-identical to
+ * cpsoc_i2c0_submit_write above - SAME initial busy-wait on status bit
+ * 0x1000, SAME register-block programming, SAME per-byte 0x10-bit poll - but
+ * the per-byte loop READS INTO `data[i]` from `*(handle+0x18)` (ICDRR, the
+ * I2C0 receive-data register) instead of writing OUT from it, and there's a
+ * real extra wrinkle on the LAST byte: when `i == len-1`, it ALSO ORs
+ * `0x8000` into `*(handle+0x24)` (ICMDR) before that final byte's poll -
+ * exactly `panelbus_i2c_read_bytes`'s own documented STP-bit-on-last-byte
+ * behavior in `panelbus_dispatch.c`. This is not a coincidence: `get_xrefs_to`
+ * on `0xc00033f0` this pass confirms this IS `panelbus_i2c_read_bytes` -
+ * the identical function at the identical address, with exactly 3 real
+ * callers firmware-wide: `FUN_c00073fc` (cad.c-range), `FUN_c0010b58`
+ * (`panelbus_rx_dispatch_loop`, panelbus_dispatch.c), and `FUN_c0010f60`
+ * (`cpsoc_read_event_pair`, below) - the definitive evidence that this
+ * device's command-relay path and `panelbus_dispatch.c`'s own internal
+ * channel share one physical I2C0 controller, not two separate buses.
+ * @0xc00033f0. */
+int cpsoc_i2c0_submit_read(void *handle, uint8_t reg, uint8_t *data, int len)	/* FUN_c00033f0, formerly cpsoc_spi_submit_read; == panelbus_i2c_read_bytes in panelbus_dispatch.c */
 {
 	volatile uint32_t *status = (volatile uint32_t *)((uint8_t *)handle + 8);
 	int i, j;
@@ -642,7 +723,7 @@ int cpsoc_spi_submit_read(void *handle, uint8_t reg, uint8_t *data, int len)	/* 
 }
 
 /* cpsoc_queue_command_with_retry - real command-submit-with-ack primitive:
- * retries the underlying submit (cpsoc_spi_submit_write, above) up to 4
+ * retries the underlying submit (cpsoc_i2c0_submit_write, above) up to 4
  * times; on repeated failure, formats+draws the error message
  * `"Fail to send data to psoc : %d"` (`0xc00231a0`, confirmed string) at
  * screen position (100,100), and if a separate flag byte is clear, calls
@@ -654,15 +735,19 @@ int cpsoc_spi_submit_read(void *handle, uint8_t reg, uint8_t *data, int len)	/* 
  * (cad_delay_ticks's own dead first argument, `cpsoc_get_handle`'s
  * `DAT_c001160c`, etc.) - almost certainly one field inside the same
  * fixed device-context struct, though its own semantics (e.g. "diagnostic
- * mode: suppress hard fault on SPI failure") aren't independently
- * confirmed; its runtime value isn't captured by this static ELF-wrapper
- * import (BSS, zero at load time). Handle for the underlying submit is
- * fetched fresh via `FUN_c0001a00(DAT_c0010dec, 0)` (the same "select one
- * of two fixed handles by flag" idiom `cpsoc_get_handle`/FUN_c0001a1c uses
- * for the analog-polling chain, but a DIFFERENT handle pair - this is the
- * PSoC scan/LED chip's own bus handle, not the analog chip's).
- * @0xc0010d44. */
-extern void *cpsoc_get_scan_handle(void *ctx, int which);	/* FUN_c0001a00, distinct handle-pair from cpsoc_get_handle/FUN_c0001a1c below */
+ * mode: suppress hard fault on I2C0 failure" - SPI/I2C0 mis-attribution pass,
+ * 2026-07-19: was "SPI failure") aren't independently confirmed; its runtime
+ * value isn't captured by this static ELF-wrapper import (BSS, zero at load
+ * time). Handle for the underlying submit is fetched fresh via
+ * `FUN_c0001a00(DAT_c0010dec, 0)` - REATTRIBUTED 2026-07-19: `FUN_c0001a00`
+ * is `panelbus_dispatch.c`'s own `panelbus_i2c_base`, and selector=0 here
+ * resolves (confirmed via `read_memory` at `DAT_c0001a18`) to the real I2C0
+ * peripheral base `0x01c22000` - the same "select one of two fixed handles
+ * by flag" idiom `cpsoc_get_handle`/FUN_c0001a1c uses for the analog-polling
+ * chain, but a DIFFERENT handle pair with a DIFFERENT (genuinely SPI) bus
+ * behind it - this is the PSoC scan/LED chip's own I2C0 bus handle, not the
+ * analog chip's SPI one. @0xc0010d44. */
+extern void *cpsoc_get_scan_handle(void *ctx, int which);	/* FUN_c0001a00, == panelbus_i2c_base (panelbus_dispatch.c); distinct handle-pair from cpsoc_get_handle/FUN_c0001a1c below */
 extern void crypto_at88_format_fault_text(char *dst, const char *fmt,
 					  const void *arg1, const void *arg3);	/* FUN_c00168fc, see crypto_at88.c */
 extern void draw_text(int x, int y, const char *str, int unused);	/* FUN_c0015650, see crypto_at88.c/clcdc.c */
@@ -674,7 +759,7 @@ int cpsoc_queue_command_with_retry(uint8_t reg, void *data, int len)	/* FUN_c001
 	int attempt;
 
 	for (attempt = 0; attempt < 4; attempt++) {
-		if (cpsoc_spi_submit_write(handle, reg, (const uint8_t *)data, len))
+		if (cpsoc_i2c0_submit_write(handle, reg, (const uint8_t *)data, len))
 			return 1;
 	}
 	crypto_at88_format_fault_text(0 /* DAT_c0010df4 */, "Fail to send data to psoc : %d" /* DAT_c0010df0 = 0xc00231a0 */, (const void *)(intptr_t)reg, 0);
@@ -726,7 +811,7 @@ uint8_t cpsoc_queue_push_validated(void *pool_base, int opcode, uint8_t byte1, u
  *                                                          //  same selector
  *                                                          //  idiom as
  *                                                          //  cpsoc_get_scan_handle
- *          ok = cpsoc_spi_submit_read(handle, reg, dest, len);
+ *          ok = cpsoc_i2c0_submit_read(handle, reg, dest, len);
  *          if (!ok)
  *              crypto_at88_fault(0, "../cpsoc.cpp", 0x11d); // line 285,
  *                                                             // RESOLVED
@@ -1269,7 +1354,7 @@ uint8_t cpsoc_queue_drain_writes(void *cpsoc, int reg)	/* FUN_c0010e48 */
 		if (!cpsoc_event_queue_pop(cpsoc, reg - 0x78, (uint32_t *)entry))
 			return ok;
 		ok = (uint8_t)cpsoc_queue_command_with_retry((uint8_t)reg, entry, 2);
-		cad_pedal_queue_notify(0 /* DAT_c0010f04 = 0xc01cac00, same shared delay-handle constant as cpsoc_spi_submit_write/_read */, reg, entry[0], entry[1]);
+		cad_pedal_queue_notify(0 /* DAT_c0010f04 = 0xc01cac00, same shared delay-handle constant as cpsoc_i2c0_submit_write/_read */, reg, entry[0], entry[1]);
 	} while (ok);
 	cad_delay_ticks(0 /* DAT_c0010f04 */, 500);
 	cad_delay_ticks(0 /* DAT_c0010f04 */, 500);
@@ -1318,7 +1403,7 @@ uint8_t cpsoc_drain_queue_wrapper(void *unused_dispatcher, int reg)	/* FUN_c0007
 }
 
 /* cpsoc_poll_reg_reads - live hardware READ loop for one register: reads a
- * 2-byte response via cpsoc_spi_submit_read (the SAME primitive
+ * 2-byte response via cpsoc_i2c0_submit_read (the SAME primitive
  * cpsoc_read_event_pair uses, but through a DIFFERENT handle-selector -
  * `FUN_c0001a00(DAT_c0010be8,0)`, the cpsoc_get_scan_handle idiom), gates
  * each successful read through `cpsoc_read_tag_valid` (a real tag-byte
@@ -1331,7 +1416,28 @@ uint8_t cpsoc_drain_queue_wrapper(void *unused_dispatcher, int reg)	/* FUN_c0007
  * from `FUN_c0010b58`'s real disassembly, not fully transcribed since two
  * of its three callees (`cpsoc_read_tag_valid`'s exact use of its own
  * return value in the loop condition, and cobjectmgr's own dispatcher) sit
- * partly outside this file's scope. @0xc0010b58. */
+ * partly outside this file's scope. @0xc0010b58.
+ *
+ * DUPLICATE-DEFINITION FLAG (SPI/I2C0 mis-attribution pass, 2026-07-19,
+ * found while chasing that question, not independently pursued further):
+ * `0xc0010b58` is ALSO reconstructed, independently and under a different
+ * name, as `panelbus_rx_dispatch_loop` in `panelbus_dispatch.c` - confirmed
+ * by a fresh decompile of `0xc0010b58` this pass matching that file's own
+ * body almost exactly (same `FUN_c0001a00(.,0)` handle fetch, same
+ * `FUN_c00033f0` 2-byte read call, same `FUN_c0010b08` tag-validate gate,
+ * same `FUN_c0007220` forward-dispatch call). Two different reconstruction
+ * passes independently decompiled the SAME real function under two names
+ * (`cpsoc_poll_reg_reads` here, `panelbus_cmd_dispatch`'s own caller there)
+ * with slightly different transcriptions of the loop-continuation logic -
+ * this is itself further, direct confirmation that cpsoc's command-relay
+ * chain and panelbus_dispatch.c's internal channel are ONE real caller
+ * graph over ONE physical I2C0 bus, not two coincidentally-similar ones.
+ * Left as two separate definitions (not merged/deleted) per this project's
+ * standing convention of flagging cross-file duplicates rather than
+ * unifying them without a dedicated pass to decide which transcription (or
+ * neither) is fully correct - whoever revisits `panelbus_dispatch.c` or
+ * this function next should treat `0xc0010b58` as a single real function
+ * with two independent, not-yet-reconciled C transcriptions. */
 extern uint8_t cpsoc_read_tag_valid(uint8_t tag);	/* FUN_c0010b08, see its own reconstruction below */
 extern void cobjectmgr_secondary_dispatch(void *ctx, int reg, uint8_t byte1, uint8_t byte2);	/* FUN_c0007220, see cobjectmgr.c's own README status - not reconstructed here */
 
@@ -1343,7 +1449,7 @@ void cpsoc_poll_reg_reads(void *cpsoc, int reg)	/* FUN_c0010b58 */
 
 	do {
 		keep_going = 0;
-		if (cpsoc_spi_submit_read(handle, (uint8_t)reg, entry, 2)) {
+		if (cpsoc_i2c0_submit_read(handle, (uint8_t)reg, entry, 2)) {
 			if (cpsoc_read_tag_valid(entry[0])) {
 				cobjectmgr_secondary_dispatch(0 /* DAT_c0010bec = 0xc01cac00 */, reg, entry[0], entry[1]);
 				keep_going = 1;

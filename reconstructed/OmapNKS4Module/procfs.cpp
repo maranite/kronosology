@@ -23,6 +23,13 @@ static int sBlockOnRead;
 
 /* proc handles */
 void *gProc, *gProcProgress, *gProcHardwareVersion, *gProcOmapVersion;
+/* VM-only, 2026-07-19: /proc/OmapNKS4InjectEvent handle - see
+ * OmapNKS4ProcWriteInjectEvent()'s own comment (below) and
+ * OmapNKS4ProcInitialize()'s conditional-creation comment for why this one is
+ * separate from the four real handles above. Stays NULL (and the /proc entry
+ * is never created at all) whenever sVmVirtualProbe is 0, i.e. on real
+ * hardware. */
+void *gProcInjectEvent;
 
 /* installer-support event id -> name (index by the id passed to OmapNKS4ProcAddEvent) */
 /* NOT extern: previously declared extern with no definition anywhere
@@ -261,6 +268,66 @@ int OmapNKS4ProcWriteProgress(void *file, char *buffer, unsigned int count, void
 	return count;
 }
 
+/* ---- VM-only, 2026-07-19: /proc/OmapNKS4InjectEvent write handler ------------
+ *
+ * TEST SCAFFOLDING, NOT GROUND TRUTH: unlike every other proc handler in this
+ * file, this one has no disassembly citation and no real-hardware counterpart -
+ * there is no /proc/OmapNKS4InjectEvent in the shipping module. It exists only
+ * so external VM test tooling (anything able to `cat somebytes >
+ * /proc/OmapNKS4InjectEvent` from inside the VM) can drive ARBITRARY interrupt-
+ * IN traffic - key/knob/analog-input/AT88-read events, not just usb.cpp's own
+ * single hardcoded button+aftertouch packet (vm_virtual_probe_inject_event(),
+ * called once at boot from main.cpp) - through the real event-processing path
+ * for actual test coverage.
+ *
+ * Deliberately does NO decoding of the written bytes itself: they are taken as
+ * the raw wire-format interrupt-IN buffer (same [dLo][dHi][idx][op] 4-byte
+ * record layout vm_virtual_probe_inject_event()'s own header comment
+ * documents, usb.cpp) and handed verbatim to vm_inject_event_buffer()
+ * (usb.cpp), which stages them into the real sInterruptURB and calls the real,
+ * unmodified InterruptCallback()/COmapNKS4Driver_ReceiveEventBuffer() decode
+ * chain - the exact same production code path a genuine interrupt completion
+ * uses. No second/parallel decode logic lives here.
+ *
+ * Real-hardware safety: this entry is only ever created by
+ * OmapNKS4ProcInitialize() when sVmVirtualProbe is set (see that function's own
+ * comment below) - on real hardware (sVmVirtualProbe==0) /proc/OmapNKS4InjectEvent
+ * never exists, so this handler is unreachable there. The sVmVirtualProbe check
+ * below is pure defense-in-depth (e.g. against some future refactor wiring this
+ * handler up unconditionally), not the primary gate - same belt-and-suspenders
+ * pattern vm_inject_event_buffer() itself (usb.cpp) already uses.
+ *
+ * Same kmalloc_buf/copy_from_user/kfree shape as OmapNKS4ProcWrite/
+ * OmapNKS4ProcWriteProgress above (established project convention for every
+ * proc write handler in this file) - unlike those two, no NUL terminator is
+ * appended (buf[count]=0) since this data is a binary event buffer, not a
+ * keyword string to strstr() against. */
+int OmapNKS4ProcWriteInjectEvent(void *file, char *buffer, unsigned int count, void *data)
+{
+	if (!sVmVirtualProbe)
+		return -1;	/* should be unreachable: entry isn't created when this is 0 */
+	if (count == 0)
+		return 0;
+
+	char *buf = (char *)kmalloc_buf(count);
+	if (!buf) {
+		printk("<6>OmapNKS4:%s: line %d: cannot allocate memory\n",
+		       "OmapNKS4ProcWriteInjectEvent", __LINE__);
+		return -12;
+	}
+	if (copy_from_user(buf, buffer, count)) {
+		printk("<6>OmapNKS4:%s: line %d: copy from user\n",
+		       "OmapNKS4ProcWriteInjectEvent", __LINE__);
+		kfree(buf);
+		return -14;
+	}
+
+	vm_inject_event_buffer((unsigned char *)buf, count);
+
+	kfree(buf);
+	return count;
+}
+
 int OmapNKS4ProcReadOmapVersion(char *page, char **start, int off, int count, int *eof, void *data)
 {
 	unsigned char v[10], rev;
@@ -327,6 +394,34 @@ int OmapNKS4ProcInitialize(void)
 		return -1;
 	}
 	proc_set(gProcOmapVersion, OmapNKS4ProcReadOmapVersion, 0);
+
+	/* VM-only, 2026-07-19: TEST SCAFFOLDING, NOT GROUND TRUTH - the real
+	 * OmapNKS4ProcInitialize() creates exactly the four entries above and
+	 * nothing else (confirmed: ground truth's own real disassembly makes
+	 * exactly four create_proc_entry() calls, see this function's own
+	 * 2026-07-18 CORRECTION comment above). This fifth entry is a pure VM
+	 * test-harness addition, gated so it is created ONLY when sVmVirtualProbe
+	 * is set - on real hardware (sVmVirtualProbe==0) this whole block is
+	 * skipped and /proc/OmapNKS4InjectEvent never exists, leaving real-hardware
+	 * behavior bit-for-bit unaffected. Mode 0222 (write-only, no useful read) -
+	 * unlike the four real entries above this one is deliberately not given a
+	 * read_proc (proc_set's third arg is 0), since it has no state of its own
+	 * to report back; see OmapNKS4ProcWriteInjectEvent()'s own comment (above)
+	 * for what a write does. Failure to create it is logged but NOT fatal to
+	 * OmapNKS4ProcInitialize() as a whole (matches this function's own
+	 * established real-hardware convention of a per-entry printk+return -1 on
+	 * failure - but since this entry is never real-hardware-reachable, a soft
+	 * failure that just leaves the VM test feature unavailable is preferable
+	 * to tearing down the four already-successfully-created real entries). */
+	if (sVmVirtualProbe) {
+		gProcInjectEvent = make_proc_entry("OmapNKS4InjectEvent", 0222);
+		if (!gProcInjectEvent) {
+			printk("<6>OmapNKS4:%s: line %d: cannot create VM-only inject-event "
+			       "proc entry\n", "OmapNKS4ProcInitialize", __LINE__);
+		} else {
+			proc_set(gProcInjectEvent, 0, OmapNKS4ProcWriteInjectEvent);
+		}
+	}
 	return 0;
 }
 
@@ -359,6 +454,18 @@ void OmapNKS4ProcDone(void)
 	gProcProgress = 0;
 	gProcHardwareVersion = 0;
 	gProcOmapVersion = 0;
+	/* VM-only, 2026-07-19: TEST SCAFFOLDING, NOT GROUND TRUTH - mirror image of
+	 * OmapNKS4ProcInitialize()'s own conditional creation above. Ground truth's
+	 * real OmapNKS4ProcDone() only ever removes the four entries above
+	 * (unconditionally, since the real driver always creates all four) - this
+	 * fifth removal is gated on gProcInjectEvent actually being non-NULL
+	 * (rather than re-checking sVmVirtualProbe) so it stays a correct no-op
+	 * even if OmapNKS4ProcInitialize() ran with sVmVirtualProbe set but this
+	 * one entry's own create_proc_entry() call happened to fail. */
+	if (gProcInjectEvent) {
+		remove_proc_entry("OmapNKS4InjectEvent", 0);
+		gProcInjectEvent = 0;
+	}
 	printk("<6>OmapNKS4:%s: line %d: exit\n", "OmapNKS4ProcDone", 499);
 }
 

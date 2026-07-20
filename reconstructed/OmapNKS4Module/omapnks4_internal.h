@@ -261,6 +261,18 @@ void vm_virtual_probe_inject_event(void);
  * module's own real boot/configure sequence, so nothing else would drive them
  * in a VM test. See usb.cpp's own definition for the full rationale. */
 void vm_virtual_probe_test_setters(void);
+/* VM-only, 2026-07-19: TEST SCAFFOLDING, NOT GROUND TRUTH (no real-hardware
+ * counterpart, unlike everything else declared in this header) - general
+ * host-driven counterpart to vm_virtual_probe_inject_event() above. Stages an
+ * arbitrary caller-supplied interrupt-IN event buffer (same wire format as
+ * vm_virtual_probe_inject_event()'s own hardcoded packet) into sInterruptURB
+ * and feeds it through the real, unmodified InterruptCallback()/
+ * COmapNKS4Driver_ReceiveEventBuffer() decode path - see usb.cpp's own
+ * definition for the full rationale and the buffer-length clamping it does.
+ * Currently called from procfs.cpp's OmapNKS4ProcWriteInjectEvent(), the write
+ * handler for the new VM-only /proc/OmapNKS4InjectEvent entry (created only
+ * when sVmVirtualProbe is set - see OmapNKS4ProcInitialize(), procfs.cpp). */
+void vm_inject_event_buffer(const unsigned char *data, unsigned int len);
 /* VM-only, 2026-07-18: real-concurrency stress test for the video draw-builder
  * ring (video.cpp) - spawns real kernel threads that hammer InitLCDRegs/
  * XAxisByteSize/SendPixelDataRegion/SendFillData/UpdateColorPal concurrently

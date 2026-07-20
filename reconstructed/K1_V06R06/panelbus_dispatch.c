@@ -71,13 +71,45 @@
  * I2C buses, or whether I2cByGpio.cpp's bit-bang layer coexists with this
  * hardware controller for a different reason, is not resolved here - stated
  * as the honest structural consequence of the address/bit-position match,
- * not asserted beyond that. This also means cpsoc.c's own "third SPI device"
- * finding (FUN_c00032f8, its own submit primitive) - which shares the exact
- * same +0x08/+0x14/+0x1c/+0x24 register shape as this file's FUN_c00033f0,
- * just for transmit instead of receive - is very likely ALSO this same I2C0
- * hardware block rather than SPI. Not corrected in cpsoc.c (not this file's
- * scope to edit), flagged here as a real cross-file finding for whoever
- * revisits that section.
+ * not asserted beyond that.
+ *
+ * CONFIRMED (SPI/I2C0 mis-attribution pass, 2026-07-19, resolving the "very
+ * likely" flag this section used to carry): cpsoc.c's own "third SPI device"
+ * submit/read primitives (FUN_c00032f8/FUN_c00033f0, formerly
+ * cpsoc_spi_submit_write/_read, now cpsoc_i2c0_submit_write/_read in
+ * cpsoc.c) are not merely shape-similar to this file's I2C0 primitives -
+ * they ARE this same I2C0 hardware, definitively:
+ *  - FUN_c00033f0 (this file's own panelbus_i2c_read_bytes) is the exact
+ *    same function cpsoc.c calls for its own reads - get_xrefs_to on
+ *    0xc00033f0 returns exactly 3 static callers firmware-wide:
+ *    FUN_c00073fc, FUN_c0010b58 (panelbus_rx_dispatch_loop, this file), and
+ *    FUN_c0010f60 (cpsoc_read_event_pair, cpsoc.c). One real function, two
+ *    files citing it under two names.
+ *  - The handle both sides pass to it/its write-side sibling (FUN_c00032f8)
+ *    is fetched via FUN_c0001a00(_, 0) - FUN_c0001a00 IS panelbus_i2c_base
+ *    above (byte-identical decompiled body), and selector=0 resolves (per
+ *    read_memory on this function's own literal pool at
+ *    DAT_c0001a14/DAT_c0001a18) to 0x01c22000, the real I2C0 base cited
+ *    above - not a lookalike constant, the SAME address word.
+ *  - A further, independent duplicate surfaced chasing this: 0xc0010b58
+ *    itself (this file's panelbus_rx_dispatch_loop) is ALSO separately
+ *    reconstructed in cpsoc.c as cpsoc_poll_reg_reads - same address, same
+ *    real call shape (handle fetch -> FUN_c00033f0 read -> tag-validate ->
+ *    FUN_c0007220 forward-dispatch), two independently-transcribed C bodies
+ *    for one real function. Flagged in cpsoc.c's own new note on
+ *    cpsoc_poll_reg_reads; not merged here or there.
+ *
+ * cpsoc.c has been updated to rename cpsoc_spi_submit_write/_read to
+ * cpsoc_i2c0_submit_write/_read and correct its own comments - see that
+ * file's own new correction note above its "third SPI-bus device" section.
+ * Practical consequence for a future emulator: cpsoc's command-relay chain
+ * (switch/LED-row I/O, LED-bargraph submit/read, the "third device" queue)
+ * and this file's own internal command channel are ONE shared I2C0
+ * controller, not two independent bus peripherals - a virtual board model
+ * needs exactly one I2C0 hardware block backing both call chains. The
+ * genuinely separate SPI bus (cpsoc.c's ADC channel reads via
+ * omap_spi_write, omap_l108_spi.c) is unaffected by this finding and
+ * remains real SPI, on a different peripheral entirely.
  *
  * FUN_c0014488 CORRECTION: README.md/ctouchpanel.c/cobjectmgr.c all describe
  * FUN_c0014488 (the 5-0x1d lookup table) as referenced from FUN_c0007220.

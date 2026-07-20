@@ -143,6 +143,44 @@ int main(void)
 	check_eq("reload after $B0 test succeeds", (unsigned int)(rc == 0), 1);
 	free(blob);
 
+	printf("[2e] $B4/$B2 zone-dispatch plumbing, new 2026-07-19 (see\n"
+	       "     at88_chip_read_zone()'s doc comment, at88_chip.h): $B2 must\n"
+	       "     actually route to whichever zone the most recent $B4 selected,\n"
+	       "     not silently always hit zone 0. Runs pre-$B8\n"
+	       "     (b8RoundsAccepted==0), same raw-passthrough branch [2b]/[2d]\n"
+	       "     already exercise, so this reads the REAL captured Zone0 secret\n"
+	       "     restored by [2d]'s reload -- not synthetic data.\n");
+	unsigned char selZone0[4] = {0xb4, 0x03, 0x00, 0x00};
+	rc = stgNV2AC_sync_cmd(selZone0, 4);
+	check_eq("$B4 select zone 0 rc==0", (unsigned int)(rc == 0), 1);
+	unsigned char realZone0Cmd[4] = {0xb2, 0x00, 0x00, 16};
+	unsigned char realZone0[16];
+	rc = nv2ac_read_cmd_impl(realZone0Cmd, realZone0);
+	check_eq("$B2 read after selecting zone 0 rc==0", (unsigned int)(rc == 0), 1);
+
+	unsigned char selZone1[4] = {0xb4, 0x03, 0x01, 0x00};
+	rc = stgNV2AC_sync_cmd(selZone1, 4);
+	check_eq("$B4 select zone 1 rc==0", (unsigned int)(rc == 0), 1);
+	unsigned char zone1Cmd[4] = {0xb2, 0x00, 0x00, 16};
+	unsigned char zone1Data[16];
+	rc = nv2ac_read_cmd_impl(zone1Cmd, zone1Data);
+	check_eq("$B2 read after selecting zone 1 rc==0", (unsigned int)(rc == 0), 1);
+	static const unsigned char allZero16[16] = {0};
+	check_eq("$B2 zone 1 == the documented all-zero synthetic placeholder",
+		 (unsigned int)(memcmp(zone1Data, allZero16, 16) == 0), 1);
+	check_eq("$B2 zone 1 data != $B2 zone 0 data (real Zone0 secret is not all-zero,\n"
+		 "        proving dispatch actually switched, not two branches that agree)",
+		 (unsigned int)(memcmp(zone1Data, realZone0, 16) == 0), 0);
+
+	rc = stgNV2AC_sync_cmd(selZone0, 4);
+	check_eq("$B4 re-select zone 0 rc==0", (unsigned int)(rc == 0), 1);
+	unsigned char realZone0Again[16];
+	rc = nv2ac_read_cmd_impl(realZone0Cmd, realZone0Again);
+	check_eq("$B2 read after re-selecting zone 0 rc==0", (unsigned int)(rc == 0), 1);
+	check_eq("$B2 zone 0 data unchanged by the zone-1 detour (regression check --\n"
+		 "        the real, already-correct zone 0 path is untouched)",
+		 (unsigned int)(memcmp(realZone0Again, realZone0, 16) == 0), 1);
+
 	printf("[3] Read IdN via $B6 (stgNV2AC_sync_read_cmd) -- must match the\n"
 	       "    real captured cfg[0x19..0x1f] (checked by MD5 hash: private\n"
 	       "    per-device data, real value intentionally not in this file)\n");

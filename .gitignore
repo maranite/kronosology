@@ -32,6 +32,7 @@ reconstructed/*/verify/test_*
 !reconstructed/*/verify/test_*.c
 !reconstructed/*/verify/test_*.cpp
 !reconstructed/*/verify/test_*.py
+reconstructed/*/tools/results/*
 
 # This one test's ground truth is real captured per-device data (Zone0 key
 # material + a matching .reauth pair) that can't be meaningfully replaced

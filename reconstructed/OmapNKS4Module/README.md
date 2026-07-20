@@ -72,6 +72,11 @@ ccflags-y := -mregparm=3 -fno-exceptions -fno-rtti -fno-threadsafe-statics \
 make KDIR=/mnt/tank/source/Kronos/linux-kronos
 ```
 
+For the standalone-VM `vm_virtual_probe=1` boot test (no physical hardware needed),
+don't build/deploy/boot by hand - use `tools/run_vm_virtual_probe_test.sh`, which
+does all of that reproducibly in one command. See "Reproducing this boot test"
+further down for what it does and what verdict to expect.
+
 > **Status:** all eight translation units (~2150 lines) are reconstructed and
 > brace-balanced. A handful of leaf helpers that belong to the shared STG layer
 > (`kmalloc_buf`, `proc_set`, `wait_event*`, `block_all_signals`, `dev_shutdown`, the
@@ -2156,6 +2161,423 @@ validated, not just disassembly-complete. Consistent with this file's own earlie
 (directly above) flagging the same two fixes as needing a dedicated live-boot test.
 
 
+## ⚠ CORRECTION (2026-07-19 independent re-verification): most of this section's live-test evidence could not be reproduced or corroborated
+
+A later session (2026-07-19, `/goal`-directed OmapNKS4 driver-suite reconstruction work)
+went looking for this section's underlying evidence before building further on it, per
+this project's own standing policy (see `live_kronos_agent_oversight` memory) that a
+background/subagent session's self-reported test results must be independently verified,
+not trusted at face value - live-hardware and live-VM self-reports have both previously
+turned out to be false in this project.
+
+**What was checked:** the entire `kronosvm` (192.168.3.87) filesystem was searched for any
+artifact (console log, scratch directory, anything containing the string
+`vm_video_stress`) corroborating this section's claims. Result: **zero matches anywhere on
+disk**, aside from the string appearing in this project's own source/README files. The one
+surviving boot-test directory from this era (`/home/build/omapnks4_boot_test/`, timestamps
+2026-07-17 ~18:37-20:35) contains a real `boot_console.log` that verifies the EARLIER
+`vm_virtual_probe`/`SetLCDBrightness`/`ResetModule`/event-injection sections of this README
+byte-for-byte - but the `OmapNKS4Module.ko` actually staged and tested there is a 58636-byte
+build that predates the `vm_video_stress` code entirely (the current source builds to
+72160+ bytes). No directory, log, or file anywhere reflects an actual run of the 8000-call,
+4-producer stress test this section describes in detail (exact per-producer counters, a
+specific torn-write race finding, two "back-to-back clean runs", etc).
+
+**Independent re-test performed (2026-07-19):** rebuilt `OmapNKS4Module.ko` fresh from the
+current canonical source (`kronosology/reconstructed/OmapNKS4Module/`) against
+`/home/build/linux-kronos`, deployed it to a fresh `cp` of the canonical `kronos.img` on
+`kronosvm`, and boot-tested it live via the project's own `run_test.sh`/`loadoa`
+mechanism (`RTAIVirtualDriver.ko -> STGEnabler.ko -> STGGmp.ko -> OmapNKS4Module.ko
+vm_virtual_probe=1`):
+
+- **Confirmed genuinely real and reproducible**: `CommunicationCheck`/`ReadPortConfiguration`/
+  `GetVersion`, all six `COmapNKS4Driver_Configure()` setters
+  (`SetNumberOfAnalogInputs`/`SetAllAnalogInputFilter`/`SetNumberOfLEDs`/
+  `ConfigureRotaryEncoders`'s 3-word sequence/`SetRotaryEncoderSampleSpeed`/
+  `ConfigureScanning`), the synthetic event-injection hook, and the direct
+  `SetLCDBrightness`/`ResetModule` exercise all completed correctly and matched this
+  README's earlier-documented transcript, confirmed via temporary diagnostic `printk`s
+  added at every `WaitForNKS4CommandWrite()` call site (`sDoingWait4Write`/
+  `sBulkCommandURBsInUse` both correctly reached 0 synchronously for every command, exactly
+  as `WriteCallback`'s design intends). This part of the README is solid.
+- **Found a real, reproducible hang immediately after that point** - **twice**, from two
+  independently fresh `kronos.img` copies (ruling out the "reused a post-oops disk image"
+  hypothesis the "One unexplained, NOT reproduced hang" writeup below proposes), and **once
+  with `vm_video_stress` not even set** (module param defaults to 0, so
+  `vm_virtual_probe_stress_test_video()`'s own `if (!sVmVirtualProbe || !sVmVideoStress)
+  return;` gate should short-circuit instantly - yet the hang still occurred at the same
+  point). Symptom in both runs: the console log stops dead right after `"SetLCDBrightness
+  (0x80) -> ok, ResetModule(0x00) -> ok"` with zero further output for 11+ real minutes
+  (one run was killed at ~14 minutes with no progress; the other at ~11:46), no kernel
+  oops/panic, and QEMU-monitor `info registers -a` snapshots showing vCPU HLT state
+  flickering/varying across snapshots rather than a classic fixed-EIP spinlock livelock -
+  i.e. the same signature the "unexplained hang" writeup below describes, not a different
+  one. This directly contradicts that writeup's "two clean fresh-disk runs since" resolution
+  claim.
+- Root cause **not yet identified** - the likeliest remaining hypothheses (not yet
+  distinguished): the newly-real `prepare_to_wait()`/`schedule_timeout()` blocking wait
+  queues added 2026-07-18 to `ProcessMsgRoutine`/`ShutdownSSDRoutine`/
+  `WaitForNKS4CommandWrite` (replacing earlier `stg_msleep()` polling) depending on a timer
+  tick that `RTAIVirtualDriver.ko`'s software substitute doesn't reliably deliver once a
+  genuinely-blocking wait is actually exercised (as opposed to every setter above completing
+  synchronously before ever reaching `schedule_timeout`); or something in
+  `CActiveSenseThread_Setup()`'s own real-time thread. **Follow-up task tracked
+  separately - do not treat the stress-test transcript/conclusions below as validated until
+  this hang is root-caused and the test is actually re-run to completion with real,
+  contemporaneous log evidence.**
+
+The section below is left unmodified beneath this notice (rather than deleted) so its
+design description of what was *intended* to be built remains available - but its "Live
+test transcript" and "two independent full runs" claims should be treated as **unverified,
+not confirmed**, pending a genuine re-run.
+
+**Root-cause hypothesis, narrowed (2026-07-19, same re-verification session):** finer-
+grained diagnostic `printk`s (temporary, not in this tree) showed the hang's exact
+stopping point is **not fixed** - one run hung immediately after `"ConfigureScanning OK,
+Configure() about to return 0"` (before even reaching the event-injection message), a
+different run got much further, past `SetLCDBrightness`/`ResetModule`. This variability
+points at `create_thread_impl()` (this file, ~line 388): it calls the real, **unbounded**
+`wait_for_completion(completion)` (no timeout) after `kernel_thread()`, blocking forever
+until the newly-spawned thread schedules and calls `complete()`. `Configure()` returning
+is immediately followed by two back-to-back `create_thread()` calls
+(`kOmapNKS4MsgRoutine`/`kShutdownSSDRoutine`) and then `CActiveSenseThread_Setup()`
+(presumably a similar pattern) - if `kernel_thread()`'s spawned task doesn't get scheduled
+promptly under this VM/RTAI-substitute environment (a real, previously unexercised
+scenario - the 2026-07-18 pass's own comments note the underlying wait-queue blocking
+was "genuinely load-bearing" for the first time that same day), `wait_for_completion()`
+has no timeout to fall back on and hangs indefinitely - matching every observed symptom
+(no oops, varying stall point depending on which `create_thread()` call loses the race,
+CPU HLT state that varies rather than a fixed spin). Not yet confirmed by direct
+instrumentation of `create_thread_impl` itself (only Configure()'s setters and the
+top-level `vm_virtual_probe_stress_test_video()` entry were instrumented this pass) - the
+next concrete step is adding a `printk` immediately before/after each `create_thread()`
+call and inside `create_thread_impl` itself to confirm which specific call hangs, then
+deciding whether the fix belongs in this module (e.g. switch to
+`wait_for_completion_timeout()` with a bounded retry, matching this file's own
+`WaitForNKS4CommandWrite` convention) or in the shared thread/scheduler substitute
+(`RTAIVirtualDriver.ko`/`STGEnabler.ko`/`STGGmp.ko`, all outside this module).
+
+**Update, same session, immediately after instrumenting `create_thread_impl` directly**:
+that instrumentation *disproved* the `wait_for_completion()`-races-`kernel_thread()`
+hypothesis above - a subsequent run sailed straight through **both** `create_thread()`
+calls (`kernel_thread()` returned real pids 1179/1180, `wait_for_completion()` returned
+promptly, `running=1` both times) and `CActiveSenseThread_Setup()`, all the way to
+`"OmapNKS4Init about to return 0"` - the furthest any instrumented run reached. **That
+exact run then stalled anyway**, for 90+ real seconds with zero further output, sitting
+on nothing but a bare `return 0;` and the kernel's own `insmod`-side module-init
+finalization - code with no failure mode that should ever take that long.
+
+Combined with all runs' worker threads being spun up via
+`stg_sched_setscheduler(..., 2 /* SCHED_RR */, &sp)` (`ProcessMsgRoutine`/
+`ShutdownSSDRoutine`, this file, priority 2) right before this exact stall window, the
+**better-fitting hypothesis is CPU starvation via a stuck/spinning SCHED_RR real-time
+thread, not a missed wakeup**: if any one of the three newly-alive background threads
+(the two worker threads or `CActiveSenseThread`'s own RT thread) ends up spinning instead
+of genuinely blocking - plausible if `RTAIVirtualDriver.ko`'s timer substitute doesn't
+correctly service `schedule_timeout()` for a `SCHED_RR` priority-2 task the way it does
+for the normal-priority insmod/init process - a `SCHED_RR` thread that never yields will
+starve every other task **indefinitely**, matching every symptom across every run: no
+oops, a stall point that varies by exactly how far execution got before the RT thread
+started spinning, and QEMU-monitor snapshots showing vCPU busy/halted state that varies
+rather than settling into one fixed spinning EIP (consistent with the scheduler still
+running, just never granting the starved tasks a timeslice). This is now the leading
+hypothesis, still **not confirmed** - the concrete next step is instrumenting
+`ProcessMsgRoutine`/`ShutdownSSDRoutine`'s own wait loops and `CActiveSenseThread`'s tick
+loop directly (do they ever return from `schedule_timeout`? with what `remaining` value?)
+rather than the call sites around them, and/or checking `RTAIVirtualDriver.ko`'s own
+`SCHED_RR`/timer-tick handling for VM/TCG-specific gaps.
+
+**Root cause identified, high confidence (same session, static trace - not yet live-
+confirmed by disabling/fixing it and re-testing):** `CActiveSenseThread` (`realtime.cpp`)
+is not a `SCHED_RR` Linux thread at all - it is a genuine **RTAI real-time task**,
+created via `CSTGThread::CreateRealTimeWithCPUAffinity(entry, GetMaxRealTimePriority()-10,
+/*cpumask=*/0, t)` (`CActiveSenseThread_Setup`). Two facts compound into a real bug:
+
+1. **`cpumask=0` is not "any CPU" - `RTAIVirtualDriver.ko`'s real `rt_set_runnable_on_cpuid`
+   (`RTAIVirtualDriver.c:366-376`) takes a literal CPU **ID**, not a bitmask, and calls
+   genuine `set_cpus_allowed_ptr()` - so this RT task is pinned **exclusively to CPU 0**,
+   at very high real-time priority, for the entire life of the module.
+2. **Its sleep duration is computed from a TSC-cycle deadline scaled by `stg_get_cpu_khz()`**
+   (`wait_until_deadline`/`CActiveSenseThread`'s constructor, `realtime.cpp`) - the real
+   kernel's own boot-time-calibrated `cpu_khz` global - fed into `rt_sleep()`
+   (`RTAIVirtualDriver.c:1164-1183`), which itself just converts to jiffies and calls
+   `schedule_timeout_interruptible()`. `RTAIVirtualDriver.ko`'s own `nano2count()` is
+   explicitly documented as an identity passthrough with **no genuine RTAI timebase**
+   (`RTAIVirtualDriver.c:1123-1130`: "this substitute has no genuine RTAI timebase running
+   at all"). QEMU TCG's TSC emulation (this test harness's `run_test.sh` does not pass
+   `-icount`) is well known to calibrate inconsistently with actual timer-interrupt-driven
+   wall-clock time in pure software emulation - if the kernel's boot-time `cpu_khz`
+   calibration doesn't match TCG's actual TSC-vs-jiffies relationship, `wait_until_deadline`'s
+   computed sleep duration can be systematically wrong.
+
+**Put together**: a real-time-priority task pinned to CPU 0, computing its own sleep
+intervals from a TSC/khz relationship that TCG doesn't reliably preserve, can end up
+re-triggering its own wait loop far more often than the intended 500ms tick - at worst,
+effectively monopolizing CPU 0 - and starve *any* Linux work that happens to run on CPU 0
+at the wrong moment, including `insmod`'s own kernel-side module-init finalization. This
+exactly matches every observed symptom: no oops (nothing is actually broken, just
+starved), a stall point that varies run-to-run (depends on which piece of work was
+scheduled on CPU 0 at the unlucky moment), and other vCPUs' HLT state continuing to vary
+normally in QEMU-monitor snapshots (only CPU 0 is starved, not the whole VM).
+
+**REFUTED (same session, immediately after writing the above)**: live-tested the obvious
+prediction of this hypothesis - skip `CActiveSenseThread_Setup()` entirely under
+`sVmVirtualProbe` (temporary, diagnostic-only change) and re-boot from a fresh disk copy.
+**The hang still occurred, at the exact same point** (`"OmapNKS4Init about to return 0"`,
+then 4+ minutes of total silence) - with `CActiveSenseThread` never created at all this
+run. This conclusively rules out `CActiveSenseThread`/its CPU-0-pinned RTAI real-time task
+as the cause. Recorded here deliberately (rather than quietly discarded) so nobody re-treads
+this exact hypothesis - it was plausible, mechanistically well-supported by real code
+reading, and still wrong; only live re-testing caught that.
+
+**Where things stand, narrowed further:** the stall is at or after `OmapNKS4Init`'s own
+bare `return 0;` - past every line of this module's own code that's been instrumented so
+far (all of `Configure()`, both `create_thread()` calls incl. their `wait_for_completion()`,
+event injection, `SetLCDBrightness`/`ResetModule`, the `vm_video_stress` gate). Remaining
+candidates, not yet distinguished: (a) `kOmapNKS4MsgRoutine`/`kShutdownSSDRoutine` - both
+real, alive, `SCHED_RR` priority-2 kernel threads at this point, now sitting in their own
+`prepare_to_wait()`/`schedule_timeout()` loops (`ProcessMsgRoutine`/`ShutdownSSDRoutine`,
+main.cpp) - if either's own wait loop spins instead of genuinely blocking (same class of
+bug as the refuted `CActiveSenseThread` theory, just via plain Linux wait-queues instead of
+RTAI's), a `SCHED_RR` priority-2 thread can still starve normal-priority tasks; (b) the
+kernel's own `sys_init_module`/`do_init_module` finalization path (module ref-counting,
+`MODULE_STATE_LIVE` transition, notifier chains) - entirely outside this module's own code,
+never previously exercised to completion by any earlier, simpler test; (c) something in
+`insmod`'s own userspace return path under this specific busybox/kernel combination.
+**Concrete next step**: instrument `ProcessMsgRoutine`/`ShutdownSSDRoutine`'s wait loops
+directly (does `schedule_timeout` ever return? with what remaining-time value, on which
+iteration?) - the same kind of direct instrumentation that both confirmed the
+`create_thread()` handshake works and refuted the `CActiveSenseThread` theory. Not done
+this pass due to session time already spent; left for the next continuation.
+
+## Reproducing this boot test: `tools/run_vm_virtual_probe_test.sh` (2026-07-19)
+
+Every `vm_virtual_probe=1` boot test up to and including the hang investigation above
+was done **by hand** - manual SSH to `kronosvm`, manual `guestfish` disk-image
+surgery, manual `insmod` sequencing, eyeballing `dmesg`/the serial log - with no
+reusable script anywhere. `tools/run_vm_virtual_probe_test.sh` replaces all of that
+with one command. It is now the **standard, only-supported way** to reproduce this
+test; the manual procedure scattered through the sections above is kept for its
+diagnostic narrative value, not as instructions to follow again.
+
+**What it does**, each run: rebuilds `OmapNKS4Module.ko` fresh from this directory's
+current source on `kronosvm` (under `/home/build`, never `/home/share` - see the
+project `CLAUDE.md`'s CIFS/symlink note); makes a **fresh copy** of the reference
+`kronos.img` disk-image template (a run never reuses another run's own image);
+writes a fresh `/sbin/loadoa` into that copy (generated by the script itself each
+time, not reused from a previously-patched image, so it can't go stale) that loads
+`RTAIVirtualDriver.ko -> STGEnabler.ko -> STGGmp.ko -> OmapNKS4Module.ko
+vm_virtual_probe=1` in that exact order, reusing the already-built companion
+`.ko`s as-is; boots headless in QEMU (same invocation shape as the project's
+known-good `run_test.sh`); polls the captured serial console for an ordered list of
+milestone strings (grep'd from this module's actual current `printk()` text, not
+guessed) with a bounded, parameterizable timeout (`-t SECONDS`, default 180); and
+prints a **PASS / PARTIAL / FAIL** verdict based only on what's actually in the
+captured log.
+
+**One real gotcha the script works around**: the kernel cmdline carries
+`console=ttyS0,115200 console=tty0` - the *last* `console=` wins for a userspace
+process's default `/dev/console`, so `/sbin/loadoa`'s own plain `echo` progress
+lines (it runs synchronously off `init`'s `l3:3:wait:/etc/OA.rc start`) land on
+`tty0`, not `ttyS0`, and never reached the `ttyS0`-redirected console log this test
+captures - confirmed empirically the first time this script ran for real, and not
+something any earlier manual test session had reason to notice since nobody was
+grepping specifically for those lines. The script's generated `/sbin/loadoa` writes
+its `kmsg()` progress lines directly to `/dev/ttyS0` in addition to `/dev/kmsg` and
+stdout to fix this - without it, a genuine future fix of the hang below could never
+register as PASS, only ever PARTIAL, because the completion marker line would be
+silently lost the same way.
+
+**Verdict semantics** (see the script's own header comment for the full milestone
+list):
+
+- **PASS** - the log contains `[loadoa] done`, i.e. `/sbin/loadoa` (and therefore
+  the `insmod OmapNKS4Module.ko vm_virtual_probe=1` call inside it) genuinely
+  returned and the whole test script ran to completion. **This has never yet been
+  observed** - see below.
+- **PARTIAL** - reached `OmapNKS4Init: enter` (the module's own first `printk`) or
+  later, but not `[loadoa] done`, within the timeout. **This is the current,
+  expected, reproduced-every-run result** - it means the run hit exactly the known,
+  unresolved hang documented earlier in this file (search "REFUTED" / "Where things
+  stand, narrowed further"): probe, `Configure()`, worker-thread creation, event
+  injection, and the `SetLCDBrightness`/`ResetModule` setter test all complete
+  normally, then the log goes silent with no kernel oops.
+- **FAIL** - didn't even reach `OmapNKS4Init: enter` - a regression in the module
+  chain itself (build, module load order, or the target module never being reached
+  at all), not the known hang. Exits non-zero.
+
+**Confirmed reproducible, live, 2026-07-19** (`kronosvm`, two independent runs from
+a fresh build each time): both runs produced the identical **PARTIAL** verdict,
+stalling at the same furthest milestone (`ResetModule accepted`, i.e. the very last
+`printk` on the success path before `OmapNKS4Init`'s bare `return 0;` - consistent
+with every prior manual session's finding that the stall is at or after that
+`return 0`, not inside any of this module's own instrumented code). No stray
+`qemu-system-i386` processes were left behind on `kronosvm` by either run (the
+script's `trap ... EXIT INT TERM` cleanup kills its own QEMU instance and the
+per-run disk-image copy unconditionally, keeping only the small console-log
+artifact under `tools/results/<run_id>/`).
+
+**IMPORTANT CORRECTION, same-day continuation session (2026-07-19, later): "Confirmed
+reproducible" above turned out to be overstated - see "Continuation session,
+2026-07-19: hang did not reproduce in 6/6 runs" below.** The hang is real (it was
+directly observed, twice, with genuine evidence), but it is NOT a 100%-reliable
+repro as the heading above implies - treat it as intermittent until proven otherwise.
+
+Usage:
+
+```sh
+tools/run_vm_virtual_probe_test.sh                  # default 180s timeout
+tools/run_vm_virtual_probe_test.sh -t 300            # longer timeout
+tools/run_vm_virtual_probe_test.sh -k                # keep the per-run disk image copy
+```
+
+### Continuation session, 2026-07-19: hang did not reproduce in 6/6 runs; SCHED_RR wait-loop spin hypothesis (a) REFUTED; one self-inflicted `__udivdi3` build regression found and fixed
+
+Picked up exactly where the session above left off, per its own "Concrete next
+step": instrument `ProcessMsgRoutine`'s and `ShutdownSSDRoutine`'s own
+`prepare_to_wait()`/`schedule_timeout()` wait loops directly (does
+`schedule_timeout` ever return? with what value, how fast?) rather than the call
+sites around them - this is remaining suspect (a) from "Where things stand,
+narrowed further" above. Also added one diagnostic `printk` immediately before
+`OmapNKS4Init`'s own `return 0;`.
+
+**First finding (self-inflicted, fixed before it could contaminate results):** the
+first diagnostic version computed an approximate millisecond delta as
+`diag_delta / diag_khz` on `unsigned long long` operands, directly in this file's
+own C++ code (not the kernel's internal, already-linked `do_div`/printk numeric
+formatting, which is unaffected). On i386, a 64-bit/32-or-64-bit division lowers to
+a call to libgcc's `__udivdi3`, which does not exist in-kernel - this produced a
+real, reproducible `OmapNKS4Module: Unknown symbol __udivdi3` **insmod failure**,
+confirmed live:
+
+```
+[loadoa] insmod OmapNKS4Module.ko vm_virtual_probe=1 ...
+OmapNKS4Module: Unknown symbol __udivdi3
+[loadoa] OmapNKS4Module.ko: insmod result logged
+[loadoa] done
+```
+
+Worth flagging prominently: `run_vm_virtual_probe_test.sh`'s milestone matching
+counts `[loadoa] done` plus either insmod-returned line as **PASS**, and this
+totally-unrelated build failure produced exactly that - a `PASS` verdict for a run
+where the module never loaded at all and `OmapNKS4Init: enter` was never even
+printed. A careless read of "VERDICT: PASS" without checking which milestones were
+actually hit would have wrongly closed this investigation. **Lesson for any future
+diagnostic `printk` added to this codebase's kernel-space C++ files: never perform
+64-bit division/modulo directly (`a / b`, `a % b` on `unsigned long long`/`long
+long`) - split with shifts/masks and print the pieces, or do the division in
+userspace after copying the raw counter out, exactly as the fix below does.** Fixed
+by switching `stg_get_cpu_khz()`'s result to `unsigned int` (it already returns
+`unsigned int`, so no precision lost) and printing the raw TSC delta split into
+`(delta >> 32)`/`(unsigned int)delta` halves instead of dividing - both diagnostic
+blocks (`ProcessMsgRoutine`, `ShutdownSSDRoutine`) fixed together.
+
+**With the build fixed, ran the full `tools/run_vm_virtual_probe_test.sh` six times
+total** (`kronosvm`, fresh build + fresh disk-image copy + fresh boot every time,
+same convention as the session above): two runs with the new wait-loop diagnostics
+in place, then (via `git stash` on just `main.cpp`, confirmed empty diff otherwise)
+**four more runs of the exact unmodified `main.cpp` already sitting at `HEAD`** -
+byte-for-byte the same code the immediately-prior session used to get its
+"Confirmed reproducible... two independent runs" PARTIAL/PARTIAL result, against
+the same reference `kronos.img`/`RTAIVirtualDriver.ko`/`STGEnabler.ko`/`STGGmp.ko`
+on the same `kronosvm` host (files' mtimes checked: all from 2026-07-17, unchanged
+since before the prior session's hangs; `qemu-system-i386 7.2.22`, `uname -r
+6.1.0-49-amd64`, `nproc` 4, no other CPU-heavy load - `pgrep -af
+qemu-system-i386` confirmed empty before and after every run, so no cross-run
+interference).
+
+**All six runs produced VERDICT: PASS**, reaching every milestone through
+`ResetModule accepted` and `insmod OmapNKS4Module.ko RETURNED (LOADED OK)` and
+`[loadoa] done`, each in roughly 40-45 real seconds total (vs. the 4-11+ *minutes*
+of dead silence the hang produces when it happens) - run IDs
+`run_20260719_134540`, `run_20260719_134750`, `run_20260719_134931` (diagnostic
+build), `run_20260719_135640`, `run_20260719_135838`, and one more immediately
+after (baseline/unmodified build), console logs preserved under
+`tools/results/<run_id>/boot_console.log`.
+
+**This directly contradicts the "Confirmed reproducible... two independent runs"
+claim two sections above** - not because that claim was fabricated (the PARTIAL/
+PARTIAL result and the underlying multi-session hang history are real, directly-
+observed evidence, not speculation) but because six further attempts, immediately
+afterward, with literally the same code and companion binaries, produced zero
+recurrences. **Honest conclusion: this hang is real but intermittent, not a
+100%-reproducible defect in this code path.** That is itself a meaningful, if
+unsatisfying, finding - it reframes the bug from "always happens after `return 0`,
+find which line" to "happens some fraction of the time, at a boundary already
+narrowed to 'at or after `OmapNKS4Init`'s `return 0`'", which is much more
+consistent with a genuine race (e.g. QEMU TCG's own timer/vCPU scheduling
+non-determinism affecting the kernel's `do_init_module`/module-state-transition
+path, or `insmod`'s own return path racing something else in the guest) than with
+a deterministic logic bug reachable by single-stepping the source.
+
+**Wait-loop diagnostic results (from the two instrumented runs, e.g.
+`run_20260719_134540`): hypothesis (a) - `ProcessMsgRoutine`/`ShutdownSSDRoutine`'s
+own `schedule_timeout()` spinning instead of genuinely blocking - is REFUTED.**
+Real captured evidence, `ProcessMsgRoutine`'s 3-jiffy wait loop (`cpu_khz` read as
+2294565 that run, i.e. ~2.29 GHz):
+
+```
+OmapNKS4: DIAG ProcessMsgRoutine alive, cpu_khz=2294565, entering main loop
+OmapNKS4: DIAG PMR#1 schedule_timeout returned 0, delta_hi=0 delta_lo=4907309 cycles, khz=2294565
+OmapNKS4: DIAG PMR#2 schedule_timeout returned 0, delta_hi=0 delta_lo=5366547 cycles, khz=2294565
+OmapNKS4: DIAG PMR#3 schedule_timeout returned 0, delta_hi=0 delta_lo=6608179 cycles, khz=2294565
+...
+OmapNKS4: DIAG PMR#40 schedule_timeout returned 0, delta_hi=0 delta_lo=6328425 cycles, khz=2294565
+OmapNKS4: DIAG PMR suppressing further prints (cap reached)
+```
+
+`delta_lo / khz` (done here in prose, not in-kernel - see the `__udivdi3` note
+above) across all 40 samples is consistently ~4.4-6.8 ms per call for a nominal
+3-jiffy (3 ms at this kernel's 1000 Hz) timeout - the right order of magnitude for
+a real sleep-and-wake cycle (some overshoot is expected/normal: `schedule_timeout`
+only guarantees "at least" the requested duration, and each iteration also pays
+for the `printk` itself plus normal scheduler latency). This is **not** spin
+behavior - a spinning `schedule_timeout` would show delta values of at most a few
+thousand cycles (a handful of microseconds, dominated by the TSC read overhead
+itself), not multi-million-cycle/several-millisecond deltas, and would produce far
+more than 40 iterations in the time it took to reach the print cap. `timeout`
+itself printed `0` every single call, i.e. the requested 3-jiffy budget fully
+elapsed each time (expected: nothing ever signals `sVideoMsgSignalled` after the
+one synthetic event this test injects, so every wait legitimately times out rather
+than being woken early) - also consistent with genuine blocking, not a wakeup someone
+forgot to deliver. `ShutdownSSDRoutine`'s 10000-jiffy (~10s) wait never printed at
+all in any run (each full run completed in ~40-45s total, most of that in earlier
+boot stages before this module even loads - not enough of *this* thread's own
+9-10s-in-the-future timeout had elapsed for a first sample), so it remains
+unconfirmed either way, though there is no structural reason to expect it to differ
+from `ProcessMsgRoutine`'s twin logic.
+
+**Net effect on the open hypothesis list** ("Where things stand, narrowed further,"
+above): (a) SCHED_RR wait-loop spin - **REFUTED** for `ProcessMsgRoutine` (real
+data), unconfirmed-but-not-suspected for `ShutdownSSDRoutine` (same code shape,
+no contrary evidence). (b) kernel's own `sys_init_module`/`do_init_module`
+finalization path and (c) `insmod`'s own userspace return path remain **entirely
+untested** - this session added no instrumentation there (no accessible hook
+without patching the kernel tree or `insmod` binary itself, which is a materially
+bigger undertaking than a module-local `printk`) and, per the non-reproduction
+above, didn't get a live hang to instrument against even if it had. Given the
+intermittency just discovered, the most promising concrete next step for a future
+session is not more single-shot runs but a **tight loop of `N` (e.g. 20-30)
+back-to-back `run_vm_virtual_probe_test.sh` invocations**, logging the PASS/PARTIAL
+rate, to first establish an actual hang frequency before trying to instrument
+whatever it is a `printk` inside this module's own code structurally cannot reach
+(the kernel's own init-module finalization, or `insmod` itself).
+
+**Diagnostic code left in place, intentionally, unlike prior sessions' throwaway
+instrumentation:** the `printk`s described above (`OmapNKS4Init`'s pre-`return 0`
+line, and both wait loops' capped, TSC-delta-annotated prints) are still in
+`main.cpp`, clearly marked `TEMPORARY DIAGNOSTIC`, and were left in rather than
+reverted - given the hang is now known to be intermittent rather than
+guaranteed-every-run, a future session re-running this same test repeatedly is
+likely to hit it eventually, and having this instrumentation already present
+(rather than needing to be re-added from scratch) directly helps root-cause that
+occurrence when it happens. Revert them (see the `TEMPORARY DIAGNOSTIC` comment
+blocks, `main.cpp`, `ProcessMsgRoutine`/`ShutdownSSDRoutine`/end of
+`OmapNKS4Init`) once the hang is either root-caused or the project decides they're
+no longer useful.
+
+---
+
 ## Live concurrency stress test, 2026-07-18: the video-ring race-check and `pop_free_urb`, exercised under real SMP load
 
 Direct response to the Opus review checkpoint above - a live, `kronosvm` (192.168.3.87,
@@ -2367,6 +2789,634 @@ No changes were made to the canonical `kronos_local.img`; all testing used fresh
 `cp --sparse=always` scratch copies in a dedicated, since-removed scratch directory on
 `kronosvm`. `make verify`'s host suite was re-run clean after every source change in this
 section (0 failures, both suites) - unaffected by these VM-only additions as expected.
+
+
+## General host-driven event injection via `/proc/OmapNKS4InjectEvent`, 2026-07-19
+
+**TEST SCAFFOLDING, NOT GROUND TRUTH** - everything in this section is a VM test-harness
+addition with no real-hardware counterpart and no disassembly citation, same class of
+addition as `vm_virtual_probe_inject_event()`/`vm_virtual_probe_test_setters()` (see the
+"`vm_virtual_probe`, further continued" section above) - clearly marked as such in both
+the code and here, not to be confused with this file's usual ground-truth reconstruction
+work.
+
+**The gap this closes**: `vm_virtual_probe_inject_event()` (`usb.cpp`, called once from
+`OmapNKS4Init()`) already proved the real `InterruptCallback()` ->
+`COmapNKS4Driver_ReceiveEventBuffer()` decode path works, but only for ONE hardcoded
+button+aftertouch packet baked in at compile time. Nothing let external test tooling
+drive arbitrary key/knob/analog-input/AT88-read traffic through the virtual board for
+actual test coverage - every test was stuck with that single fixed packet.
+
+**What was added:**
+
+- `usb.cpp`: `void vm_inject_event_buffer(const unsigned char *data, unsigned int len)`
+  - Placed immediately after `vm_virtual_probe_inject_event()`, same file.
+  - Takes an arbitrary caller-supplied byte buffer in the SAME wire format
+    `vm_virtual_probe_inject_event()`'s own header comment documents (`[dLo][dHi][idx]
+    [op]` 4-byte records, terminated by a Sync record), stages it into `sInterruptURB`'s
+    real transfer buffer (`urb+0x40`), sets `actual_length`/`status` (`urb+0x54`/`+0x38`)
+    exactly as `vm_virtual_probe_inject_event()` already does, and calls the real,
+    unmodified `InterruptCallback()` on it. No second/parallel decode logic - all
+    interpretation still happens inside the real `ReceiveEventBuffer()`.
+  - `len` is silently clamped to `sInterruptURB`'s own negotiated buffer size
+    (`urb+0x50`, the same `wMaxPacketSize` `configure_interrupt_urb()` stored there at
+    probe time - 64 bytes for the synthetic `vm_virtual_probe` device, see
+    `vm_write_ep(epArray + 0*0x2c, 0x81, 0x03, 64, 1)` in `vm_virtual_probe_inject()`),
+    then rounded down to a whole number of 4-byte records (`InterruptCallback()` computes
+    `numInts = actual_length / 4`, so a trailing partial record would be silently dropped
+    by that real division anyway).
+  - Gated on `sVmVirtualProbe` and `sInterruptURB` being set, same pattern as every other
+    `vm_*` function in this file.
+- `omapnks4_internal.h`: extern declaration for `vm_inject_event_buffer()`, added next to
+  `vm_virtual_probe_test_setters()`'s own declaration, with a matching "test scaffolding,
+  not ground truth" header comment.
+- `procfs.cpp`:
+  - New global `void *gProcInjectEvent` (mirrors `gProc`/`gProcProgress`/etc, but
+    documented as VM-only - stays NULL on real hardware).
+  - New write handler `int OmapNKS4ProcWriteInjectEvent(void *file, char *buffer,
+    unsigned int count, void *data)` - same `kmalloc_buf`/`copy_from_user`/`kfree` shape
+    every other proc write handler in this file already uses, but does NOT NUL-terminate
+    the buffer (this is a binary event buffer, not a keyword string to `strstr()`
+    against). Copies the raw written bytes verbatim into `vm_inject_event_buffer()` and
+    returns `count` on success. Its own `sVmVirtualProbe` check is defense-in-depth only
+    (the real gate is that the entry is never created when `sVmVirtualProbe` is 0 - see
+    below).
+  - `OmapNKS4ProcInitialize()`: after the four real entries (`OmapNKS4`,
+    `OmapNKS4ProgressBar`, `OmapNKS4HardwareVersion`, `OmapNKS4OmapVersion`) are created
+    exactly as ground truth requires, a FIFTH block, wrapped in `if (sVmVirtualProbe)`,
+    creates `/proc/OmapNKS4InjectEvent` (mode `0222`, write-only, no `read_proc`) and
+    wires it to `OmapNKS4ProcWriteInjectEvent` via the existing `proc_set()` helper.
+    Failure to create it is logged but non-fatal to `OmapNKS4ProcInitialize()` overall
+    (unlike the four real entries, which each return `-1` on failure) - this entry never
+    existing shouldn't tear down the four already-created real ones.
+  - `OmapNKS4ProcDone()`: mirror-image conditional removal, gated on `gProcInjectEvent`
+    being non-NULL (not on re-checking `sVmVirtualProbe`, so it stays a correct no-op even
+    if creation itself had failed).
+
+**Real-hardware safety (the actual requirement here)**: `/proc/OmapNKS4InjectEvent` is
+only ever created inside the `if (sVmVirtualProbe)` block added to
+`OmapNKS4ProcInitialize()`. When `sVmVirtualProbe` is 0 (i.e. always, on real hardware),
+this whole block is skipped, the `/proc` entry never exists, and every other line touched
+by this change is either inert (the new function bodies, never called) or a pure
+compile-time addition (the header declaration). `vm_inject_event_buffer()` itself also
+independently re-checks `sVmVirtualProbe` before doing anything, so even a direct,
+hypothetical future call from non-`/proc` code would still be a no-op on real hardware.
+Nothing about `vm_virtual_probe_inject_event()` or any other existing function was
+modified - this is a purely additive change.
+
+**Usage** (once a VM has booted with `vm_virtual_probe=1` and the board has finished
+configuring): write raw wire-format bytes to the new proc entry from inside the VM, e.g.
+a single button record (`idx=0x50`) followed by the Sync terminator:
+
+```sh
+printf '\x01\x00\x50\x01\x00\x00\x00\x87' > /proc/OmapNKS4InjectEvent
+```
+
+Any multiple-of-4-bytes buffer works; anything beyond 64 bytes (the synthetic device's
+negotiated `wMaxPacketSize`) or not dword-aligned is silently clamped/truncated by
+`vm_inject_event_buffer()` as described above, with a `printk` explaining what happened.
+
+**Build verification, this pass:**
+
+- Built from a fresh scratch copy under `/home/build/omapnks4_event_injection_<timestamp>/`
+  (not `/home/share`, per this project's standard CIFS/symlink workaround), against
+  `/home/build/linux-kronos`.
+- `make clean && make ko` - real Kbuild build, succeeded (exit 0), produced
+  `OmapNKS4Module.ko`. The only new-code-related build output is the same class of
+  pre-existing `-fpermissive` "invalid conversion ... to 'void*'" warning every other
+  `proc_set()` call site in this file already produces (function-pointer-to-`void*` isn't
+  strictly standard C++, but the module's own build flags explicitly allow it) - not a
+  regression, not an error.
+- `nm -C OmapNKS4Module.o` confirms both new symbols are present in the built object:
+  `vm_inject_event_buffer`, `OmapNKS4ProcWriteInjectEvent(void*, char*, unsigned int,
+  void*)`, and `gProcInjectEvent`.
+- `make clean && make verify` (host-side, no kernel/VM needed) - both existing suites
+  (`test_command`, `test_driver_receive_event_buffer`) still pass with 0 failures,
+  unaffected by this change (neither suite links `usb.cpp`/`procfs.cpp`).
+
+**NOT live-boot-tested this pass.** Nobody has actually booted a VM with this change,
+written bytes to `/proc/OmapNKS4InjectEvent`, and confirmed the event lands in
+`OmapNKS4ProcReadEvent()`'s ring / the input FIFO / calibration output as expected - only
+compile-time and host-side verification above. This was an explicit scope limit for this
+pass (a separate, concurrent debugging session already had exclusive use of the
+`kronosvm` sandbox), not an oversight. The concrete next step for whoever picks this up:
+boot `vm_virtual_probe=1`, write a few known-good and known-bad (wrong length, all-zero,
+oversized) buffers to the new proc entry, and confirm via `dmesg` +
+`/proc/OmapNKS4`/`/proc/nks4`-style event reads that the real decode path actually
+consumed them as expected - do not take this section's own "should work" reasoning as a
+substitute for that, per this project's own hard-won live-test-fabrication lesson (see
+the "⚠ CORRECTION" section above).
+
+
+## Bulk-video/URB-pool path confirmed working for a real, unmodified caller (2026-07-19)
+
+An earlier audit this session characterized the 256-entry `sBulkVideoURBs` pool and
+`SendPixelDataRegion`/`ContinueProcessingEvent` bulk-OUT chain as "entirely unemulated by
+`vm_virtual_probe`" — that characterization was already stale by the time it was written;
+the `vm_video_stress` work (see above) had already built real framebuffer infrastructure,
+and `WriteCallback`'s video-URB completion branch (`usb.cpp`, `*(int*)(urb+0x70)==1`) has
+never been gated to the stress-test's own synthetic producers.
+
+**Live-tested against a genuinely real, unmodified caller** (not a synthetic test
+producer): `COmapNKS4Driver_Configure()`'s own tail call,
+`COmapNKS4Driver_SetProgressBarPercent(0x0f)` (`driver.cpp:848`), runs unconditionally on
+every `vm_virtual_probe=1` boot and internally issues four real
+`OmapNKS4VideoAPI_SendFillData()` calls (`driver.cpp:441-445`). A temporary wire-decode
+diagnostic added to `vm_usb_submit_urb()` (matched on the `0xc4` opcode byte alone, same
+style as the existing `SetLCDBrightness`/`ResetModule` name-confirm checks) captured all
+four calls live on a real boot (`kronosvm`, run `pbtest_20260719_141603_3253938`):
+
+```
+DIAG SendFillData wire decode: width=553 base=172 color=192 height=553 (raw cmd=0xc4290200 len=12)
+DIAG SendFillData wire decode: width=553 base=172 color=192 height=553 (raw cmd=0xc4290200 len=12)
+DIAG SendFillData wire decode: width=97  base=75  color=9   height=97  (raw cmd=0xc4610000 len=12)
+DIAG SendFillData wire decode: width=97  base=75  color=1   height=97  (raw cmd=0xc4610000 len=12)
+```
+
+At first glance `width==height` in every sample looks like a decode bug (the two fields
+come from disjoint wire-byte ranges, `buf[0..2]` vs `buf[8..10]`, so an accidental alias
+would be surprising) — but cross-checking `driver.cpp:441` (`SendFillData(...,  empty,
+filled + base, empty)`) and `:444` (`SendFillData(..., filled, base, filled)`) shows
+ground truth's own `SetProgressBarPercent()` genuinely passes the **same value for both
+width and height** on two of its four calls. The live capture matches this exactly — not
+a bug, confirmation. Combined with the already-correct wire-packing format (`pack_field19`,
+matching this file's own documented ground-truth byte layout for the `0xc4` opcode) and
+`WriteCallback`'s already-general video-URB completion, this closes the "does bulk/video
+actually work for realistic callers" question: **yes**, for at least the single-chunk
+`SendFillData` case a real, unmodified driver call already exercises on every boot.
+
+**Still open, not exercised by this test**: `SendPixelDataRegion`'s **multi-chunk
+row-wrap streaming** for regions wider than one `ContinueProcessingEvent` chunk — the
+`vm_video_stress` section's own "Does not prove" list already flagged this as untested,
+and nothing this pass did changes that. `Eva` (the boot/UI process, a separate consumer
+of the video/LCD family per the OA.ko call-inventory work) has also never actually been
+run against this virtual board — only this module's own internal progress-bar caller has.
+
+**2026-07-19 follow-up: the diagnostic above was generalized to all 5 video-bulk opcodes**
+(`0x81`/`0xc0`/`0xc2`/`0xc4`/`0xc5`, `vm_usb_submit_urb()` in `usb.cpp`, matched by opcode
+byte using `ProcessEvents`' own documented wire-byte layouts — `video.cpp`'s "CORRECTION,
+2026-07-18" comment above `ProcessEvents()`), and a **real, freshly re-run boot** (`run_
+20260719_144946`, verdict **PASS** — no hang this time) was fed through
+`virtualOmapNKS4/wire_to_vpanel.c`, which calls the actual `vpanel.c` draw API with the real
+captured values to produce a genuine, viewable 800×600 BMP — closing the loop from "the wire
+dispatch works" to "here is an actual rendered picture" this project's video-side effort has
+been building toward. As expected given the limitation above, only `SendFillData` (the
+progress bar) appears in the capture, so the render is a small progress-bar rectangle on an
+otherwise-black screen, not a full boot logo — the honest, non-fabricated result. Full
+writeup, the real captured log, the checked-in BMP, and pixel-level verification (3 distinct
+colors, not blank/uniform) are in `virtualOmapNKS4/README.md`'s own "Live wire capture → real
+render" section — not duplicated here to avoid the two READMEs drifting out of sync.
+
+
+## Hang-rate study, 2026-07-19: real numbers instead of single-shot runs, plus a precise new localization
+
+Direct follow-up to this file's own "**IMPORTANT CORRECTION**" above ("Confirmed
+reproducible... two independent runs" turned out to be overstated once someone
+actually re-ran it many times) and its "concrete next step" ("a tight loop of N
+(e.g. 20-30) back-to-back `run_vm_virtual_probe_test.sh` invocations, logging the
+PASS/PARTIAL rate, to first establish an actual hang frequency"). This section is
+that study, run for real, plus (unplanned, opportunistic) a materially better
+localization of the hang than any prior session reached.
+
+**Method**: `tools/run_vm_virtual_probe_test.sh`, invoked sequentially (never
+concurrently) against `kronosvm`, each call individually wrapped in its own
+`timeout` with margin beyond the script's internal `-t` poll budget so the
+script's own `EXIT` trap always gets to run its cleanup (kill its qemu, delete its
+per-run disk image copy) even if something upstream is impatient. `pgrep -af
+qemu-system-i386` and `df -h /` on `kronosvm` were checked before/after runs to
+confirm no leftover processes or disk growth across the batch.
+
+**Run 1 was thrown out, and why (a real methodological finding in its own
+right)**: the first invocation this session used too tight an outer `timeout`
+(250s) for the actual build+`guestfish`+boot overhead (~90-100s before the poll
+loop even starts) plus a 200s poll budget, so it was killed by the *outer*
+wrapper before it could reach either a genuine PASS or its own internal timeout -
+inconclusive by construction, not a real data point. Worse: while it was running,
+a **second, independent `qemu-system-i386` + `run_vm_virtual_probe_test.sh`
+invocation appeared on `kronosvm` that this session did not launch** - evidenced
+by `tools/results/run_20260719_144946/` (a genuine, complete PASS trace, ending
+`[loadoa] done`) materializing locally under this same `/home/share`-mounted
+results directory, ~27s after this session's own run started, with its own
+remote per-run disk image never cleaned up (inconsistent with *this* script's own
+`EXIT` trap, consistent with a *different* script invocation's trap running to
+completion independently). **Direct confirmation this was a real concurrent
+session, not a stale leftover**: partway through writing up this section, this
+exact `README.md` file grew by 15 lines *while this session was mid-batch*
+(the "2026-07-19 follow-up" video-render paragraph above, referencing that same
+`run_20260719_144946` as its own freshly-captured PASS evidence) - i.e. a
+different agent session was concurrently using `kronosvm` for a different
+(video-rendering) investigation and concurrently editing this same README, on
+the same `/home/share` CIFS mount, at the same time as this rate study. **Lesson
+for future sessions**: `kronosvm` and this shared workspace are not
+single-tenant-guaranteed just because one session's own `pgrep` check comes back
+empty at one instant - a concurrent session can start between that check and the
+next command. This session's own runs 2 onward did not detect any further
+collisions (`pgrep`/`df` stayed clean and consistent with only this session's own
+qemu instances throughout), but this is worth flagging prominently for anyone
+who sees an unexplained anomaly in a future batch here.
+
+Wrapper timeout was fixed to 260s outer / 120s internal poll (`-t 120`) for every
+run from Run 2 onward - ample margin confirmed by every subsequent run's own
+measured wall-clock duration (94-96s for a PASS, 194-198s for a PARTIAL, both
+comfortably inside 260s).
+
+**Results, 20 clean sequential runs (Run 1 excluded as above), unmodified source,
+`kronosvm`, all within a ~35-minute window (12:11-12:46 local)**:
+
+| Run | Verdict | Duration | 1-min load avg (pre-run) | Furthest milestone |
+|---|---|---|---|---|
+| 2  | PASS    | 96s  | (not recorded) | loadoa done |
+| 3  | PASS    | 95s  | 0.49 | loadoa done |
+| 4  | PARTIAL | 196s | 1.68 | Configure(): NKS4 versions reported |
+| 5  | PASS    | ~100s| (not recorded, live-monitored) | loadoa done |
+| 6  | PARTIAL | -    | (not recorded) | Configure(): NKS4 versions reported (see live capture below) |
+| 7  | PASS    | 95s  | 0.57 | loadoa done |
+| 8  | PASS    | 95s  | 1.10 | loadoa done |
+| 9  | PARTIAL | 195s | 1.38 | Configure(): NKS4 versions reported |
+| 10 | PASS    | 95s  | 0.89 | loadoa done |
+| 11 | PASS    | 94s  | 1.39 | loadoa done |
+| 12 | PARTIAL | 194s | 1.07 | Configure(): NKS4 versions reported |
+| 13 | PARTIAL | 194s | 1.07 | Configure(): NKS4 versions reported |
+| 14 | PASS    | 95s  | 1.94 | loadoa done |
+| 15 | PARTIAL | 197s | 1.03 | Configure(): NKS4 versions reported |
+| 16 | PASS    | 94s  | 1.28 | loadoa done |
+| 17 | PARTIAL | 196s | 1.19 | Configure(): NKS4 versions reported |
+| 18 | PASS    | 95s  | 0.95 | loadoa done |
+| 19 | PARTIAL | 198s | 1.36 | Configure(): NKS4 versions reported |
+| 20 | PASS    | 94s  | 1.18 | loadoa done |
+| 21 | PARTIAL | 195s | 1.26 | Configure(): NKS4 versions reported |
+
+**Real, computed hang rate: 9/20 = 45%.** This is dramatically higher than the
+"6/6 clean" result the immediately-preceding continuation session reported (this
+file's own "hang did not reproduce in 6/6 runs" section above) - that session's
+own honest caveat ("most promising concrete next step... a tight loop of N
+back-to-back invocations, to first establish an actual hang frequency") turns out
+to have been exactly right to worry about: 6 runs was not enough to see the true
+rate, and this bug is common, not rare.
+
+**Pattern found #1 - every single hang stalls at the identical tracked
+milestone.** All 9 PARTIAL runs above (and Run 1, excluded but consistent) show
+`Configure(): NKS4 versions reported` as the furthest milestone the script's own
+tracker reaches - never earlier, never later, never a different milestone. This
+directly contradicts the older "stall point that varies run-to-run" observation
+this file records from the now-refuted CPU-0-pinned-RTAI-thread hypothesis
+sessions - but see Pattern #3 below for why that tracker-level consistency is
+misleading about *where the code is actually stuck*.
+
+**Pattern found #2 - host load average: a weak trend, not a clean predictor.**
+Among the 17 runs with a recorded pre-run 1-minute load average: PASS runs
+averaged 1.09 (range 0.49-1.94), PARTIAL runs averaged 1.26 (range 1.03-1.68).
+The PARTIAL group's mean is somewhat higher, but the ranges overlap heavily -
+Run 14 (PASS) had the single highest load of the whole batch (1.94) and passed
+cleanly, while Run 15 (PARTIAL) had one of the lowest (1.03) and hung. **This is
+not a usable predictor** - host load is not driving the hang in any simple
+threshold sense, though a noisier/weaker contribution (e.g. affecting scheduling
+timing at the margin) can't be ruled out from 20 samples. No time-of-day pattern
+could be assessed - the whole batch ran inside one continuous 35-minute window.
+
+**Pattern found #3 (the real news this session): the hang is NOT actually inside
+either worker thread's wait loop, AND a live capture plus new instrumentation
+localizes it far more precisely than "at or after `OmapNKS4Init`'s `return 0`."**
+
+*Live QEMU-monitor capture of a genuine, in-progress hang* (Run 6,
+`run_20260719_150641`, backgrounded + a `gawk`-based log-tailing monitor that
+only alerts on a real stall, then two `info cpus`/`info registers -a` samples 8s
+apart via `qmon.sock` and a small `socket.AF_UNIX` Python probe,
+`/tmp/qmon_probe.py`):
+
+```
+Sample 1: CPU0 EIP=4011978d HLT=1 | CPU1 EIP=40103908 HLT=0 (running)
+          | CPU2 EIP=4011978d HLT=1 | CPU3 EIP=4011978d HLT=1
+Sample 2 (+8s): CPU0 EIP=4011978d HLT=1 (unchanged, idle)
+          | CPU1 EIP=401150a0 HLT=0 (ADVANCED - real work, not a fixed spin)
+          | CPU2 EIP=40115090 HLT=0 (was HLT=1/idle, now running, near CPU1's EIP)
+          | CPU3 EIP=4011978d HLT=1 (unchanged, idle)
+VM status: running (not a VM-level deadlock)
+```
+
+Not a classic single-fixed-EIP tight spin (EIPs move between samples, consistent
+with earlier sessions' own "resampling minutes apart showed the EIP had moved"
+observation for a different, since-abandoned hang instance) - genuine, varying
+work is happening on 2 of 4 vCPUs while the VM overall stays responsive.
+
+*The full captured console log (413 lines) for that same hang* - not visible
+through the milestone tracker alone, since these are the pre-existing "TEMPORARY
+DIAGNOSTIC" prints from the previous continuation session, not part of the
+script's tracked `MILESTONES` array - showed **both background kernel threads
+alive and behaving completely normally for the entire duration of the stall**:
+`ProcessMsgRoutine` printed all 40 of its capped diagnostic lines (each
+~2-10ms per 3-jiffy wait, genuine blocking) and `ShutdownSSDRoutine` printed 9
+full iterations before the run's timeout, each iteration's 64-bit cycle delta
+(`delta_hi<<32 | delta_lo`) computing to **~10.00 seconds** at the reported
+`cpu_khz` - exactly its designed ~10s (10000-jiffy) period. This is new evidence
+(no prior session's hang lasted long enough to see `ShutdownSSDRoutine`'s own
+wait loop actually fire) that **extends the earlier "SCHED_RR wait-loop spin
+hypothesis (a) - REFUTED" finding (previously established only for
+`ProcessMsgRoutine`) to `ShutdownSSDRoutine` too**, with real data instead of "no
+structural reason to expect it to differ."
+
+Since both worker threads are provably alive and well-behaved throughout, and
+`create_thread()` for both is called from `OmapNKS4Init` (`main.cpp`) only
+*after* `COmapNKS4Driver_Configure()` (`driver.cpp`) has already returned
+successfully, **Configure() itself must have already completed successfully in
+this hang** - the milestone tracker's "stuck at NKS4 versions reported" is an
+artifact of that being the last *tracked* printk, not evidence execution is
+still inside `Configure()`.
+
+**New targeted instrumentation added this session** (both files, gated/ungated
+as noted, all marked `TEMPORARY DIAGNOSTIC`, not ground-truthed, meant to be
+removed once the hang is root-caused):
+
+- `driver.cpp`, `COmapNKS4Driver_Configure()`'s tail (`SetNumberOfAnalogInputs`
+  through `SetProgressBarPercent`, the ~7 command round-trips after the "NKS4
+  versions reported" printk): one `printk` before each call, as a secondary net
+  in case a *different* hang instance turns out to be in here instead.
+  Deliberately **ungated** (no `sVmVirtualProbe` check) - `driver.cpp` is also
+  compiled standalone into the host-side `make verify` suite
+  (`verify/host_stubs.cpp`), which does not link `main.cpp`'s definition of
+  `sVmVirtualProbe`; an earlier version of this edit gated on it and broke
+  `make verify` with an undefined-reference link error (caught and fixed before
+  this pass finished - `make verify` now passes clean, 0 failures both suites,
+  confirmed after the fix). Matches this codebase's existing convention of the
+  `PMR#`/`SSD#` diagnostics already being unconditional for the same reason.
+- `main.cpp`, `OmapNKS4Init()`, bracketing the two `create_thread()` calls and
+  `CActiveSenseThread_Setup()`: a `printk` immediately before and after each.
+
+**Result - the exact stuck call, confirmed twice, live:** two further hangs this
+session (Run 25 / `run_20260719_155841` and Run 26 / `run_20260719_160255`, both
+with the new instrumentation in place) show the **identical** pattern:
+
+```
+DIAG about to create_thread(kOmapNKS4MsgRoutine)
+DIAG kOmapNKS4MsgRoutine create_thread() returned, running=1
+DIAG kShutdownSSDRoutine create_thread() returned, running=1
+DIAG about to call CActiveSenseThread_Setup()
+   <-- both worker threads' own PMR#/SSD# diagnostics print normally from here on,
+       proving those threads are alive and unrelated to the stall -->
+   <-- NO "DIAG CActiveSenseThread_Setup() returned" LINE ANYWHERE IN EITHER LOG -->
+```
+
+Compare a PASS run with the same instrumentation (`run_20260719_155326`): the
+`"CActiveSenseThread_Setup() returned"` line appears within 1-2 log lines of the
+`"about to call"` line, every time, with no exception across the 3 clean
+post-instrumentation PASS runs (22, 23, 24) this session also captured.
+Post-instrumentation validation batch: 5 runs, 3 PASS / 2 PARTIAL (25, 26) - a
+40% rate, statistically indistinguishable from the pre-instrumentation 45%,
+i.e. the printk-only instrumentation does not appear to have changed the hang's
+frequency or character, and it caught the exact same stuck call twice
+independently.
+
+**Conclusion: `OmapNKS4Init`'s calling thread enters `CActiveSenseThread_Setup()`
+and, on hung runs, never returns from it.** This is a substantially more precise
+localization than this file's previous best ("at or after `OmapNKS4Init`'s own
+bare `return 0`") - it points at one specific function:
+`CActiveSenseThread_Setup()` (`realtime.cpp`), which heap-allocates a
+`CActiveSenseThread`, computes `GetMaxRealTimePriority() - 10`, and calls
+`CreateRealTimeWithCPUAffinity()` (real RTAI-task creation: `rtwrap_pthread_attr_*`
+→ `rtwrap_pthread_create()` → `rt_task_init`/`rt_typed_sem_init`/`rt_task_resume`
+→ `rtwrap_set_debug_traps_in_rt_task()` → `rtwrap_set_runnable_on_cpuid()`, all in
+`rtwrap.cpp`). A quick read of `rtwrap_pthread_create()` itself shows no obvious
+blocking wait (`rt_task_resume` fires the new task asynchronously via
+`posix_wrapper_fun` and returns immediately, unlike the plain-`kernel_thread()`
+`create_thread()` path's `wait_for_completion()`) - so if the hang truly is
+inside this call chain, the likelier candidates are `rtwrap_set_debug_traps_in_rt_task()`
+or `rtwrap_set_runnable_on_cpuid()` (neither read in detail this pass), or
+something inside `RTAIVirtualDriver.ko`'s own handling of whatever syscall/ioctl
+either of those makes. **Not yet instrumented at that finer grain - this is the
+concrete next step for a future session**, and it directly supersedes the
+now-stale "instrument `ProcessMsgRoutine`/`ShutdownSSDRoutine`'s wait loops
+directly" next-step this file previously recorded (that instrumentation was
+added and did its job - both are now conclusively cleared).
+
+**Explicit caveat vs. the earlier "REFUTED" `CActiveSenseThread` finding above**
+(search this file for `"REFUTED (same session, immediately after writing the
+above)"`): that test *skipped* `CActiveSenseThread_Setup()` entirely (under an
+older, simpler `main.cpp`, before the video-stress/event-injection/extra-DIAG
+additions) and the hang still occurred, at a *later* point
+(`"OmapNKS4Init about to return 0"`). That refutation remains valid for what it
+actually tested - it proves the hang does not *require*
+`CActiveSenseThread_Setup()` to exist. It does not, in hindsight, prove
+`CActiveSenseThread_Setup()` can never itself be a hang point - today's
+before/after-bracketed, twice-repeated, live evidence says it currently is (at
+least much of the time). The most likely reconciliation: this is not one single
+root cause but a family of related timing-sensitive gaps in the
+RTAI-substitute/scheduling layer (`RTAIVirtualDriver.ko`'s already-documented
+"no genuine RTAI timebase" limitation, `nano2count`/`rt_sleep`), and which
+specific gap actually manifests has shifted as the surrounding code has grown
+more complex over successive sessions.
+
+**Honest overall assessment**: this is a **genuine, real, fairly common
+(40-45%) intermittent race**, not rare/acceptable VM-testing noise - a rate this
+high, this consistent across 25 total clean runs (20 pre- + 5
+post-instrumentation) spanning two separately-timed batches, is not sampling
+noise at this sample size. It is now precisely enough localized
+(`CActiveSenseThread_Setup()`, specifically something inside or downstream of
+its `CreateRealTimeWithCPUAffinity()`/`rtwrap_pthread_create()` call chain) that
+a future session has a concrete, narrow target instead of "somewhere after
+`Configure()`." Whether it is worth chasing further depends on project
+priority: `vm_virtual_probe`/`vm_video_stress`/the event-injection scaffolding
+are all VM-only test harnesses with no real-hardware counterpart (this file's
+own repeated "TEST SCAFFOLDING, NOT GROUND TRUTH" framing), so this specific bug
+cannot itself be a real-hardware defect - but the underlying RTAI-substitute
+timing gap it's exposing could plausibly affect other RTAI-real-time-task
+creation paths this project cares about beyond just `CActiveSenseThread`, which
+is the strongest argument for continuing to chase it rather than shrugging it
+off as harness-only noise.
+
+**Artifacts**: `tools/results/rate_study_20260719/driver.log` (full run-by-run
+log with pre-run `pgrep`/`uptime` snapshots); the diagnostic `printk`s described
+above remain in `driver.cpp`/`main.cpp`, clearly marked, per this file's own
+established convention of leaving useful in-place diagnostics for the next
+session rather than reverting them.
+
+---
+
+## Hang ROOT-CAUSED AND FIXED, 2026-07-19 (continuation session): `RTAIVirtualDriver.ko`'s `set_debug_traps_in_rt_task()` return-type/ABI mismatch; 19/19 clean post-fix runs vs. the prior 45% baseline
+
+Direct continuation of the "Hang-rate study" section immediately above, picking up
+its own concrete next step exactly as scoped: instrument
+`rtwrap_pthread_create()`, `rtwrap_set_debug_traps_in_rt_task()`, and
+`rtwrap_set_runnable_on_cpuid()` at finer grain than that session reached, catch
+a live hang, and pin down the exact stuck call.
+
+**Instrumentation added** (temporary, `printk("<6>OmapNKS4: DIAG ...")`,
+matching this file's established convention): before/after markers around
+`rtwrap_pthread_create()`'s own `rt_task_init()`/`rt_typed_sem_init()`/
+`rt_task_resume()` calls (`rtwrap.cpp`) and around
+`CreateRealTimeWithCPUAffinity()`'s `rtwrap_set_debug_traps_in_rt_task()`/
+`rtwrap_set_runnable_on_cpuid()`/rollback-path calls (`realtime.cpp`), plus one
+extra marker around `rtwrap_pthread_cancel()`'s own `rt_task_delete()` call
+(the rollback path's actual teardown primitive) once the first live hang made
+clear that path was the relevant one. All of this instrumentation has since
+been **reverted** (the bug is root-caused and fixed, per this file's own
+"remove once root-caused" convention already used for the wait-loop
+diagnostics elsewhere) - the evidence below is preserved from the live console
+logs captured while it was in place, not left in the source.
+
+**First live hang, instrumented (`run_20260719_161546`)** - the exact DIAG
+sequence, verbatim from the captured console log:
+
+```
+OmapNKS4: DIAG about to call CActiveSenseThread_Setup()
+OmapNKS4: DIAG about to call rtwrap_pthread_create()
+OmapNKS4: DIAG about to call rt_task_init(task=f719d840)
+OmapNKS4: DIAG rt_task_init() returned 0
+OmapNKS4: DIAG about to call rt_typed_sem_init(task+0x580=f719ddc0)
+OmapNKS4: DIAG rt_typed_sem_init() returned
+OmapNKS4: DIAG about to call rt_task_resume(task=f719d840)
+OmapNKS4: DIAG rt_task_resume() returned
+OmapNKS4: DIAG rtwrap_pthread_create() returned 0, pTask=f719d840
+OmapNKS4: DIAG about to call rtwrap_set_debug_traps_in_rt_task()
+OmapNKS4: DIAG rtwrap_set_debug_traps_in_rt_task() returned 71
+OmapNKS4: DIAG debug-traps rc!=0, rolling back: about to call rtwrap_clear_debug_traps_in_rt_task()
+OmapNKS4: DIAG rtwrap_clear_debug_traps_in_rt_task() returned, about to call rtwrap_pthread_cancel(pTask=f719d840)
+OmapNKS4: DIAG about to call rt_task_delete(task=f719d840)
+```
+
+That is the **entire** rest of the console output for that boot - no
+`"rt_task_delete() returned"` line, no `"rtwrap_pthread_cancel() returned"`
+line, nothing else, ever (confirmed against the full log, both worker
+threads' pre-existing PMR#/SSD# diagnostics kept printing normally in
+parallel the whole time, exactly as the section above already established).
+**The exact stuck call is `rt_task_delete()`** (`rtwrap.cpp`'s
+`rtwrap_pthread_cancel()` -> `RTAIVirtualDriver.ko`'s `rt_task_delete()`),
+called from `CreateRealTimeWithCPUAffinity()`'s own rollback path after
+`rtwrap_set_debug_traps_in_rt_task()` reported failure (rc=71, not 0).
+
+**Second live hang, instrumented (`run_20260719_162122`)**: independently
+reproduced the identical sequence byte-for-byte (`rtwrap_set_debug_traps_in_rt_task()
+returned 71`, rollback, stuck forever at `rt_task_delete()`) - not a one-off.
+
+**The critical third data point (`run_20260719_161919`, a PASS)**: same
+instrumentation, same `rtwrap_set_debug_traps_in_rt_task() returned 71` -
+**every single call returns this same garbage value, not just on the runs
+that hang** - but this time `rt_task_delete()` returned promptly (`rc=0`) and
+the boot completed normally. This is the finding that cracked it open: the
+"debug traps failed" branch is being taken on **100% of runs**, but the
+rollback it triggers only **hangs** on a fraction of those - i.e. this is a
+two-part bug, and the intermittency lives entirely in the second part.
+
+**Root cause, part 1 - why `rtwrap_set_debug_traps_in_rt_task()` always
+"fails"**: `RTAIVirtualDriver.c`'s implementation of the real external this
+routes through, `set_debug_traps_in_rt_task()`, was declared `void` with a
+completely empty body:
+
+```c
+void set_debug_traps_in_rt_task(void)
+{
+}
+EXPORT_SYMBOL(set_debug_traps_in_rt_task);
+```
+
+`OmapNKS4Module.ko`'s own `rtwrap.cpp`, however, declares this exact external
+as `int set_debug_traps_in_rt_task(void)` and `CSTGThread::CreateRealTimeWithCPUAffinity`
+(`realtime.cpp`) genuinely branches on the returned value - ground truth
+already established this is load-bearing on real hardware (see
+`omapnks4_internal.h`'s own `rtwrap_set_debug_traps_in_rt_task` comment,
+"`CSTGThread::CreateRealTimeWithCPUAffinity` actually tests it ... to decide
+whether to tear the just-created RT task back down - a real, load-bearing
+return value, not a benign leftover register"). A `void`-returning function
+with an empty body never writes EAX at all (there is nothing to write) - the
+caller reads back whatever value happened to already be sitting in EAX at
+the call site, which is why every single call observed this session returned
+the identical, meaningless value **71**: not "random" in the colloquial
+sense, but genuinely undefined behavior at the C level, coincidentally
+deterministic here only because the surrounding code path is itself
+deterministic run to run.
+
+**Root cause, part 2 - why the resulting spurious rollback only sometimes
+hangs**: `RTAIVirtualDriver.c`'s `rt_task_delete()` tears down its kthread
+via `kthread_stop()`, which requires the thread function to observe
+`kthread_should_stop()`/`t->stopping` and return. But the RT task this
+specific call chain just created is `CActiveSenseThread`'s task, whose entry
+point (`CActiveSenseThread::ThreadRoutine()`, `realtime.cpp`) is, by design,
+a genuine infinite loop (`for (;;) { wait_until_deadline(...); ... }`) with
+no stop-check anywhere in it - matching real RTAI's own convention of
+tearing down RT tasks by forcible deletion, not a cooperative return. This is
+a real, unavoidable race: `rtwrap_pthread_create()` calls `rt_task_resume()`
+(which wakes the kthread) only moments before the rollback's
+`rt_task_delete()` sets `t->stopping=1` - if the scheduler dispatches the
+kthread first, it reaches `t->entry(t->data)` before checking `stopping`
+again and loops forever, so `kthread_stop()` blocks on a thread function that
+will never return (`run_20260719_161546`/`_162122`); if `stopping=1` lands
+first, the kthread's own `if (!kthread_should_stop() && !t->stopping)
+t->entry(...)` guard correctly skips calling `entry()` at all, the thread
+returns immediately, and `kthread_stop()` returns promptly
+(`run_20260719_161919`). This race, not anything about the debug-trap check
+itself, is what makes the bug intermittent (~40-45% observed) rather than
+deterministic.
+
+**The fix** (`RTAIVirtualDriver.c`, `set_debug_traps_in_rt_task()`): changed
+the return type to `int` and made it explicitly `return 0;` (success),
+matching what the real ground-truth OA.ko-family disassembly already
+established this value means. This is minimal and safe: it removes the
+*only* code path that reaches the unsafe `rt_task_delete()`-on-a-still-live-
+infinite-loop-task rollback during this module's own `vm_virtual_probe` boot
+sequence - `CreateRealTimeWithCPUAffinity()` now always takes its intended
+success path (`rtwrap_set_runnable_on_cpuid()` + `return 1`), never calling
+`rt_task_delete()` on a task it just successfully created. It deliberately
+does **not** attempt to fix the deeper, structural limitation that a plain
+Linux kthread cannot be forcibly cancelled mid-infinite-loop the way a real
+RTAI hard-RT task can (`rt_task_delete()`'s own comment in
+`RTAIVirtualDriver.c` already documents `rt_task_suspend()`/`rt_task_resume()`
+as "best-effort only" for the same underlying reason) - that gap is real and
+would still bite any caller that legitimately needs to cancel an
+already-running RT task, but no confirmed caller on this module's own boot
+path does, so leaving it unaddressed is the smaller, better-scoped change
+rather than a speculative rewrite of `rt_task_delete()`'s own cancellation
+semantics.
+
+**Real before/after numbers, this session, `kronosvm`, sequential runs, `-t
+120`**:
+
+| Phase | Runs | Hangs (PARTIAL) | Rate |
+|---|---|---|---|
+| Pre-fix, this session (`run_20260719_161546`/`_161919`/`_162122`) | 3 | 2 | 67% (small n, consistent with the 45% baseline within sampling noise) |
+| Pre-fix, prior session's own 20-run study (see "Hang-rate study" above) | 20 | 9 | 45% |
+| **Combined pre-fix, both sessions** | **23** | **11** | **~48%** |
+| **Post-fix** (`run_20260719_162557` through `run_20260719_165639`, 19 runs total - 4 with the diagnostic `printk`s still in place confirming `rtwrap_set_debug_traps_in_rt_task()` now returns 0, 15 with them already reverted to confirm the fix holds on the clean, final source) | **19** | **0** | **0%** |
+
+19/19 clean PASS runs in a row post-fix, against a measured pre-fix baseline
+of ~48% across 23 runs spanning two sessions, is not sampling noise: the
+probability of 19/19 successes by chance alone if the true hang rate were
+still ~45-48% is on the order of 0.55^19 ≈ 0.00003 (about 1 in 30,000). Every
+post-fix run was a genuine fresh build (`RTAIVirtualDriver.ko` rebuilt from
+the fixed source at `/home/build/rtaivd_hangfix_20260719`, deployed to the
+`/home/build/omapnks4_boot_test/RTAIVirtualDriver.ko` reference location the
+test script's own `loadoa` uses; a pre-fix backup was kept at
+`RTAIVirtualDriver.ko.pre_hangfix_backup` in the same directory) plus a fresh
+`OmapNKS4Module.ko` build and fresh disk-image copy per run (the test
+script's own standard per-run hygiene). `pgrep -af qemu-system-i386` and `df
+-h /` on `kronosvm` were checked clean (no leftover processes, no unexpected
+disk growth) both before this session's work started and after the full
+batch finished. `make verify` (host-side known-answer test suite) re-run
+clean, 0 failures, after reverting the temporary `printk` instrumentation.
+
+**What remains open**: the deeper structural gap - `RTAIVirtualDriver.ko`'s
+`rt_task_delete()` cannot forcibly cancel a kthread already executing an
+entry function with no `kthread_should_stop()` check, unlike real RTAI's
+genuine forcible task deletion - is real and undisturbed by this fix. It is
+not currently reachable by any confirmed caller on this module's own boot
+path (the one call site that *did* reach it, this exact bug, is now fixed at
+the point that made it unreachable), but any future RTAI-substitute work
+that legitimately needs to cancel a running RT task (as opposed to one that
+never got to start, which works fine today) should expect to hit this same
+class of problem and will need a real fix in `rt_task_delete()`/
+`rtv_thread_fn()` itself (e.g. a bounded `kthread_stop()` wait with a
+documented fallback, or teaching entry-point loops like
+`CActiveSenseThread::ThreadRoutine()` to cooperatively check a stop flag -
+both are real behavior changes relative to genuine RTAI's own forcible-
+cancellation semantics, so neither was in scope for this pass's "minimal,
+safe, confirmed" fix). Flagged for whoever next needs genuine RT-task
+cancellation, not fixed here.
+
+**Files changed**: `RTAIVirtualDriver/RTAIVirtualDriver.c`
+(`set_debug_traps_in_rt_task()`, `void` -> `int`, explicit `return 0`) is the
+actual fix. `OmapNKS4Module/realtime.cpp` and `OmapNKS4Module/rtwrap.cpp`
+carried the temporary finer-grained `printk` instrumentation described above
+during this investigation; both are back to their pre-session state (no
+diagnostic `printk`s added by this pass remain) now that the bug is
+root-caused and fixed.
 
 
 ## Fidelity notes

@@ -55,6 +55,65 @@ This directory is also the K1 reference baseline for the sibling
 [`K2_V01R10/`](../K2_V01R10/) project (Kronos 2's own panel firmware,
 `KRONOS2S_V01R10.VSB`) — see that directory's own README for its port/validation status.
 
+## 2026-07-19 — SPI/I2C0 mis-attribution resolved
+
+Closed the one open item the completion pass above didn't touch: whether `cpsoc.c`'s
+own "third device" command-relay primitives (`FUN_c00032f8`/`FUN_c00033f0`, documented
+there as `cpsoc_spi_submit_write`/`cpsoc_spi_submit_read`) are genuinely SPI, or - as
+`panelbus_dispatch.c`'s own hardware section suspected but didn't chase down - the same
+real on-chip I2C0 controller that file's own `panelbus_i2c_read_bytes` uses. This
+mattered concretely for a future virtual-board emulator: one shared I2C0 bus controller
+to model, or two independent peripherals.
+
+**Finding: I2C0, definitively — not SPI.** Rebuilt the minimal single-`PT_LOAD` ELF32
+ARM wrapper around `Decomp/subsystem/KRONOS_V06R06.VSB` (raw payload at file offset
+`0x100`, per this doc's own "Ghidra setup" section) and loaded it fresh into an idle
+Ghidra MCP session (no concurrent agents this pass, so live per-call queries were used
+directly rather than a pre-fetched static dump). Evidence, strongest first:
+
+1. `FUN_c00033f0` — cpsoc.c's own "SPI read" primitive — is not just structurally
+   similar to `panelbus_dispatch.c`'s `panelbus_i2c_read_bytes`. `get_xrefs_to` on
+   `0xc00033f0` returns exactly 3 static callers firmware-wide: `FUN_c00073fc`,
+   `FUN_c0010b58` (`panelbus_rx_dispatch_loop`, `panelbus_dispatch.c`), and `FUN_c0010f60`
+   (`cpsoc_read_event_pair`, `cpsoc.c`). **It is the literal same function**, independently
+   transcribed under two names by two different reconstruction passes that didn't cross-
+   check addresses against each other.
+2. Both sides fetch their register-block handle via `FUN_c0001a00(_, 0)`. Fresh decompile
+   confirms `FUN_c0001a00` IS `panelbus_dispatch.c`'s own `panelbus_i2c_base`
+   (byte-identical body: `return param_2 ? DAT_c0001a14 : DAT_c0001a18;`). A direct
+   `read_memory` on that function's own literal pool this pass reads
+   `DAT_c0001a14 = 0x01e28000` (I2C1) and `DAT_c0001a18 = 0x01c22000` (I2C0) — the real
+   TI OMAP-L138/AM1808 I2C1/I2C0 peripheral base addresses per the public TRM, exactly as
+   `panelbus_dispatch.c` already documented. Every real call site on both the cpsoc.c and
+   panelbus_dispatch.c sides passes selector `0` — I2C0.
+3. Contrast case, confirming the method actually discriminates rather than rubber-
+   stamping everything as I2C0: `cpsoc.c`'s OTHER handle-selector, `cpsoc_get_handle`
+   (`FUN_c0001a1c`, immediately adjacent in the image), has its own, DIFFERENT literal
+   pool — read this pass at `0xc0001a30`/`0xc0001a34` — holding `0x01f0e000`/`0x01c41000`,
+   neither of which matches any OMAP-L138 I2C/TRM peripheral base. That handle feeds
+   `omap_spi_write` (`omap_l108_spi.c`, register shape `+0x3c`/`+0x40`, structurally
+   distinct from the `+0x08`/`+0x14`/`+0x1c`/`+0x20`/`+0x24` I2C0 shape) for the same
+   device's real ADC channel reads — genuinely SPI, unaffected by this finding.
+
+**A second duplicate surfaced chasing this**, flagged but not merged: `0xc0010b58`
+(`panelbus_rx_dispatch_loop` in `panelbus_dispatch.c`) is ALSO independently
+reconstructed in `cpsoc.c` as `cpsoc_poll_reg_reads` — same address, same real call shape,
+two separately-transcribed C bodies. Left as two definitions per this project's standing
+convention of flagging cross-file duplicates rather than silently unifying them.
+
+**Files updated**: `cpsoc.c` (renamed `cpsoc_spi_submit_write`/`_read` to
+`cpsoc_i2c0_submit_write`/`_read`, corrected every comment asserting SPI for these two
+functions and their callers, added the full evidence trail as a file-level correction
+note above the "third SPI-bus device" section — the ADC-polling half of that section's
+own name is unaffected and remains genuinely SPI); `panelbus_dispatch.c` (upgraded its
+own "very likely" flag to CONFIRMED with the address/xref evidence above); this README
+(the two mentions above, struck through/marked RESOLVED rather than deleted).
+
+**Confidence: high.** This rests on literal address/constant matches (the same function
+address, the same base-address-selector function, the same hex constant read directly
+from the image), not on register-offset-shape similarity alone — the ambiguity the
+2026-07-18 pass left open is fully closed.
+
 ## 2026-07-18 — systematic parallel reconstruction pass
 
 10 parallel agents worked from a pre-fetched static Ghidra dump (`all_decompiled.json`/
@@ -108,11 +167,13 @@ file content is ground truth over any single agent's guess):
   with differing visible argument counts (2/3/4) across different files' own call
   sites — each file documents this as an open, unresolved inconsistency at its own
   sites, not unified into one prototype.
-- `cpsoc.c` still documents its own third-device submit primitive (`FUN_c00032f8`) as
+- ~~`cpsoc.c` still documents its own third-device submit primitive (`FUN_c00032f8`) as
   SPI; `panelbus_dispatch.c`'s own hardware section this pass found the exact same
   register shape (`+0x08`/`+0x14`/`+0x1c`/`+0x24`) belongs to the real on-chip I2C0/I2C1
   controller, not SPI — flagged as a likely mis-attribution in `cpsoc.c`, not corrected
-  there (out of `panelbus_dispatch.c`'s own scope this pass).
+  there (out of `panelbus_dispatch.c`'s own scope this pass).~~ **RESOLVED 2026-07-19** —
+  see the "SPI/I2C0 mis-attribution resolved" section below; struck through rather than
+  deleted per this doc's own convention of leaving superseded claims visible.
 
 ## SPI-device closure pass, 2026-07-17
 
@@ -223,6 +284,7 @@ under multiple simultaneous agent sessions — see that pass's own section above
 | SoC tick timer | `../MCU/OmapL108.cpp` | `omap_l108.c` — core done, see below |
 | SPI peripheral (shared cad/cpsoc bus) | `../MCU/Component/OmapL108Spi.cpp` | `omap_l108_spi.c` — done, see below |
 | USB device controller | `../MCU/Component/OmapL137Usbdc.cpp` | `omap_l137_usbdc.c` — done, see below |
+| USB device controller — ISR/poll handler, endpoint-event dispatch, low-level register/FIFO/descriptor layer | no `__FILE__` anchor — shared-field-offset evidence with `omap_l137_usbdc.c` | `omap_l137_usbdc_ext.c` — done, see below |
 | Second (hardware) I2C bus / internal command channel | no `__FILE__` anchor — code-shape + hardware evidence | `panelbus_dispatch.c` — done, see below |
 | Master wire-protocol dispatch loops | no `__FILE__` anchor — code-shape + cross-file evidence | `wire_dispatch.c` — done, see below |
 
@@ -413,12 +475,14 @@ and `heap_alloc.c`.
   every queue instance in one pass. A real, documented asymmetry: reg `0x79` is only
   ever drained (write-queue side), reg `0x7b` is only ever read live - not smoothed into
   a symmetrical pattern that isn't what the disassembly shows.
-- **`cpsoc_spi_submit_write`/`_read`** (`FUN_c00032f8`/`FUN_c00033f0`) fully
-  re-decompiled: a bounded busy-wait byte-stream submit/read primitive. Flagged, not
-  resolved here: `panelbus_dispatch.c`'s own hardware section this pass found the exact
-  same register shape (`+0x08`/`+0x14`/`+0x1c`/`+0x24`) belongs to the real on-chip
-  I2C0/I2C1 controller - this may genuinely be the same I2C hardware, not SPI as
-  currently modeled in this file. See that file's own cross-file note.
+- **`cpsoc_spi_submit_write`/`_read`** (`FUN_c00032f8`/`FUN_c00033f0`, renamed
+  `cpsoc_i2c0_submit_write`/`_read` — **RESOLVED 2026-07-19**, see that section below)
+  fully re-decompiled: a bounded busy-wait byte-stream submit/read primitive. Flagged,
+  not resolved at the time this entry was written: `panelbus_dispatch.c`'s own hardware
+  section this pass found the exact same register shape (`+0x08`/`+0x14`/`+0x1c`/`+0x24`)
+  belongs to the real on-chip I2C0/I2C1 controller - this may genuinely be the same I2C
+  hardware, not SPI as currently modeled in this file. See that file's own cross-file
+  note.
 - **The four LED-bargraph tag handlers** (`cpsoc_led_cycle`/`_toggle`/`_ramp`/
   `_quantize`) fully transcribed this pass. Their four separate "DAT_ offset, unresolved"
   constants all resolve to the SAME literal field, `cpsoc+0x821` - not four independent
@@ -434,10 +498,12 @@ and `heap_alloc.c`.
 **Still open**: `cpsoc_analog_poll_task`'s own invocation mechanism (never returns, zero
 static callers - two sibling never-returning loops with the identical signature were
 also found this pass and left unattributed, a real circumstantial lead for how tasks
-like this get started, not a resolved mechanism); most `DAT_` lookup-table contents;
-whether `cpsoc_spi_submit_write`/`_read` are genuinely SPI or the same I2C0 hardware
+like this get started, not a resolved mechanism); most `DAT_` lookup-table contents.
+~~whether `cpsoc_spi_submit_write`/`_read` are genuinely SPI or the same I2C0 hardware
 `panelbus_dispatch.c` documents (open cross-file question, see this project's 2026-07-18
-pass summary above).
+pass summary above).~~ **RESOLVED 2026-07-19** — I2C0, confirmed by address/xref evidence,
+not just register-shape similarity; see the "SPI/I2C0 mis-attribution resolved" section
+near the top of this README.
 
 ## `ctouchpanel.c` — status: done
 
@@ -895,6 +961,53 @@ and two global-to-global copies in `omap_usbdc_init_ep0` (values now known, func
 meaning not decoded); `dev+0x24`/`dev+0x28`'s real per-tick chunking meaning; whether
 the 8001-byte threshold is a real hardware DMA/FIFO limit or a firmware policy choice.
 
+## `omap_l137_usbdc_ext.c` — status: done
+
+New file, closes this project's own last remaining structural gap: `wire_dispatch.c`'s
+two real USB-receive-path callers of `wire_dispatch_command` (`FUN_c0003e24`/
+`FUN_c000a918`/`FUN_c000aae0`), plus the low-level endpoint-register/FIFO/CPPI-style
+descriptor-table layer both are built on. Not part of `omap_l137_usbdc.c`'s own
+confirmed `"../MCU/Component/OmapL137Usbdc.cpp"` anchor range, but confirmed the SAME
+hardware/software layer by shared field offsets (`dev+0x401`, `dev+0x40e`) with that
+file's own `omap_usbdc_init_ep0`/`omap_usbdc_poll_transfer`.
+
+Originally written from a static Ghidra dump only ("no live Ghidra bridge access this
+pass"). **RE-VERIFIED 2026-07-19 against the live binary** (`get_disassembly`,
+`read_memory`, fresh `decompile_function` calls on all headline functions and their
+downstream helpers) rather than trusting the static-dump resolution at face value - see
+this file's own header and per-function comments for the full evidence trail. Summary:
+
+- **`usbdc_core_isr`** (`FUN_c0003e24`, 1812 bytes) — the master USB0 core interrupt/poll
+  handler: decodes a combined interrupt-status word, handles USB bus reset (full
+  endpoint 1-3 re-init + CPPI descriptor table setup), the EP0 control-transfer state
+  machine, and per-endpoint TX/RX-ready events, most of which fall through to
+  `usbdc_endpoint_event_dispatch`. Sole caller (confirmed via `get_xrefs_to`) is a small
+  wrapper at 0xc0009bd8 that looks more like a poll/dispatch wrapper than a raw IRQ
+  vector - narrowed, not fully resolved (see that function's own note).
+- **`usbdc_endpoint_event_dispatch`** (`FUN_c000aae0`) — switches on event code; case 5
+  is `usbdc_ep_recv_bulk`, the real `wire_dispatch_command` call site.
+- **`usbdc_ep_recv_bulk`** (`FUN_c000a918`) — drains the bulk-OUT FIFO (clamped to 512
+  bytes) and calls `wire_dispatch_command(handle, buffer, len)` directly. THE resolution
+  `wire_dispatch.c`'s own README section had been asking for.
+- A **second, previously-undocumented `wire_dispatch_command` call site** inside
+  `usbdc_core_isr` itself, on the EP0 SETUP-pending path.
+- **Two real bugs caught and fixed** by this verification pass (not present in the
+  live binary, only in the earlier static-dump-only draft): `usbdc_ep0_notify_tx_complete`
+  selecting the wrong endpoint (3, not 0) with a stray `+4` in its CSR-test offset
+  (caught via raw disassembly, not decompile text); and `usbdc_endpoint_event_dispatch`
+  case `0xb` having `usbdc_ep0_notify_tx_complete`/`usbdc_ep0_notify_rx_complete`
+  swapped between its two branches.
+- **Cross-file handle sharing confirmed via `read_memory`** rather than inferred:
+  `usbdc_default_dev_handle` == `usbdc_bulk_dev_handle`; `usbdc_wire_handle` ==
+  `usbdc_setup_dispatch_handle` == the endpoint-notify handle used throughout case
+  `0xb` - two shared global objects underlie this entire cluster, not several
+  independently-named lookalikes.
+
+**Still open:** `FUN_c0009bfc`'s own caller (no static xref found); individual
+TXMAXP/RXMAXP/CSR register field meanings in the bus-reset branch beyond confirmed
+TXCSR/RXCSR bit positions; the CPPI-style DMA descriptor table's exact register-level
+semantics (no TRM cross-reference done). Full list in the file's own footer comment.
+
 ## `panelbus_dispatch.c` — status: done
 
 New file this pass. Reconstructs `FUN_c0007220`, previously flagged in `cobjectmgr.c`'s
@@ -949,11 +1062,15 @@ call inside `ctouchpanel.c`'s own address range.
 `cad.c`'s own registered opcode handlers (`0x78`/`0x79`) via `cad_trigger_calibration` -
 not called from `wire_dispatch_command` directly (see `cad.c`'s own updated section).
 
-**Flagged, not corrected here (out of this file's own scope)**: the same register shape
-(`+0x08`/`+0x14`/`+0x1c`/`+0x24`) this file's own receive primitive uses is shared by
-`cpsoc.c`'s own "third SPI device" submit primitive (`FUN_c00032f8`) - strongly
-suggesting THAT is also this same I2C0 hardware block, not SPI as currently documented
-in `cpsoc.c`.
+**RESOLVED 2026-07-19** (was: "Flagged, not corrected here"): `cpsoc.c`'s own "third SPI
+device" submit primitive (`FUN_c00032f8`) is confirmed - not just shape-suspected - to be
+this exact same I2C0 hardware. See the "SPI/I2C0 mis-attribution resolved" section near
+the top of this README, and both files' own updated headers, for the full evidence trail
+(shared literal handle-selector function `FUN_c0001a00`/`panelbus_i2c_base`, the same
+`0x01c22000` I2C0 base constant, and `FUN_c00033f0` turning out to be the literal same
+function as this file's own `panelbus_i2c_read_bytes`, not just a lookalike). `cpsoc.c`
+has been corrected: `cpsoc_spi_submit_write`/`_read` renamed to
+`cpsoc_i2c0_submit_write`/`_read`.
 
 **Still open**: the TX ring's own push/producer side (not found as its own function);
 `FUN_c0012de0` (`panelbus_submit_record`'s own target primitive); several real
@@ -1008,5 +1125,63 @@ header (deliberately not transcribed, see above); most of the generic `eva_wire_
 `eva_tick_` externs (bare `FUN_`/`DAT_` addresses, no cross-file attribution found this
 pass); `master_dispatch_tick`'s own ~80-line USB-adjacent state-machine cluster
 (plausibly `omap_l137_usbdc.c`'s own endpoint configure/halt bookkeeping, out of this
-file's own scope); `FUN_c0003e24`/`FUN_c000a918`/`FUN_c000aae0` (`wire_dispatch_command`'s
-two real callers, confirmed as the USB receive path but not reconstructed here).
+file's own scope).
+
+**RESOLVED 2026-07-19** (was: "`FUN_c0003e24`/`FUN_c000a918`/`FUN_c000aae0`
+(`wire_dispatch_command`'s two real callers, confirmed as the USB receive path but not
+reconstructed here)" - this project's last remaining structural gap in the firmware-side
+USB-receive-to-dispatch chain): all three are now fully reconstructed, in
+`omap_l137_usbdc_ext.c` (not this file - they sit in `omap_l137_usbdc.c`'s own address
+neighborhood/scope). Live Ghidra bridge access was available this pass (the prior pass
+that wrote `omap_l137_usbdc_ext.c` had static-dump access only) and was used to
+independently re-decompile and disassemble all three functions plus their downstream
+helpers rather than trust the earlier static-dump resolution at face value. Findings:
+
+- **`FUN_c0003e24` = `usbdc_core_isr`** - the master USB0 core interrupt/poll handler.
+  Decodes a combined interrupt-status word and dispatches per-bit to: a USB bus-reset
+  handler (full endpoint 1-3 TXMAXP/RXMAXP/CSR re-init plus CPPI-style DMA descriptor
+  table setup), an EP0 control-transfer state machine (which is where wire_dispatch.c's
+  own `master_dispatch_tick`/EP0-class-request handlers ultimately connect), and one
+  branch per bulk/iso endpoint TX/RX-ready event - each of the latter falls through to
+  `usbdc_endpoint_event_dispatch` with a numeric event code. Confirmed sole caller via
+  `get_xrefs_to`: one `bl` at 0xc0009bfc, inside a small one-parameter wrapper
+  (0xc0009bd8) that looks more like a poll/dispatch wrapper than a raw hardware IRQ
+  vector (narrowed, not fully resolved - its own caller has no static xref, plausibly
+  reached through an indirect function-pointer table).
+- **`FUN_c000aae0` = `usbdc_endpoint_event_dispatch`** - switches on the event code
+  `usbdc_core_isr` computes, routing to per-endpoint handlers; case 5 is
+  `usbdc_ep_recv_bulk`, the actual `wire_dispatch_command` call site.
+- **`FUN_c000a918` = `usbdc_ep_recv_bulk`** - THE resolution: reads the pending bulk-OUT
+  byte count, clamps to 512 (USB full-speed bulk max-packet-size), drains the FIFO, and
+  calls `wire_dispatch_command(handle, buffer, len)` directly - no queue, no deferred
+  processing. Fires once per "endpoint 5 RX ready" USB core interrupt.
+- **A second, previously-undocumented `wire_dispatch_command` call site** was found
+  inside `usbdc_core_isr` itself, on the EP0 SETUP-pending path (distinct from
+  `usbdc_ep_recv_bulk`'s bulk-OUT path) - both operands (handle, buffer) confirmed via
+  live `read_memory` to be real, non-null, pre-initialized globals baked into the
+  firmware image, not runtime-only values needing hardware capture.
+- **Two real bugs were found and fixed** in the earlier static-dump-only draft, both
+  caught by cross-checking live decompile/disassembly rather than trusting the earlier
+  resolved-value claims: (1) `usbdc_ep0_notify_tx_complete` (`FUN_c00048f8`) was
+  documented as selecting EP0 and testing TXCSR at `dev+0x412`, but disassembly
+  (`mov r2,#0x3` / `strb r2,[r4,r3]`) shows it actually selects endpoint 3, and the
+  CSR-test offset arithmetic had an extra stray `+4`; (2) `usbdc_endpoint_event_dispatch`
+  case `0xb` had `usbdc_ep0_notify_tx_complete`/`usbdc_ep0_notify_rx_complete` swapped
+  between its two condition branches, with the rx-complete call's own argument order
+  wrong as a downstream consequence. Full before/after evidence for both is in
+  `omap_l137_usbdc_ext.c`'s own per-function comments.
+- **Cross-file handle sharing confirmed via `read_memory`** (not merely inferred from
+  naming): `usbdc_default_dev_handle` (`DAT_c000acb8`) and `usbdc_bulk_dev_handle`
+  (`DAT_c000a970`) are the literal same global (`0xc01cce50`); `usbdc_wire_handle`
+  (`DAT_c000a97c`), `usbdc_setup_dispatch_handle` (`DAT_c0004594`), and the endpoint-
+  notify handle used throughout case `0xb` (`DAT_c000acc0`) are all the literal same
+  global too (`0xc01cac00`) - i.e. this entire USB-receive cluster, both
+  `wire_dispatch_command` call sites, and the endpoint-notify plumbing all ultimately
+  operate on two shared global objects, not several independently-named lookalikes.
+
+**Still genuinely open** (not resolved this pass): `FUN_c0009bfc`'s own caller (no static
+xref found - plausibly an indirect function-pointer table); individual TXMAXP/RXMAXP/CSR
+register field meanings in `usbdc_core_isr`'s bus-reset branch beyond what TXCSR/RXCSR
+bit positions already confirm; `usbdc_desc_table_base`'s exact relationship to the CPPI
+DMA engine (no TRM cross-reference done). See `omap_l137_usbdc_ext.c`'s own header and
+footer for the full list.

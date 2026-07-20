@@ -41,6 +41,31 @@
  *
  * Everything in this file is additive to omap_l137_usbdc.c, not a
  * duplicate or a correction of it - omap_l137_usbdc.c is NOT edited here.
+ *
+ * VERIFICATION PASS, 2026-07-19 (live Ghidra bridge, KRONOS_V06R06_wrapped.elf):
+ * this file's original pass (above) was static-dump-only ("no live Ghidra
+ * bridge access this pass"). This pass re-decompiled all three of this
+ * file's headline functions (usbdc_core_isr/FUN_c0003e24,
+ * usbdc_ep_recv_bulk/FUN_c000a918, usbdc_endpoint_event_dispatch/
+ * FUN_c000aae0) plus their downstream helpers directly against the live
+ * binary, and independently read back every DAT_ constant cited below via
+ * `read_memory` rather than trusting the earlier pass's resolved-value
+ * claims. Result: the vast majority confirmed byte-for-byte (DAT_c0004538=
+ * 0x4090, DAT_c0004574=0x401, DAT_c000a974=DAT_c000acbc=0x418, and the
+ * cross-file handle-sharing facts noted in the case-0xb section below), but
+ * TWO real bugs found and fixed, both flagged in-place at their own sites
+ * with the raw evidence (disassembly listings / read_memory results) that
+ * caught them:
+ *  - usbdc_ep0_notify_tx_complete (FUN_c00048f8) selected endpoint 3 via
+ *    INDEX, not EP0 as claimed, and the earlier draft's CSR-test offset
+ *    arithmetic (`d + 0x412 + 4`) was wrong (should be plain `d + 0x412`) -
+ *    caught by direct disassembly readback, not decompile text alone.
+ *  - usbdc_endpoint_event_dispatch's (FUN_c000aae0) case 0xb had
+ *    usbdc_ep0_notify_tx_complete and usbdc_ep0_notify_rx_complete swapped
+ *    between the c[0x72]/c[0x73] branches, with usbdc_ep0_notify_rx_complete's
+ *    own call-site argument order wrong as a downstream consequence.
+ * See each function's own corrected comment block below for the full
+ * before/after evidence trail rather than repeating it here.
  */
 
 #include <stdint.h>
@@ -431,17 +456,46 @@ void usbdc_ep_arm_tx(void *dev, uint8_t ep)	/* FUN_c0003dd4 */
  * Section 4 - EP0 completion helpers
  * =========================================================================== */
 
-/* usbdc_ep0_notify_tx_complete - selects INDEX=0 (EP0), and if TXCSR
- * (dev+0x412) bit 0 (TXPKTRDY, still set = not yet sent) is CLEAR,
- * forwards to FUN_c0006a04 (a generic host-notify/event helper, out of
- * this file's own address range - not reconstructed here) to obtain a
- * completed-length value, then - gated on a global one-shot flag
- * (usbdc_ep0_pending_flag, DAT_c0004980) - records that length into
- * descriptor slot 0 (usbdc_desc_set_length) and re-arms descriptor slot
- * 0x14/0x10 (usbdc_desc_arm_slot). Called 3 times from FUN_c000aae0's own
- * endpoint-event switch (case 0xb, out of this file's scope - see
- * omap_l137_usbdc.c's own README on FUN_c000aae0's 3 call sites into this
- * function). @0xc00048f8. */
+/* usbdc_ep0_notify_tx_complete - CORRECTED 2026-07-19 (live Ghidra
+ * verification pass, see file header): the ORIGINAL static-dump-era draft
+ * of this function claimed "selects INDEX=0 (EP0)" and tested TXCSR via
+ * `d + 0x412 + 4` - BOTH wrong, confirmed by direct disassembly readback
+ * (`get_disassembly` @0xc00048f8, not just decompile text):
+ *
+ *     c0004900: ldr  r3,[0xc0004974]      ; r3 = DAT_c0004974 = 0x40e (INDEX)
+ *     c0004908: mov  r2,#0x3              ; NOT #0 - literal immediate 3
+ *     c000490c: strb r2,[r4,r3]           ; d[0x40e] = 3  -> selects EP3
+ *     c0004910: add  r3,r3,#0x4           ; r3 = 0x412 (TXCSR, INDEX+4)
+ *     c0004914: ldrh r3,[r4,r3]           ; load d[0x412] (TXCSR), NOT d[0x416]
+ *     c000491c: tst  r3,#0x1              ; test TXPKTRDY
+ *
+ * So this function selects ENDPOINT 3 (not EP0) via INDEX, then tests bit 0
+ * (TXPKTRDY) of the resulting TXCSR shadow at the FIXED dev+0x412 window -
+ * the earlier draft's `d + 0x412 + 4` was simple arithmetic error (adding
+ * the same "+4" twice: once implicitly via DAT_c0004974 already being
+ * folded into +4 in a since-corrected mental model, once explicitly in the
+ * expression), landing on dev+0x416 (RXCSR) instead. Every OTHER site in
+ * this file that adds 4 to DAT_c0004974-shaped INDEX offsets is checked
+ * against its own disassembly below where this pass had live access; this
+ * one function's error was isolated (case 0xb's own call-site swap, fixed
+ * separately below, is what surfaced this - the two bugs are unrelated).
+ *
+ * Given the earlier draft's "always EP0" naming premise is now known wrong,
+ * the function name is kept anyway (renaming ripples through every call
+ * site's own comments elsewhere in this project) but the real endpoint (3)
+ * is called out explicitly at both the select and the doc level.
+ *
+ * If TXCSR (now correctly dev+0x412, endpoint 3's shadow) bit 0 (TXPKTRDY,
+ * still set = not yet sent) is CLEAR, forwards to FUN_c0006a04 (a generic
+ * host-notify/event helper, out of this file's own address range - not
+ * reconstructed here) to obtain a completed-length value, then - gated on a
+ * global one-shot flag (usbdc_ep0_pending_flag, DAT_c0004980) - records that
+ * length into descriptor slot 0 (usbdc_desc_set_length) and re-arms
+ * descriptor slot 0x14/0x10 (usbdc_desc_arm_slot). Real caller: case 0xb of
+ * usbdc_endpoint_event_dispatch below, the `c[0x72] == 1` branch, called
+ * ONCE per dispatch (NOT 3 times as the earlier draft claimed - that "3
+ * call sites" count belonged to usbdc_ep0_notify_rx_complete instead; see
+ * the case-0xb correction below for the full swap). @0xc00048f8. */
 extern uint32_t usbdc_ep0_notify_helper(void *handle, void *ctx, uint32_t len);	/* FUN_c0006a04 */
 
 void usbdc_ep0_notify_tx_complete(void *dev, uint32_t len)	/* FUN_c00048f8 */
@@ -452,10 +506,14 @@ void usbdc_ep0_notify_tx_complete(void *dev, uint32_t len)	/* FUN_c00048f8 */
 	uint8_t *d = (uint8_t *)dev;
 	uint32_t result;
 
-	d[0x40e] = 0;	/* DAT_c0004974, resolved: 0x40e (INDEX = EP0) */
-	if ((*(uint16_t *)(d + 0x412 + 4) & 1) != 0)	/* real offset: INDEX+4 == 0x412 (TXCSR) itself;
-							 * see note - Ghidra shows `iVar1+4` where
-							 * iVar1 is DAT_c0004974 (0x40e), i.e. dev+0x412 */
+	d[0x40e] = 3;	/* DAT_c0004974 resolved: 0x40e (INDEX); value confirmed
+			 * by disassembly to be literal 3 (endpoint 3), NOT 0 -
+			 * see corrected note above */
+	if ((*(uint16_t *)(d + 0x412) & 1) != 0)	/* TXCSR, INDEX+4 == 0x412 -
+							 * confirmed by disassembly
+							 * (`add r3,r3,#4` from 0x40e),
+							 * corrected from the earlier
+							 * draft's erroneous +0x416 */
 		return;
 	result = usbdc_ep0_notify_helper(usbdc_ep0_notify_handle, usbdc_ep0_notify_ctx_slot, len);
 	if (usbdc_ep0_pending_flag == 0)
@@ -465,13 +523,20 @@ void usbdc_ep0_notify_tx_complete(void *dev, uint32_t len)	/* FUN_c00048f8 */
 	usbdc_desc_arm_slot((uint32_t *)dev, 0x14, 0x10);
 }
 
-/* usbdc_ep0_notify_rx_complete - sibling of the above: if the same one-shot
- * flag (usbdc_ep0_pending_flag2, DAT_c00049e4) is set, clears it, forwards
- * to FUN_c000a3ac... no - to FUN_c00064ac (a different generic notify
- * helper, out of range, not reconstructed) with a length obtained from
- * usbdc_desc_get_length (case-0 phantom-forward, see that function's own
- * note), then re-arms descriptor slot 0/0. Sole caller: FUN_c000aae0's own
- * switch (case 0xb branch, same call site family as above).
+/* usbdc_ep0_notify_rx_complete - sibling of usbdc_ep0_notify_tx_complete
+ * above: if the same one-shot flag (usbdc_ep0_pending_flag2, DAT_c00049e4)
+ * is set, clears it, forwards to FUN_c000a3ac... no - to FUN_c00064ac (a
+ * different generic notify helper, out of range, not reconstructed) with a
+ * length obtained from usbdc_desc_get_length (case-0 phantom-forward, see
+ * that function's own note), then re-arms descriptor slot 0/0.
+ *
+ * CORRECTED 2026-07-19 (live Ghidra verification pass, see file header):
+ * this is the function actually called ONCE from FUN_c000aae0's case 0xb
+ * `c[0x72] == 1` branch (args `(dev, 0, code)`), NOT the up-to-3x call in
+ * the `c[0x73] == 1` branch as an earlier draft of the case-0xb dispatch
+ * body had it (that 3-call-site family belongs to usbdc_ep0_notify_tx_complete
+ * instead - see this file's own case-0xb section below for the full swap
+ * writeup and the disassembly-confirmed evidence).
  * @0xc0004984. */
 extern void usbdc_ep0_notify_helper2(void *handle, void *ctx, uint32_t len, uint32_t param3);	/* FUN_c00064ac */
 
@@ -960,33 +1025,84 @@ uint8_t usbdc_endpoint_event_dispatch(void *ctx, uint32_t event)	/* FUN_c000aae0
 		usbdc_ep_state10_handler();
 		break;
 	case 0xb: {
+		/* CORRECTED 2026-07-19 (live Ghidra verification pass, see file
+		 * header): the earlier static-dump-era draft had the c[0x72]/
+		 * c[0x73] branches' callees SWAPPED, and consequently got
+		 * usbdc_ep0_notify_rx_complete's own call-site argument order
+		 * wrong too. Re-checked directly against a fresh decompile of
+		 * FUN_c000aae0 (not re-derived from the earlier pass's notes):
+		 *
+		 *   if (c[0x72] == 1) {
+		 *       FUN_c0004984(*DAT_c000acb8, 0, uVar6);   <- rx_complete
+		 *       FUN_c0006858(DAT_c000acc0, uVar6);
+		 *   }
+		 *   if (c[0x73] == 1) {
+		 *       FUN_c00069ac(DAT_c000acc0, uVar6);
+		 *       ... (state1/burst-counter logic) ...
+		 *       FUN_c00048f8(*DAT_c000acb8, uVar6);      <- tx_complete
+		 *       ...
+		 *   }
+		 *
+		 * i.e. usbdc_ep0_notify_rx_complete (FUN_c0004984) is the ONE-
+		 * shot call in the c[0x72] branch, and usbdc_ep0_notify_tx_complete
+		 * (FUN_c00048f8) is the (up to once, taken along exactly one of
+		 * three sub-paths) call in the c[0x73] branch - exactly backwards
+		 * from the earlier draft. This also fixes usbdc_ep0_notify_tx_complete's
+		 * own header comment above, which had inherited the wrong "called 3
+		 * times" attribution from this same swap (that count belongs to
+		 * usbdc_ep0_notify_rx_complete's 3 call sites in the c[0x73] branch
+		 * below, not to tx_complete's real single call site here).
+		 *
+		 * usbdc_ep0_notify_rx_complete's real call-site argument order is
+		 * (dev, 0, code) - `ep_hint=0, param3=code` - NOT (dev, code, 0) as
+		 * the earlier draft had it; confirmed directly from
+		 * `FUN_c0004984(*DAT_c000acb8,0,uVar6)`.
+		 *
+		 * Separately CONFIRMED (not previously resolved): DAT_c000acc0
+		 * (the "0" placeholder every usbdc_ep_state_notify call below used)
+		 * is NOT zero - `read_memory` @0xc000acc0 returns 0xc01cac00, the
+		 * EXACT SAME value as DAT_c0004594 (usbdc_setup_dispatch_handle,
+		 * omap_l137_usbdc_ext.c's own usbdc_core_isr) and DAT_c000a97c
+		 * (usbdc_wire_handle, usbdc_ep_recv_bulk below) - i.e. all three of
+		 * this cluster's "notify"/"dispatch" handle globals are the SAME
+		 * underlying object. Named usbdc_ep_notify_handle here rather than
+		 * left as a literal 0. Also newly confirmed by the same method:
+		 * DAT_c000acb8 (usbdc_default_dev_handle) == DAT_c000a970
+		 * (usbdc_bulk_dev_handle, usbdc_ep_recv_bulk below) == 0xc01cce50,
+		 * and DAT_c000acbc == DAT_c000a974 == 0x418 - this whole endpoint-
+		 * handler cluster and usbdc_ep_recv_bulk share one dev handle and
+		 * one RX-length register offset, not merely similar-looking
+		 * globals. */
+		extern void *usbdc_ep_notify_handle;	/* DAT_c000acc0, resolved: 0xc01cac00,
+							 * == usbdc_setup_dispatch_handle ==
+							 * usbdc_wire_handle */
 		int is_state1 = usbdc_ep_state3_query() == 1;
 		uint32_t code = is_state1 ? 0x40 : 8;
-		usbdc_ep_state_notify(0 /* DAT_c000acc0 */, code);
+		usbdc_ep_state_notify(usbdc_ep_notify_handle, code);	/* FUN_c0006578 */
 		if (c[0x72] == 1) {
-			usbdc_ep0_notify_tx_complete(usbdc_default_dev_handle, code);
-			usbdc_ep_state_notify(0, code);	/* FUN_c0006858 */
+			usbdc_ep0_notify_rx_complete(usbdc_default_dev_handle, 0, code);
+			usbdc_ep_state_notify(usbdc_ep_notify_handle, code);	/* FUN_c0006858 */
 		}
 		if (c[0x73] == 1) {
 			extern int32_t *usbdc_burst_counter;	/* DAT_c000acc4 */
-			usbdc_ep_state_notify(0, code);	/* FUN_c00069ac */
+			usbdc_ep_state_notify(usbdc_ep_notify_handle, code);	/* FUN_c00069ac */
 			if (is_state1) {
 				if (c[0x6e] == 0) {
 					if (*usbdc_burst_counter > 0) {
-						usbdc_ep0_notify_rx_complete(usbdc_default_dev_handle, code, 0);
+						usbdc_ep0_notify_tx_complete(usbdc_default_dev_handle, code);
 						*usbdc_burst_counter = 0;
 					}
 					(*usbdc_burst_counter)++;
 				} else {
-					usbdc_ep0_notify_rx_complete(usbdc_default_dev_handle, code, 0);
+					usbdc_ep0_notify_tx_complete(usbdc_default_dev_handle, code);
 					c[0x6e] = 0;
 					*usbdc_burst_counter = 1;
 				}
 			} else {
-				usbdc_ep0_notify_rx_complete(usbdc_default_dev_handle, code, 0);
+				usbdc_ep0_notify_tx_complete(usbdc_default_dev_handle, code);
 			}
 		}
-		usbdc_ep_state_notify(0, code);	/* FUN_c0006988 */
+		usbdc_ep_state_notify(usbdc_ep_notify_handle, code);	/* FUN_c0006988 */
 		break;
 	}
 	default:
@@ -1033,17 +1149,41 @@ void usbdc_ep_recv_bulk(void)	/* FUN_c000a918 */
  *    transcribed as literally as the raw decompile allows rather than
  *    normalized, since the real source almost certainly used named struct
  *    fields the decompiler flattened into index-relative arithmetic.
- *  - The exact wire-format of `FUN_c0007d1c(DAT_c0004594, *DAT_c0004590,
- *    len)` inside usbdc_core_isr's EP0 SETUP-class dispatch path
- *    (transcribed above as a placeholder `wire_dispatch_command(0,0,0)`
- *    call rather than asserting the two fixed-global operands' real
- *    runtime values, which the static image doesn't populate) - this is a
- *    SECOND, distinct wire_dispatch_command call site from
- *    usbdc_ep_recv_bulk's own, reached via EP0 control transfers rather
- *    than bulk-OUT, not previously documented anywhere in this project.
+ *  - CORRECTED 2026-07-19: the note that used to be here claimed
+ *    usbdc_core_isr's own EP0 SETUP-class `wire_dispatch_command` call was
+ *    "transcribed above as a placeholder `wire_dispatch_command(0,0,0)`" -
+ *    stale/wrong even against this file's own body above, which already
+ *    calls `wire_dispatch_command(usbdc_setup_dispatch_handle,
+ *    *usbdc_setup_dispatch_buf, len)` with the real resolved globals, not
+ *    literal zeros. Live `read_memory` this pass confirms both operands are
+ *    real, non-null, initialized values baked into the static image
+ *    (DAT_c0004594/usbdc_setup_dispatch_handle = 0xc01cac00 - the SAME
+ *    value as usbdc_wire_handle/DAT_c000a97c and usbdc_ep_notify_handle/
+ *    DAT_c000acc0 above; DAT_c0004590/usbdc_setup_dispatch_buf =
+ *    0xc01cabc0, a pointer-to-pointer, dereferenced once at the call site)
+ *    - this genuinely is a firmware image with pre-linked global state, not
+ *    a case needing runtime capture to resolve. This remains a SECOND,
+ *    distinct wire_dispatch_command call site from usbdc_ep_recv_bulk's
+ *    own, reached via EP0 control transfers rather than bulk-OUT.
  *  - usbdc_desc_table_base's true consumer/producer relationship with the
  *    CPPI-style DMA engine this whole Section 3 almost certainly drives -
  *    no register-level TRM cross-reference done this pass.
- *  - FUN_c0009bfc, usbdc_core_isr's own sole caller - not reconstructed,
- *    real role (hardware IRQ vector vs. poll wrapper) not determined.
+ *  - FUN_c0009bfc, usbdc_core_isr's own sole caller (confirmed single
+ *    xref via `get_xrefs_to`) - not reconstructed, still not fully
+ *    resolved, but NARROWED this pass: live disassembly of its containing
+ *    function (prologue @0xc0009bd8, `bl 0xc0003e24` at 0xc0009bfc itself)
+ *    shows it takes ONE parameter (its own r0), clears a busy-style byte at
+ *    param+5 immediately before the call and sets it back to 1 immediately
+ *    after, and passes `*(some global)` as usbdc_core_isr's `dev` and its
+ *    OWN parameter straight through as `ep0_ctx` - i.e. it's called WITH a
+ *    context object rather than invoked bare, which reads more like a
+ *    poll-loop/dispatch wrapper than a raw hardware IRQ vector (real vector
+ *    entries in this image's other confirmed ISR-shaped code don't take a
+ *    caller-supplied context parameter). Its OWN caller could not be found
+ *    via `get_xrefs_to` (0 results, both for the `bl` instruction's address
+ *    and its function's own entry) - plausibly reached only via an indirect
+ *    function-pointer table Ghidra's static analysis hasn't resolved,
+ *    consistent with a genuine "still needs live hardware capture or a
+ *    table cross-reference this pass didn't attempt" gap rather than a
+ *    static-analysis oversight.
  * ------------------------------------------------------------------------- */

@@ -117,8 +117,9 @@ lookup for loadmod's specific need.
    truth to build one from.
 
    This alone wasn't enough to make the self-test's round trip work, though:
-   `at88_chip_read_zone0()`'s `$B2` dispatch was (still is, for zone routing —
-   see below) unconditionally DEAX-encrypted, and a chip that always requires
+   `at88_chip_read_zone0()`'s `$B2` dispatch was unconditionally DEAX-encrypted
+   (zone routing was a separate, later gap — see below, RESOLVED 2026-07-19),
+   and a chip that always requires
    a live `$B8` session for zone 0 couldn't pass its own factory self-test
    before that session ever exists. Reconciled by gating `$B2` on
    `chip->b8RoundsAccepted`: `< 2` (no session yet, e.g. a freshly-loaded
@@ -137,15 +138,51 @@ lookup for loadmod's specific need.
    come back different (proving the gate has a real effect, not just two
    branches that happen to agree).
 
-   **Deliberately still open, not touched by this fix**: `$B2`'s dispatch
-   remains unconditional on zone 0 regardless of `g_chip.selectedZone` —
-   consistent with today's stated scope ("only zone 0 is ever emulated"), but
-   the panel firmware's zone-select call is explicit and structural on its
-   side of the wire, not vestigial. Also open: whether a real chip's `$B0`
-   is *always* raw regardless of auth state, or only pre-lock (this emulator
-   currently implements the former, the simpler of the two, since nothing in
-   scope distinguishes them) — see `at88_chip.h`'s `at88_chip_write_zone0()`
-   doc comment.
+   **Was deliberately left open by this fix, RESOLVED 2026-07-19**: `$B2`'s
+   dispatch used to be unconditional on zone 0 regardless of
+   `g_chip.selectedZone` — `$B4` stored the selected zone but nothing ever
+   consulted it, a real fidelity gap (the panel firmware's zone-select call
+   is explicit and structural on its side of the wire, not vestigial, so
+   silently ignoring it was always going to bite something outside today's
+   OA.ko/loadmod.ko-only scope, e.g. `GetPubIdMod.ko` per the scope table
+   above).
+
+   **Fix**: added `at88_chip_read_zone()` (`chip_state.cpp`/`at88_chip.h`),
+   the real `$B2` dispatch entry point, and pointed `nv2ac_exports.cpp`'s
+   `0xb2` case at it (passing `g_chip.selectedZone`) instead of calling
+   `at88_chip_read_zone0()` directly.
+   - `zone == 0` still routes to `at88_chip_read_zone0()` **completely
+     unchanged** — same pre-/post-`$B8` gating, same DEAX stepping, same real
+     captured secret data. Zone 0's already-correct, ground-truthed behavior
+     was not touched.
+   - Any other selected zone routes to a **synthetic, clearly-documented
+     all-zero placeholder**, always a raw passthrough (no DEAX — there is no
+     evidence non-zero zones are auth-gated the same way zone 0 is, so this
+     doesn't invent that). **This is explicitly NOT ground-truthed chip
+     data** — this project has no capture for any zone but 0 — the only
+     claim this placeholder makes is that dispatch PLUMBING is now correct
+     (different selected zones really do route to different data). Do not
+     read all-zero non-zone-0 output as "the real chip returns zeros here";
+     it means "we don't know, and haven't pretended to."
+
+   New KAT coverage (`verify/test_chip_state.cpp` [5e]/[5f],
+   `verify/test_nv2ac_exports.cpp` [2e]) proves: zone-0 dispatch is
+   byte-identical to calling `at88_chip_read_zone0()` directly (no behavior
+   change); a non-zero-zone read returns all-zero and differs from the real
+   zone-0 data (dispatch actually switches, not two branches that happen to
+   agree); and re-selecting zone 0 after reading a different zone still
+   returns the correct real captured secret (regression check against the
+   zone-0 path). Out-of-range reads are rejected on both branches.
+
+   Still open: whether a real chip's `$B0` is *always* raw regardless of
+   auth state, or only pre-lock (this emulator currently implements the
+   former, the simpler of the two, since nothing in scope distinguishes
+   them) — see `at88_chip.h`'s `at88_chip_write_zone0()` doc comment. Also
+   still open: `$B0` (write) still always targets `zone0[]` regardless of
+   `g_chip.selectedZone` — only the `$B2` (read) half of the zone-dispatch
+   gap was in scope for this fix (nothing in this project's confirmed
+   OA.ko/loadmod.ko usage ever issues a `$B0` to a non-zero zone, so there's
+   no ground truth driving a write-side fix yet either).
 6. **`useEightStepAac` (b8_handshake.cpp's real `$B8` lockout, added 2026-07-13)
    defaults to the 4-attempt decay sequence** (`$FF,$EE,$CC,$88,$00`) per the
    Atmel CryptoMemory datasheet's stated default ("ETA=1"). The real Kronos
@@ -193,7 +230,10 @@ coverage — worth using during implementation/validation, not just `KronosExtra
 ## Status
 
 **`chip_state.cpp` done and KAT-verified** (`at88_chip.h` / `chip_state.cpp` /
-`verify/test_chip_state.cpp`, 6/6 checks passing). Covers:
+`verify/test_chip_state.cpp`, 35/35 checks passing as of 2026-07-19 — this
+count has grown from the file's original "6/6" as `$B0` write support and
+`$B2` zone-dispatch coverage were added; see this file's own git history /
+Open Item #5 for what each addition covers). Covers:
 
 - The DEAX/GPA stream cipher (`deax_init`/`deax_step`/`deax_compute_challenges`)
   — ported directly from `KronosExtract/source/kronos_extract.c`'s own
@@ -209,6 +249,12 @@ coverage — worth using during implementation/validation, not just `KronosExtra
   `kronos_extract.c`'s `synth_zone0_read()` with the chip/host roles
   reversed (this side encrypts real plaintext; `kronos_extract.c` decrypts
   what a real chip sends — same cipher, same step order, opposite direction).
+- `at88_chip_read_zone()` — new 2026-07-19, the real `$B2` dispatch entry
+  point: routes to `at88_chip_read_zone0()` unchanged for zone 0 (the one
+  real, ground-truthed zone), or a clearly-synthetic all-zero placeholder for
+  any other selected zone (no captured ground truth exists for any zone but
+  0 — see Open Item #5 for the full writeup). This is dispatch PLUMBING, not
+  a claim about real non-zero-zone contents.
 
 KAT approach used two independent kinds of ground truth on purpose (so a bug
 in one can't hide behind the other): the *real* captured file (magic/CRC/zone
@@ -420,6 +466,6 @@ to wire into `nv2ac_exports.cpp`. Every piece of chip-side protocol logic
 itself — zone storage, `$B0`/`$B6`/`$B2` reads and writes, the full `$B8`
 handshake, the two real exported symbols, the pairFact3 fixture, and the
 general `.pairFact3`/`.reauth` decrypt — is complete and KAT-verified
-(97/97 checks across all seven host test binaries, after Open Item #5's
-`$B0` write support and the `pairfact_decrypt` correction, both
-2026-07-16).
+(116/116 checks across all seven host test binaries, as of 2026-07-19's
+`$B2` zone-dispatch fix — up from 97/97 after Open Item #5's `$B0` write
+support and the `pairfact_decrypt` correction, both 2026-07-16).
