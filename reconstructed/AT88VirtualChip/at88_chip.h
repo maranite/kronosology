@@ -311,6 +311,18 @@ int at88_chip_read_config(const struct AT88ChipState *chip,
  * reconciliation available, not a certainty -- no independent oracle
  * confirms it (see README.md Open Item #5).
  *
+ * WEAKER EVIDENCE THAN ORIGINALLY STATED (caveat added 2026-07-20): a full
+ * 691-function xref sweep of KRONOS_V06R06.VSB (`reconstructed/K1_V06R06/
+ * README.md`, completed 2026-07-19) found `crypto_at88_self_test` has ZERO
+ * static callers anywhere in the firmware image -- it may be dead
+ * factory-test code that never actually runs on a real boot, not a routine
+ * confirmed to execute pre-$B8. The command FRAMING this gating relies on is
+ * still solid (the same header-byte mapping applies to every opcode the
+ * firmware's runtime AT88 queue relay handles, and that relay demonstrably
+ * does run), but the specific claim "a real chip visibly serves raw zone-0
+ * reads/writes before $B8" now rests on a routine that may never execute.
+ * Re-derive from a source with confirmed callers if one turns up.
+ *
  *   b8RoundsAccepted < 2 (no live session yet): RAW passthrough, no DEAX
  *     stepping at all -- returns chip->zone0[addr..addr+len) unmodified.
  *     This is the branch that makes the panel firmware's self-test
@@ -372,15 +384,22 @@ int at88_chip_read_zone(struct AT88ChipState *chip, struct DeaxState *d,
 
 /*
  * Zone0 write ($B0) -- new 2026-07-16, ground-truthed against the same
- * KRONOS_V06R06.VSB self-test described above. Always a RAW copy into
- * chip->zone0[addr..addr+len), regardless of b8RoundsAccepted -- matches
- * the self-test's own visible behavior (it builds its 16-byte pattern and
- * writes it directly, with no encrypt call in between). Deliberately does
- * NOT attempt to model an encrypted/authenticated write path: nothing in
- * this project's scope (OA.ko/loadmod.ko are confirmed read-only AT88
- * consumers) ever issues a post-handshake $B0, so there is no ground truth
- * to build one from -- see README.md Open Item #5. If that's ever needed,
- * it needs its own investigation first, not a guess bolted on here.
+ * KRONOS_V06R06.VSB self-test described above (see that self-test's own
+ * "zero static callers" caveat, added 2026-07-20, in at88_chip_read_zone0()'s
+ * doc comment -- applies here too, since it's the same routine). Always a RAW
+ * copy into chip->zone0[addr..addr+len), regardless of b8RoundsAccepted --
+ * matches the self-test's own visible behavior (it builds its 16-byte
+ * pattern and writes it directly, with no encrypt call in between).
+ * Deliberately does NOT attempt to model an encrypted/authenticated write
+ * path: nothing in this project's scope (OA.ko/loadmod.ko are confirmed
+ * read-only AT88 consumers) ever issues a post-handshake $B0, so there is no
+ * ground truth to build one from -- see README.md Open Item #5. Real
+ * hardware itself doesn't appear to restrict $B0 by zone at the wire-protocol
+ * level either (KRONOS_V06R06.VSB's runtime AT88 queue relay forwards
+ * whatever zone a queued host command specifies, generically) -- the
+ * restriction here is purely "no in-scope caller needs it yet." If that's
+ * ever needed, it needs its own investigation first, not a guess bolted on
+ * here.
  *
  * 0 on success, -1 if the write would run past the 40-byte zone.
  */

@@ -12,12 +12,11 @@
 #                      (`$(MAKE) -C $(KDIR) ARCH=i386 M=$(PWD) modules`), which
 #                      re-invokes THIS Makefile with KERNELRELEASE set,
 #                      taking the `ifneq ($(KERNELRELEASE),)` branch below
-#                      instead. KDIR must point at the actual Kronos
-#                      2.6.32.11-korg kernel source tree (lives in WSL
-#                      per CLAUDE.md's Development Environment section,
-#                      not in this sandboxed environment -- this repo
-#                      can write and sanity-check the source, but the
-#                      real .ko has to be built where that tree exists).
+#                      instead. KDIR must point at the ABI-matched Kronos
+#                      2.6.32.11-korg kernel tree (/home/build/linux-kronos
+#                      on this host, per CLAUDE.md's Development Environment
+#                      section -- verified working: `make ko
+#                      KDIR=/home/build/linux-kronos` builds a clean .ko).
 #   make ko-clean KDIR=... - Kbuild clean.
 #
 # module_main.cpp (the real kernel glue: EXPORT_SYMBOL, module_init/exit,

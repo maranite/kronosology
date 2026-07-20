@@ -41,15 +41,20 @@
  * the two: this is genuine Linux USB core code running the genuine
  * enumeration/probe path on both sides.
  *
- * SCOPE, this pass: get enumeration + `OmapNKS4Probe`'s own descriptor
- * checks to succeed, so `OmapNKS4Init`'s own `wait_for_completion_timeout`
- * observes a real completion instead of timing out. Deep wire-protocol
- * fidelity (responding correctly to every real `COmapNKS4Command` word,
- * matching the real NKS4 ARM firmware's own confirmed behavior from this
- * project's `NKS4PanelFirmware/` reconstruction) is a natural follow-on,
- * not attempted in full here - the interrupt-IN/bulk-OUT completion
- * handlers below are deliberately minimal (log + ACK), not a full protocol
- * implementation. Honestly scoped rather than claimed complete.
+ * SCOPE: enumeration + `OmapNKS4Probe`'s own descriptor checks succeed (so
+ * `OmapNKS4Init`'s own `wait_for_completion_timeout` observes a real
+ * completion instead of timing out) - achieved and boot-tested, see
+ * `OmapNKS4DummyHCDFix/README.md`'s "Twelfth pass". Also now implements the
+ * 3 specific `COmapNKS4Command` query/response pairs
+ * `COmapNKS4Driver_Configure()` itself waits on (CommunicationCheck,
+ * ReadPortConfiguration, GetVersion - see the completion handlers' own
+ * header comment below for the ground truth), so `Configure()`'s full
+ * 9-call sequence can run. Full, general wire-protocol fidelity (every
+ * other real `COmapNKS4Command` word, genuine runtime panel events -
+ * button/knob/pedal state matching the real NKS4 ARM firmware's own
+ * confirmed behavior from this project's `NKS4PanelFirmware/`
+ * reconstruction) is still a natural follow-on, not attempted here.
+ * Honestly scoped rather than claimed complete.
  *
  * Build: kernel-only Kbuild module, plain C (matches every other virtual
  * driver's own precedent for avoiding C++ against this ancient kernel's
@@ -63,6 +68,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include <linux/timer.h>
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/errno.h>
@@ -108,6 +114,9 @@ struct nks4_dev {
 	struct usb_request	*req_bulk_out;
 	struct usb_request	*req_int_in;
 	u8			config_value;
+	struct timer_list	event_timer;	/* periodic synthetic runtime events, see below */
+	int			int_in_busy;	/* best-effort guard: req_int_in already queued */
+	int			replies_sent;	/* count of the 3 known Configure() command replies actually sent */
 };
 
 static struct nks4_dev *nks4;
@@ -138,11 +147,22 @@ static struct usb_device_descriptor nks4_device_desc = {
 	.bNumConfigurations	= 1,
 };
 
-/* Interface class 0xff (vendor-specific): confirmed real value, see
- * CLAUDE.md's own documented ground truth ("one real usb_device_id entry
- * (vendor 0x0944/product 0x1005/vendor-specific interface class 0xff)",
- * cross-confirmed in OmapNKS4Module's own README.md main.cpp section on the
- * real `struct usb_driver` reconstruction). */
+/* Interface class/subclass/protocol: confirmed real values, see
+ * OmapNKS4Module/main.cpp's own struct usb_device_id reconstruction
+ * (ground truth: read_memory @0x1b040 of the real shipped binary,
+ * cross-checked against linux-kronos's real struct usb_device_id layout):
+ * match_flags=0x0383 (VENDOR|PRODUCT|INT_CLASS|INT_SUBCLASS|INT_PROTOCOL),
+ * bInterfaceClass=0xff, bInterfaceSubClass=0xff, bInterfaceProtocol=0x00.
+ *
+ * BUG FIX (2026-07-20, OmapNKS4Probe still not firing after config-descriptor
+ * fix): bInterfaceSubClass was left at 0 here, but match_flags has
+ * USB_DEVICE_ID_MATCH_INT_SUBCLASS (0x0100) set, meaning the real driver's
+ * id_table requires an EXACT match on bInterfaceSubClass, not just
+ * bInterfaceClass - the real value is 0xff, not 0. With this set to 0, the
+ * kernel's own usb_match_one_id() rejects the interface before
+ * OmapNKS4Probe() is ever called, regardless of how correctly the device
+ * enumerates otherwise - fully explains clean enumeration + probe timeout.
+ * See OmapNKS4DummyHCDFix/README.md's "Twelfth pass" section. */
 static struct usb_interface_descriptor nks4_intf_desc = {
 	.bLength		= USB_DT_INTERFACE_SIZE,
 	.bDescriptorType	= USB_DT_INTERFACE,
@@ -150,7 +170,7 @@ static struct usb_interface_descriptor nks4_intf_desc = {
 	.bAlternateSetting	= 0,
 	.bNumEndpoints		= 2,
 	.bInterfaceClass	= 0xff,
-	.bInterfaceSubClass	= 0,
+	.bInterfaceSubClass	= 0xff,
 	.bInterfaceProtocol	= 0,
 	.iInterface		= 0,
 };
@@ -184,12 +204,207 @@ static struct usb_config_descriptor nks4_config_desc = {
 };
 
 /* ========================================================================= *
- *  Bulk-OUT / interrupt-IN completion handlers - deliberately minimal, see
- *  file header's own "SCOPE, this pass" note. Real COmapNKS4Command wire
- *  protocol handling (CommunicationCheck ack, version query responses
- *  matching command.cpp's own confirmed encodings) is a natural follow-on
- *  once enumeration itself is confirmed working, not attempted here.
+ *  COmapNKS4Command wire protocol - just enough to satisfy
+ *  COmapNKS4Driver_Configure()'s own 3 query/response pairs (the only calls
+ *  in its 9-call sequence that wait for a reply; the other 6 are bulk-OUT-
+ *  only setters already satisfied by this file's existing generic re-queue).
+ *
+ *  Ground truth, independently verified against both sides of the real
+ *  protocol (not copied from a single source):
+ *  - Request words + expected response tags: OmapNKS4Module/command.cpp
+ *    (CommunicationCheck=0x00ee0000/tag 0x0066, ReadPortConfiguration=
+ *    0x01f10000/tag 0x0171, GetVersion=0x00f00000/tag 0x0070).
+ *  - Wire byte order for the bulk-OUT command word: OmapNKS4Module/
+ *    submit.cpp's own header comment on submit_urb_words() - CONFIRMED ON
+ *    REAL HARDWARE that the command-word path sends words RAW (no byte
+ *    reversal), i.e. plain x86 little-endian, so a straight u32 read of the
+ *    first 4 bytes matches the sent word with no byte-swapping needed.
+ *  - Interrupt-IN response record format ([dLo][dHi][idx][op], terminated
+ *    by a Sync record [0][0][0][0x87]): OmapNKS4Module/driver.cpp's
+ *    ReceiveEventBuffer() decode loop, and independently corroborated by
+ *    usb.cpp's own already-proven vm_virtual_probe_inject_event() self-test
+ *    packet, which uses the identical shape.
+ *  - The 3 specific reply records below were derived by hand-tracing
+ *    ReceiveEventBuffer()'s own op==0 (analog/CC, idx==0x66/0x70) and op==1
+ *    idx==0x71 (ReadPortConfiguration's own special-cased branch, which ORs
+ *    in the opcode explicitly rather than using the generic word) paths to
+ *    the exact dLo/dHi/idx/op values that produce command.cpp's expected
+ *    resp values (0x00660000/0x01710001/0x00701805 - the last two matching
+ *    OMAP V01 R08 / PSoC V00 R05 and hwVer=1/is88=0, both confirmed real
+ *    values cited in driver.cpp's own comments) - not copied from any single
+ *    table, cross-checked against both files' real logic directly.
  * ========================================================================= */
+
+struct nks4_cmd_reply {
+	u32 cmd;
+	unsigned char record[4];	/* [dLo][dHi][idx][op] */
+};
+
+static const unsigned char nks4_sync_record[4] = { 0x00, 0x00, 0x00, 0x87 };
+
+static const struct nks4_cmd_reply nks4_replies[] = {
+	{ 0x00ee0000, { 0x00, 0x00, 0x66, 0x00 } },	/* CommunicationCheck -> resp 0x00660000 */
+	{ 0x01f10000, { 0x01, 0x00, 0x71, 0x01 } },	/* ReadPortConfiguration -> resp 0x01710001 (hwVer=1, is88=0) */
+	{ 0x00f00000, { 0x05, 0x18, 0x70, 0x00 } },	/* GetVersion -> resp 0x00701805 (OMAP V01 R08 / PSoC V00 R05) */
+};
+
+/* ========================================================================= *
+ *  Periodic synthetic RUNTIME panel events - beyond the 3 configuration-time
+ *  command replies above, exercises ReceiveEventBuffer()'s other opcode
+ *  branches (analog/CC, button, aftertouch, rotary encoder, S/PDIF status)
+ *  so the real driver's full runtime event-decode path gets real coverage,
+ *  not just the config-time handshake.
+ *
+ *  BUTTON EVENTS ARE NOW REAL, CONFIRMED, NAMED TRAFFIC - not a placeholder.
+ *  The wire-idx -> physical-button translation (OA.ko's own
+ *  CSTGOmapNKSMsgHandler::ProcessNextNKSEvent(), previously untraced
+ *  anywhere in this project) was traced this pass via direct disassembly of
+ *  the real OA.ko binary (/tmp/oa_real_disasm.txt, function at 0x2073d0 in
+ *  that file's own addressing). Confirmed instruction sequence right before
+ *  the real CSTGFrontPanel::HandleSwitchEvent(eSTGButtonCode,bool) call
+ *  (regparm(3): EAX=this, EDX=code, CL=pressed - same ABI
+ *  KronosScreenRemoteDaemon/nks4_inject_module/nks4_inject.c's own header
+ *  independently reconstructed):
+ *    movzbl 0x2a(%esp),%eax   ; eax = wire idx byte
+ *    and    $0xf0,%eax        ; hi nibble
+ *    cmp    $0x30,%eax / cmp $0x40,%eax   ; only these two reach HandleSwitchEvent
+ *    cmp    $0x30,%eax; sete %al          ; al = 1 if idx&0xf0==0x30, else 0 (0x40 case)
+ *    movzbl 0x29(%esp),%ebx   ; ebx = wire dHi byte
+ *    mov    %eax,%esi         ; esi = press/release flag
+ *    ... (COmapNKS4Driver_GetTestMode() check, non-test-mode path taken) ...
+ *    and    $0x7f,%ebx        ; ebx = dHi & 0x7f  <- this becomes EDX (code)
+ *    mov    %esi,%eax ; movzbl %al,%ecx  <- this becomes ECX (pressed)
+ *    call   HandleSwitchEvent(this, code=dHi&0x7f, pressed=(idx&0xf0==0x30))
+ *  I.e., for a real button press/release: op=0x00, dLo=don't-care (unused
+ *  in this path), dHi=the real scan code (0-127, from nks4_inject.c's own
+ *  hardware-confirmed btn_table[] - e.g. EXIT=8, HELP=9, ENTER=23),
+ *  idx=0x30 for PRESS or 0x40 for RELEASE (low nibble of idx not checked by
+ *  this path). This is now a confirmed, disassembly-verified bridge between
+ *  the two previously-separate reference layers this project had
+ *  (ReceiveEventBuffer's wire decode and nks4_inject.c's real button
+ *  names) - see OmapNKS4DummyHCDFix/README.md's "Sixteenth pass".
+ *
+ *  ROTARY AND ANALOG (incl. AFTERTOUCH/KNOBS) ARE ALSO NOW REAL, CONFIRMED,
+ *  NAMED TRAFFIC, traced the same way (direct ProcessNextNKSEvent
+ *  disassembly). Two real corrections to this file's own PRIOR comments,
+ *  found by disassembly rather than assumed from ReceiveEventBuffer's own
+ *  inline labels:
+ *  - What ReceiveEventBuffer calls "op==1/idx&0xf0==0x50, button/key" is
+ *    NOT a button in ProcessNextNKSEvent - confirmed disassembly shows this
+ *    exact shape reaches `CSTGFrontPanel::HandleRotary(this, delta)` with
+ *    `delta = dHi<<8 | dLo` (EDX at the call site), matching
+ *    nks4_inject.c's own documented HandleRotary ABI exactly.
+ *  - What ReceiveEventBuffer calls "op==0x1f, rotary encoder" does NOT reach
+ *    HandleRotary at all in ProcessNextNKSEvent - it goes to a diagnostic
+ *    PushUnsolicitedMessage path instead (confirmed via the same decompile/
+ *    disassembly pass).
+ *  - The real analog-controller dispatch (op==3) calls
+ *    `HandleAnalogController(this, device_code, param2, param3)` with
+ *    **device_code = wire idx & 0x3f** (confirmed disassembly: `and
+ *    $0x3f,%edx` on the idx byte immediately before the call) - directly
+ *    the SAME device_code space nks4_inject.c's own header already
+ *    documents (7=Aftertouch, 8-15=RT Knobs 1-8, 16-23=Sliders 1-8, 27=rear
+ *    Pedal jack, 29=Damper, etc., most HARDWARE-CONFIRMED there). `param2`/
+ *    `param3` come from `ShortInvertNkS4AnalogValue(dLo, dHi)`, itself now
+ *    also disassembled (0x2077f0 in /tmp/oa_real_disasm.txt): it builds a
+ *    raw10-style value from the two bytes (bit shape closely matches this
+ *    project's own already-established `raw10 = dLo<<2 | dHi>>6` convention
+ *    documented for aftertouch calibration elsewhere), then conditionally
+ *    inverts it around 0x3ff unless the raw value is exactly the center
+ *    point 0x200. This confirms the transform's SHAPE (extract-then-
+ *    conditionally-invert), but the exact resulting numeric semantics (what
+ *    specific dLo/dHi pair produces what displayed reading) were not fully
+ *    derived - the events below confirm the real DISPATCH TARGET (which
+ *    device_code fires, disassembly-verified) and the transform's general
+ *    shape, but not a claim about a specific meaningful displayed value.
+ *
+ *  S/PDIF status (op==7) needs no OA.ko-side confirmation - disassembly of
+ *  ReceiveEventBuffer itself already shows this is handled entirely inside
+ *  OmapNKS4Module.ko (`sInstance.fSpdifClockError = idx & 1`), no dispatch
+ *  to OA.ko at all.
+ *
+ *  See OmapNKS4DummyHCDFix/README.md's "Fourteenth"/"Sixteenth"/
+ *  "Seventeenth pass" sections for the full research trail.
+ * ========================================================================= */
+
+#define NKS4_EVENT_PERIOD_JIFFIES (2 * HZ)
+/* Generous settle time after the 3rd (last) real command reply is sent,
+ * before the FIRST synthetic runtime event fires - gives OmapNKS4Init()'s
+ * own post-Configure() bring-up (interrupt-URB resubmit, worker-thread
+ * startup) a wide margin to finish before this gadget starts sending
+ * unsolicited interrupt-IN traffic. See README.md's "Fifteenth pass": a
+ * fixed delay measured from SET_CONFIGURATION (not from here) was not a
+ * reliable proxy for this and caused a real hang. */
+#define NKS4_EVENT_SETTLE_JIFFIES (60 * HZ)
+
+#define NKS4_BTN_EXIT 8		/* nks4_inject.c btn_table[]: real, hardware-confirmed EXIT scan code */
+/* nks4_inject.c's own eSTGAnalogDeviceCode reference, real device_code values
+ * (device_code = wire idx & 0x3f, confirmed this pass - see file header):
+ * 7=Aftertouch (HARDWARE-CONFIRMED), 8=RT Knob 1 (HARDWARE-CONFIRMED). */
+#define NKS4_DEV_AFTERTOUCH 7
+#define NKS4_DEV_RT_KNOB1   8
+
+static const unsigned char nks4_generic_events[][4] = {
+	/* op=1, idx&0xf0==0x50: REAL rotary encoder (HandleRotary, delta=dHi<<8|dLo).
+	 * ReceiveEventBuffer's own inline comment calls THIS shape "button/key" -
+	 * disassembly of ProcessNextNKSEvent (this pass) shows it actually reaches
+	 * HandleRotary, not HandleSwitchEvent. delta=0x0100 (CW), matching
+	 * nks4_inject.c's own documented example value. */
+	{ 0x00, 0x01, 0x50, 0x01 },
+	{ 0x00, NKS4_BTN_EXIT, 0x30, 0x00 },		/* op=0  REAL button PRESS:   dHi=EXIT(8), idx=0x30 - disassembly-confirmed bridge, see file header */
+	{ 0x00, NKS4_BTN_EXIT, 0x40, 0x00 },		/* op=0  REAL button RELEASE: dHi=EXIT(8), idx=0x40 - same bridge */
+	/* op=3: REAL analog controller (HandleAnalogController, device_code=idx&0x3f).
+	 * param2/param3 (derived from dLo/dHi here via ShortInvertNkS4AnalogValue,
+	 * now disassembly-confirmed as a raw10-extract-then-conditionally-invert
+	 * transform - see file header) go through that transform before reaching
+	 * the handler. For device_code=7 (Aftertouch), the DISPATCH target is
+	 * confirmed by direct disassembly, but nks4_inject.c itself flags this
+	 * specific device group as "NOT hardware-tested" for any value-scaling
+	 * formula, so no displayed-value claim is made for this entry. */
+	{ 0x80, 0x02, NKS4_DEV_AFTERTOUCH, 0x03 },
+	/* op=3  REAL RT Knob 1 (device_code=8). dLo=0x40,dHi=0x00 -> raw10=0x100
+	 * -> param2(out_hi)=32 (computed via ShortInvertNkS4AnalogValue, this
+	 * pass's own disassembly). nks4_inject.c's own header states this exact
+	 * device group (RT Knobs/Sliders/Value Slider) is HARDWARE-CONFIRMED with
+	 * a byte0=value*2 scaling formula - applying it here predicts a displayed
+	 * value of 16. This prediction itself was not re-verified against real
+	 * hardware this pass (would need a live comparison), but it is a
+	 * concrete, derived value rather than an arbitrary one, unlike the
+	 * Aftertouch entry above. */
+	{ 0x40, 0x00, NKS4_DEV_RT_KNOB1, 0x03 },
+	{ 0x01, 0x00, 0x00, 0x07 },			/* op=7  S/PDIF status: clock-error flag toggle - real, handled entirely inside OmapNKS4Module.ko, no OA.ko dispatch needed */
+};
+
+static void nks4_event_timer_fn(unsigned long data)
+{
+	struct nks4_dev *dev = (struct nks4_dev *)data;
+	static unsigned int next = 0;
+	unsigned char *ibuf;
+	int qret;
+
+	if (!dev || dev->config_value != 1 || !dev->req_int_in || !dev->req_int_in->buf)
+		goto rearm;
+
+	if (dev->int_in_busy)
+		goto rearm;	/* best-effort: skip this tick rather than double-queue */
+
+	ibuf = dev->req_int_in->buf;
+	memcpy(ibuf, nks4_generic_events[next], 4);
+	memcpy(ibuf + 4, nks4_sync_record, 4);
+	dev->req_int_in->length = 8;
+	dev->int_in_busy = 1;
+	qret = usb_ep_queue(dev->ep_int, dev->req_int_in, GFP_ATOMIC);
+	printk(KERN_INFO "OmapNKS4VirtualBoard: synthetic runtime event [%02x %02x %02x %02x] qret=%d\n",
+	       nks4_generic_events[next][0], nks4_generic_events[next][1],
+	       nks4_generic_events[next][2], nks4_generic_events[next][3], qret);
+	if (qret)
+		dev->int_in_busy = 0;
+
+	next = (next + 1) % ARRAY_SIZE(nks4_generic_events);
+
+rearm:
+	mod_timer(&dev->event_timer, jiffies + NKS4_EVENT_PERIOD_JIFFIES);
+}
 
 static void nks4_ep0_complete(struct usb_ep *ep, struct usb_request *req)
 {
@@ -198,9 +413,45 @@ static void nks4_ep0_complete(struct usb_ep *ep, struct usb_request *req)
 
 static void nks4_bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	if (req->status == 0 && req->actual > 0)
-		printk(KERN_INFO "OmapNKS4VirtualBoard: bulk-OUT %d bytes (not yet decoded - see file header)\n",
+	if (req->status == 0 && req->actual >= 4) {
+		u32 cmd = *(u32 *)req->buf;
+		struct nks4_dev *dev = nks4;
+		size_t i;
+
+		printk(KERN_INFO "OmapNKS4VirtualBoard: bulk-OUT command word 0x%08x\n", cmd);
+
+		for (i = 0; i < sizeof(nks4_replies) / sizeof(nks4_replies[0]); i++) {
+			if (nks4_replies[i].cmd != cmd)
+				continue;
+			if (dev && dev->req_int_in && dev->req_int_in->buf && !dev->int_in_busy) {
+				unsigned char *ibuf = dev->req_int_in->buf;
+				int qret;
+
+				memcpy(ibuf, nks4_replies[i].record, 4);
+				memcpy(ibuf + 4, nks4_sync_record, 4);
+				dev->req_int_in->length = 8;
+				dev->int_in_busy = 1;
+				qret = usb_ep_queue(dev->ep_int, dev->req_int_in, GFP_ATOMIC);
+				if (qret) {
+					dev->int_in_busy = 0;
+				} else {
+					dev->replies_sent++;
+					if (dev->replies_sent == sizeof(nks4_replies) / sizeof(nks4_replies[0])) {
+						printk(KERN_INFO "OmapNKS4VirtualBoard: all %d config-time command "
+						       "replies sent - arming synthetic runtime-event timer in %us\n",
+						       dev->replies_sent, NKS4_EVENT_SETTLE_JIFFIES / HZ);
+						mod_timer(&dev->event_timer, jiffies + NKS4_EVENT_SETTLE_JIFFIES);
+					}
+				}
+				printk(KERN_INFO "OmapNKS4VirtualBoard: command 0x%08x -> interrupt-IN reply qret=%d\n",
+				       cmd, qret);
+			}
+			break;
+		}
+	} else if (req->status == 0 && req->actual > 0) {
+		printk(KERN_INFO "OmapNKS4VirtualBoard: bulk-OUT %d bytes (too short to be a command word)\n",
 		       req->actual);
+	}
 
 	/* re-queue to keep receiving */
 	req->length = NKS4_EP_MAXPACKET;
@@ -210,10 +461,13 @@ static void nks4_bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 
 static void nks4_int_in_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	/* Idle: this substitute doesn't yet generate real panel events
-	 * (button/knob/pedal state) - see file header's own scope note. A
-	 * real interrupt-IN transfer only needs to be queued when there's
-	 * genuine event data to report; nothing re-queues here by design. */
+	/* Nothing to re-queue automatically: each interrupt-IN transfer here is
+	 * a one-shot reply (a COmapNKS4Command response, or a synthetic runtime
+	 * event from nks4_event_timer_fn()), queued on demand - not a periodic
+	 * self-re-arming transfer. Just clear the busy guard so the next
+	 * request (from either source) can queue req_int_in again. */
+	if (nks4)
+		nks4->int_in_busy = 0;
 }
 
 /* ========================================================================= *
@@ -318,9 +572,22 @@ static int nks4_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c
 			dev->req_bulk_out->length = NKS4_EP_MAXPACKET;
 			usb_ep_queue(dev->ep_bulk, dev->req_bulk_out, GFP_ATOMIC);
 			printk(KERN_INFO "OmapNKS4VirtualBoard: configured, endpoints enabled\n");
+			/* Do NOT start the runtime-event timer here: SET_CONFIGURATION
+			 * fires as soon as this gadget enumerates, which can happen well
+			 * before OmapNKS4Module.ko even loads (a fixed wall-clock delay
+			 * from here is not a reliable proxy for "the real driver has
+			 * finished Configure() and its own post-Configure() bring-up" -
+			 * confirmed the hard way, see README.md's "Fifteenth pass": a
+			 * 10s-from-SET_CONFIGURATION delay caused a real hang, most
+			 * likely by delivering synthetic interrupt-IN traffic into
+			 * OmapNKS4Init()'s own fragile post-Configure() window. The
+			 * timer is instead started from nks4_bulk_out_complete(), only
+			 * once all 3 real command replies have actually been sent -
+			 * see dev->replies_sent and NKS4_EVENT_SETTLE_JIFFIES below. */
 		} else {
 			usb_ep_disable(dev->ep_int);
 			usb_ep_disable(dev->ep_bulk);
+			del_timer_sync(&dev->event_timer);
 		}
 		len = 0;
 		break;
@@ -402,6 +669,10 @@ static int nks4_bind(struct usb_gadget *gadget)
 		goto fail;
 	dev->req_int_in->complete = nks4_int_in_complete;
 
+	init_timer(&dev->event_timer);
+	dev->event_timer.function = nks4_event_timer_fn;
+	dev->event_timer.data = (unsigned long)dev;
+
 	nks4 = dev;
 	printk(KERN_INFO "OmapNKS4VirtualBoard: bound, ep_int=%s ep_bulk=%s\n",
 	       dev->ep_int->name, dev->ep_bulk->name);
@@ -431,6 +702,8 @@ static void nks4_unbind(struct usb_gadget *gadget)
 	if (!dev)
 		return;
 
+	del_timer_sync(&dev->event_timer);
+
 	if (dev->req_int_in) {
 		kfree(dev->req_int_in->buf);
 		usb_ep_free_request(dev->ep_int, dev->req_int_in);
@@ -453,6 +726,7 @@ static void nks4_disconnect(struct usb_gadget *gadget)
 	struct nks4_dev *dev = get_gadget_data(gadget);
 
 	if (dev) {
+		del_timer_sync(&dev->event_timer);
 		usb_ep_disable(dev->ep_int);
 		usb_ep_disable(dev->ep_bulk);
 		dev->config_value = 0;
