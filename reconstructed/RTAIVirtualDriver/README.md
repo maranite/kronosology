@@ -242,22 +242,36 @@ always loads after the real, genuine RTAI stack there.
   function's cancellation semantics need a rewrite (e.g. a cooperative
   stop flag checked inside every RTAI-style service loop this module's
   tasks run).
-- **`rtwrap_pthread_create()`'s RT-task entry point is a hardcoded address
-  this module cannot make valid.** `reconstructed/OA/src/init/rtwrap.cpp`
-  passes `rt_task_init()` a hardcoded address constant
+- **FIXED (sec 10.235, 2026-07-13) — `rtwrap_pthread_create()`'s RT-task
+  entry point used to be a hardcoded address this module could not make
+  valid.** `reconstructed/OA/src/init/rtwrap.cpp` originally passed
+  `rt_task_init()` a literal ground-truth address
   (`RTWRAP_THREAD_TRAMPOLINE = (void *)0x118e80`) as the RT task's entry
   point - an intentionally-unreconstructed internal `OA.ko` trampoline
   function, modeled only as an opaque address because nothing in that file
-  calls it directly (it is only ever passed through to `rt_task_init`).
-  This module's `rt_task_init()` faithfully does what real RTAI would do
-  with whatever entry pointer it is given - spawn a kthread that eventually
-  calls it - but it cannot make that specific hardcoded address a valid
-  function in a freshly-linked `OA.ko` build, since that build's own
-  `.text` layout necessarily differs from the original binary the constant
-  was extracted from. Any run that reaches the point where a daemon's
-  kernel thread is resumed and jumps to that address is expected to fault
-  there. This is a pre-existing `OA.ko`-side reconstruction gap, not
-  something introduced by this module, and not this module's own scope to
-  fix. *To validate:* reconstruct the real trampoline function's code from
-  `OA.ko`'s own disassembly at that address, or patch the address at load
-  time to point at an equivalent reconstructed function once one exists.
+  called it directly at the time. Once this module's own `rt_task_init()`/
+  `rt_task_resume()` became real (genuinely spawning a kthread and jumping
+  straight to whatever entry pointer they're given), this hazard stopped
+  being theoretical: a live `kronosvm` boot Oopsed jumping to the literal
+  `0x118e80` (`EIP == CR2 == 0x118e80`, "Bad EIP value" - nothing valid
+  lives there in a freshly-linked `OA.ko`, confirming the concern this
+  entry originally raised). Fixed the same way `daemon_lifecycle.cpp`'s
+  analogous `DAEMON_THREAD_TRAMPOLINE`/`DECRYPT_THREAD_TRAMPOLINE` hazard
+  was fixed (sec 10.234): `rtwrap.cpp` now points `RTWRAP_THREAD_TRAMPOLINE`
+  at a real, minimal, safe stand-in function (`RtwrapThreadTrampoline`,
+  matching `rt_task_init`'s required `void(*)(long)` signature) instead of
+  the bare literal. It deliberately does NOT dispatch through the stashed
+  `start`/`arg` fields at task+0x5b0/+0x5b4 that the real trampoline
+  presumably uses - every current caller of `CreateRealTimeWithCPUAffinity()`
+  is a genuine infinite real-time audio-DSP service loop, out of scope per
+  this project's RTAI-virtualization policy, and dispatching into one risks
+  trading a clean Oops for a silent busy-loop/soft-lockup instead. Verified
+  via `test_rtwrap.cpp` (confirms the captured entry pointer is non-NULL,
+  not the old `0x118e80` literal, and callable without crashing) and via
+  the live `kronosvm` boot that first caught the bug (`OA_DEBUG_MARKER 14`
+  now fires: `CreateRealTimeWithCPUAffinity()` successfully spawns and
+  resumes a real-time kthread for the first time this project has ever
+  recorded). This module (`RTAIVirtualDriver.ko`) itself required no
+  change - the gap was entirely on `OA.ko`'s own reconstructed side. See
+  `reconstructed/OA/src/init/rtwrap.cpp`'s header comment on
+  `rtwrap_pthread_create` for the full writeup.

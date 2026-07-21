@@ -342,13 +342,32 @@ made for those - see Known limitations.
   from readable code, not a guess. Further fresh disassembly (all six of
   `AnalogJoystickXHandler`/`AnalogRibbonXHandler`/`AnalogFootPedalHandler`/
   etc. turned out to be real, individually decompiled functions, not dead
-  ends): **Joystick X** feeds its 10-bit raw value through
-  `CSTGControllerRTData::CPitchBendFilter::Filter` (a center-deadzone check
-  at `0x200` gates whether the filter runs) and emits a real 14-bit MIDI
-  Pitch Bend message (`low7 = v&0x7f`, `high7 = (v>>7)&0x7f`) - a genuine,
-  different scaling model from the knob/slider group, not yet reduced to a
-  single formula since `CPitchBendFilter`'s own smoothing arithmetic wasn't
-  traced. **Ribbon X** shows real touch/release semantics: `param_1!=0`
+  ends): **Joystick X** feeds its 10-bit raw value (left-shifted 4 bits to
+  14-bit MIDI Pitch Bend range, center `0x2000`) through
+  `CSTGControllerRTData::CPitchBendFilter::Filter` and emits a real 14-bit
+  MIDI Pitch Bend message (`low7 = v&0x7f`, `high7 = (v>>7)&0x7f`) - a
+  genuine, different scaling model from the knob/slider group.
+  **`CPitchBendFilter::Filter`'s own smoothing arithmetic - RESOLVED
+  2026-07-20** via direct disassembly of the real, small (84-byte)
+  function (`_ZN20CSTGControllerRTData16CPitchBendFilter6FilterEt`,
+  `Decomp/OA.ko_Decomp/OA.ko` offset `0xd5f0`): it is not a smoothing/decay
+  filter in the low-pass sense - it is a **center-crossing guarantor**.
+  Given the new raw value and the filter's own stored previous value (a
+  16-bit field in the filter object), it forces the stored value to snap to
+  exactly the true center (`0x2000`) whenever the new value and the
+  previous stored value fall on opposite sides of the `0x1fff`/`0x2000`
+  boundary (new `<=0x1fff` while previous `>0x2000`, or new `>0x2000` while
+  previous `<=0x1fff`) - guaranteeing a genuine bipolar axis like pitch
+  bend always emits a true-center message when crossing over, rather than
+  jumping straight from e.g. a low negative-bend value to a positive one in
+  a single step. When the stored value lands exactly on `0x2000` (having
+  just snapped there, or already there) AND the incoming value is
+  `<=0x2000`, it additionally writes one extra byte, sourced from a global
+  lookup table (`CSTGGlobal::sInstance+0x6b9`), into a second field of the
+  filter object - not yet connected to a named downstream consumer, but a
+  real, ground-truthed side effect, not a guess. Otherwise, it simply
+  tracks the new value directly. Returns whether the stored value actually
+  changed. **Ribbon X** shows real touch/release semantics: `param_1!=0`
   means finger-down (stores a displayed value of `0x3ff-param_1` - another
   instance of the same center-inversion style seen in
   `ShortInvertNkS4AnalogValue`, but applied again at this OA.ko layer, not
@@ -357,77 +376,170 @@ made for those - see Known limitations.
   wrapper forwarding straight to `CSTGControllerRTData::HandleFootPedalChange`,
   which itself forwards to a generic `HandleControllerChange` CC dispatcher
   with no extra scaling visible at this layer (structurally similar to
-  Aftertouch's direct pass-through). Still genuinely unconfirmed: Joystick
-  Y/Ribbon Z/Vector Joystick X+Y's own specific formulas (not yet read),
-  Footswitch (on/off, likely trivial but unread), and Tempo/Damper (already
-  separately documented as using their own distinct non-linear curves).
-  *To validate:* trace `HandleAnalogController`'s own further use of
+  Aftertouch's direct pass-through). **The remaining device codes were
+  traced too, closing every one of them structurally**: **Joystick Y**
+  (`ProcessJoystickY`) is a genuine, concrete, different model from
+  Joystick X - a split bipolar CC pair, not pitch bend: below center,
+  `((0x1ff-raw)>>2)&0x7f` drives one CC; above center, `(raw>>2)&0x7f`
+  drives a *different* CC; exact center (`0x200`) sends neither - the same
+  "raw10 >> 2" reduction pattern as the RT-Knob/Slider group's `byte0`
+  math, just split across two unipolar CCs instead of one bipolar value.
+  **Ribbon Z is a confirmed, deliberate no-op** - a real, 1-byte function
+  (`ret` and nothing else) is wired into the dispatch table for it; not an
+  unconfirmed formula, but a settled fact that this axis currently does
+  nothing. **Vector Joystick X/Y** both route through the same
+  `SendCCToKG` generic CC dispatcher Ribbon X uses, gated on whether a CC
+  is actually assigned to that axis (`CSTGGlobal::sInstance+0x6c0`/`0x6c1`
+  checked `>=0`, a signed-byte per-axis CC-number assignment table) - a
+  real, concrete routing model. **The 16-bit-to-byte reduction -
+  RESOLVED 2026-07-20**: disassembly of the real
+  `AnalogVectorXHandler`/`AnalogVectorYHandler`
+  (`_ZN18CSTGControllerInfo20AnalogVectorXHandlerEtt`/`...YHandlerEtt`,
+  `Decomp/OA.ko_Decomp/OA.ko` offsets `0x97900`/`0x97870`) shows
+  `SendCCToKG` itself does no reduction at all - it is a thin 5-byte
+  MIDI-message packer (status/data1/data2 + two fixed trailer bytes) that
+  just forwards to a further helper; the actual reduction happens in the
+  caller, and it is the simplest possible one: **`ccValue = raw16 & 0xff`**
+  (the incoming ushort's low byte, `%dl`, taken directly with no shift or
+  scale). Both handlers have a second, previously undocumented branch,
+  gated on a mode flag (`CSTGGlobal::sInstance+0x2f` bit `0x2`): when set,
+  BOTH X and Y CCs (if assigned) are sent a fixed value `0x40` (MIDI CC
+  center) regardless of the live raw value - a "force to rest position"
+  behavior (e.g. plausibly on release/disable), not yet connected to a
+  named trigger condition. **Footswitch** (`HandleFootSwitchChange`) is confirmed as the expected
+  trivial boolean on/off, plus one extra real detail: a configurable
+  polarity-invert (normally-open vs normally-closed jack wiring) and
+  change-detection gating before dispatch. **Value Slider**
+  (`AnalogValueSliderHandler`) structurally confirms the hardware-tested
+  `byte0=value*2` formula's own value flows straight into
+  `SendUnsolControl2MessageToUI`, gated by a separate mode flag for
+  whether it ALSO sends a CC via `SendCCToKG`. Tempo/Damper remain
+  documented only via `nks4_inject.c`'s own hardware-tested non-linear
+  curves (not independently re-traced in this pass). *To validate:* trace
+  `HandleAnalogController`'s own further use of
   `param2`/`param3` for a specific `device_code`, or compare synthetic
   values against live
   real-hardware readings for that control.
-- **Real-hardware verification of this exact wire-level event byte
-  sequence, as consumed by the real driver's `ReceiveEventBuffer()`, WAS
-  performed (2026-07-20)** - and produced a real, diagnosed negative
-  result, not yet a confirmed working effect. Earlier, semantic-layer-only
-  checks (via `nks4_inject`'s `/proc/.nks4inject`, an unrelated
-  additive-call injection path) showed a framebuffer diff before/after an
-  EXIT button press/release with the expected large pixel change
-  (333,532/480,021 bytes), then a full revert to the original baseline; a
-  `ROT 256` (rotary CW) diff showed a smaller, real, localized change
-  (5,556 bytes) consistent with a UI value update rather than a full
-  redraw; `ANALOG 7 100 0` (Aftertouch) and `ANALOG 8 100 0` (RT Knob 1)
-  both completed cleanly but produced no visible screen change - expected
-  for sound-synthesis parameters with no on-screen meter, not a failure.
-  But none of that exercised the actual wire bytes this module's own
-  generator sends, only the same real dispatch TARGETS at a higher call
-  layer. Building a kernel module that reads or injects live wire traffic
-  directly at the `ReceiveEventBuffer()` layer was attempted two different
-  ways: an inline function hook (blocked by this project's safety tooling,
-  which draws a boundary around any new kernel module patching/hooking a
-  live production binary's internals), and a purely additive call with no
-  interception of any existing code path. **The additive-call design
-  (`nks4_wire_verify.ko`) WAS built and run on real hardware, with
-  explicit authorization**: a real `BTN 9` press+release, encoded as
-  genuine wire bytes (`[00 09 30 00]`/`[00 09 40 00]`), was fed directly
-  into the real, live `ReceiveEventBuffer()`. dmesg confirms the call
-  fires correctly, but a `/dev/fb1` diff before/after showed **0 of
-  480,021 bytes differ** - no observable effect, reproducing this
-  project's own earlier report exactly. **Root cause diagnosed and
-  confirmed, not just theorized**: every wire-decoded event in
-  `ReceiveEventBuffer` is gated by `CNKS4EventFilter::FilterEvent()`,
-  which requires `bEnabled` (`sInstance+0x1d`) true and `bSuppressAll`
-  (`sInstance+0x1e`) false before an event reaches the host FIFO. Fresh
-  `objdump -dr` of the real 3.2.2 binary independently confirms offset
-  `0x1d` - 8 separate call sites in `ReceiveEventBuffer` compute
-  `&sInstance+0x1d` immediately before calling `FilterEvent`. A live
-  diagnostic read at the moment of the test showed `bEnabled=0` (and
-  `bSuppressAll=0`, ruling out the other half of the gate) - `FilterEvent`
-  hits its `if (!bEnabled) return 0` early-exit and silently drops the
-  event before it reaches `ProcessNextNKSEvent`. *To validate:* whether
-  calling the real, exported `COmapNKS4Driver_StartScanning()` (sets only
-  that one byte to 1, nothing else) makes the same wire-level test produce
-  a real effect is the natural next step, but adding that call was blocked
-  by this project's safety tooling as a new state-mutating call into live
-  driver internals (distinct from the read-only diagnostics used above) -
-  awaiting explicit authorization to attempt.
+- ~~Real-hardware verification of this exact wire-level event byte
+  sequence, as consumed by the real driver's `ReceiveEventBuffer()`, has
+  not been performed~~ **RESOLVED (2026-07-20) - genuine wire-level
+  real-hardware verification achieved, with a real bug in this project's
+  OWN test tooling found and fixed along the way.** Earlier,
+  semantic-layer-only checks (via `nks4_inject`'s `/proc/.nks4inject`, an
+  unrelated additive-call injection path operating on `OA.ko`'s
+  already-translated `CSTGFrontPanel::Handle*` layer, not the raw wire
+  bytes) had shown a framebuffer diff before/after an EXIT button
+  press/release with the expected large pixel change (333,532/480,021
+  bytes), then a full revert to baseline - real, but one layer removed
+  from the actual wire protocol this module's generator speaks.
+  A dedicated additive-call module, `nks4_wire_verify.ko` (same safety
+  posture as `nks4_inject.c`: no hook, no trampoline, no patching of any
+  existing code), was built to close that gap by calling the real, live
+  `ReceiveEventBuffer()` directly with genuine wire bytes. Its FIRST
+  version resolved `COmapNKS4Driver::sInstance`'s address by reading an
+  already-relocated pointer out of another function's own machine code
+  (`SetProgressBarPercentEh.clone.3`) - a technique already proven
+  elsewhere in this project - but got the offset's ADDEND wrong: the
+  relocation slot used belongs to a `MOV moffs8,AL` instruction
+  (`SetProgressBarPercent`'s own body, storing into `sInstance.bProgress`
+  at `+0x1b`), so the raw relocated value in that slot is
+  `&sInstance + 0x1b`, not `&sInstance`. Every read AND every
+  `ReceiveEventBuffer(this=...)` call this module made before the fix used
+  a `this` pointer 0x1b bytes past the real object - past the end of the
+  documented 40-byte struct - which is why a live diagnostic read showed
+  `bEnabled=0`/implausible `num_keys`/implausible `hw_version`: none of
+  those reads, nor the event-buffer calls themselves, were ever touching
+  the real struct. (The "`bEnabled=0` gates the event filter" root cause
+  this document previously reported was consequently WRONG - a real,
+  disassembly-confirmed fact about the struct layout, misapplied to a
+  wrongly-computed base address; `CNKS4EventFilter::FilterEvent()` and its
+  `sInstance+0x1d`/`+0x1e` offsets remain correctly documented, just not
+  the actual explanation here.) After subtracting the `0x1b` addend, a
+  fresh baseline read showed `sinstance` shift exactly by `0x1b` as
+  predicted, `filter_enabled=1` and `hw_version=1` (both now plausible,
+  unlike before) - and a real `BTN 9` press+release, sent as genuine wire
+  bytes (`[00 09 30 00]`/`[00 09 40 00]`) directly into the real, live
+  `ReceiveEventBuffer()`, produced a **real, large `/dev/fb1` diff:
+  334,229 of 480,021 bytes changed** (closely matching the earlier
+  `nks4_inject`-layer EXIT test's 333,532 bytes - the same real UI
+  transition, now confirmed reachable via the actual wire protocol). A
+  wire-level `BTN 8` (EXIT) press/release afterward restored the display
+  to **exactly** the original baseline (0 bytes differ), a clean,
+  zero-net-disruption round trip. This is now genuine, complete,
+  wire-level real-hardware verification, not a semantic-layer proxy for
+  it.
 - **An intermittent failure where the first configuration-time command
   reply (`CommunicationCheck`) is not delivered or received correctly**,
   causing the driver load to hang rather than fail cleanly, occurs on a
   minority of otherwise-identical boot attempts and remains unresolved.
   It is suspected to be a timing artifact of this kernel's RTAI/I-pipe
   substitution rather than a logic bug in this module's own code, but
-  this is not proven. *To validate:* run a larger repeated-boot sample
-  (10+ runs of an identical build) to establish whether the failure rate
-  is stable and whether it correlates with a specific timing window
-  around driver bring-up.
-- **The real field names/purposes occupying the padding inserted into
-  `struct usb_hcd`/`struct usb_bus` and `struct urb` were never
-  identified** - both fixes use generic, documented padding fields rather
-  than named, semantically understood ones. *To validate:* obtain real
-  Korg kernel source for these structs, or perform further live-kernel
-  triangulation of the affected regions the way the `struct urb` gap
-  itself was pinned down (comparing disassembled real-kernel field
-  accesses against the build tree's own offsets).
+  this is not proven. **PARTIAL DATA (2026-07-20):** ran 8 repeated
+  boots on `kronosvm` using a bounded, minimal 6-module chain
+  (`RTAIVirtualDriver.ko` -> `STGEnabler.ko` -> `STGGmp.ko` ->
+  `dummy_hcd_fixed.ko` -> `OmapNKS4VirtualBoard.ko` ->
+  `OmapNKS4Module.ko`, no `AT88VirtualChip.ko`/`OmapNKS4VirtualDriver.ko`,
+  no module parameters) with a 150s per-boot bound and stall detection
+  (45s with no new console output after `OmapNKS4`/`dummy_hcd` mentioned).
+  **8/8 runs stalled - 0 completed.** This is a materially different
+  result from the `run_vm_virtual_probe_test.sh` hang-rate study
+  referenced elsewhere in this project (9/20, 45%, for the *unrelated*
+  `vm_virtual_probe=1` standalone path that bypasses this dummy_hcd/gadget
+  chain entirely) and should not be read as the same measurement at a
+  different rate - different chain, different failure point. Also new: in
+  every run examined, the actual stall point was EARLIER than
+  `CommunicationCheck` - the virtual root hub's own descriptor read fails
+  first (`hub 1-0:1.0: config failed, can't read hub descriptor (err
+  -22)`), `OmapNKS4Probe()` is consequently never called
+  (`OmapNKS4: Waited for OmapNKS4Probe(). driver state is 0` /
+  `OmapNKS4: probe failed`), and - despite `OmapNKS4Init`'s own
+  documented graceful-timeout design (see `OmapNKS4VirtualBoard/README.md`
+  "Design goal") - no further console output, including this project's own
+  `loadoa_test.sh`'s follow-up `kmsg` lines, ever appears; something after
+  the printed "probe failed" message stops producing output entirely, a
+  genuine hang rather than the designed clean-failure-and-continue path.
+  **Caveat:** this minimal harness differs from whatever configuration
+  produced the "loads and configures successfully end to end" result
+  documented above (bugs #1-6) - missing `AT88VirtualChip.ko`/
+  `OmapNKS4VirtualDriver.ko` and module parameters could plausibly affect
+  root-hub enumeration timing, so this 8/8 result should be read as "a
+  real, reproducible failure mode exists and was newly characterized down
+  to the root-hub descriptor read," not as a revised, definitive failure
+  rate for the previously-validated configuration. *To validate:* rerun
+  with the full module chain (including AT88VirtualChip/
+  OmapNKS4VirtualDriver) and any real module parameters, and if the root
+  hub `err -22` persists, GDB-attach across a stalled boot to find what,
+  after "probe failed" prints, is actually blocking further execution.
+- **UPDATED 2026-07-20 - most of this padding now has real, confirmed field
+  names; a few smaller gaps remain genuinely unidentified despite
+  exhaustive effort, not for lack of trying.** Re-checked against the
+  current kernel tree (`/home/build/linux-kronos`'s own `hcd.h`/`usb.h`,
+  dated 2026-07-19/20 fix comments): the largest single gap, `struct
+  usb_hcd`'s 12-byte shared-roothub cluster, is now fully named and
+  confirmed via direct disassembly of the real kernel's own
+  `usb_create_shared_hcd()`/`usb_hc_died()` (recovered from `kronos.img`'s
+  own symbolicated vmlinux) - `bandwidth_mutex@0xbc`, `shared_hcd@0xc0`,
+  `primary_hcd@0xc4`, matching real upstream Linux's own shared-USB2/3-
+  root-hub fields, evidently backported into Korg's vendor kernel while
+  keeping the same `2.6.32.11-korg` version string. Three smaller 4-byte
+  gaps remain genuinely unnamed after real effort, each with a specific,
+  reasoned (not confirmed) hypothesis: `struct usb_hcd`'s kref-to-
+  `rh_timer` gap (likely `irq_descr[]` grew to 28 bytes, or an inserted
+  field); `struct usb_bus`'s bitfield-region gap (likely a GCC-version
+  difference in i386 bitfield storage-unit alignment between the real
+  kernel's GCC 4.5 and this tree's host GCC 12, empirically reproduced
+  with a standalone `offsetof()` probe but not independently confirmed as
+  THE cause); and `struct urb`'s `pipe`-to-`status` gap, which was checked
+  against the **live production Kronos itself** (not just a factory
+  image - `/boot/bzImage` pulled directly from 192.168.100.15, extracted
+  to vmlinux, and disassembled) across every generic urb-lifecycle
+  function that touches nearby fields, all of which independently confirm
+  the surrounding offsets without ever touching this specific one. This
+  *is* the "further live-kernel triangulation" this item's own next step
+  asked for, already performed as thoroughly as static/disassembly
+  analysis allows - what remains open would need either real Korg kernel
+  source (unavailable) or a code path this triangulation hasn't reached
+  yet.
 
 ## Related documentation
 

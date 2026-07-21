@@ -561,21 +561,32 @@ static void LoadAll(void)
             puts("Problems chmoding pipe for 2nd disk ftp mount point");
     }
 
-    /* ── 15. Load OA.ko from (possibly redirected) path ─────────────── */
+    /* -- 15. Load KorgUsbAudioDriver.ko --------------------------------
+     * Must precede OA.ko: OA.ko's own ELF symbol table carries non-weak
+     * (GLOBAL) undefined references to KorgUsbAudio- and KorgUsbMidi-
+     * family symbols, which the kernel module loader resolves eagerly
+     * at insmod time -- a non-weak unresolved symbol is a hard load
+     * failure, not a runtime-only concern. Confirmed against a live
+     * Kronos's own /proc/modules: "KorgUsbAudioDriver ... 1 OA" lists
+     * OA as KorgUsbAudioDriver's dependent, which is only possible if
+     * KorgUsbAudioDriver.ko was already loaded when OA.ko resolved its
+     * symbols. An earlier reconstruction had this pair reversed (OA.ko
+     * before KorgUsbAudioDriver.ko) based on a misreading of the
+     * evidence. */
+    {
+        char *argv[] = { "/sbin/insmod", PATH_KORG_USB_AUDIO_KO, NULL };
+        if (RunProcess(argv, 0, "/dev/null") != 0)
+            fprintf(stderr, "Insmod %s failed\n", PATH_KORG_USB_AUDIO_KO);
+        /* non-fatal in stock binary — OA is the critical one */
+    }
+
+    /* ── 16. Load OA.ko from (possibly redirected) path ─────────────── */
     {
         char *argv[] = { "/sbin/insmod", PATH_OA_KO, NULL };
         if (RunProcess(argv, 0, "/dev/null") != 0) {
             fprintf(stderr, "Insmod %s failed\n", PATH_OA_KO);
             Fail(0x13);
         }
-    }
-
-    /* ── 16. Load KorgUsbAudioDriver.ko ─────────────────────────────── */
-    {
-        char *argv[] = { "/sbin/insmod", PATH_KORG_USB_AUDIO_KO, NULL };
-        if (RunProcess(argv, 0, "/dev/null") != 0)
-            fprintf(stderr, "Insmod %s failed\n", PATH_KORG_USB_AUDIO_KO);
-        /* non-fatal in stock binary — OA is the critical one */
     }
 
     /* ── 17. Umount /korg/Mod ───────────────────────────────────────── */

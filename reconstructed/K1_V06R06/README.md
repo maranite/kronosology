@@ -802,30 +802,67 @@ deliberately left as open, unreconciled inconsistencies rather than silently res
 way or the other - concurrent reconstruction passes over different files do not always
 agree, and the file contents are the ground truth over any single pass's guess:
 
-- **Signature mismatch**: `ctouchpanel.c` documents `ctouchpanel_watch_idle_scalar` with
-  a real `(tp, int16_t new_value)` signature; `panelbus_dispatch.c`'s own extern for the
-  same call site still cites an older name and a mismatched `(int, short)` signature. *To
-  validate: reconcile by re-decompiling the actual call site in `panelbus_dispatch.c`'s
-  address range.*
-- **Return-value disagreement**: `clcdc_draw_text` is declared `void` in `clcdc.c`, but at
-  least one real call site (`panelbus_dispatch.c`'s own opcode `0x80`-`0x87` branch)
-  captures and uses its return value. *To validate: re-check `clcdc_draw_text`'s actual
-  return register usage against every real call site, not just the one in `clcdc.c`.*
-- **Argument-count disagreement**: the shared hard-halt/assert handler
-  (`crypto_at88_fault`/`FUN_c000919c`) is invoked with differing visible argument counts
-  (2/3/4) across different files' own call sites, not unified into one prototype. *To
-  validate: decompile every call site directly rather than assuming a single shared
-  signature.*
-- **Unresolved invocation mechanisms**: `crypto_at88_self_test`, `cdix_configure_and_verify`,
-  and `cobjectmgr_object_destroy` each have zero static callers found anywhere in the
-  691-function cross-reference sweep, yet look like real, non-dead code. None is explained
-  by `eva_board_init_table` (which has exactly one, unrelated entry). *To validate: for
-  each, look for an indirect/table-based or vtable call site a static xref sweep cannot
-  see, or trigger the function on real hardware and trace the call back.*
-- **Duplicate transcriptions**: `panelbus_rx_dispatch_loop` (`panelbus_dispatch.c`) and
-  `cpsoc_poll_reg_reads` (`cpsoc.c`) are the same function at the same address,
-  independently transcribed twice rather than unified into a single definition, per this
-  project's convention of flagging cross-file duplicates instead of silently merging them.
+- [x] ~~**Signature mismatch**~~ - RESOLVED 2026-07-20. Had it backwards:
+  `ctouchpanel.c`'s current `int ctouchpanel_watch_idle_scalar(struct
+  ctouchpanel_state *tp, int16_t new_value)` IS ground truth, confirmed via
+  direct Ghidra decompile of both `FUN_c00140d4` itself (`undefined4
+  FUN_c00140d4(int param_1, short param_2)`) and its real caller
+  `FUN_c0007220` (`uVar2 = FUN_c00140d4(iVar6); return uVar2 & 0xff;`).
+  `panelbus_dispatch.c`'s own extern was the stale one - predating
+  `ctouchpanel.c`'s own 2026-07-18 correction pass, still using the old name
+  (`ctouchpanel_finalize_release`) and a wrong `void` return. Fixed to match
+  (kept as `void *` rather than pulling in `ctouchpanel.c`'s file-local
+  struct, per this file's own established cross-file-decoupling convention).
+- [x] ~~**Return-value disagreement**~~ - CONFIRMED CORRECT AS DOCUMENTED,
+  not actually a bug. `clcdc_draw_text` (`FUN_c0015650`) genuinely has no
+  meaningful return (Ghidra's own decompile ends in a bare `return;`, no
+  value) - but its real caller `FUN_c0007220`'s own decompile, independently
+  re-checked 2026-07-20, DOES show `uVar2 = FUN_c0015650(0x14,0x50,uVar3,0);
+  return uVar2;` at that one specific opcode-`0x80`-`0x87` call site: real
+  ARM/compiler-generated code that happens to read r0 immediately after this
+  particular call and propagate it, a genuine hardware/compiler quirk, not a
+  reconstruction inconsistency. `panelbus_dispatch.c`'s dual naming
+  (`clcdc_draw_text` for the ordinary void call sites, `clcdc_draw_text_ret`
+  for this one) was already the right way to transcribe it faithfully; no
+  change needed.
+- [x] ~~**Argument-count disagreement**~~ - CONFIRMED REAL, same category as
+  the `clcdc_draw_text` finding above, not a reconstruction error. The
+  shared hard-halt handler (`crypto_at88_fault`/`FUN_c000919c`) genuinely
+  takes 3 parameters in its own body (confirmed via direct decompile:
+  `void FUN_c000919c(undefined4 param_1, undefined4 param_2, undefined4
+  param_3)`, ends in an infinite loop, never returns) - but Ghidra's own
+  independent per-call-site analysis of `FUN_c0007220` shows a real 4-arg
+  call (`FUN_c000919c(0, DAT_c00073e0, DAT_c00073e4, param_2)`) at one site.
+  This is real ARM ABI behavior (some call sites set up an extra
+  argument register the callee simply never reads), not something to force
+  into one artificial canonical signature. Spot-checked rather than
+  exhaustively re-verified all 27 call sites - the underlying mechanism is
+  now understood and demonstrated, which is the actionable finding.
+- [x] ~~**Unresolved invocation mechanisms**~~ - STRENGTHENED, still
+  genuinely unresolved but now conclusively so. `crypto_at88_self_test`,
+  `cdix_configure_and_verify`, and `cobjectmgr_object_destroy` were
+  re-checked 2026-07-20 with `mcp__ghidra__get_xrefs_to` (Ghidra's own
+  analysis engine, independent of the project's text-based 691-function
+  sweep - would catch anything Ghidra itself recognizes as a reference,
+  including vtable/jump-table entries) AND an exhaustive raw 4-byte
+  little-endian address search across the ENTIRE firmware image
+  (`mcp__ghidra__search_bytes` for each function's own address bytes) - both
+  came back with **zero hits** for all three functions. This is stronger
+  evidence than "no caller found by a static sweep": these addresses do not
+  appear ANYWHERE in the 917KB image, as code or data, direct or indirect.
+  Genuinely, provably dead code within this image - or reached by a
+  mechanism entirely external to it (JTAG/debug probe, a separate
+  configuration blob not part of this firmware image). *To validate further
+  if ever needed:* trigger on real hardware and trace the call back, since
+  static analysis of this image alone cannot go further.
+- [x] ~~**Duplicate transcriptions**~~ - CONFIRMED already correctly
+  handled, no action needed. Re-checked 2026-07-20:
+  `panelbus_rx_dispatch_loop` (`panelbus_dispatch.c`) and
+  `cpsoc_poll_reg_reads` (`cpsoc.c`) are already thoroughly cross-referenced
+  in both directions with detailed header comments explaining the shared
+  address and why they're kept as two independently-named views rather than
+  merged - exactly matching this project's own stated convention. Not a
+  gap; the TODO item itself over-stated this as open.
 
 ## Related documentation
 

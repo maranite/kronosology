@@ -99,29 +99,51 @@ Kbuild-compatible `Makefile`) is in place, matching
 
 ## Known limitations
 
-- **The real `.ko` build has not been verified against a real kernel
-  tree/`KDIR`.** The host-side build only compiles each unit as a
-  freestanding object for the known-answer tests; the Kbuild path that
-  produces the real `.ko` has not been exercised against a kernel tree
-  matching the Kronos's own module ABI. *To validate:* build with `make ko
-  KDIR=<kronos-kernel-tree>` against a correctly configured
-  Linux 2.6.32.11-korg tree and confirm the resulting module loads.
-- **`CSTGThread::CreateRealTimeWithCPUAffinity` is not yet investigated.**
-  This is the real gate on `init_module` step 13 (see above), and is a
-  separate, self-contained dependency from this stub. *To validate:*
-  disassemble `CSTGThread::CreateRealTimeWithCPUAffinity` and its RTAI
-  real-time-thread-creation call chain to determine what conditions cause
-  it to fail under emulation.
-- **The real-hardware module load order is unconfirmed and possibly
-  contradictory.** `loadoa/loadoa.c` shows `OA.ko` loading before
-  `KorgUsbAudioDriver.ko` on real hardware, but `OA.ko`'s undefined
-  `KorgUsbAudio*` symbols are `GLOBAL`, not `WEAK` - which should make that
-  load order impossible for a normal Linux module load, since the kernel
-  only resolves undefined symbols against already-loaded modules and
-  otherwise refuses to `insmod`. This does not block using this stub (a
-  test boot can simply load this module before `OA.ko`, regardless of what
-  order real hardware uses), but the discrepancy itself is unresolved.
-  *To validate:* re-check the real boot log's module load order and the
-  real `KorgUsbAudioDriver.ko`/`OA.ko` symbol tables' bind types directly,
-  to determine whether the apparent ordering is real or a
-  misread of the evidence.
+- **RESOLVED (2026-07-20) — the real `.ko` build is now verified against a
+  real kernel tree, and confirmed loading on a live boot.** `make ko
+  KDIR=/home/build/linux-kronos` builds clean (only the expected benign
+  Kbuild C++-in-C-context warnings shared by every other module in this
+  project, e.g. `-fno-rtti` not applying to `module_main.c`). Booted on
+  the `kronosvm` sandbox (192.168.3.87, never the live production Kronos):
+  the resulting `KorgUsbAudioVirtualDriver.ko` loads cleanly (`dmesg`:
+  "KorgUsbAudioVirtualDriver: loading", no error), and critically, `OA.ko`
+  itself subsequently `insmod`s successfully afterward in the same boot -
+  proof its `KorgUsbAudio*`/`KorgUsbMidi*` `GLOBAL` undefined symbols
+  really did resolve against this module's real exports (the same
+  load-order dependency documented in the fix above). That boot did stall
+  later, after `fakefb: init called`, with no further console output - a
+  separate issue, unrelated to this module (that boot's module chain never
+  touched `OmapNKS4Module`/`dummy_hcd_fixed`, so it is NOT the
+  `OmapNKS4DummyHCDFix`-documented `CommunicationCheck` hang despite an
+  initial, incorrect guess to that effect - see this project's own TODO.md
+  for the correction). Root cause not investigated further here; out of
+  scope for this module.
+- **FIXED (batch 39 / sec 10.235) — `CSTGThread::CreateRealTimeWithCPUAffinity`
+  has since been investigated and reconstructed.** It was the real gate on
+  `init_module` step 13 (see above), separate from this stub's own
+  dependency surface. Faithfully reconstructed at
+  `reconstructed/OA/src/init/cpu_affinity.cpp` from the real method's
+  disassembly (`.text+0x40a30`, 202 bytes), including its variable-length
+  `alloca()`'d RTAI pthread-attr object. A real bug was found and fixed
+  while ground-truthing it: this function's own `rtwrap_pthread_create()`
+  result check was inverted (treated 0/success as failure), confirmed
+  backwards via both this function's own disassembly and the real
+  caller's (`.text+0x40a30`: `test edi,edi; je <success>` - zero is
+  success). Its own downstream dependency, `rtwrap_pthread_create()`'s
+  hardcoded RT-task trampoline address, was separately found and fixed
+  (sec 10.235, see `reconstructed/RTAIVirtualDriver/README.md`'s Known
+  limitations) - together these let `CreateRealTimeWithCPUAffinity()`
+  reach a live, confirmed-working real-time kthread spawn on `kronosvm`
+  for the first time this project has recorded.
+- **FIXED (2026-07-20) — the module load order was previously misread as
+  contradictory.** An earlier reconstruction of `loadoa/loadoa.c` had
+  `OA.ko` loading before `KorgUsbAudioDriver.ko`, which would have been
+  impossible given `OA.ko`'s undefined `KorgUsbAudio*` symbols are
+  `GLOBAL`, not `WEAK` (the kernel only resolves undefined symbols
+  against already-loaded modules and otherwise refuses to `insmod`).
+  Checked directly against a live Kronos's `/proc/modules` (read-only):
+  it lists `KorgUsbAudioDriver ... 1 OA`, i.e. OA as a dependent of
+  KorgUsbAudioDriver, which is only possible if `KorgUsbAudioDriver.ko`
+  loaded first. `loadoa/loadoa.c`'s two `insmod` calls were swapped to
+  match. This stub's own module order (already loading before `OA.ko`)
+  needed no change.

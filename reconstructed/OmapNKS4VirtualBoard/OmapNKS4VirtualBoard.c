@@ -204,8 +204,8 @@ static struct usb_config_descriptor nks4_config_desc = {
 };
 
 /* ========================================================================= *
- *  COmapNKS4Command wire protocol - just enough to satisfy
- *  COmapNKS4Driver_Configure()'s own 3 query/response pairs (the only calls
+ *  COmapNKS4Command wire protocol - enough to satisfy
+ *  COmapNKS4Driver_Configure()'s own query/response pairs (the only calls
  *  in its 9-call sequence that wait for a reply; the other 6 are bulk-OUT-
  *  only setters already satisfied by this file's existing generic re-queue).
  *
@@ -214,6 +214,30 @@ static struct usb_config_descriptor nks4_config_desc = {
  *  - Request words + expected response tags: OmapNKS4Module/command.cpp
  *    (CommunicationCheck=0x00ee0000/tag 0x0066, ReadPortConfiguration=
  *    0x01f10000/tag 0x0171, GetVersion=0x00f00000/tag 0x0070).
+ *
+ *  EXTENDED (2026-07-20, TODO.md "wire-protocol depth" item): this gadget's
+ *  fixed ReadPortConfiguration reply reports hwVer=1, so
+ *  COmapNKS4Driver_Configure() (driver.cpp) always takes its `else` branch
+ *  and calls the single 4-out-argument GetVersion() overload (word
+ *  0x00f00000) exactly once - the original 3-entry table above was
+ *  therefore sufficient for every command word this gadget's own
+ *  configuration path can actually produce. But `GetVersion(int index, ...)`
+ *  (command.cpp:48), used by the hwVer==2 and hwVer==3 branches
+ *  (driver.cpp:792-811, `GetVersion(1..3, ...)`), sends `0x00f00000 |
+ *  (index<<8)` - a DIFFERENT command word per index (0x00f00100/0x00f00200/
+ *  0x00f00300) that the original table did not recognize at all, so those
+ *  calls would silently fall through to the generic bulk-OUT re-queue with
+ *  no interrupt-IN reply ever sent, hanging `WaitForNKS4ReadEvent()`
+ *  indefinitely and failing Configure() on any hwVer other than 1. Added
+ *  entries for all three below (synthetic-but-plausible version/revision
+ *  bytes, matching this project's own precedent for the original
+ *  GetVersion entry's synthetic 0x00701805 value) so the gadget answers the
+ *  full real command surface `command.cpp` defines, not only the specific
+ *  subset this gadget's own default hwVer=1 configuration happens to need.
+ *  `dev->replies_sent`'s "all replies sent, arm the runtime-event timer"
+ *  gate (below) is deliberately NOT widened to include these - it still
+ *  counts only the 3 replies the CURRENT hwVer=1 path actually sends; see
+ *  `NKS4_CONFIG_REPLY_COUNT` below.
  *  - Wire byte order for the bulk-OUT command word: OmapNKS4Module/
  *    submit.cpp's own header comment on submit_urb_words() - CONFIRMED ON
  *    REAL HARDWARE that the command-word path sends words RAW (no byte
@@ -245,8 +269,24 @@ static const unsigned char nks4_sync_record[4] = { 0x00, 0x00, 0x00, 0x87 };
 static const struct nks4_cmd_reply nks4_replies[] = {
 	{ 0x00ee0000, { 0x00, 0x00, 0x66, 0x00 } },	/* CommunicationCheck -> resp 0x00660000 */
 	{ 0x01f10000, { 0x01, 0x00, 0x71, 0x01 } },	/* ReadPortConfiguration -> resp 0x01710001 (hwVer=1, is88=0) */
-	{ 0x00f00000, { 0x05, 0x18, 0x70, 0x00 } },	/* GetVersion -> resp 0x00701805 (OMAP V01 R08 / PSoC V00 R05) */
+	{ 0x00f00000, { 0x05, 0x18, 0x70, 0x00 } },	/* GetVersion() 4-out overload -> resp 0x00701805 (OMAP V01 R08 / PSoC V00 R05) */
+	/* GetVersion(index, ...) overload, indexed variants - only reachable if
+	 * ReadPortConfiguration's hwVer response above is ever changed to 2 or 3
+	 * (unreachable, thus untested end-to-end, under this gadget's current
+	 * fixed hwVer=1 reply) - see header comment above. */
+	{ 0x00f00100, { 0x01, 0x01, 0x70, 0x00 } },	/* GetVersion(1) -> resp 0x00700101 (PanelL/PSoC V01 R01) */
+	{ 0x00f00200, { 0x01, 0x01, 0x70, 0x00 } },	/* GetVersion(2) -> resp 0x00700101 (PanelR V01 R01) */
+	{ 0x00f00300, { 0x01, 0x01, 0x70, 0x00 } },	/* GetVersion(3) -> resp 0x00700101 (Jack V01 R01) */
 };
+
+/* Config-time replies the gadget's CURRENT fixed ReadPortConfiguration
+ * response (hwVer=1) actually causes Configure() to wait for: CommunicationCheck,
+ * ReadPortConfiguration, and the single 4-out-arg GetVersion() call - see the
+ * "EXTENDED" header comment above. Deliberately NOT sizeof(nks4_replies)/... -
+ * the indexed GetVersion entries added above are only reachable on a hwVer
+ * this gadget never actually reports, and must not block the runtime-event
+ * timer from arming. */
+#define NKS4_CONFIG_REPLY_COUNT 3
 
 /* ========================================================================= *
  *  Periodic synthetic RUNTIME panel events - beyond the 3 configuration-time
@@ -436,7 +476,7 @@ static void nks4_bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 					dev->int_in_busy = 0;
 				} else {
 					dev->replies_sent++;
-					if (dev->replies_sent == sizeof(nks4_replies) / sizeof(nks4_replies[0])) {
+					if (dev->replies_sent == NKS4_CONFIG_REPLY_COUNT) {
 						printk(KERN_INFO "OmapNKS4VirtualBoard: all %d config-time command "
 						       "replies sent - arming synthetic runtime-event timer in %us\n",
 						       dev->replies_sent, NKS4_EVENT_SETTLE_JIFFIES / HZ);

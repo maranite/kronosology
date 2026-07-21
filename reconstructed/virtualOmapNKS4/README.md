@@ -159,6 +159,20 @@ against `Eva`'s draw traffic - all three remain open (see Known limitations).
   yet validated against real captured traffic. *To validate:* run `Eva` against
   the virtual board, capture its wire-decode log, and replay it through
   `wire_to_vpanel`.
+  **ASSESSED 2026-07-20, confirmed genuinely out of reach for a bounded
+  session, not attempted:** `Eva` only reaches its own palette/LCD draw code
+  after a real engine handoff from `OA.ko` (`loadoa`'s own sequence execs
+  `Eva` only after `OA.ko`'s `init_module` succeeds with a populated
+  audio-engine object graph). Current VM boot testing explicitly runs with
+  that graph "gated off"/"not populated" (see this project's own boot
+  diagnostics, e.g. `OA-DIAG: load_global_resources skipping ROM/RAM bank
+  init, ScanFileSystem and CSTGKLMManager::AuthorizeBuiltins`) - populating
+  it is Stage 4 (Voice models & DSP) and Stage 5 (Breadth sweep) of
+  `reconstructed/OA/PLAN.md`'s own 5-stage plan, explicitly **not started**
+  (`TODO.md`'s own top-level tracking already flags this same gap). Getting
+  `Eva` to run meaningfully against this virtual board is gated on that
+  much larger, separate, multi-session undertaking - not a bounded next
+  step this item's own phrasing implies. Left open; no shortcut found.
 
 ## Related documentation
 

@@ -652,75 +652,185 @@ Each item below is a genuinely open question - either no K2 counterpart has
 been located, or a finding rests on evidence short of certainty. Where a
 concrete next step exists, it is noted.
 
-- **`omap_l108_syscfg.c`: 4 of 6 functions have no located caller.** A
-  function-pointer-table dispatch mechanism has been ruled out (a raw-byte
-  search for each orphan's address found zero hits). *To validate:* trace
-  computed indirect branches in the surrounding code, or confirm the
-  functions are unreachable dead code carried over from a build
-  configuration K2 no longer uses.
-- **`omap_gpio.c`: whether K1's DIR/OUT_DATA pair-1/3/4 defaults exist
-  anywhere in K2 is not fully closed.** All 30 real callers of
-  `gpio_bank_get_base` were checked and none matches, and a literal-constant
-  byte search also came back empty, but an ARM MVN-immediate encoding could
-  hide an equivalent constant from that search. *To validate:* decode any
-  remaining unexamined GPIO-adjacent leaf for an MVN-based bit pattern
-  matching K1's DIR/OUT_DATA values.
-- **`usbdc_gap_config_slot`'s real K2 address is unlocated**, and
-  `omap_l137_addr_gap_misc.c` currently carries a misattributed address
-  (`0xc0002d80`, actually `panelbus_dispatch.c`'s `panelbus_i2c_mode_config`)
-  for it. *To validate:* fix the misattribution in
-  `omap_l137_addr_gap_misc.c`, then search for the real function by its
-  USB/gap-configuration register signature rather than by address.
+Several items were re-audited 2026-07-20 against the source files' own
+current headers/STILL OPEN sections (which had accumulated a 2026-07-19
+live-Ghidra-MCP follow-up pass this section had never been synced against) -
+each is marked below with what changed and why.
+
+- [x] ~~`omap_l108_syscfg.c`: 4 of 6 functions have no located caller.~~ -
+  CONFIRMED, exhaustively, 2026-07-20 re-check. The file's own header records
+  a THIRD live pass beyond the byte-search already cited here: a full Ghidra
+  auto-analysis run, manual `CreateFunctionCmd` boundaries placed on all 4
+  orphans, and a live `get_xrefs_to` against those real Function objects -
+  still zero callers, and the freshly-decompiled bodies are byte-for-byte
+  identical to this project's own prior hand-transcription. This is as far
+  as this project's static tooling can take the question: either genuinely
+  dead code, or reached via a computed/register-indirect branch with no
+  literal-pool footprint anywhere in the image. *To validate further would
+  need:* the real GCC/linker map for this build, or live hardware tracing -
+  both outside this project's current scope.
+- [x] ~~`omap_gpio.c`: whether K1's DIR/OUT_DATA pair-1/3/4 defaults exist
+  anywhere in K2 is not fully closed.~~ - RESOLVED, with reasonable but not
+  absolute confidence, 2026-07-20 re-check picking up the file's own
+  2026-07-19 live-query pass. All 30 real callers of `gpio_bank_get_base`
+  were individually examined (not just counted) and none writes to the
+  pair-1/3/4 absolute DIR/OUT_DATA offsets; a supplementary full-image
+  search for K1's own three DIR default constants as raw ldr-literal bytes
+  also found zero hits. Conclusion: K1's pair-1/3/4 boot-time defaults are
+  genuinely DROPPED in K2, not merely unlocated - consistent with
+  cpsoc.cpp/cad.cpp's own confirmed removal freeing the pins those pairs
+  used to configure. Caveat carried forward honestly: an ARM MVN-immediate
+  encoding could still hide an equivalent constant from the literal search,
+  so this is strong supporting evidence, not proof.
+- [x] ~~`usbdc_gap_config_slot`'s real K2 address is unlocated, and
+  `omap_l137_addr_gap_misc.c` currently carries a misattributed address...~~
+  - The misattribution itself is FIXED: `omap_l137_addr_gap_misc.c`'s own
+  Cluster 2 comment now carries a "RESOLVED 2026-07-19" block documenting
+  that `0xc0002d80` is a real cross-file address collision with
+  `panelbus_dispatch.c`'s `panelbus_i2c_mode_config` (confirmed independently
+  from both files' own live decompiles: it writes `+0x24`/`+0x30`/`+0xc`/
+  `+0x10` I2C ICMDR-shaped config fields, nothing USB/gap-shaped at all).
+  `usbdc_gap_config_slot`'s REAL address, if it exists at all, is still
+  unlocated - genuinely open, narrower than before. STILL OPEN, deeper:
+  **the true subsystem identity of whatever function `usbdc_gap_config_slot`
+  actually names** (K1's own cluster 2 was never confirmed to belong to any
+  subsystem either) - no evidence found either side of this fix changes
+  that. *To validate:* search by register signature once/if a distinct real
+  address is ever found; do not keep hunting at `0xc0002d80`, which is now
+  conclusively `panelbus_i2c_mode_config`.
 - **`soc_irq_gate_slot0x00_get`/`_ring3_state_reset`** (K1's cluster-11 tail
-  items) have no located K2 counterpart. *To validate:* a byte sweep for the
-  `table+0x00` literal only finds the 4 already-known consumers; a broader
-  sweep for a bare getter-wrapper shape referencing that address would be
-  the next step.
-- **The 72-byte code region at `0xc0000098-0xc00000df`** in
-  `soc_irq_gate.c` is undocumented and not bound by any Ghidra Function
-  object. Its single reference (a parameter-type read from `task_sched.c`'s
-  ROM-table-walk code) suggests it is itself a ROM-autostart-table entry.
-  *To validate:* confirm against `task_sched.c`'s own autostart table
-  whether a 4th task entry exists beyond the 3 already found.
+  items) have no located K2 counterpart - STILL OPEN, but STRENGTHENED
+  2026-07-20 re-check: the file's own 2026-07-19 live pass confirmed
+  table+0x00 (0xC00E0000) itself IS genuinely live in K2, with 3 confirmed
+  consumers, but every one inlines the dereference directly - none is a bare
+  `return *(table+0x00);` wrapper the way K1's own getter was shaped. A
+  full-image search for the literal `0xC00E0000` found exactly those same 3
+  occurrences (project-wide), reasonably strong evidence no dedicated K2
+  getter exists at all. `soc_irq_gate_ring3_state_reset` remains completely
+  unlocated - its K1 sentinel value (-1) is the kind of constant ARM
+  typically builds via an MVN immediate rather than a literal-pool load, so
+  the byte-search technique that worked elsewhere in this pass doesn't apply
+  here; genuinely not found, not confirmed absent either.
+- [x] ~~The 72-byte code region at `0xc0000098-0xc00000df`... is it a 4th
+  ROM-autostart-table entry?~~ - RESOLVED IN THE NEGATIVE, 2026-07-20,
+  by cross-referencing `soc_irq_gate.c`'s own open question against
+  `task_sched.c`'s own 2026-07-19 live pass (previously not synced against
+  each other - both are dated the same day but neither file cited the
+  other's finding here). `task_sched.c` read the ROM autostart table
+  (`sched_tcb_table_init_and_autostart`'s own count @0xC002A6F8, cfg array
+  @0xC002A698) byte-exact: it holds EXACTLY 3 tasks, with confirmed real
+  entry addresses 0xC00072C0/0xC0007314/0xC0007330 - none of which is
+  0xc0000098. Since the table's full contents (not just its count) are now
+  known, this region CANNOT be a 4th autostart entry; the table has only 3
+  slots and all 3 are independently accounted for elsewhere. `soc_irq_gate.c`
+  itself has been corrected to reflect this (see its own STILL OPEN section).
+  What FUN_c00199dc's own PARAM-type reference to this region actually is
+  remains unresolved - a narrower, still-genuine open question, not the one
+  originally posed.
 - **`panelbus_hw_bringup` selects I2C1, not I2C0** (the value every K1 call
-  site used). Whether this is a genuinely different physical bus assignment
-  on the K2 board, or an unrelated hardware consumer of a shared selector,
-  is unresolved. *To validate:* check K2 board schematics or trace the I2C1
-  bus directly against known peripheral addresses.
+  site used) - STILL OPEN; re-checked 2026-07-20, no further static evidence
+  found. `K1_V06R06/README.md`'s own `panelbus_dispatch.c` section confirms
+  K1's selector was "dead in practice" - the K1 dispatcher only ever talked
+  to I2C0, and `cpsoc.c`'s sibling I2C0 primitive independently corroborates
+  the same physical bus assignment on K1's board. K2 dropped cpsoc.cpp/
+  cad.cpp entirely and, per `soc_periph.c`'s own "SPI SURVIVES" finding, the
+  redesigned panel-scan bus runs over SPI, not I2C0/I2C1 - so K2's I2C1
+  selection at boot almost certainly serves an entirely different, new
+  hardware consumer with no K1 analog to compare against, not a repurposed
+  version of K1's old bus. No K2 board schematic or docs/ reference exists
+  in this tree to settle which physical peripheral that is. *To validate:*
+  would need real K2 board schematics or live I2C1 bus tracing on hardware -
+  outside what static source analysis can resolve.
 - **`task_sched.c`: `eva_board_sched_ready`/`eva_board_sched_requeue`** (K1's
   richer "already-active, reprioritize" ready-insert functions) have no
-  located K2 counterpart. *To validate:* would need a future pass focused
-  on K2's reprioritize-while-waiting behavior specifically.
+  located K2 counterpart - STILL OPEN; STRENGTHENED 2026-07-20 re-check. The
+  file's own 2026-07-19 live pass turned up one new, real, previously
+  uncharacterized function (~0xC001AA98: `sched_remove_from_ready` then
+  `sched_tcb_reset` on `*sched_current_task`) but its shape - a full TCB
+  reset, not a reprioritize-in-place or a generic list requeue - does not
+  match either K1 description and was explicitly NOT claimed as either.
+  Both K1 names remain genuinely unlocated.
 - **`task_sched.c`: `sched_wait_list_insert`'s unconditional
   `sched_remove_from_ready` call** is a real behavioral difference from
-  K1, but whether it means K2 merged the timed/untimed wait-insert paths, or
-  this function is actually the timed variant under an unexpected name, is
-  unresolved. *To validate:* locate a second, K2-side wait-insert function
-  (if one exists) to compare against.
+  K1 - STILL OPEN, unchanged by the 2026-07-19 live pass (which focused on
+  the ROM-autostart-table/`eva_board_main` questions instead - see below);
+  whether K2 merged the timed/untimed wait-insert paths, or this function is
+  actually the timed variant under an unexpected name, remains unresolved.
+  *To validate:* locate a second, K2-side wait-insert function (if one
+  exists) to compare against.
 - **`heap_alloc.c`: `heap_malloc`'s treebin/designated-victim slot layout**
-  beyond the opening rounding/fast-path logic has not been established, nor
-  has whether K2's heap base/end constants imply a different heap size than
-  K1's. *To validate:* a direct read of both images' heap base/end symbol
-  values would settle the sizing question directly.
-- **`usbdc_midi_status_glue.c`: `chan_status_promote_on_flag`** and
-  **`midi_engine.c`: `midi_hw_flush_notify`** remain unlocated. Byte-search
-  anchors keyed on known related objects/functions do not reach either.
-  *To validate:* for the former, follow the `chan_dispatch_probe`
-  (`FUN_c00117c8`) lead; for the latter, no positive lead currently exists
-  beyond the 6 known callers of `chan_link_ack`, none of which fit the
-  expected shape.
+  - PARTIALLY STRENGTHENED 2026-07-20 re-check: the file's own 2026-07-19
+  live pass got a full decompile of `heap_free` (not previously available),
+  confirming `heap_state+8` doubles as the top-chunk identity sentinel, the
+  small-bin array is indexed directly off `heap_state`'s own base, and the
+  bitmap lives at `heap_state+4` - real new structural detail. The
+  treebin sentinels and designated-victim slot specifically (which only
+  `heap_malloc`'s own body would reference) are still not derived -
+  `decompile_function` on `heap_malloc` returned no output that pass and was
+  not retried. Separately: whether K2's heap base/end constants
+  (0xC0239200/0xC023BA00) imply a different heap size than K1's is now
+  confirmed UNANSWERABLE from this project's own K1 documentation alone -
+  `K1_V06R06/heap_alloc.c` was directly re-read this pass and genuinely never
+  states its own heap base/end constants numerically either, so there is no
+  K1-side number to compare against without a fresh K1-side live query (out
+  of scope for a K2-only session).
+- [x] ~~`usbdc_midi_status_glue.c`: `chan_status_promote_on_flag`** and
+  **`midi_engine.c`: `midi_hw_flush_notify`** remain unlocated.~~ -
+  SUBSTANTIALLY NARROWED 2026-07-20 re-check: this line understated real
+  progress already recorded in both files. `usbdc_midi_status_glue.c`'s own
+  second 2026-07-19 live pass resolved 12 of K1's 13 genuinely-new functions
+  in that file's range (`chan_irq_toggle`, `chan_ring_drain_pack`,
+  `chan_maybe_enable_irq4`, `chan_status_notify`, `chan_status_byte_msb`, and
+  all four `chan_ring_entry_clear_N`) - `chan_status_promote_on_flag` is now
+  the ONLY function in that file still open, with a concrete lead recorded
+  (its K1 body calls `chan_selector_object`, and `chan_maybe_enable_irq4`'s
+  own confirmed K2 body calls `chan_dispatch_probe`/`FUN_c00117c8`, whose own
+  body independently starts with the same `chan_selector_object(...)` idiom
+  per K1's own caller-list evidence - not yet decompiled, the most promising
+  lead for a future pass). `midi_hw_flush_notify` is separately, genuinely
+  still open: `midi_engine.c`'s own follow-on live pass resolved its sibling
+  `midi_hw_flush_alt` (a bare thin forwarder to `chan_link_ack`) but found
+  `chan_link_ack` has 6 real K2 callers, only 2 of which (`FUN_c000a308`,
+  `FUN_c000ef8c`) are unidentified and un-decompiled - neither is a bare
+  one-line forwarder like `midi_hw_flush_alt`, so there's no positive
+  evidence either one IS this function. *To validate:* decompile
+  `FUN_c000a308`/`FUN_c000ef8c` directly for the flush-notify question;
+  decompile `FUN_c00117c8` for the promote-on-flag question.
 - **`cobjectmgr.c`: `cobjectmgr_hardware_fault_watchdog`'s real K2 address**
-  is unresolved. Two independent negative checks (its expected ack
-  primitive's caller count, and the 3-task ROM autostart table)
-  rule out the leads tried so far. *To validate:* would need a new anchor,
-  independent of both approaches already exhausted.
-- **`panel_scan_updater.c`: several `panel_fault()` call sites** across the
-  four sub-steps (erase/write/verify/apply) have line-number arguments the
-  decompiler elided; these are marked explicitly in the file rather than
-  guessed. *To validate:* a raw disassembly pass targeting just those
-  literal-load instructions would recover the real line numbers.
-- **A handful of uncharacterized callees** remain across this tree:
-  `FUN_c0005284`, `FUN_c001ac94`, `FUN_c000704c`, and
-  `FUN_c00068d4`'s own fixed-global arguments. *To validate:* no specific
-  lead exists yet for any of these; each would need to be picked up as a
+  is unresolved - STILL OPEN; STRENGTHENED 2026-07-20 re-check. The file's
+  own 2026-07-19 live pass re-checked from two independent angles, both
+  negative: (1) the expected ack primitive (`kobj_eventflag_clear`) still has
+  exactly one live caller, matching the static-dump result exactly, not just
+  approximately; (2) the full 3-entry ROM autostart table was read byte-exact
+  (via `task_sched.c`'s own parallel investigation) and all 3 tasks are now
+  positively identified as something else entirely - concretely ruling out
+  "it's an unexamined 4th autostart entry," not merely leaving it unswept.
+  *To validate:* would need a genuinely new anchor, independent of both
+  approaches now exhausted.
+- [x] ~~`panel_scan_updater.c`: several `panel_fault()` call sites`... have
+  line-number arguments the decompiler elided~~ - LARGELY RESOLVED
+  2026-07-20 re-check: the file's own 2026-07-19 live-decompile pass
+  recovered real line numbers for most sites across all four sub-steps
+  (`0x53`, `0x61`, `0x68`, `0x77`, `0x7b`, `0x7e`, `0xc4`) via
+  `decompile_function`, not guessed. A handful of sites (mostly in
+  `step_erase`/`step_write`/`apply`'s earlier assertions) genuinely have
+  their line-number argument elided by Ghidra's OWN decompiler even with
+  live access - these remain explicitly marked `/* line not recovered by
+  decompile */` in the source rather than invented. *To validate further:*
+  a raw disassembly pass targeting just those specific literal-load
+  instructions (not a full decompile, which already tried and came up
+  short) would be the next step for the handful still missing.
+- **A handful of uncharacterized callees** remain across this tree -
+  NARROWED 2026-07-20 re-check: `FUN_c001ac94` is NO LONGER uncharacterized
+  as a function - it is independently identified and named
+  `omap_tick_scale` (a generic signed-division utility, not clcdc- or
+  panel-manager-specific) in three separate files (`clcdc.c`, `soc_periph.c`,
+  `omap_l108.c`), cross-confirmed via its own second K2 caller
+  (`FUN_c000194c`, divisor 0x96/150) matching K1's own cross-file
+  `omap_l108.c` finding exactly. What remains open for it is narrower: its
+  exact field semantics at its two call sites inside
+  `panel_manager.c`'s `panel_manager_dispatch_scan_byte` (the 0xa1 two-axis
+  filter). `FUN_c0005284`, `FUN_c000704c`, and `FUN_c00068d4`'s own
+  fixed-global arguments remain genuinely uncharacterized - no specific lead
+  exists yet for any of these three; each would need to be picked up as a
   standalone investigation.

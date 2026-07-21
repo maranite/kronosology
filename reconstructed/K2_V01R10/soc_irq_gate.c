@@ -883,14 +883,21 @@ void soc_irq_gate_group_b_disable(void)	/* FUN_c001999c */
  *    file ALREADY independently names FUN_c00199dc as "one of eva_board_
  *    crt0's own subsystem-bring-up calls" and the real caller of both
  *    kobj_table_init and sched_tcb_table_init_and_autostart's own ROM-table
- *    ROM walk. This strongly suggests 0xc0000098 is itself an entry in that
- *    SAME ROM-table mechanism (very plausibly an auto-started boot task,
- *    matching this project's own established "referenced from a table/
- *    init-list, not a real CALL instruction" pattern already seen for K1's
- *    ring3_state_reset and this file's own group_b_disable) - NOT defined
- *    here (belongs to task_sched.c's own ROM-task-table territory, out of
- *    this file's own scope, and its own tail-call target was not chased).
- *    NEEDS LIVE QUERY if a future task_sched.c pass wants to close it fully.
+ *    ROM walk. This ORIGINALLY suggested 0xc0000098 might itself be an entry
+ *    in that SAME ROM-table mechanism (a 4th auto-started boot task) -
+ *    NOW REFUTED, not just left open: task_sched.c's own 2026-07-19 live
+ *    pass (see that file's own header) read the ROM autostart table
+ *    (sched_tcb_table_init_and_autostart's own count @0xC002A6F8, cfg array
+ *    @0xC002A698) byte-exact and found EXACTLY 3 tasks, with confirmed real
+ *    entry addresses 0xC00072C0/0xC0007314/0xC0007330 - none of which is
+ *    0xc0000098. Since the ROM table's full contents are now known (not
+ *    merely counted), 0xc0000098 CANNOT be a 4th autostart entry; the table
+ *    only has 3 slots and all 3 are independently accounted for elsewhere.
+ *    What FUN_c00199dc's PARAM-type reference to 0xc0000098 actually IS
+ *    (some other argument it passes during its own subsystem-bring-up
+ *    sequence, not a table row) remains unresolved - genuinely open, but a
+ *    narrower question than originally framed. NEEDS LIVE QUERY if a future
+ *    pass wants to identify what that PARAM-type reference actually is.
  *  - K1's own "gap_slot_bringup" cluster (twice-called usbdc_gap_config_
  *    slot-shaped bring-up) - INVESTIGATED, STILL NOT LOCATED. The obvious
  *    live lead (get_xrefs_to on omap_l137_addr_gap_misc.c's own claimed K2

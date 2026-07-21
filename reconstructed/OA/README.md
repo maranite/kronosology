@@ -675,11 +675,21 @@ symbol." The real dependency order:
    order.
 
 `loadoa/loadoa.c` is the real orchestrator that drives this sequence on
-device. Real extracted `loadoa.c` source shows `insmod OA.ko` (fatal on
-failure) happening *before* `insmod KorgUsbAudioDriver.ko` (explicitly
-non-fatal in the source's own comment) - see Known limitations below for
-why this is surprising given `OA.ko`'s own confirmed `GLOBAL` (not `WEAK`)
-relocations against `KorgUsbAudio*` symbols.
+device. **FIXED 2026-07-20:** an earlier pass at reconstructing
+`loadoa.c` had `insmod OA.ko` (fatal on failure) ordered *before*
+`insmod KorgUsbAudioDriver.ko` (non-fatal) - apparently plausible from
+the source alone, but contradicting `OA.ko`'s own confirmed `GLOBAL`
+(not `WEAK`) relocations against `KorgUsbAudio*` symbols, which the
+kernel resolves eagerly at `insmod` time and would hard-fail if
+`KorgUsbAudioDriver.ko` weren't already loaded. Checked directly against
+a live Kronos's `/proc/modules` (read-only, no state change): it lists
+`KorgUsbAudioDriver ... 1 OA` - OA as KorgUsbAudioDriver's dependent,
+only possible if `KorgUsbAudioDriver.ko` loaded first. The two `insmod`
+calls in `loadoa/loadoa.c` were swapped to match; `KorgUsbAudioDriver.ko`
+now loads immediately before `OA.ko`, matching the dependency order this
+section already documented in steps 1-7 above. This was a bug in the
+reconstruction's read of the evidence, not a real paradox in Linux's
+module loader.
 
 `KorgUsbAudioDriver.ko` turned out to be a single combined audio+MIDI
 driver exporting roughly 20 symbols; every audio-family function `OA.ko`
@@ -878,19 +888,32 @@ symbols, each fully disassembly-confirmed:
   legacy COM-port addresses it programs were not resolved from the
   disassembly alone. *To validate*: a full Ghidra decompile of
   `CSTGComPort::Initialize()`.
-- **The `OA.ko`/`KorgUsbAudioDriver.ko` load-order relationship is
-  unresolved.** `loadoa/loadoa.c` loads `OA.ko` (fatal on failure) before
-  `KorgUsbAudioDriver.ko` (explicitly non-fatal), yet `OA.ko`'s own
-  `KorgUsbAudio*` symbol references are confirmed `GLOBAL` (not `WEAK`)
-  direct-call relocations, which should make that order fail under
-  standard kernel module loading. Static analysis alone does not resolve
-  this. *To validate*: trace the real `insmod` sequence and symbol
-  resolution against a live device or an accurate emulation environment.
-- **`loadmod.ko`'s `/korg/Eva` decryption-bypass question is open.**
-  Whether the on-disk `/korg/Eva` UI binary's decryption hooks can be
-  exercised independently of a full engine boot is not determined.
-  *To validate*: trace `loadmod.ko`'s own call path to that decryption
-  step directly.
+- ~~`loadmod.ko`'s `/korg/Eva` decryption-bypass question is open.~~
+  **ALREADY FULLY RESOLVED elsewhere in this project** - this entry was
+  stale, written without cross-referencing `docs/crypto/cryptoloop_keys.md`,
+  a dedicated, already-complete piece of work on exactly this question.
+  Short answer: yes, trivially exercisable independent of a full engine
+  boot, and not even chip-dependent. `/korg/Eva` (like `/korg/Mod` and
+  `/korg/rw/PCM/WaveMotion`) is a plain AES-256-CBC (`cryptsetup`'s
+  `aes-cbc-plain` mode, IV = plain sector number) cryptoloop volume; the
+  call chain is `loadmod.ko`'s `RetrieveSecurityICKey` -> the Atmel-chip/
+  RSA/`BlowfishExpandKey` chain -> `BuildCdromCommandStruct()` (populates
+  the cryptoloop key globals) -> `HookedSysMount`/`MountLoopDevAndExec`
+  (attaches the loop device with that key) - see
+  `docs/modules/loadmod.ko.md` and `docs/modules/loadmod.ko_inner_md5_check.md`
+  for that chain traced in detail. The per-volume AES key is derived from
+  the same already-cracked `.pairFact3` plaintext this project's own
+  `AT88VirtualChip/pairfact_decrypt.h` decodes (`[nonce 15][0x03 + Mod/Eva/
+  WaveMotion keys, 49B][MD5 16B]`, per `CLAUDE.md`'s ".reauth IS
+  .pairFact3" finding) - hex-encoded via `loadmod.ko`'s own `HexEncode`.
+  Better still: `docs/crypto/cryptoloop_keys.md` reports the recovered
+  31-hex-char keys are **universal across every Kronos unit and firmware
+  version tested**, extracted once via `LOOP_GET_STATUS64`
+  (`scripts/getloopkey.s`) and verified working against every captured
+  image (`scripts/decrypt_kronos_img.py --check`, all volumes, all
+  versions, ✓). Decrypting `/korg/Eva`'s content needs no chip, no
+  `loadmod.ko` execution, and no live boot at all - `scripts/
+  decrypt_kronos_img.py` does it standalone in plain Python.
 - **`OmapNKS4Module.ko`'s real `init_module` hard-requires a real USB
   front-panel board to `probe()`**, even though the module itself is fully
   reconstructed - it cannot succeed in an environment with no panel

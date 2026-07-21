@@ -528,12 +528,16 @@ uint8_t panelbus_submit_record(void *target, uint8_t tag, uint8_t value)	/* FUN_
  *                          separately-cited DAT_c0009040) - flagged, not
  *                          asserted. Ends by calling ctouchpanel_finalize_
  *                          release (FUN_c00140d4, ctouchpanel.c) with an
- *                          argument - ctouchpanel.c's own extern for this
- *                          symbol is declared `void(void)`; this call site's
- *                          real decompile shows 2 formal parameters
- *                          (`int, short`) - a genuine signature mismatch
- *                          worth fixing in ctouchpanel.c, not corrected here.
- *                          RETURNS DIRECTLY (no scheduler-wake tail).
+ *                          argument. RESOLVED 2026-07-20: this note
+ *                          previously had it backwards - ctouchpanel.c's own
+ *                          signature (`int ctouchpanel_watch_idle_scalar
+ *                          (struct ctouchpanel_state *tp, int16_t
+ *                          new_value)`) is ground truth (confirmed via
+ *                          direct decompile of FUN_c00140d4 AND its caller
+ *                          FUN_c0007220); THIS file's own extern was the
+ *                          stale one (old pre-correction name, wrong `void`
+ *                          return) and has been fixed to match. RETURNS
+ *                          DIRECTLY (no scheduler-wake tail).
  *    0x70              -> writes a flag into ctx, posts event-flag bit 0x40
  *    0x80-0x87         -> device-ID negotiation handshake: caches the first
  *                          negotiated arg byte per-ctx (+0x40, 0xff
@@ -580,7 +584,26 @@ uint8_t panelbus_submit_record(void *target, uint8_t tag, uint8_t value)	/* FUN_
  * ------------------------------------------------------------------------- */
 extern void  cad_trim_adjust(int16_t *trim, int reg, int8_t delta);		/* FUN_c0013480, cad.c */
 extern int32_t omap_tick_scale(int32_t ticks, int divisor);			/* FUN_c001e3f8, cited from omap_l108.c */
-extern void  ctouchpanel_finalize_release(int ctx, short value);		/* FUN_c00140d4 - see mismatch note above */
+extern int   ctouchpanel_watch_idle_scalar(void *tp, short new_value);	/* FUN_c00140d4 - void* here, not
+										   ctouchpanel.c's own `struct
+										   ctouchpanel_state *`, matching this
+										   file's established convention of not
+										   asserting struct identity across files
+										   (see panelbus_widget below). -
+										   RESOLVED 2026-07-20: this file's own extern was
+										   stale, predating ctouchpanel.c's own 2026-07-18
+										   correction pass (old name
+										   "ctouchpanel_finalize_release", wrong `void`
+										   return). Confirmed via direct decompile of
+										   FUN_c00140d4 (returns `undefined4`, real int 0/1)
+										   and its caller FUN_c0007220 (`uVar2 =
+										   FUN_c00140d4(iVar6); return uVar2 & 0xff;`) -
+										   ctouchpanel.c's `int ...(struct ctouchpanel_state
+										   *tp, int16_t new_value)` is ground truth; updated
+										   to match and use the current name. The call site
+										   below doesn't use the return value (this branch
+										   already returns `scaled&0xff` separately), so this
+										   was a type/name mismatch only, not a functional bug. */
 extern void  crypto_at88_format_fault_text2(char *dst, const char *fmt,	/* FUN_c00168fc, second local name: this file's own
 									   call sites show 2 AND 4 visible arguments across
 									   different uses - same inconsistency as panelbus_tx_fault
@@ -699,7 +722,7 @@ uint32_t panelbus_cmd_dispatch(void *ctx_v, uint32_t port, uint32_t opcode, uint
 		}
 		w->field_21c = 0;
 		w->last_tick = (uint16_t)scaled;
-		ctouchpanel_finalize_release((int)(uintptr_t)w, (short)scaled);
+		ctouchpanel_watch_idle_scalar(w, (short)scaled);
 		return (uint32_t)scaled & 0xff;
 	} else if ((opcode & 0xf8) == 0x80) {
 		if (ctx->field_40b != 0xff) {

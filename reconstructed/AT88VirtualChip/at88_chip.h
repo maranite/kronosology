@@ -146,10 +146,17 @@ struct AT88ChipState {
 
 	/* Selects the real AAC decay sequence's length (b8_handshake.cpp): 0 = 4
 	 * consecutive failures to lock (the datasheet's stated default, "ETA=1"),
-	 * nonzero = 8 (chip config bit "ETA=0"). The real Kronos chip's actual ETA
-	 * setting has NOT been characterized from a live capture -- this defaults to
-	 * the documented default (4) rather than a guess. See README.md's Open Items
-	 * and b8_handshake.cpp's kAacSequence4/8 comment for the datasheet citation. */
+	 * nonzero = 8 (chip config bit "ETA=0"). CONFIRMED 2026-07-20 against three
+	 * independent real captured chips (two Kronos, one Nautilus,
+	 * KronosExtract.bin format): cfg[0x18] is the datasheet's Device
+	 * Configuration Register (DCR, Table 5-1's "$18 byte 0" -- immediately
+	 * before the already-known IdN field at cfg[0x19:0x20], which is
+	 * Table 5-1's own "$18 bytes 1-7"). All three units read DCR = 0xFB
+	 * (0b11111011); bit 4 (mask 0x10) is the ETA bit and reads 1 on every
+	 * unit, meaning ETA is NOT asserted (active-low) -- the 4-step sequence.
+	 * Confirms this default is correct, not just documented-default-by-
+	 * assumption. See README.md's Known limitations and
+	 * b8_handshake.cpp's kAacSequence4/8 comment for the datasheet citation. */
 	unsigned char useEightStepAac;
 };
 

@@ -117,6 +117,7 @@ model itself is not independently confirmed** - see Known limitations.
 | Address | Size | Contents |
 |---|---|---|
 | `0x00-0x0F`, `0x20-0x27`, `0x40-0x4F` | - | Fixed, manufacturer-constant bytes, identical across every unit checked so far. Not secret, not per-device - useful only as a sanity check that config-zone addressing lines up correctly. |
+| `0x18` | 1 byte | DCR (Device Configuration Register, datasheet sec 6.3.8) - bit 4 is the ETA (Eight Trials Allowed) fuse bit driving the AAC decay-sequence length above. Real value on every unit checked: `0xFB` (ETA not asserted -> 4-step sequence). Not currently modeled as a distinct field (falls in a byte this module doesn't specially interpret), but the AAC-length default it confirms is already applied. |
 | `0x19-0x1F` | 7 bytes | IdN - the device's per-device Public ID. |
 | `0x50` | 1 byte | AAC status byte (see AAC lockout above). |
 | `0x51-0x57` | 7 bytes | Per-device bytes, part of the `$B8` challenge seed (`p3`). |
@@ -200,46 +201,92 @@ Each item below is something this module does not model with real captured
 data, or a design choice not independently confirmed against a real chip.
 Where a validation path exists, it's noted.
 
-- **Config-zone slots `0x60`/`0x70` (and the notional `0x80`) are
-  unmodeled beyond raw storage.** Real, per-device-shaped data is
-  provisioned there on every unit checked, but no consumer this module
-  models ever reads it back - every real call site hardcodes the zone-0
-  slot (`0x50`). *To validate:* determine whether any other module or auth
-  subsystem issues `$B8`/`$B2` selecting one of these slots; if none does,
-  these remain provisioned-but-unread by design.
-- **`$B0` (write) does not consult the selected zone** - it always targets
-  zone 0, unlike `$B2` (read), which routes on the most recently selected
-  zone. No consumer this module models ever issues a `$B0` to a non-zero
-  zone. *To validate:* capture a real `$B0` write targeting a non-zero zone,
-  if one exists, before extending write support to match `$B2`'s dispatch.
+- **RESOLVED (2026-07-20) — config-zone slots `0x60`/`0x70`/`0x80` are
+  provisioned-but-unread by design, confirmed rather than assumed.** Real,
+  per-device-shaped data sits there on every unit checked, but tracing the
+  actual consumer settles why it's never read: `Nv2acVerifyRound()`
+  (`reconstructed/OA/src/auth/nv2ac_handshake.cpp`) indexes a real,
+  ground-truth `.rodata` lookup table `kNv2acStatusZone[4] = {0x50, 0x60,
+  0x70, 0x80}` by a `sel` (0-3) parameter its two real callers,
+  `nv2ac_enable_cipher`/`nv2ac_enable_encrypt`, pass straight through from
+  `SetupAtmelForAuthorizations()` (`reconstructed/OA/src/auth/atmel_setup.cpp`,
+  the sole confirmed-executing caller of both) - and both of
+  `atmel_setup.cpp`'s own call sites hardcode `sel=0`, i.e. only
+  `kNv2acStatusZone[0] == 0x50` is ever actually selected. The table's
+  other three entries exist in the real binary (so the reconstruction is
+  faithful to reproduce them) but are structurally unreachable from any
+  call path this project has found - `crypto_at88_self_test`
+  (`reconstructed/K1_V06R06/crypto_at88.c`, the panel firmware's
+  independent AT88 consumer) also only ever touches zone 0. No further
+  validation step is open unless a not-yet-reconstructed OA.ko call site
+  (Stage 4/5, not started) turns out to pass a nonzero `sel`.
+- **RESOLVED (2026-07-20) — `$B0` (write) does not consult the selected
+  zone, and no real consumer anywhere in this project's evidence base
+  issues one to a non-zero zone.** Searched every reconstructed real AT88
+  consumer for a `0xb0` opcode call: `OA.ko` never issues `$B0` at all (its
+  only zone-select-adjacent call is `cm_SetUserZone`'s `$B4`); the only
+  `$B0` caller found anywhere is `crypto_at88_self_test()`
+  (`reconstructed/K1_V06R06/crypto_at88.c` and its K2 counterpart,
+  identical), and it always writes zone 0 (`crypto_at88_write(chip, 0xb0,
+  0, 0, 16, buf)`). That function itself has zero located callers in a
+  full cross-reference sweep - possibly dead factory-test code - so even
+  its own zone-0-only usage may never execute on a real boot. Since no
+  confirmed-executing consumer, nor any consumer at all in the traced
+  evidence, ever selects a non-zero zone for `$B0`, the current
+  always-zone-0 behavior remains correct by the absence of any
+  contradicting evidence. Only a not-yet-reconstructed OA.ko call path
+  (Stage 4/5, not started) could change this.
 - **Non-zero-zone `$B2` reads return an all-zero placeholder**, not real
   chip data - there is no captured data for any zone but zone 0. This
   proves the dispatch plumbing itself is correct (different zones really do
   route differently); it is not a claim about real non-zero-zone contents.
   *To validate:* capture zone 1 (or whichever zone a real consumer selects)
   directly from a chip.
-- **Whether zone 0's raw-vs-encrypted gating is genuinely tied to session
-  state, as implemented, is unconfirmed.** The evidence motivating the
-  raw/pre-auth branch is a firmware self-test routine
-  (`reconstructed/K1_V06R06/crypto_at88.c`) that a full cross-reference
-  sweep of that firmware image found has no callers anywhere - it may be
-  dead code that never executes on a real boot, not a routine confirmed to
-  run before `$B8`. The command framing itself is still solid (the same
-  header-byte mapping applies to every opcode that firmware's runtime AT88
-  queue relay handles, and that relay does run), but the specific claim that
-  a real chip serves raw zone-0 access before any `$B8` session exists rests
-  on this uncertain evidence. *To validate:* find a confirmed-executing real
-  consumer that performs a zone-0 access before completing `$B8`, or
-  determine that no such access ever legitimately occurs and the gating can
-  be simplified to always-encrypted.
-- **The AAC decay sequence length (four steps vs. eight - the chip's "ETA"
-  configuration) has not been read back from a live chip's config zone.**
-  This module defaults to the four-step sequence
-  (`$FF,$EE,$CC,$88,$00`). *To validate:* identify the ETA bit's location in
-  the config zone from a captured blob, or observe directly how many
-  consecutive rejected `$B8` attempts a real chip tolerates before locking,
-  and set `useEightStepAac` on the loaded `AT88ChipState` accordingly if it
-  turns out to be the eight-step variant.
+- **PARTIALLY RESOLVED (2026-07-20) — the post-`$B8`/encrypted half of the
+  gating is now confirmed against a real, confirmed-executing consumer;
+  the pre-`$B8`/raw half remains unconfirmed but is inert.** `OA.ko`'s own
+  `fFfFfFfFfFfF13` (`reconstructed/OA/src/auth/atmel_zone_io.cpp`, real
+  `$B2` opcode reader for the auth-key-material zones `0x10`/`0x18`/`0x20` -
+  i.e. this module's "Zone 0") is called by `ParseAuths`/
+  `VerifyAuthorizationString`, the real, confirmed-executing EXs
+  authorization path - not dead code. Its decode behavior is gated on the
+  persistent `mode` global, which only reaches `2` (decode-enabled) after
+  `SetupAtmelForAuthorizations()`'s both `$B8` rounds succeed
+  (`nv2ac_enable_cipher`/`nv2ac_enable_encrypt`,
+  `reconstructed/OA/src/auth/nv2ac_handshake.cpp`) - and
+  `SetupAtmelForAuthorizations()` always runs, once, before `ParseAuths` in
+  the real boot sequence. This confirms the encrypted/post-auth half of
+  the model against real code: every confirmed-executing Zone 0 access
+  happens with `mode==2` (decoded), never `mode==0` (raw). The
+  raw/pre-auth half remains unconfirmed by any executing consumer - the
+  only candidate for one, the firmware self-test
+  (`reconstructed/K1_V06R06/crypto_at88.c`'s `crypto_at88_self_test`), has
+  zero located callers anywhere (a separate, already-resolved finding, see
+  that file's own header comment) - but this is harmless rather than an
+  open risk: nothing in this project's evidence base ever exercises a
+  pre-auth zone-0 read, so the raw branch, even if the real chip's actual
+  behavior there turns out to differ from this model's assumption, has no
+  confirmed real call path that would expose the difference. *Still open
+  only if* a not-yet-reconstructed OA.ko call path (Stage 4/5, not
+  started) turns out to read Zone 0 before `SetupAtmelForAuthorizations()`
+  completes.
+- **RESOLVED (2026-07-20) — the AAC decay sequence length (four steps vs.
+  eight) is now confirmed four-step from real chip data, not just assumed
+  from the documented default.** The Atmel datasheet (`Good Info/Atmel-
+  8664-CryptoMem-Low-Density-Full-Specification-Datasheet.pdf`, sec 5.3
+  Table 5-1) places the Device Configuration Register (DCR) at config-zone
+  address `$18`, byte 0 - immediately before the already-known
+  Identification Number field this project already reads at `cfg[0x19:0x20]`
+  (Table 5-1's own "`$18` bytes 1-7"), confirming the address alignment.
+  DCR bit 4 (mask `0x10`) is the ETA bit (sec 6.3.8.4: active-low, asserted
+  = 8-trial mode). Checked `cfg[0x18]` across all three real captured
+  units this project has (`real_data/947e/`, `real_data/6630/`, and a
+  Nautilus capture in `NautilusTest/`, all `KronosExtract.bin` format):
+  **every unit reads `DCR = 0xFB`**, bit 4 set (`0xFB & 0x10 != 0`), i.e.
+  ETA not asserted - the 4-step sequence
+  (`$FF,$EE,$CC,$88,$00`). `useEightStepAac` staying `0` by default is
+  therefore confirmed correct on real hardware, not merely the documented
+  factory default carried over unverified.
 
 ## Related documentation
 

@@ -120,7 +120,7 @@ With this fix in place, the gadget binds successfully and real endpoint
 autoconfiguration succeeds (`OmapNKS4VirtualBoard: bound, ep_int=ep-a
 ep_bulk=ep-b`).
 
-## Known kernel-header ABI mismatches (open blockers)
+## Known kernel-header ABI mismatches (found and fixed)
 
 `dummy_hcd.ko` is a loadable module built against this project's own reconstructed
 kernel-header tree, but it loads into and interoperates with the real, opaque,
@@ -191,16 +191,29 @@ reconstructed header (e.g. a backported struct member, or a buffer-size differen
 `irq_descr[]`). Which mechanism accounts for which portion of the total 20-byte delta
 is not resolved.
 
-**To validate/fix**: build a small standalone reproducer isolating just the `struct
-usb_bus` bitfield region, compile it under both a GCC-4.5-era toolchain and the tree's
-current host GCC, and diff the resulting `offsetof()` values to settle whether
-compiler packing alone explains the first `+4`. Separately, disassemble more of the
-real kernel's own `usb_create_shared_hcd`/`usb_add_hcd` for further explicit-offset
-writes to pin down the remaining ~12 bytes of the `+20` total delta not yet accounted
-for by named fields. Once the exact missing/mis-packed bytes are identified, patch the
-kernel tree's `drivers/usb/core/hcd.h`/`include/linux/usb.h` so that
-`offsetof(struct usb_hcd, driver)` (and the other fields above) match the real kernel
-exactly, rebuild `dummy_hcd.ko`, and re-test.
+**Fixed**: the kernel tree's `drivers/usb/core/hcd.h`/`include/linux/usb.h` were
+patched with documented padding fields so `offsetof(struct usb_hcd, driver)`
+(and the other fields above) match the real kernel exactly; see
+`reconstructed/OmapNKS4DummyHCDFix/README.md` bug #2 for the applied fix and
+`dummy_hcd_fixed.ko` boot-test confirmation. **UPDATE 2026-07-19/20**: most of
+this is no longer generic/unnamed - the largest single gap, `struct usb_hcd`'s
+12-byte shared-roothub cluster, was pinned down via direct disassembly of the
+real kernel's own `usb_create_shared_hcd()`/`usb_hc_died()` (`kronos.img`'s
+own symbolicated vmlinux) to real, confirmed fields: `bandwidth_mutex@0xbc`,
+`shared_hcd@0xc0`, `primary_hcd@0xc4` - matching real upstream Linux's
+shared-USB2/3-root-hub support, evidently backported into Korg's vendor
+kernel. The smaller `struct usb_bus` bitfield-region gap remains generically
+padded - the exact mechanism behind the delta (compiler bitfield-packing
+difference vs. a genuinely missing/different-sized field) was not
+conclusively isolated even after a standalone `offsetof()` reproducer
+empirically confirmed the host toolchain's own packing behavior, and the
+real field name occupying it was not identified — see
+`OmapNKS4DummyHCDFix/README.md`'s own Known limitations for the fuller,
+current picture across all three affected structs (`usb_hcd`/`usb_bus`/
+`urb`). *To fully close, if ever needed:* build a standalone
+reproducer isolating the `struct usb_bus` bitfield region under both a GCC-4.5-era
+toolchain and the tree's current host GCC to settle the packing-vs-missing-field
+question, or obtain real Korg kernel source for these structs.
 
 ### 2. `struct urb`
 
@@ -246,15 +259,16 @@ symptom from a kernel panic into an ordinary USB transfer failure. Per this proj
 scope rules, real, unmodified `dummy_hcd.c` itself is never patched; all fixes live in
 this standalone fork.
 
-**To validate/fix**: correct the `struct urb` field layout in the kernel tree's
-`include/linux/usb.h` so `setup_packet` and the fields after it land at the real
-kernel's offsets, rebuild `dummy_hcd_fixed.ko` (or `dummy_hcd.ko` once the fix is
-folded back in), and re-run the same live-breakpoint trace to confirm
-`urb->setup_packet` now reads a valid pointer at `dummy_urb_enqueue`'s entry. See
-`reconstructed/OmapNKS4DummyHCDFix/README.md` for the full fix history and evidence
-for this and related bugs in the same module.
+**Fixed**: the `struct urb` field layout in the kernel tree's `include/linux/usb.h`
+was corrected with a generic 4-byte padding field between `pipe` and `status` so
+`setup_packet` and the fields after it land at the real kernel's offsets. A
+live-breakpoint re-trace confirmed `urb->setup_packet` now reads a valid pointer at
+`dummy_urb_enqueue`'s entry. See `reconstructed/OmapNKS4DummyHCDFix/README.md` bug #3
+for the full fix history and evidence for this and related bugs in the same module.
+As with the `usb_hcd`/`usb_bus` fix above, the real field's name/purpose was never
+identified — the padding is generic, not semantically understood.
 
-## Alternative validation path (does not depend on the above being fixed)
+## Alternative validation path (does not depend on the gadget stack)
 
 `OmapNKS4Module.ko` has a `vm_virtual_probe` module parameter that synthesizes a
 virtual NKS4 device in-process and feeds it directly to the real `OmapNKS4Probe()` -
@@ -262,27 +276,65 @@ no `dummy_hcd`, no gadget layer, no real USB bus at all. This reaches
 `driver_state=1` and a real `CommunicationCheck` protocol round-trip without requiring
 this module or `dummy_hcd.ko` to work. See `OmapNKS4Module/README.md`'s own
 `vm_virtual_probe` section for detail, including two real bugs (a latent wait-queue
-NULL-deref, a reply-delivery race) that path surfaced and fixed.
+NULL-deref, a reply-delivery race) that path surfaced and fixed. A further tool built
+on this same additive-call approach, `nks4_wire_verify.ko`
+(`reconstructed/OmapNKS4DummyHCDFix/README.md`'s "Panel event wire protocol" section),
+achieved genuine wire-level real-hardware verification (2026-07-20) by feeding real
+wire bytes directly into the live `ReceiveEventBuffer()`.
 
-This module's own gadget-based design remains the architecturally more complete
-approach (genuine USB core enumeration on both sides of a real device/host
-relationship) and is the natural path forward once the kernel-header ABI mismatches
-above are resolved; `vm_virtual_probe` is a working substitute in the meantime, not a
-replacement for it.
+This module's own gadget-based design (genuine USB core enumeration on both sides of
+a real device/host relationship) is the architecturally more complete approach and,
+per the fixes above, now enumerates and configures successfully end to end;
+`vm_virtual_probe`/`nks4_wire_verify` remain useful as faster, USB-stack-free paths
+for iterating on protocol/event-decode work rather than as a substitute for it.
 
 ## Known limitations
 
-- The `struct usb_hcd`/`struct usb_bus` field-layout fix described above has been
-  derived (the exact target offsets are known) but has not been applied to the kernel
-  tree's headers and re-verified end to end. *To validate:* apply the header fix,
-  rebuild `dummy_hcd.ko`, and confirm the root-hub enumeration no longer crashes.
-- The `struct urb` field-layout fix has not been applied either. *To validate:* apply
-  the header fix, rebuild, and confirm `dummy_timer()` no longer reads a NULL
-  `setup_packet`.
-- The exact mechanism behind each delta (compiler bitfield-packing difference vs. a
-  genuinely missing/different-sized header field) is not fully isolated for either
-  struct family. *To validate:* see the standalone-reproducer suggestion above.
-- Wire-protocol fidelity is minimal (log + ACK, re-queue on both endpoints), not a
-  real `COmapNKS4Command` implementation. *To validate:* once enumeration succeeds
-  end to end, extend `nks4_setup()`/the bulk handler to answer real commands using the
-  `command.cpp`/`driver.cpp` and NKS4 panel firmware reconstructions as ground truth.
+- ~~The real field names/purposes occupying the padding inserted into the
+  `struct usb_hcd`/`struct usb_bus` and `struct urb` fixes above were never
+  identified~~ **UPDATED 2026-07-20 - largely resolved.** `struct usb_hcd`'s
+  biggest gap (12 bytes) is now named and confirmed via real-kernel
+  disassembly: `bandwidth_mutex`/`shared_hcd`/`primary_hcd`, Korg's vendor
+  kernel evidently backporting upstream Linux's shared-USB2/3-root-hub
+  support. The three remaining small (4-byte) gaps across `usb_hcd`/
+  `usb_bus`/`urb` were each independently, exhaustively re-investigated
+  this pass - including `struct urb`'s gap checked directly against the
+  **live production Kronos's own kernel** (`/boot/bzImage` pulled from
+  192.168.100.15 itself, not just a factory image) - and remain genuinely
+  unidentified: no code path any of this project's disassembly has reached
+  touches those specific offsets. This *is* the live-kernel triangulation
+  this item's own next step asked for, already performed as thoroughly as
+  static analysis allows. See `reconstructed/OmapNKS4DummyHCDFix/README.md`
+  for the full, current fix history and per-gap detail.
+- An intermittent failure where the first configuration-time command reply
+  (`CommunicationCheck`) is not delivered or received correctly, on a minority of
+  otherwise-identical boot attempts, causing the driver load to hang rather than fail
+  cleanly, remains unresolved (documented in
+  `reconstructed/OmapNKS4DummyHCDFix/README.md`). Suspected RTAI/I-pipe timing
+  artifact, not proven. *To validate:* run 10+ repeated identical boots to establish
+  failure rate and correlation with a specific timing window.
+- ~~Wire-protocol fidelity is minimal (log + ACK, re-queue on both endpoints), not a
+  real `COmapNKS4Command` implementation.~~ **STALE - already substantially fixed
+  before this entry was last updated, then EXTENDED further 2026-07-20.** All 3
+  real configuration-time query/response pairs (`CommunicationCheck`,
+  `ReadPortConfiguration`/`GetRawDipSwitches` - the latter shares
+  `ReadPortConfiguration`'s exact wire command and response tag, so needs no
+  separate table entry - and `GetVersion`'s 4-out-argument overload) are answered
+  with real, ground-truthed reply records (see `OmapNKS4DummyHCDFix/README.md`
+  bug #6); the other 6 `Configure()` calls are one-way bulk-OUT setters already
+  satisfied by the generic re-queue, needing no reply data. A periodic
+  runtime-event generator (bug #7) additionally exercises 4 of `ReceiveEventBuffer`'s
+  6 runtime event types with real, named traffic (button press/release, rotary,
+  aftertouch, RT Knob 1) plus S/PDIF (handled entirely inside `OmapNKS4Module.ko`,
+  never reaching the gadget). **2026-07-20 extension:** `GetVersion(index, ...)`'s
+  indexed overload (`command.cpp:48`, used by `Configure()`'s hwVer==2/hwVer==3
+  branches, `driver.cpp:792-811`) sends a DIFFERENT command word per index
+  (`0x00f00100`/`0x00f00200`/`0x00f00300`), which the table didn't recognize at
+  all - any hwVer other than this gadget's own fixed hwVer=1 reply would have
+  hung `WaitForNKS4ReadEvent()` indefinitely on the second `GetVersion` call.
+  Added synthetic-but-plausible reply entries for all three indices. Since this
+  gadget's own `ReadPortConfiguration` reply is fixed at hwVer=1, `Configure()`
+  never actually takes the hwVer==2/3 branches today, so this fix is
+  real-protocol-surface-complete but not yet exercised end-to-end by an actual
+  boot - *to validate:* temporarily change the `ReadPortConfiguration` reply's
+  hwVer byte to 2 or 3 and confirm `Configure()` completes via that branch too.
