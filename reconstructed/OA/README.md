@@ -881,9 +881,106 @@ symbols, each fully disassembly-confirmed:
   constructor sets four fields to the real global `STGVJSAssignInfo` and
   four 16-bit fields to a centered `0x8000` default.
 
+### Real-hardware boot test (2026-07-21) - first-ever physical boot, three bugs found and fixed
+
+First real-hardware `insmod` test of this whole reconstruction, on a
+Kronos 2 dev board (192.168.100.16, ASRock IMB-140D Plus / Atom D2550 / 4
+logical CPUs) booted into the KronosRescue live environment - same
+`2.6.32.11-korg` kernel as production, real front-panel/keybed/AT88
+hardware live, no OA/EVA/NKS4 userspace loaded. Real companion modules
+used throughout (RTAI stack, `STGEnabler.ko`, `STGGmp.ko`,
+`OmapNKS4Module.ko`, `USBMidiAccessory.ko`, all already on-device at
+`/sbin`/`/usr/realtime/modules`); `KorgUsbAudioDriver.ko` pulled from an
+already-decrypted `Mod.img` cache (`/home/share/ARCHIVE/Ignored/
+DecryptedImages/MOD_Extracted/`), since it's encrypted in place on every
+real unit and never shipped as a plain file (`/korg/Mod` is a loop-mounted
+cryptoloop volume, same family as the ones the crypto section above
+already fully solved).
+
+Found a real dependency gap this project's own "Module load order and
+dependencies" section (below) didn't mention: `USBMidiAccessory.ko` must
+also load before `OA.ko` (`Unknown symbol
+USBMidiAccessory_SetDrumPadClient` otherwise).
+
+Three real bugs surfaced and fixed, none ever hit by prior VM testing
+(this reconstruction's boot sequence has grown since the VM's own
+furthest point):
+
+1. **`rtwrap_malloc` was an unconditional `return 0` stub**
+   (`bar2_stubs_c.cpp`), never promoted to a real body unlike its sibling
+   `rtwrap_free`. Every caller (`CSTGSlotVoiceData`, `CSTGGlobal`'s
+   manager ctors, `wave_seq_manager.cpp`, `vector_manager.cpp`,
+   `streaming_event_manager.cpp`, `engine_startup_bits.cpp`) hands the
+   NULL straight to `rtwrap_pthread_mutex_init`/similar with no check - a
+   NULL+0xc crash in real `rt_typed_sem_init` (`rtai_sem.ko`), the very
+   first real-hardware boot crash of this whole project. Ground-truthed
+   (`.text+0x118ee0`) and fixed to the real two-arg forward:
+   `rtheap_alloc(&rtai_global_heap, size, 0)`, exactly mirroring
+   `rtwrap_free`'s already-correct body two lines below it in
+   `rtwrap.cpp`.
+2. **`CleanupSharedHeap()` was a documented no-op** (`stgheap_init.cpp`),
+   never given a real body. On real hardware, any `init_module` failure
+   past step 5 (`InitializeSTGHeap`) - e.g. the keybed failure below -
+   left the ~2.7GB `ioremap_cache`'d bank-memory region mapped forever:
+   `VmallocUsed` came within ~1MB of `VmallocTotal` after a single failed
+   insmod, starving every retry within the same boot down to a few-MB
+   heap and crashing early in `CSTGEngine`'s own constructor instead.
+   Ground-truthed (`.text+0x9e40`): a single guarded `iounmap()` call,
+   nothing else. Fixed + a new host KAT (`test_stgheap_init.cpp`)
+   confirming the call and address.
+3. **`CSTGAudioManager`'s CPU-core-count derivation was never carved out
+   of its own `_unrecovered_head`/`_unrecovered_middle` placeholder
+   arrays** - a documented gap, not a hidden bug, but the first code path
+   in this project to actually read from inside that placeholder
+   (`CSTGVoiceModel`'s own constructor reads `CSTGAudioManager::
+   sInstance`'s own `+0x18` as a per-channel record-array count). Since
+   `stg_kmalloc`'s real `GFP_KERNEL` (confirmed `0xd0` immediate,
+   `.text+0x118d61`) never zeroes, this read genuine uninitialized heap
+   garbage, occasionally large enough to trip the kernel's own `WARNING
+   at mm/page_alloc.c:1806` (`order >= MAX_ORDER`) inside
+   `__alloc_pages_nodemask`, which then returns NULL - written into
+   unconditionally by `CSTGVoiceModel`'s own ctor (ground truth doesn't
+   check either, confirmed via the identical unchecked write at the same
+   `+0xa0` offset in `OA_real.ko`). Ground-truthed the real derivation
+   (`.text+0x65f5f`..`.text+0x65fac`, inside `CSTGAudioManager`'s own
+   constructor): reads `CSTGCPUInfo::sInstance->cpuCount` (already
+   correctly reconstructed, clamped to 4 by `stg_num_online_cpus()`),
+   clamps again (raw>4 -> 3; raw in [2,4] -> raw-1; raw<=1 -> raw
+   unchanged), and derives a small per-core zero-fill array from that.
+   Carved `audioCoreCountM1`/`audioCoreCountFlag` (+0x18/+0x1c) and
+   `audioCoreZeroFillCount`/`audioCoreZeroFillArray[2]` (+0xa68/+0xa6c)
+   out of the two placeholder arrays (their combined size is unchanged,
+   `sizeof(CSTGAudioManager)` still matches); the surrounding 13
+   CProfiler/CDurationStats "profiler slots" remain unreconstructed.
+
+After all three fixes, boot progress went from a hard crash at
+`OA_DEBUG_MARKER 8` (bug #1, first attempt) all the way to a CLEAN
+(non-crashing) failure at `OA_DEBUG_MARKER 14` -
+`CSTGKeybedInterface_Startup` - matching the VM's own previously-furthest
+point, but for a genuinely different reason. Temporary diagnostic
+`printk`s added to `comport_init.cpp`/`keybed_init.cpp` (matching this
+project's established `debug_marker.cpp` "TEMPORARY, to be deleted once
+root-caused" convention - **NOT yet removed, still needed**) show
+`CSTGComPort::Initialize()`'s Winbond W83627 Super I/O chip-detection
+probe finds **nothing** at either legacy config port (`0x2E`/`0x4E`), for
+all 6 COM ports, across all 10 outer retries (60/60 probe attempts) -
+`CSTGKeybedInterface_Startup` never even reaches the actual UART/ACK
+handshake. Two live possibilities, not yet distinguished: (a) this
+Kronos 2 board's real motherboard (ASRock IMB-140D Plus, a different
+board entirely from the K1 D510/D525MW this reconstruction was likely
+last validated against) may not wire the keybed through a legacy ISA/LPC
+Super I/O UART the way `CSTGComPort` assumes at all, or (b) this specific
+dev board's physical keybed connection isn't actually live at the
+electrical level the chip-probe expects, independent of any code bug.
+*Next step*: physical inspection of where/how the K2 keybed actually
+connects to this motherboard, in progress.
+
 ## Known limitations
 
-- **`CSTGComPort`'s exact UART port addresses are unconfirmed.** The
+- **`CSTGComPort`'s exact UART port addresses are unconfirmed** (see the
+  2026-07-21 real-hardware section above for a related, newer finding:
+  the chip-detection PROBE itself finds nothing on a real K2 board,
+  which may make this question moot on that model specifically). The
   Winbond W83627 Super I/O probing logic is fully traced, but the specific
   legacy COM-port addresses it programs were not resolved from the
   disassembly alone. *To validate*: a full Ghidra decompile of

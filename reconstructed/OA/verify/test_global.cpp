@@ -40,6 +40,24 @@ struct CSTGFrontPanel {
 };
 
 /*
+ * Local minimal stand-in matching oa_setup_global_resources.h's own
+ * CSTGCPUInfo (same mangled sInstance/cpuCount symbols, cpuCount as the
+ * first member so it lands at +0x0 exactly like the real class) --
+ * same rationale as CSTGFrontPanel above (avoids oa_internal.h's
+ * placement-new/<new> conflict). Real-hardware fix 2026-07-21:
+ * managers.cpp's CSTGAudioManager::CSTGAudioManager() (linked into this
+ * file) now reads CSTGCPUInfo::sInstance->cpuCount -- not exercised by
+ * any of this file's own tests, but the symbol must still resolve.
+ */
+struct CSTGCPUInfo {
+	unsigned int cpuCount;	/* +0x0 */
+	static CSTGCPUInfo *sInstance;
+	CSTGCPUInfo(unsigned int cpuCountOverride) : cpuCount(cpuCountOverride) {}
+};
+static CSTGCPUInfo g_mockCpuInfo(4);
+CSTGCPUInfo *CSTGCPUInfo::sInstance = &g_mockCpuInfo;
+
+/*
  * Initialize()'s own confirmed real head/tail/count list-anchor fields
  * (+0x29c98f4/+0x29c98f8/+0x29c98fc) are genuinely 32-bit pointers on
  * the real target, tightly packed with no gaps -- but this is a

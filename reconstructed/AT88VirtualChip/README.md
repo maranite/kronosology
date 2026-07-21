@@ -236,12 +236,21 @@ Where a validation path exists, it's noted.
   always-zone-0 behavior remains correct by the absence of any
   contradicting evidence. Only a not-yet-reconstructed OA.ko call path
   (Stage 4/5, not started) could change this.
-- **Non-zero-zone `$B2` reads return an all-zero placeholder**, not real
-  chip data - there is no captured data for any zone but zone 0. This
-  proves the dispatch plumbing itself is correct (different zones really do
-  route differently); it is not a claim about real non-zero-zone contents.
-  *To validate:* capture zone 1 (or whichever zone a real consumer selects)
-  directly from a chip.
+- **Non-zero-zone `$B2` reads return an all-zero placeholder — CONFIRMED
+  against a real chip (2026-07-21).** Ran `chip_extract.ko`
+  (`ARCHIVE/extract_chip_data/chip_extract.c`, reviewed line-by-line and
+  rebuilt fresh against `/home/build/linux-kronos` before deployment) on
+  the real Kronos 2 dev board with default (safe) module params — the
+  `try_pw` password-verification path is gated behind an explicit,
+  non-default module param and was left unset, so it never issued a `$BA`
+  command; only `$B4`(zone-select)/`$B2`(zone-read)/`$B6`(config-zone-read)
+  ran, no `$B8` anywhere in this tool. Zone 1 read back **stable after only
+  3 tries** and is genuinely **all-zero across all 64 bytes**
+  (`z1[00..3f]` entirely `00`), confirming this reconstruction's all-zero
+  placeholder for non-zero zones matches real chip behavior, not just an
+  absence of contradicting data. (Zone 0 came back "unstable after 40
+  tries" this run — real, expected bus-contention noise per this tool's
+  own documented caveat, not a concern for this specific validation.)
 - **PARTIALLY RESOLVED (2026-07-20) — the post-`$B8`/encrypted half of the
   gating is now confirmed against a real, confirmed-executing consumer;
   the pre-`$B8`/raw half remains unconfirmed but is inert.** `OA.ko`'s own

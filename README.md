@@ -12,7 +12,18 @@ patcher that produces a signed Korg-format OS update package from a stock
 firmware tree.
 
 Most visitors will only be interested in the two tools below.  Both run on
-Linux (or WSL on Windows).
+Linux (native — see [environments.md](../PROJECT_BRAIN/environments.md), WSL
+is no longer part of the dev setup).
+
+> **Shared context**: kronosology is the deep-RE trunk feeding a larger
+> Kronos modding ecosystem — its findings drive
+> [KronosScreenRemoteDaemon](../KronosScreenRemoteDaemon/)'s kernel modules,
+> which in turn serve [KronosScreenRemote](../KronosScreenRemote/) and
+> [KronosScreenRemotePy](../KronosScreenRemotePy/). Cross-project
+> architecture, shared dev environments, credentials/access pointers, and
+> agent/tooling policy live in
+> [`/home/share/PROJECT_BRAIN/BRAIN.md`](../PROJECT_BRAIN/BRAIN.md) —
+> check there before duplicating knowledge into this repo.
 
 ---
 

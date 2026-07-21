@@ -1806,7 +1806,29 @@ public:
 	 * Native-pointer-width so it's correctly sized on any build without
 	 * relying on the compiler's own implicit vtable-pointer placement. */
 	void *_vtablePtr;
-	unsigned char _unrecovered_head[0xa44];	/* +0x04 (target) after _vtablePtr, this reaches +0xa48 */
+	unsigned char _unrecovered_head1[0x18 - 0x04];	/* +0x04..+0x17, confirmed untouched */
+	/*
+	 * +0x18/+0x1c -- confirmed real (`.text+0x65f5f`..`.text+0x65fac`,
+	 * real-hardware boot regression found 2026-07-21): derived from
+	 * `CSTGCPUInfo::sInstance->cpuCount` (raw>4 -> 3; raw in [2,4] ->
+	 * raw-1; raw<=1 -> raw unchanged), read directly by
+	 * `CSTGVoiceModel`'s own constructor as its per-audio-channel
+	 * record-array count (`operator new[](audioCoreCountM1 * 0xc)`).
+	 * This project's own prior "not reconstructed" placeholder here
+	 * left this genuinely uninitialized (`stg_kmalloc`'s real `GFP_KERNEL`
+	 * ground-truthed to NOT zero, confirmed via `.text+0x118d61`'s own
+	 * `0xd0` GFP immediate) -- on real hardware this read garbage heap
+	 * bytes, occasionally large enough to make `CSTGVoiceModel`'s own
+	 * `operator new[]` request trip the kernel's own `order >= MAX_ORDER`
+	 * `WARN_ON` in `__alloc_pages_nodemask` and return NULL, which
+	 * `CSTGVoiceModel`'s ctor (faithfully, ground truth doesn't check
+	 * either) then wrote into unconditionally -- a NULL-pointer Oops.
+	 * See `CSTGAudioManager::CSTGAudioManager()`'s own header comment
+	 * in managers.cpp for the full derivation.
+	 */
+	unsigned int  audioCoreCountM1;		/* +0x18 */
+	unsigned int  audioCoreCountFlag;		/* +0x1c */
+	unsigned char _unrecovered_head2[0xa48 - 0x20]; /* +0x20..+0xa47, confirmed untouched */
 	unsigned int  mutexCondFlag1;			/* +0xa48, confirmed zeroed */
 	unsigned int  mutex1Handle;			/* +0xa4c, confirmed real mutex handle */
 	unsigned int  cond1Handle;			/* +0xa50, confirmed real condvar handle */
@@ -1814,9 +1836,21 @@ public:
 	unsigned char _unrecovered_gap1[3];		/* +0xa55..+0xa57, confirmed untouched */
 	unsigned int  mutex2Handle;			/* +0xa58, confirmed real mutex handle */
 	unsigned int  cond2Handle;			/* +0xa5c, confirmed real condvar handle */
-	unsigned char _unrecovered_middle[0x454c - 0xa60]; /* +0xa60..+0x454c, confirmed to
-							     * exist (CPU-count logic + 13
-							     * profiler slots), not reconstructed */
+	unsigned char _unrecovered_middle1[0xa68 - 0xa60]; /* +0xa60..+0xa67, confirmed untouched */
+	/*
+	 * +0xa68/+0xa6c -- confirmed real, the same block as
+	 * audioCoreCountM1/Flag above: the per-core zero-fill loop bound
+	 * (0, 1, or 2) and the array it zeroes. Not read by anything this
+	 * project has reconstructed yet, but implemented alongside
+	 * audioCoreCountM1/Flag rather than left freshly-`stg_kmalloc`'d
+	 * garbage, since it's part of the exact same confirmed instruction
+	 * sequence.
+	 */
+	unsigned int  audioCoreZeroFillCount;		/* +0xa68 */
+	unsigned int  audioCoreZeroFillArray[2];	/* +0xa6c..+0xa73 (max confirmed extent: 2 dwords) */
+	unsigned char _unrecovered_middle[0x454c - 0xa74]; /* +0xa74..+0x454b, confirmed to
+							     * exist (13 profiler slots), not
+							     * reconstructed */
 	unsigned int  trailingCount;			/* +0x454c, confirmed: 0x100 (256) */
 	unsigned int  trailingMask;			/* +0x4550, confirmed: 0xff (255) */
 	float         trailingReciprocal;		/* +0x4554, confirmed: 0.00390625f (1/256) */

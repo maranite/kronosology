@@ -188,7 +188,28 @@ void rtwrap_clear_debug_traps_in_rt_task(void *taskHandle)
 	clear_debug_traps_in_rt_task(taskHandle);
 }
 
-/* ---- Free (rtheap_free against the RTAI global heap) ---- */
+/* ---- Alloc/Free (rtheap_alloc/rtheap_free against the RTAI global heap) ---- */
+
+/*
+ * Confirmed real (`.text+0x118ee0`, real-hardware boot regression found
+ * 2026-07-21): a pure two-arg-marshalled forward to `rtheap_alloc`,
+ * mode fixed at 0 -- the exact same "address-only" `rtai_global_heap`
+ * usage as this file's own `rtwrap_free` below. This function's real
+ * counterpart was never promoted out of the `bar2_stubs_c.cpp`
+ * always-NULL placeholder until now; every caller (CSTGSlotVoiceData::
+ * CSTGSlotVoiceData(), CSTGGlobal's manager ctors, wave_seq_manager.cpp,
+ * vector_manager.cpp, streaming_event_manager.cpp, engine_startup_bits.cpp)
+ * hands the result straight to `rtwrap_pthread_mutex_init`/similar with
+ * no NULL check, so the stub's unconditional NULL crashed the first
+ * real-hardware boot attempt inside `rt_typed_sem_init` (NULL+0xc) --
+ * the RTAI global heap itself was already live at that point (rtai_sched.ko's
+ * own boot log: "RTAI[malloc]: global heap size = 2097152 bytes"), this
+ * function just never actually called into it.
+ */
+void *rtwrap_malloc(unsigned int size)
+{
+	return rtheap_alloc(&rtai_global_heap, size, 0);
+}
 
 void rtwrap_free(void *ptr)
 {

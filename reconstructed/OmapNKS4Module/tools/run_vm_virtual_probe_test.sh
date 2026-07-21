@@ -69,7 +69,15 @@
 # `pgrep -af qemu-system-i386` first.
 #
 # Usage:
-#   run_vm_virtual_probe_test.sh [-t|--timeout SECONDS] [-k|--keep-run-dir]
+#   run_vm_virtual_probe_test.sh [-t|--timeout SECONDS] [-k|--keep-run-dir] [-l|--linger SECONDS]
+#
+#   -l/--linger: after "[loadoa] done" is detected, keep the VM running and
+#   keep polling the console log for this many EXTRA seconds before shutting
+#   it down (default 0, i.e. original behavior -- shut down immediately on
+#   completion). Use this to observe background kernel-thread diagnostics
+#   that only fire some seconds after loadoa's own script has already
+#   finished (e.g. kOmapNKS4MsgRoutine/kShutdownSSDRoutine's periodic
+#   "DIAG PMR#N"/"DIAG SSD#N" prints).
 #
 # Requires: local `ssh kronosvm` (passwordless, already configured) reaching
 # the 192.168.3.87 sandbox; that host must already have /home/build/linux-kronos
@@ -92,6 +100,17 @@ REMOTE_REF_KOS=(RTAIVirtualDriver.ko STGEnabler.ko STGGmp.ko)  # reused as-is
 TIMEOUT=180          # seconds; recommend 3 minutes per project instructions
 POLL_INTERVAL=5       # seconds between log checks
 KEEP_RUN_DIR=0
+LINGER=0              # extra seconds to keep the VM alive AFTER "[loadoa] done",
+                       # still polling/capturing console output, before shutdown.
+                       # Added 2026-07-21 for kOmapNKS4MsgRoutine/kShutdownSSDRoutine's
+                       # own background wait_event_timeout() loops: loadoa itself
+                       # returns almost immediately after these threads print their
+                       # "alive, entering main loop" line, so without lingering, this
+                       # script's normal completion detection kills qemu long before
+                       # ShutdownSSDRoutine's 10000-jiffy (~10s) timeout can ever fire
+                       # even once -- see reconstructed/OmapNKS4Module/README.md's
+                       # "Known limitations" entry on this thread's own diagnostic
+                       # ("DIAG SSD#N") never having been directly observed.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"     # OmapNKS4Module/ (this module's source)
@@ -100,6 +119,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -t|--timeout) TIMEOUT="$2"; shift 2 ;;
         -k|--keep-run-dir) KEEP_RUN_DIR=1; shift ;;
+        -l|--linger) LINGER="$2"; shift 2 ;;
         -h|--help)
             grep '^#' "${BASH_SOURCE[0]}" | sed 's/^#//; s/^# //'
             exit 0 ;;
@@ -375,6 +395,30 @@ while [ "${ELAPSED}" -lt "${TIMEOUT}" ]; do
     ELAPSED=$((ELAPSED + POLL_INTERVAL))
     log "  ...waited ${ELAPSED}s/${TIMEOUT}s (furthest milestone so far: $([ ${LAST_MATCHED_INDEX} -ge 0 ] && echo "${MILESTONES[$LAST_MATCHED_INDEX]%%|*}" || echo "none yet"))"
 done
+
+# --------------------------------------------------------------------------
+# Optional linger: loadoa itself finishes almost immediately after
+# kOmapNKS4MsgRoutine/kShutdownSSDRoutine print their "alive, entering main
+# loop" lines, well before either thread's own wait_event_timeout() has had
+# time to elapse even once. Without this, background-thread diagnostics are
+# structurally unobservable no matter how large --timeout is, since the main
+# poll loop above exits (and normally proceeds straight to qemu shutdown) the
+# moment "[loadoa] done" is seen.
+# --------------------------------------------------------------------------
+if [ "${COMPLETED}" -eq 1 ] && [ "${LINGER}" -gt 0 ]; then
+    log "Completion detected -- lingering ${LINGER}s to capture background-thread diagnostics..."
+    LINGER_ELAPSED=0
+    while [ "${LINGER_ELAPSED}" -lt "${LINGER}" ]; do
+        if ! ssh "${SSH_HOST}" "kill -0 ${QEMU_PID} 2>/dev/null"; then
+            log "qemu-system-i386 (pid ${QEMU_PID}) exited during linger -- stopping linger early."
+            break
+        fi
+        sleep "${POLL_INTERVAL}"
+        LINGER_ELAPSED=$((LINGER_ELAPSED + POLL_INTERVAL))
+        log "  ...lingered ${LINGER_ELAPSED}s/${LINGER}s"
+    done
+    scp -q "${SSH_HOST}:${REMOTE_LOG}" "${LOCAL_RESULTS_DIR}/boot_console.log" 2>/dev/null || true
+fi
 
 # Final pull, in case the last change landed between the last poll and now.
 scp -q "${SSH_HOST}:${REMOTE_LOG}" "${LOCAL_RESULTS_DIR}/boot_console.log" 2>/dev/null || true

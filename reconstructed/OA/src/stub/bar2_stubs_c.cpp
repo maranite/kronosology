@@ -227,9 +227,10 @@ extern "C" unsigned int get_sizeof_rtwrap_pthread_attr(void) { return 64; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" int get_pthread_recursive_attr_constant(void) { return 1; }
-extern "C" void *rtwrap_malloc(unsigned int) { return 0; }
 extern "C" int rtwrap_set_debug_traps_in_rt_task(void *) { return 0; }
-/* rtwrap_request_irq: promoted to a real body in rtwrap.cpp (sec 10.237),
+/* rtwrap_malloc: promoted to a real body in rtwrap.cpp (real-hardware
+ * boot regression, 2026-07-21), matching rtwrap_free's own precedent.
+ * rtwrap_request_irq: promoted to a real body in rtwrap.cpp (sec 10.237),
  * matching its four irq-family siblings there -- see this file's own
  * updated comment above. */
 

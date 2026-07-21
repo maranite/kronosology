@@ -120,6 +120,24 @@ extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { g_mutexattrCalls++; }
  * these need real link-satisfying storage/mocks, not just a vtable
  * placeholder. */
 CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+/*
+ * Local minimal stand-in matching oa_setup_global_resources.h's own
+ * CSTGCPUInfo (same mangled sInstance/cpuCount symbols, cpuCount as the
+ * first member so it lands at +0x0 exactly like the real class) --
+ * avoids including that header directly, which pulls in oa_internal.h's
+ * own placement-new operator, conflicting with <new> (already included
+ * above), matching this project's own established CSTGFrontPanel/
+ * STGAPIFrontPanelStatus precedent (test_global.cpp). Real-hardware fix
+ * 2026-07-21: managers.cpp's CSTGAudioManager::CSTGAudioManager() now
+ * reads CSTGCPUInfo::sInstance->cpuCount.
+ */
+struct CSTGCPUInfo {
+	unsigned int cpuCount;	/* +0x0 */
+	static CSTGCPUInfo *sInstance;
+	CSTGCPUInfo(unsigned int cpuCountOverride) : cpuCount(cpuCountOverride) {}
+};
+static CSTGCPUInfo g_mockCpuInfo(4);
+CSTGCPUInfo *CSTGCPUInfo::sInstance = &g_mockCpuInfo;
 extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
 extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
 extern "C" int   KorgUsbAudioStart(void) { return 0; }
@@ -688,7 +706,13 @@ int main(void)
 	       "     buffer offsets (the vtable pointer's own width differs host-vs-target).\n");
 	int mutexInitCallsBefore2 = g_mutexInitCalls;
 	int condInitCallsBefore = g_condInitCalls;
+	g_mockCpuInfo.cpuCount = 4;	/* real-hardware fix 2026-07-21: exercise the raw=4 -> val=3 case */
 	CSTGAudioManager *am = new CSTGAudioManager();
+	check_eq("audioCoreCountM1 (cpuCount=4 -> 3)", am->audioCoreCountM1, 3);
+	check_eq("audioCoreCountFlag (val=3 -> 1)", am->audioCoreCountFlag, 1);
+	check_eq("audioCoreZeroFillCount (val>1 -> 2)", am->audioCoreZeroFillCount, 2);
+	check_eq("audioCoreZeroFillArray[0] zeroed", am->audioCoreZeroFillArray[0], 0);
+	check_eq("audioCoreZeroFillArray[1] zeroed", am->audioCoreZeroFillArray[1], 0);
 	check_eq("mutexCondFlag1 == 0", am->mutexCondFlag1, 0);
 	check_eq("mutex1Handle is a real non-zero handle", (unsigned int)(am->mutex1Handle != 0), 1);
 	check_eq("cond1Handle is a real non-zero handle", (unsigned int)(am->cond1Handle != 0), 1);

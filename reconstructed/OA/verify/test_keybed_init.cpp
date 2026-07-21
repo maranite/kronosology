@@ -77,6 +77,8 @@ char CSTGComPort::Initialize(eComPortId comPortId, eBaudRateCode, eReceiveFifoTh
 
 extern "C" {
 
+int printk(const char *, ...) { return 0; } /* real-hardware keybed-debug printk added 2026-07-21 */
+
 static int g_debounceInitCalls;
 void CSTGKeybedKeyDebounceFilter_Initialize(unsigned char *) { g_debounceInitCalls++; }
 

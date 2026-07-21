@@ -41,6 +41,7 @@
 #include "oa_global.h"		/* for ResolveActivePerformanceVarsManagerRaw(), sec 10.144 */
 #include "oa_engine.h"
 #include "oa_engine_init.h"	/* for CSTGPerformance::IsCurrentlyActive(), sec 10.144 */
+#include "oa_setup_global_resources.h"	/* for CSTGCPUInfo::sInstance->cpuCount, real-hardware fix 2026-07-21 */
 #include "oa_bank_memory.h"
 #include "oa_internal.h"
 #include "oa_new_delete.h"	/* for __kmalloc/OA_GFP_KERNEL, sec 10.148 (CSTGCDWorker_InitializeBuffer) */
@@ -1270,9 +1271,10 @@ CSTGAudioManager::CSTGAudioManager()
 	rtwrap_pthread_mutex_init(mutex2, nullptr);
 	rtwrap_pthread_cond_init(cond2, nullptr);
 
-	/* +0xa60..+0x454c: confirmed to exist (a CPU-core-count-dependent
-	 * branch/array, and 13 CProfiler+CDurationStats sub-object slots,
-	 * 3 of them also with a CSTGFrontPanelStatusReporter, linked into
+	/* +0xa60..+0x454c (excluding audioCoreCountM1/Flag and
+	 * audioCoreZeroFillCount/Array, carved out below): confirmed to
+	 * exist (13 CProfiler+CDurationStats sub-object slots, 3 of them
+	 * also with a CSTGFrontPanelStatusReporter, linked into
 	 * CProfiler::sListOfProfilers) but NOT reconstructed in this pass --
 	 * see the class comment in oa_engine.h for exactly what's confirmed
 	 * there and why it wasn't modeled here. */
@@ -1283,6 +1285,43 @@ CSTGAudioManager::CSTGAudioManager()
 	trailingUnity       = 1.0f;
 
 	CSTGAudioManager::sInstance = this;
+
+	/*
+	 * audioCoreCountM1/Flag (+0x18/+0x1c) and audioCoreZeroFillCount/
+	 * Array (+0xa68/+0xa6c) -- confirmed real (`.text+0x65f5f`..
+	 * `.text+0x65fac`, real-hardware boot regression found 2026-07-21;
+	 * see oa_engine.h's own header comment on these fields for the full
+	 * story). Derives from `CSTGCPUInfo::sInstance->cpuCount` (already
+	 * clamped to <=4 by `CSTGCPUInfo`'s own constructor, `stg_
+	 * num_online_cpus()`) via a small confirmed lookup, ground-truthed
+	 * instruction-by-instruction rather than assumed:
+	 *   raw > 4  -> val = 3
+	 *   raw in [2,4] -> val = raw - 1
+	 *   raw <= 1 -> val = raw (0 or 1, unchanged)
+	 * then, from that FINAL val (not the raw count):
+	 *   val > 1  -> audioCoreCountFlag=1, audioCoreZeroFillCount=2
+	 *   val <= 1 -> audioCoreCountFlag=0, audioCoreZeroFillCount=val
+	 * (a genuine real quirk: for raw==2, val==1 takes the "val<=1" path
+	 * -- audioCoreCountFlag=0, NOT the 1 a naive "raw>1" re-check would
+	 * give -- confirmed by tracing the real jump targets, not inferred).
+	 * The zero-fill array write is skipped entirely only when
+	 * audioCoreZeroFillCount==0 (raw==0), matching ground truth's own
+	 * early-return branch.
+	 */
+	{
+		unsigned int raw = CSTGCPUInfo::sInstance->cpuCount;
+		unsigned int val = (raw > 4) ? 3 : (raw > 1) ? (raw - 1) : raw;
+		audioCoreCountM1 = val;
+		if (val > 1) {
+			audioCoreCountFlag = 1;
+			audioCoreZeroFillCount = 2;
+		} else {
+			audioCoreCountFlag = 0;
+			audioCoreZeroFillCount = val;
+		}
+		for (unsigned int i = 0; i < audioCoreZeroFillCount; i++)
+			audioCoreZeroFillArray[i] = 0;
+	}
 }
 
 CSTGMessageProcessor::CSTGMessageProcessor()

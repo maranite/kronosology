@@ -59,6 +59,13 @@
 
 #include "oa_comport.h"
 
+/* TEMPORARY debugging aid (2026-07-21) -- NOT part of the real
+ * reconstruction, to be deleted once the real-hardware keybed-handshake
+ * failure is root-caused. Matches debug_marker.cpp's own established
+ * regparm(0) printk convention (this build is -mregparm=3 throughout,
+ * but the real kernel printk is cdecl/asmlinkage). */
+extern "C" __attribute__((regparm(0))) int printk(const char *fmt, ...);
+
 CW83627 CW83627::sInstance;
 
 static const int kLdnByPort[6] = { 1, 2, 2, 3, 6, 0xd };
@@ -123,6 +130,7 @@ char CSTGComPort::Initialize(eComPortId comPortIdArg, eBaudRateCode baudRateCode
 	} else if (DetectChipAt(0x4e)) {
 		configPort = 0x4e;
 	} else {
+		printk("<3>OA_COMPORT_DBG port %d: no W83627 Super I/O chip found at 0x2e or 0x4e\n", cpid);
 		return 0;
 	}
 	CW83627::sInstance.found = 1;
@@ -136,8 +144,11 @@ char CSTGComPort::Initialize(eComPortId comPortIdArg, eBaudRateCode baudRateCode
 	unsigned int baseHigh = ReadConfigReg(configPort, 0x60);
 	unsigned int baseLow = ReadConfigReg(configPort, 0x61);
 	unsigned int newIoBase = (baseHigh << 8) | baseLow;
-	if ((newIoBase - 0x100) > 0xef8 || (newIoBase & 7) != 0)
+	if ((newIoBase - 0x100) > 0xef8 || (newIoBase & 7) != 0) {
+		printk("<3>OA_COMPORT_DBG port %d: chip found at config 0x%x, LDN %d, but bad ioBase 0x%x\n",
+		       cpid, configPort, ldn, newIoBase);
 		return 0;
+	}
 	ioBase = newIoBase;
 
 	/* IRQ discovery. */
@@ -146,6 +157,9 @@ char CSTGComPort::Initialize(eComPortId comPortIdArg, eBaudRateCode baudRateCode
 	unsigned int irq = ReadConfigReg(configPort, 0x70) & 0xf;
 	irqNumber = irq;
 	ExitConfig(configPort);
+
+	printk("<3>OA_COMPORT_DBG port %d: chip@0x%x LDN %d ioBase=0x%x irq=%d\n",
+	       cpid, configPort, ldn, ioBase, irq);
 
 	/* Hardware-reset the UART: clear MCR/IER, read-and-discard
 	 * LSR/RBR/MSR/IIR to clear any latched status. */
@@ -156,8 +170,10 @@ char CSTGComPort::Initialize(eComPortId comPortIdArg, eBaudRateCode baudRateCode
 	stg_inb(ioBase + 6);
 	stg_inb(ioBase + 2);
 
-	if (rtwrap_request_irq(irq, &CSTGComPort::RTAIInterruptHandler, this, 0) != 0)
+	if (rtwrap_request_irq(irq, &CSTGComPort::RTAIInterruptHandler, this, 0) != 0) {
+		printk("<3>OA_COMPORT_DBG port %d: rtwrap_request_irq(%d) failed\n", cpid, irq);
 		return 0;
+	}
 	rtwrap_assign_irq_to_cpu(irq, 1);
 
 	/* Final UART bring-up -- the exact same DLAB/baud-rate dance as

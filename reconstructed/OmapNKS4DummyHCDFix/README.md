@@ -300,7 +300,33 @@ is `HandleAnalogController`'s own `param2` argument - i.e. `out_hi` from
 this transform. Combining the two: for the virtual gadget's own RT Knob 1
 event (`dLo=0x40`, `dHi=0x00`), `raw10 = 0x100`, `out_hi = 0x100 >> 3 = 32`,
 predicting a displayed value of `16`. This specific prediction was not
-independently re-verified against real hardware. For every OTHER
+independently re-verified against real hardware.
+
+**Partial real-hardware validation (2026-07-21):** a passive inline hook
+(kronos_extract.c-style CR0.WP trampoline, source at
+`KronosExtract/source/nks4_sniff.c`) on the live `COmapNKS4Driver_ReceiveEventBuffer`
+of an already-running `OmapNKS4Module.ko` (real Kronos 2 dev board, real
+NKS4 panel) captured genuine RT Knob 1 wire traffic across three separate
+manual sweeps (raw `dLo`/`dHi`/`idx`/`op` bytes, ring-buffered, no module
+reload). Every captured event carried `idx=0x08` (confirming device_code 8
+= RT Knob 1 on the wire) and `op=0x03` (confirming RT Knob 1 dispatches
+through the same "aftertouch (calibrated)" opcode path as Aftertouch
+itself - not previously stated explicitly). Decoding via this file's own
+`raw10 = (dLo<<2)|(dHi>>6)` formula produced clean, monotonically
+increasing/decreasing sequences as the knob was turned (three sweeps
+spanning raw10 ranges of roughly 504-565, 566-621, and 163-223) - strong
+confirmation the wire format and `raw10` reassembly are correct.
+**Not confirmed:** the specific `raw10=0x100 -> displayed 16` claim itself.
+None of the three sweeps' *captured* events (each limited to the last 16
+of a much longer stream by the hook's 16-slot ring buffer) landed on
+exactly `raw10=0x100`, and the hook observes wire bytes at function entry,
+before `ApplyNKS4Calibration()` and the `out_hi`/display-value transform
+run - so the post-calibration displayed value was never directly observed
+either way. The general shape of the prediction (smooth, correctly-decoded
+analog data on the same channel/opcode) is now real-hardware-backed; the
+exact displayed number is still a derivation, not a measurement.
+
+For every OTHER
 `device_code` (including Aftertouch, `7`) `nks4_inject.c` itself states no
 value-scaling formula is hardware-confirmed, so no displayed-value claim is
 made for those - see Known limitations.

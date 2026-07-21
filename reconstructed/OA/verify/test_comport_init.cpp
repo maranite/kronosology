@@ -51,6 +51,8 @@ static int g_outbCalls, g_inbCalls;
 
 extern "C" {
 
+int printk(const char *, ...) { return 0; } /* real-hardware keybed-debug printk added 2026-07-21 */
+
 unsigned char stg_inb(unsigned int port)
 {
 	g_inbCalls++;

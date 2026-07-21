@@ -59,6 +59,16 @@ void *ioremap_cache(unsigned long offset, unsigned long size)
 	return sMappedRegion;
 }
 
+static void *g_iounmapAddr;
+static int g_iounmapCalls;
+void iounmap(void *addr)
+{
+	g_iounmapCalls++;
+	g_iounmapAddr = addr;
+	free(addr); /* mirrors the malloc() in the ioremap_cache mock above */
+	sMappedRegion = 0;
+}
+
 static unsigned long g_heapInitBase, g_heapInitSize;
 unsigned long CSTGHeapManager_Initialize(unsigned long base, unsigned long size)
 {
@@ -130,6 +140,18 @@ int main(void)
 	} else {
 		printf("  ok    mapped region zero-filled\n");
 	}
+
+	/*
+	 * CleanupSharedHeap() -- real-hardware boot regression, 2026-07-21
+	 * (see stgheap_init.cpp's own header comment): must actually
+	 * iounmap() the region InitializeSTGHeap() just ioremap_cache()'d,
+	 * not silently no-op (the bug that leaked ~2.7GB of vmalloc address
+	 * space per failed real-hardware insmod).
+	 */
+	void *expectedAddr = (void *)stgheap_get_ioremap_base();
+	CleanupSharedHeap();
+	check_eq("CleanupSharedHeap: iounmap call count", (unsigned long)g_iounmapCalls, 1);
+	check_eq("CleanupSharedHeap: iounmap address", (unsigned long)g_iounmapAddr, (unsigned long)expectedAddr);
 
 	printf(g_fail ? "\nRESULT: %d check(s) FAILED\n" : "\nRESULT: all checks passed\n", g_fail);
 	return g_fail ? 1 : 0;

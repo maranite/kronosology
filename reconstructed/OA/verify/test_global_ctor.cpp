@@ -40,6 +40,14 @@
  * links) -- link-satisfying host mocks only, same treatment as the
  * RTAI wrappers below. */
 CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
+/* CSTGCPUInfo::sInstance -- real-hardware fix 2026-07-21 (managers.cpp's
+ * CSTGAudioManager::CSTGAudioManager() now reads ->cpuCount). The real
+ * class (oa_setup_global_resources.h, already included above) is visible
+ * here, but its own ctor lives in engine_startup_bits.cpp, not linked
+ * into this file -- providing the out-of-line definition directly. */
+CSTGCPUInfo::CSTGCPUInfo(unsigned int cpuCountOverride) { cpuCount = cpuCountOverride; }
+static CSTGCPUInfo g_mockCpuInfo(4);
+CSTGCPUInfo *CSTGCPUInfo::sInstance = &g_mockCpuInfo;
 extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
 extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
 extern "C" int   KorgUsbAudioStart(void) { return 0; }

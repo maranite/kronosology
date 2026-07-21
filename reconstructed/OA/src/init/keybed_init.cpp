@@ -23,6 +23,12 @@
 #include "oa_keybed_init.h"
 #include "oa_internal.h" /* placement operator new(size_t, void*) */
 
+/* TEMPORARY debugging aid (2026-07-21) -- NOT part of the real
+ * reconstruction, to be deleted once the real-hardware keybed-handshake
+ * failure is root-caused. Matches debug_marker.cpp's own established
+ * regparm(0) printk convention. */
+extern "C" __attribute__((regparm(0))) int printk(const char *fmt, ...);
+
 /*
  * `CSTGComPort::OnByteReceived` (vtable slot 0) is now a REAL,
  * confirmed override -- `CSTGKeybedComPort::ReceiveByte` (sec 10.237),
@@ -118,6 +124,8 @@ delay_loop_start:
 check_ack_final:
 	if (sInstance[KEYBED_OFF_ACK_FLAG])
 		goto ack_received;
+	printk("<3>OA_KEYBED_DBG round %d port %d: Initialize() ok, probe 0xa5 sent, no ACK\n",
+	       outerRetries, comPortId);
 
 port_failed:
 	ComPort()->Cleanup();
@@ -135,6 +143,7 @@ port_failed:
 	goto check_continue;
 
 ack_received:
+	printk("<3>OA_KEYBED_DBG round %d port %d: ACK received!\n", outerRetries, comPortId);
 	outerRetries++;
 	found = 1;
 	if (outerRetries == 10)

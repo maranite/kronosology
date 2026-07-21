@@ -368,6 +368,16 @@ void CSTGPerformanceVarsManager::Initialize() {}
 void CSTGControllerRTData::Initialize() {}
 CSTGFrontPanel *CSTGFrontPanel::sInstance;
 void CSTGFrontPanel::RequestAnalogInputStatus(unsigned int) {}
+/* CSTGCPUInfo::sInstance -- real-hardware fix 2026-07-21 (managers.cpp's
+ * CSTGAudioManager::CSTGAudioManager() now reads ->cpuCount). CSTGCPUInfo's
+ * own real ctor lives in engine_startup_bits.cpp (not linked into this
+ * file) -- a trivial mock ctor here (matching this file's established
+ * link-satisfying-mock convention, e.g. CSTGControllerRTData::Initialize()
+ * above) just sets cpuCount directly, which is all this file's own `new
+ * CSTGAudioManager()` KAT below needs. */
+CSTGCPUInfo::CSTGCPUInfo(unsigned int cpuCountOverride) { cpuCount = cpuCountOverride; }
+static CSTGCPUInfo g_mockCpuInfo(4);
+CSTGCPUInfo *CSTGCPUInfo::sInstance = &g_mockCpuInfo;
 void USTGAliasBankTypes::InitializeAliasBanks() {}
 /* Mock arrays -- alias_bank_init.cpp's own real definitions are
  * deliberately not linked here so InitializeAliasBanks() stays mockable
@@ -527,8 +537,16 @@ int main(void)
 	CSTGMessageProcessor::sInstance = &msgProc;
 	MockAudioDriverInterface *adi = new MockAudioDriverInterface();
 	CSTGAudioDriverInterface::sInstance = adi;
+	g_mockCpuInfo.cpuCount = 4;	/* real-hardware fix 2026-07-21: exercise the raw=4 -> val=3 case */
 	CSTGAudioManager *am = new CSTGAudioManager();
 	CSTGAudioManager::sInstance = am;
+	if (am->audioCoreCountM1 == 3 && am->audioCoreCountFlag == 1 && am->audioCoreZeroFillCount == 2)
+		printf("  ok    CSTGAudioManager audioCoreCountM1/Flag/ZeroFillCount (cpuCount=4 -> 3/1/2)\n");
+	else {
+		printf("  FAIL  CSTGAudioManager audioCoreCountM1=%u Flag=%u ZeroFillCount=%u want 3/1/2\n",
+		       am->audioCoreCountM1, am->audioCoreCountFlag, am->audioCoreZeroFillCount);
+		g_fail++;
+	}
 	CSTGVoiceAllocator va; CSTGVoiceAllocator::sInstance = &va;
 	CLoadBalancer *lb = new CLoadBalancer();
 	CLoadBalancer::sInstance = lb;

@@ -58,6 +58,41 @@ intended extension point — and the one we propose using for a small `oa_authge
 helper module that exposes the chip secret (or a generated auth string) to userspace
 without modifying `OA.ko`. See [`../crypto/auth_string_algorithm.md`](../crypto/auth_string_algorithm.md).
 
+**Also exported (confirmed 2026-07-21 via `readelf -x __ksymtab_strings` +
+`nm` on the genuine stock binary, md5 `461156bba798c21f94871cb6c8da1595`,
+pulled live from a real Kronos 2 dev board's `/tmp/sysprobe/sbin/`) — the 11
+video-panel functions `OmapVideoModule.ko` depends on:**
+`COmapNKS4_AddToProgressBar`, `COmapNKS4_GetProgressBarPercent`,
+`COmapNKS4_GetTitleScreenVersion`, `COmapNKS4_IncProgressBar`,
+`COmapNKS4_SetProgressBarPercent`, `OmapNKS4InitLCDRegs`,
+`OmapNKS4SendFillData`, `OmapNKS4SendPixelDataRegion`,
+`OmapNKS4UpdateColorPal`, `OmapNKS4UpdateScreenInfo`, `OmapNKS4XAxisByteSize`.
+
+This resolved what looked like a real mystery: `OmapVideoModule.ko`'s own
+`modinfo` shows `depends=` empty even in the *genuine* stock binary, which
+looked like it might mean these symbols resolve through something other
+than the standard kernel module-loading mechanism. They don't — `depends=`
+is a build-time-only convenience field, populated only when the importing
+module's build had the exporter's `Module.symvers` available; it has no
+bearing on runtime `find_symbol()` resolution, which only checks whether
+the exporting module is already loaded with a real `__ksymtab` (confirmed
+present and correct here). Real `loadoa.c` already gets the order right
+(`OmapNKS4Module.ko` insmod'd and initialized, *then* `OmapVideoModule.ko`
+right after — `loadoa/loadoa.c:442-447`); an earlier "Unknown symbol"
+dmesg failure seen this session was purely an artifact of an ad-hoc manual
+test inserting `OmapVideoModule.ko` before `OmapNKS4Module` had loaded, not
+a genuine gap on real hardware.
+
+**Confirmed gap in THIS PROJECT'S OWN reconstruction**
+(`reconstructed/OmapNKS4Module/`): none of these 11 functions have an
+`EXPORT_SYMBOL()` call — `readelf -S` on our built `.ko` shows zero
+`__ksymtab*` sections at all. This doesn't block testing the new
+`OmapVideoModule.ko` reconstruction against a board where the *genuine
+stock* `OmapNKS4Module.ko` is already loaded (its real exports are already
+in kernel memory), but our own from-scratch `OmapNKS4Module` reconstruction
+will need these `EXPORT_SYMBOL()` calls added before `OmapVideoModule.ko`
+could ever load against *it* instead of the stock binary.
+
 ---
 
 ## Role

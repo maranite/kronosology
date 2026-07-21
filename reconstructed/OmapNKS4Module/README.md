@@ -500,16 +500,37 @@ validation path exists, it's noted.
   completion rather than the synchronous completion this module's own test scaffolding
   uses) has not been exercised. *To validate:* test with concurrent submitters, or with
   a real USB host controller driving genuinely asynchronous URB completion.
-- **`SendPixelDataRegion`'s multi-chunk row-wrap streaming**, for a pixel region wider
-  than one transfer chunk, has only been exercised with a full-size frame buffer and
-  realistic negotiated packet size in the disassembly-verified pass, not under live
-  concurrent/stress conditions. *To validate:* drive a wide, multi-chunk pixel-region
-  update through a live test with a realistically sized frame buffer.
-- **`ShutdownSSDRoutine`'s 10000-jiffy (~10s) wait loop has had limited direct runtime
-  observation** relative to `ProcessMsgRoutine`'s shorter, directly-observed twin (same
-  code shape, 3-jiffy wait) - a test run needs to stay up roughly 10 real seconds past
-  this module's own load for even one iteration to be directly observed. *To validate:*
-  a longer-duration boot test with this loop's own diagnostic output captured.
+- **`SendPixelDataRegion`'s multi-chunk row-wrap streaming — CONFIRMED on real
+  hardware (2026-07-21).** Independently reconstructed `OmapVideoModule.ko`
+  (`reconstructed/OmapVideoModule/`) loaded cleanly against this module's genuine
+  stock binary on a real Kronos 2 dev board (all 11 needed exports resolved via a
+  real `__ksymtab` — see `docs/modules/OmapNKS4Module.ko.md`'s "Exported kernel
+  symbols" section), then a deliberately narrow `OMAPFB_FLUSH` ioctl
+  (`KronosFB/narrow_flush_test.c`: rect 137×60px at offset 100,50, i.e. `width=137`
+  vs. the panel's real `line_length=800` — not a multiple of the 0x200-byte USB
+  chunk size, forcing genuine multi-chunk row-wrap) rendered correctly on the
+  physical panel: a static (non-corrupted, non-flickering) rectangle, user-measured
+  at ~1.1"×0.5", consistent with the requested 137/800 × 60/600 proportions on a
+  real panel. No dmesg errors. This closes the "not under a realistic non-full-size
+  frame buffer" gap that motivated this item.
+- **`ShutdownSSDRoutine`'s 10000-jiffy (~10s) wait loop — CONFIRMED (2026-07-21).**
+  Root cause of why this had never been observed: `tools/run_vm_virtual_probe_test.sh`
+  shuts the VM down the instant `loadoa`'s own script completes, which happens almost
+  immediately after this thread prints its "alive, entering main loop" line - no
+  amount of raising `--timeout` could ever help, since the poll loop exits (and
+  proceeds straight to shutdown) the moment completion is detected. Added a
+  `--linger SECONDS` option (keeps the VM up and still capturing console output for
+  N extra seconds after completion, before shutdown) and re-ran with `--linger 45`.
+  Captured 5 consecutive `DIAG SSD#N` cycles. Sanity-checked the timing itself, not
+  just the print's presence: combining each line's `delta_hi`/`delta_lo` into the
+  full 64-bit cycle count and dividing by the reported `khz` gives ≈10.0006s per
+  cycle, every time — matching the intended 10000-jiffy timeout almost exactly, the
+  same real confirmation `ProcessMsgRoutine`'s twin already had (cross-checked this
+  same run's own `DIAG PMR#N` lines the same way: ~2.9-3.4ms per 3-jiffy cycle,
+  i.e. this kernel runs at HZ=1000/1ms-per-jiffy, and 10000 jiffies vs. 3 jiffies
+  scales to the observed ~10.0006s vs. ~3ms almost exactly). `--linger` is now
+  available for any future background-thread diagnostic that fires after `loadoa`'s
+  own completion.
 - **`/proc` entry names changed from an earlier assumed `/proc/nks4*` convention to the
   real `/proc/OmapNKS4`, `/proc/OmapNKS4ProgressBar`, `/proc/OmapNKS4HardwareVersion`,
   `/proc/OmapNKS4OmapVersion` paths.** Any userspace tool that reads these paths needs

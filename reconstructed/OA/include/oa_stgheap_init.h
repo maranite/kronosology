@@ -70,6 +70,7 @@ struct resource {
 extern struct resource iomem_resource;
 
 void *ioremap_cache(unsigned long offset, unsigned long size);
+void iounmap(void *addr);
 
 /* OA.ko's own heap-manager entry points -- see this header's own note
  * above on the naming/class-membership caveat. Not yet reconstructed;

@@ -270,10 +270,22 @@ int InitializeSTGHeap(void)
 	return 0;
 }
 
+/*
+ * Confirmed real (`.text+0x9e40`, real-hardware boot regression found
+ * 2026-07-21, via `objdump -d -r` on OA_real.ko): a single guarded
+ * `iounmap()` call against `sIORemapBase` -- nothing else, no
+ * `release_mem_region`/`release_resource` counterpart in ground truth.
+ * This project's own prior "not yet disassembled" no-op left
+ * `InitializeSTGHeap`'s ~2.7GB `ioremap_cache`'d bank-memory region
+ * mapped forever on any init_module failure past step 5 (e.g. a real
+ * keybed-handshake failure at step 14) -- confirmed on real hardware:
+ * a single such failed insmod left only ~1MB of vmalloc address space
+ * free (`VmallocUsed` within 1MB of `VmallocTotal`), starving every
+ * subsequent retry within the same boot down to a few-MB heap and
+ * crashing early in `CSTGEngine`'s constructor instead.
+ */
 void CleanupSharedHeap(void)
 {
-	/* Not yet disassembled -- confirmed to exist (called symmetrically
-	 * from init_module's unwind cascade) but its own body wasn't part of
-	 * this pass's ground-truthing target. Left as a confirmed-real,
-	 * not-yet-implemented no-op rather than guessed at. */
+	if (sIORemapBase)
+		iounmap((void *)sIORemapBase);
 }
