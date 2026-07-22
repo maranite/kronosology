@@ -48,13 +48,54 @@
  *      line), IER = 3 (RX-available + THRE interrupts enabled).
  *  10. `irqEnabled = 1`, return 1 (success).
  *
- * NOT reconstructed (a real, deliberate, documented gap -- see
- * oa_comport.h's own note): comPortId 0 and 3 are confirmed via
- * `.rodata`'s own per-port flag tables to have ADDITIONAL LDN-specific
- * config beyond the generic sequence above (a GPIO-register-shaped
- * block for port 3's LDN touching registers 0x10/0x11/0x13/0x14/0x22/
- * 0x25/0x26, and a distinct extra step for port 0). This
- * reconstruction takes the generic path for all 6 ports instead.
+ * comPortId==3's special block (2026-07-22, now reconstructed -- see
+ * below): decoded byte-for-byte from `.text+0xb2b8`..`+0xb349` and
+ * cross-checked against the public Nuvoton NCT6776F/D datasheet (this
+ * chip's documented sibling family -- see kronos_keybed_serial_protocol
+ * memory / OA.ko_keybed_serial_protocol.md for the full writeup). It is
+ * NOT a GPIO/pin-mux block as originally guessed -- it is a write to
+ * three real *Global* (NOLDN) Chip Control Registers, which the
+ * datasheet confirms live in CR 0x02-0x2F and are NOT gated by LDN
+ * selection (i.e. this fires regardless of which LDN reg 0x07 currently
+ * points at):
+ *
+ *   - CR25h (Interface Tri-state Enable) <- 0x00: clears UARTA/UARTB
+ *     tri-state (bits 2/3) -- un-floats the physical serial pins so
+ *     they actively drive/receive instead of high-impedance.
+ *   - CR22h (Device Power Down)          <- 0xFF: ensures UARTA/UARTB
+ *     (bits 4/5) are NOT powered down, and IPD (bit1) stays "not
+ *     immediate power down".
+ *   - CR10h/CR11h/CR13h/CR14h (Device IRQ Type/Polarity Selection)
+ *     <- 0x00/0x00/0xFF/0xFF: sets edge-triggered (not level) and
+ *     active-low (not active-high) for every IRQ channel -- the
+ *     INVERSE of their FFh/FFh/00h/00h power-on-reset defaults.
+ *     Gated by the datasheet's own documented CR26h[bit4] unlock/lock
+ *     dance (read CR26, OR in bit4, write back; ... write CR10/11/13/14
+ *     ...; read CR26 again, AND out bit4, write back) -- this project's
+ *     disassembly matches that exact vendor-documented procedure
+ *     instruction-for-instruction.
+ *
+ * comPortId 0's distinct extra step remains a documented, deliberate
+ * gap (not yet decoded).
+ *
+ * NOTE (2026-07-22, live-hardware-checked): this block was originally
+ * flagged as a candidate explanation for the keybed UART's
+ * noise-shaped RX data (comPortId 3's Initialize() always runs before
+ * comPortId 5's on real hardware, so its side effect would fire first
+ * -- IF comPortId 3 ever got that far). A live read-only probe against
+ * the real production chip (Winbond W83627UHG, confirmed via the
+ * kernel's own `w83627ehf` binding banner) showed LDN 3 is **inactive
+ * with base=0x0000** on real hardware -- `Initialize(3)`'s own
+ * base-address validity check (`(newIoBase-0x100) > 0xef8`) fails
+ * immediately, so this block never actually executes in practice. It
+ * is kept here purely because it's a real, disassembly-confirmed part
+ * of `CSTGComPort::Initialize()` (faithful reconstruction is the
+ * point), but it is NOT the explanation for the keybed UART's earlier
+ * "noise-shaped" result -- see kronos_keybed_serial_protocol memory /
+ * OA.ko_keybed_serial_protocol.md for what that turned out to be
+ * (nothing: a live production-hardware capture showed LDN 0xD
+ * delivering clean, zero-framing-error, correctly-typed protocol
+ * messages the whole time).
  */
 
 #include "oa_comport.h"
@@ -150,6 +191,26 @@ char CSTGComPort::Initialize(eComPortId comPortIdArg, eBaudRateCode baudRateCode
 		return 0;
 	}
 	ioBase = newIoBase;
+
+	/* comPortId==3 (LDN 3, UART B) special block -- see this file's
+	 * header comment. Global (NOLDN) registers, not gated by the LDN
+	 * select above; config port is still open from the base-address
+	 * read. */
+	if (cpid == 3) {
+		WriteConfigReg(configPort, 0x25, 0x00); /* Interface Tri-state Enable: un-float UARTA/UARTB */
+		WriteConfigReg(configPort, 0x22, 0xff); /* Device Power Down: UARTA/UARTB not powered down */
+
+		unsigned char cr26 = ReadConfigReg(configPort, 0x26);
+		WriteConfigReg(configPort, 0x26, cr26 | 0x10); /* unlock CR10/11/13/14 per datasheet Note1 */
+
+		WriteConfigReg(configPort, 0x10, 0x00); /* Device IRQ TYPE Selection: all edge-triggered */
+		WriteConfigReg(configPort, 0x11, 0x00); /* Device IRQ TYPE Selection (HM/WDTO/SMI): edge */
+		WriteConfigReg(configPort, 0x13, 0xff); /* Device IRQ Polarity Selection <15:8>: active-low */
+		WriteConfigReg(configPort, 0x14, 0xff); /* Device IRQ Polarity Selection <7:0>: active-low */
+
+		cr26 = ReadConfigReg(configPort, 0x26);
+		WriteConfigReg(configPort, 0x26, cr26 & ~0x10); /* re-lock */
+	}
 
 	/* IRQ discovery. */
 	EnterConfig(configPort);

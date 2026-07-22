@@ -972,19 +972,87 @@ last validated against) may not wire the keybed through a legacy ISA/LPC
 Super I/O UART the way `CSTGComPort` assumes at all, or (b) this specific
 dev board's physical keybed connection isn't actually live at the
 electrical level the chip-probe expects, independent of any code bug.
-*Next step*: physical inspection of where/how the K2 keybed actually
-connects to this motherboard, in progress.
+
+**UPDATE, same day, continued investigation — root cause found: an ITE
+vs. Nuvoton/Winbond Super-IO unlock-key mismatch, not a code bug.** Full
+details in `docs/modules/OA.ko_keybed_serial_protocol.md`'s "Root cause
+found" section; summary:
+
+- Fresh, independent `objdump -d -r` of `OA_real.ko` confirms
+  `CSTGComPort::Initialize()`'s unlock sequence (`0x87, 0x01, 0x55,
+  0x55`/`0xaa`) really is a documented **ITE IT87-series** key, not
+  Winbond/Nuvoton. Pulled the genuinely-latest OA.ko straight out of
+  `KRONOS_Update_3_2_2.tar.gz` (decrypted `Mod.img` with the project's
+  already-known universal cryptoloop key, mounted via `debugfs`) to check
+  for a version difference — `CSTGComPort::Initialize()` is byte-for-byte
+  identical. No per-model branch exists anywhere in the call chain
+  (`init_module` → `CSTGKeybedInterface_Startup` → `Initialize`) and no
+  fallback to any other unlock key exists anywhere in the ~780-line
+  function, including both previously-unreconstructed special blocks.
+- This board's real physical Super-IO chip (confirmed both by the
+  kernel's own built-in `w83627ehf`-family driver binding at `0x295`/
+  `0x296`, and independently by a standalone raw-port userspace probe)
+  only answers the standard Nuvoton/Winbond 2-byte key (`0x87, 0x87`),
+  `devid=0xa235`. Retested the ITE key with explicit inter-byte I/O-delay
+  pacing to rule out a too-fast-write artifact — same null result. Also
+  checked the LPC bridge's (ICH7) generic I/O decode-range registers —
+  no evidence of a chipset-level routing window a full boot might open
+  that recovery boot doesn't; ruled that hypothesis out too.
+- Walked every LDN on the real chip using the confirmed-working 2-byte
+  key: `LDN 0xd` (base `0x2e8`, IRQ 7) is a real, already-enabled UART,
+  and matches this project's own already-ground-truthed `kLdnByPort[5] =
+  0xd` mapping (`comPortId 5`) exactly, passing `OA.ko`'s own base-address
+  validity check unmodified. Brought this UART up with a standalone
+  test-only tool (diverging from ground truth at exactly the unlock-key
+  step, nothing else) and ran a controlled quiet-vs-active comparison:
+  0.50 bytes/s baseline vs. 20.40 bytes/s during continuous physical
+  keybed/switch interaction — a reproducible ~40x correlation. Bytes
+  received are still `0xFF`/`0xFE`-shaped noise rather than clean
+  decoded data, and transmitting the real host-initiated probe byte
+  `CSTGKeybedInterface_Startup` sends (`0xa5`) produced no distinct reply.
+- **Net assessment**: the chip, LDN, and UART address all structurally
+  match what `OA.ko` expects — only the unlock key differs, and that
+  mismatch is real, confirmed, and not explained by boot media, timing,
+  model, or firmware version.
+
+**UPDATE 2026-07-22 — mystery fully resolved, the "noise" was never a
+real problem.** Full writeup in `docs/modules/OA.ko_keybed_serial_protocol.md`'s
+"2026-07-22 — mystery resolved" section; summary: two register-level
+hypotheses (a missed comPortId-3 tri-state/IRQ-config side effect; a
+never-switched-to-24MHz UART clock source) were fully worked out from a
+fresh disassembly of `Initialize()`'s two previously-unreconstructed
+special blocks plus the public Nuvoton NCT6776F/D datasheet, then BOTH
+were tested — and refuted — against the real production Kronos
+(192.168.100.15, user-confirmed safe to test against; the .16 dev board
+was unreachable this session) via a read-only Super-IO register probe:
+LDN 3 is inactive (base=0) on real hardware so its special block never
+executes in practice, and LDN 0xD's own clock-source register (`CRF0h`)
+already reads `0x02` = 24MHz, confirming the original divisor/baud
+assumption was correct all along. (Bonus correction: the real chip
+self-identifies as Winbond **W83627UHG**, not Nuvoton NCT6627UD.) With
+both theories dead, the UART was brought up exactly as `Initialize()`
+does (2-byte key, LDN 0xD, divisor 24, 8N1) and captured directly: 8N1
+shows zero framing errors and a clean, periodic 4-byte message
+(`EA 23 07 20`, every ~447.5ms) even at complete idle — independently
+confirmed real by this project's own already-reconstructed
+`kNumBytesForMessageType` table (`(0xEA&0x70)>>4=6` → 4 bytes, exactly
+matching). The 2026-07-21 "noise-shaped" result was specific to whatever
+state the .16 dev board's keybed harness was in that day (its chip wasn't
+even OS-detectable before the key fix) — not a firmware/protocol bug.
+Remaining: decoding the 4-byte message's payload semantics (very likely
+SW1/SW2 + joystick/pitch-bend status) needs correlating byte changes with
+live physical interaction — a normal scoped task, not an open mystery.
 
 ## Known limitations
 
-- **`CSTGComPort`'s exact UART port addresses are unconfirmed** (see the
-  2026-07-21 real-hardware section above for a related, newer finding:
-  the chip-detection PROBE itself finds nothing on a real K2 board,
-  which may make this question moot on that model specifically). The
-  Winbond W83627 Super I/O probing logic is fully traced, but the specific
-  legacy COM-port addresses it programs were not resolved from the
-  disassembly alone. *To validate*: a full Ghidra decompile of
-  `CSTGComPort::Initialize()`.
+- **`CSTGComPort`'s exact UART port addresses are unconfirmed** for K1 —
+  see the 2026-07-21 real-hardware section above: on the real K2 dev
+  board tested, the chip-detection *key* (not the addresses) turned out
+  to be the issue, and once bypassed with the chip's actual key, its LDN
+  0xd address (`0x2e8`) matched this project's own reconstruction
+  exactly. The Winbond/ITE Super-IO probing logic is fully traced; the
+  legacy COM-port addresses it programs were confirmed against real K2
+  hardware, not yet against a real K1 unit.
 - ~~`loadmod.ko`'s `/korg/Eva` decryption-bypass question is open.~~
   **ALREADY FULLY RESOLVED elsewhere in this project** - this entry was
   stale, written without cross-referencing `docs/crypto/cryptoloop_keys.md`,
