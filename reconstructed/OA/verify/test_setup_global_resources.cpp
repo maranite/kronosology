@@ -256,6 +256,30 @@ int main(void)
 	check_eq("CSTGCPUInfo::Update received CCostProfile's +4 field", (long)(g_updateArg * 10), 25);
 	check_eq("IncProgressBar called (hwVersion==3 skips one call)", (long)g_incProgressBarCalls, 2);
 
+	printf("\n[3] CSTGHeapManager::Alloc failure (simulated kronos_vm heap capacity "
+	       "shortfall, sec 10.22x): controlled failure, not a garbage-pointer collapse:\n");
+	/*
+	 * Exercises g_forceAllocFail, the out-of-range-slot mock knob already
+	 * present above but never wired into a test case before this pass.
+	 * Forcing EVERY CSTGHeapManager::Alloc() call to return an
+	 * out-of-range slot is a blunter instrument than failing only the
+	 * 4th (bank-memory-pool) call, but it exercises the exact same
+	 * bankBase==0 path the real 2026-07-23 fix targets, and confirms the
+	 * other two heap-manager-derived pointers (panel, bigRegion) stay
+	 * safely null-guarded too -- setup_global_resources() must return a
+	 * clean -1 here, not crash or corrupt memory. Before this fix,
+	 * calling CSTGBankMemory::AllocAligned() off a null bankBase produced
+	 * a nonzero garbage `engineStorage` that slipped past the
+	 * `!engineStorage` check -- this would have manifested here as this
+	 * check failing (rc left at whatever engine->Initialize() or a
+	 * write through garbage memory did, not -1).
+	 */
+	g_allocCallCount = 0;
+	g_forceAllocFail = 1;
+	rc = setup_global_resources(0);
+	check_eq("return value (existing !engineStorage hard-fail check catches it)", rc, -1);
+	g_forceAllocFail = 0;
+
 	printf("\n[direct] CSTGPCMPrecacheManager::Initialize() (sec 10.144)\n");
 	{
 		unsigned char pcmBuf[0x2a];

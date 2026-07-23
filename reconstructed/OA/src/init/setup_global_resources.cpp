@@ -16,6 +16,11 @@
 #include "oa_setup_global_resources.h"
 #include "oa_new_delete.h"	/* oa_size_t, for CSTGPCMPrecacheManager::Reset()'s new[]/delete[] use */
 
+/* TEMP DIAG (2026-07-23): same declaration convention as init_module.cpp's own
+ * local printk extern. Remove along with the printk call sites below once the
+ * live capacity-shortfall question is settled. */
+extern "C" __attribute__((regparm(0))) int printk(const char *fmt, ...);
+
 /* No <cstring> here -- it conflicts with oa_internal.h's own `strlen`
  * declaration (different exception specifier), same reasoning
  * stgheap_init.cpp already established for inlining its own zero-fill
@@ -283,22 +288,95 @@ int setup_global_resources(int param)
 	 */
 	heapBase = local_heap_base(); /* real code reloads it here too */
 	unsigned int bankSlot = CSTGHeapManager::Alloc(0xaaf1140);
+	/* TEMP DIAG (2026-07-23): pin down live capacity vs. request before
+	 * assuming the prior session's 48MB reading still applies -- a fresh
+	 * live boot this session showed physMemSize=528MB, which should be
+	 * far more than the ~199.5MB this function requests total. Remove
+	 * once the real failure point is confirmed. */
+	printk("OA-DIAG: bank alloc heapBase=%p bankSlot=%u (0xaaf1140=%u requested)\n",
+	       (void *)heapBase, bankSlot, 0xaaf1140u);
 	if (heapBase)
 		*(unsigned int *)(heapBase + 4) = bankSlot;
 	heapBase = local_heap_base(); /* real code reloads it here too */
 	unsigned char *bankBase = heapBase ? local_heap_region(*(unsigned int *)(heapBase + 4)) : 0;
-	CSTGBankMemory::Initialize(bankBase, 0xaaf1140);
-	unsigned char *globalStorage = CSTGBankMemory::AllocAligned(0x29cc4ec, 0x10);
-	CSTGGlobal *global = globalStorage ? new (globalStorage) CSTGGlobal() : 0;
+	printk("OA-DIAG: bankBase=%p\n", (void *)bankBase);
+
+	/*
+	 * DEFENSIVE ADDITION (2026-07-23, sec 10.22x): real ground-truth
+	 * disassembly has NO check on bankBase before CSTGBankMemory::
+	 * Initialize()/AllocAligned() (this header's own file comment
+	 * already states all three real hard-fail checks are exactly the
+	 * !engineStorage/!frontPanelStorage/!cpuInfo trio below, nothing
+	 * more) -- on real Kronos hardware this ~171MB Alloc(0xaaf1140)
+	 * never legitimately fails, so the real code simply never needed a
+	 * guard here.
+	 *
+	 * kronos_vm is a different story: InitializeSTGHeap's iomem_resource
+	 * gap search (stgheap_init.cpp, itself a faithful, disassembly-exact
+	 * transliteration -- not the bug) finds a MUCH smaller usable region
+	 * there than on real hardware. Live-confirmed
+	 * (kronos_vm/boot_console.log): "sPhysicalBankStart = 0xc0000000,
+	 * physMemSize = 0x03000000 (50331648)" -- a 48MB total heap, vs the
+	 * ~199.5MB (0x6a578+0x294fc+0x123f2e3+0xaaf1140) this function alone
+	 * requests across its four CSTGHeapManager::Alloc calls. This is a
+	 * genuine VM-vs-real-hardware iomem-layout difference (QEMU's
+	 * emulated PC has a much smaller free "hole" above sPhysicalBankStart
+	 * than a real Atom D510 board), not a capacity-tracking bug in
+	 * CSTGHeapManager itself -- CSTGHeapManager::Alloc() already fails
+	 * cleanly and returns the correct (unsigned int)-1 sentinel in this
+	 * situation; the bug is purely that nothing downstream of it checked
+	 * for that sentinel before trusting the result.
+	 *
+	 * With bankSlot == (unsigned int)-1, local_heap_region()'s own
+	 * `slot > 0x1869f` guard already resolves bankBase to a clean 0 --
+	 * but CSTGBankMemory::AllocAligned() has NO bounds check of its own
+	 * (confirmed, oa_bank_memory.h) and blindly bump-allocates from
+	 * address 0 regardless. That produces exactly the observed crash
+	 * chain: AllocAligned(0x29cc4ec, 0x10) off a null base correctly
+	 * returns 0 (globalStorage, harmless -- CSTGGlobal is already
+	 * null-guarded below), but the VERY NEXT call,
+	 * AllocAligned(0x8, 0x10), then lands at 0x29cc4ec rounded up to
+	 * 0x29cc4f0 -- a nonzero GARBAGE pointer that sails past the
+	 * `!engineStorage` hard-fail check and gets used as `this` for
+	 * CSTGEngine's real constructor, which Oopses writing a field 4
+	 * bytes in: CR2 0x029cc4f4 == 0x29cc4f0 + 4, an exact match. This is
+	 * the SAME collapse shape the 2026-07-12 fix above already
+	 * documented for a null `panel`/wrong-base bug -- recurring here via
+	 * a different null source (a real Alloc() failure instead of a wrong
+	 * variable).
+	 *
+	 * Fix: gate the whole bank-memory-derived block on bankBase being
+	 * non-null. When it's null, globalStorage/engineStorage/
+	 * frontPanelStorage all stay legitimately 0 (never handed to
+	 * AllocAligned at all), which makes the EXISTING, already-real
+	 * `if (!engineStorage) return -1;` check below fire cleanly instead
+	 * of a garbage pointer slipping past it -- exactly the "reach one of
+	 * the real checks cleanly" behavior a genuine capacity shortfall
+	 * should produce.
+	 */
+	unsigned char *globalStorage = 0;
+	CSTGGlobal *global = 0;
+	unsigned char *engineStorage = 0;
+	CSTGEngine *engine = 0;
+	unsigned char *frontPanelStorage = 0;
+	CSTGFrontPanel *frontPanel = 0;
+
+	if (bankBase) {
+		CSTGBankMemory::Initialize(bankBase, 0xaaf1140);
+		globalStorage = CSTGBankMemory::AllocAligned(0x29cc4ec, 0x10);
+		global = globalStorage ? new (globalStorage) CSTGGlobal() : 0;
+	}
 
 	void *debugOutputStorage = ::operator new(0xbb94);
 	new (debugOutputStorage) CMeteredDebugOutput();
 
-	unsigned char *engineStorage = CSTGBankMemory::AllocAligned(0x8, 0x10);
-	CSTGEngine *engine = engineStorage ? new (engineStorage) CSTGEngine() : 0;
+	if (bankBase) {
+		engineStorage = CSTGBankMemory::AllocAligned(0x8, 0x10);
+		engine = engineStorage ? new (engineStorage) CSTGEngine() : 0;
 
-	unsigned char *frontPanelStorage = CSTGBankMemory::AllocAligned(0x110, 0x10);
-	CSTGFrontPanel *frontPanel = frontPanelStorage ? new (frontPanelStorage) CSTGFrontPanel() : 0;
+		frontPanelStorage = CSTGBankMemory::AllocAligned(0x110, 0x10);
+		frontPanel = frontPanelStorage ? new (frontPanelStorage) CSTGFrontPanel() : 0;
+	}
 
 	/*
 	 * The three real hard-fail checks, in this specific (confirmed,
