@@ -120,14 +120,25 @@ See [`../docs/modules/OmapNKS4Module.ko_chip_wedge.md`](../docs/modules/OmapNKS4
 
 The Kronos stores its main binaries in an AES-256-CBC cryptoloop image
 (`Mod.img`).  The key is universal across all Kronos units and all firmware
-versions we've checked (2014 / 3.2.1 / 3.2.2).  The script decrypts it in
-pure Python using only the `cryptography` package.
+versions we've checked (2014 / 3.2.1 / 3.2.2 / 3.2.3).  The script decrypts it
+in pure Python using only the `cryptography` package.
 
 ### Patching
 
-**OA.ko** patches are applied as 11 section-relative offsets within the `.text`
-section — the same offsets work for any firmware version because the ELF is
-an ET_REL (relocatable) object with a stable `.text` base.  The patches:
+**OA.ko** patches are applied as 11 sites total:
+- 9 are section-relative offsets (5 in the main `.text` degradation block, 4 in
+  their own COMDAT `.text._ZN...` sections) — stable across firmware versions
+  because the ELF is an ET_REL (relocatable) object with a fixed section base.
+- 2 more (the `CSTGTG92OscBase`/`CPianoOsc` `IsUsingAnyUnauthorizedMultisamples`
+  specializations) live directly in the shared main `.text` section rather than
+  their own COMDAT section, so a raw section-relative offset for these two
+  **does drift** whenever unrelated code earlier in `.text` changes size —
+  confirmed happening going 3.2.2 → 3.2.3 (same 19 bytes, same symbols, just
+  +0x90 further into `.text`). These two are resolved by `.symtab` symbol name
+  instead (`OA_SYMBOL_PATCHES`), the same mechanism `loadmod.ko` already uses,
+  so they track the symbol wherever the recompile puts it.
+
+Together the patches:
 - Skip the magic-value degradation loop (prevents silent auth bypass removal)
 - Force `IsUsingAnyUnauthorizedMultisamples()` to always return 0
 
@@ -153,9 +164,10 @@ is already loaded — which is exactly when `oa_authgen.ko` (which depends on
 `OmapNKS4Module.ko` exports) can safely be insmod'd.  No init script changes
 are required.
 
-**Eva.elf** is patched with a 168-byte code cave written into a 206-byte zero
-region in `.rodata`.  When the front-panel Authorise button is pressed, instead
-of opening the `CAuthKeyboard` dialog for manual code entry, the cave:
+**Eva.elf** is patched with a 168-byte code cave written into a 206-byte region
+in `.rodata` that's all-zero on 3.2.1/3.2.2 (see [Compatibility](#compatibility)
+for what changed on 3.2.3).  When the front-panel Authorise button is pressed,
+instead of opening the `CAuthKeyboard` dialog for manual code entry, the cave:
 1. Calls `GetProductOptionFileName` to get the option file name (e.g. `S023`)
 2. Opens `/proc/.oaauth` (exposed by `oa_authgen.ko`)
 3. Writes `GEN:S023` to generate the device-specific auth string
@@ -177,10 +189,21 @@ section.  Full algorithm: [`../docs/crypto/update_signature.md`](../docs/crypto/
 ## Compatibility
 
 Patch strategies are version-agnostic where possible:
-- **OA.ko** — section-relative offsets; same for any ET_REL with stable section layout
+- **OA.ko** — 9 of 11 sites are section-relative offsets (same for any ET_REL
+  with stable section layout); 2 sites are `.symtab` symbol lookup (with a
+  3.2.1/3.2.2-only fallback offset if the module is ever shipped stripped)
 - **loadmod.ko** — `.symtab` symbol lookup with byte-pattern fallback
 - **loadoa** — fixed-length string replacement; works on any version containing those paths
-- **Eva** — VMA-absolute constants verified against 3.2.1 and 3.2.2
+- **Eva** — VMA-absolute constants verified against 3.2.1, 3.2.2, and 3.2.3.
+  On 3.2.3 the 206-byte `.rodata` code cave used for the auto-auth injection
+  is no longer all-zero (22 bytes of linker string-merge-section leftover —
+  a `\r`-byte staircase, not code — now sit in it). `patch_eva()`'s safety
+  check no longer requires the cave to be literally all-zero; instead it
+  scans the whole binary for any absolute pointer landing inside the cave
+  range before proceeding, and only refuses if it finds one (i.e. the region
+  is still referenced by something live). Confirmed zero such references on
+  3.2.3, and confirmed the built package's `Eva.elf` has the cave correctly
+  overwritten with the auto-auth code.
 
 The script reports the detected firmware version from known stock MD5s and
 **proceeds on unrecognised versions with a warning** (rather than refusing).

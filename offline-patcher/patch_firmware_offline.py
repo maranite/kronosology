@@ -61,7 +61,7 @@ To install on a Kronos (no SSH needed):
   4. After completion, POWER-CYCLE (full off >= 60 s).  Do NOT soft-reboot.
 
 Requires: cryptography  (pip install cryptography)
-Tested on: Korg Kronos OS 3.2.1, 3.2.2
+Tested on: Korg Kronos OS 3.2.1, 3.2.2, 3.2.3
 """
 
 import argparse
@@ -100,9 +100,11 @@ UPDATER_KEY = bytes([0x13, 0xd0, 0xaf, 0xef, 0xe0, 0x3c, 0x9b, 0x92,
 KNOWN_STOCK_MD5 = {
     "d1697c9b1c478c0dcdfaef71516fe5f2": ("loadmod.ko", "3.2.1"),
     "d9d56475be6ccb74e9001b84b64046f7": ("loadmod.ko", "3.2.2"),
+    "978154267019b63cb57d78dd9686a58d": ("loadmod.ko", "3.2.3"),
     "8a3d61f3332d7bcf694e8c05845b4754": ("loadoa",     "3.2.x"),
     "955636c2b11a70a1dbecefaaa7bd4f80": ("OA.ko",      "3.2.1"),
     "39fec7465fd7886ed8099c9cb85e2cdc": ("OA.ko",      "3.2.2"),
+    "499e04ad198ac88d81d0963ead7d0066": ("OA.ko",      "3.2.3"),
     "29fbd20cf729980e1cffd670391256b5": ("KorgUsbAudioDriver.ko", "all"),
 }
 
@@ -126,8 +128,8 @@ EVA_PLT_CLOSE      = 0x0804bcec    # close()
 _EVA_EXPECTED_CALL = bytes([0xe8, 0xef, 0x3c, 0x00, 0x00])   # original CALL bytes
 
 # ── OA.ko patch table (section-relative) ─────────────────────────────────────
-# Identical to patch_oa_ko.py — 11 patch runs, addressed by ELF section name +
-# section-relative offset.  Verified on 3.2.1 and 3.2.2.
+# Identical to patch_oa_ko.py — patch runs addressed by ELF section name +
+# section-relative offset.  Verified on 3.2.1, 3.2.2, 3.2.3.
 OA_PATCHES = [
     # CSTGEngine::Initialize — primary magic-value degradation block
     (".text", 0x008b4,
@@ -172,15 +174,6 @@ OA_PATCHES = [
         "4000000909090909090040000009090909090900800000090909090909008000000"
         "9090909090900c0000009090909090900c0000009090909090900000000090909090"),
 
-    # Two IsUsingAnyUnauthorizedMultisamples specializations in main .text
-    (".text", 0x13c7d0,
-        "8b40088b52280fbf40088b44023485c00f95c0",
-        "31c0c390909090909090909090909090909090"),
-
-    (".text", 0x155d30,
-        "8b40088b52280fbf40088b44020485c00f95c0",
-        "31c0c390909090909090909090909090909090"),
-
     # Four IsUsingAnyUnauthorizedMultisamples specializations in COMDAT sections.
     (".text._ZN17CSTGPCMModelPatch34IsUsingAnyUnauthorizedMultisamplesEPv",    0x0,
         "8b92d0010000", "31c0c3909090"),
@@ -191,6 +184,31 @@ OA_PATCHES = [
     (".text._ZN19CSTGPianoModelPatch34IsUsingAnyUnauthorizedMultisamplesEPv",   0x0,
         "8b92ac000000", "31c0c3909090"),
 ]
+
+# ── OA.ko symbol-relative patches ────────────────────────────────────────────
+# Two more IsUsingAnyUnauthorizedMultisamples specializations that live directly
+# in the main .text section rather than their own COMDAT section (unlike the
+# four above), so a raw section-relative offset drifts whenever unrelated code
+# earlier in .text changes size across firmware versions. Confirmed exactly
+# this way going 3.2.2 -> 3.2.3: identical 19 bytes, identical symbols, just
+# +0x90 further into .text after an unrelated recompile elsewhere. Resolved by
+# symbol name instead, same mechanism as LOADMOD_PATCHES below.
+OA_SYMBOL_PATCHES = [
+    ("_ZN15CSTGTG92OscBase34IsUsingAnyUnauthorizedMultisamplesER23CSTGPatchMessageContext", 0x0,
+        "8b40088b52280fbf40088b44023485c00f95c0",
+        "31c0c390909090909090909090909090909090"),
+    ("_ZN9CPianoOsc34IsUsingAnyUnauthorizedMultisamplesER23CSTGPatchMessageContext", 0x0,
+        "8b40088b52280fbf40088b44020485c00f95c0",
+        "31c0c390909090909090909090909090909090"),
+]
+
+# Last-resort fallback: section-relative .text offsets, valid on 3.2.1/3.2.2
+# only. Only used if OA.ko is ever shipped stripped (no .symtab) -- if this
+# path triggers on a firmware newer than 3.2.2, treat the offset as unverified.
+_OA_SYMBOL_FALLBACK = {
+    ("_ZN15CSTGTG92OscBase34IsUsingAnyUnauthorizedMultisamplesER23CSTGPatchMessageContext", 0x0): 0x13c7d0,
+    ("_ZN9CPianoOsc34IsUsingAnyUnauthorizedMultisamplesER23CSTGPatchMessageContext", 0x0): 0x155d30,
+}
 
 # ── loadmod.ko patches (symbol-relative) ─────────────────────────────────────
 # (symbol_name, within_symbol_offset, orig_hex, patched_hex)
@@ -490,6 +508,49 @@ def patch_oa_ko(data: bytes, verify_only: bool = False) -> bytes:
             print(f"        found   : {cur[:16].hex()}{'...' if len(cur) > 16 else ''}")
             errors += 1
 
+    # Symbol-relative patches (see OA_SYMBOL_PATCHES header comment above)
+    symbols, sec_foff = elf32_func_symbols_and_sections(data)
+    text_off, _ = sections.get(".text", (None, None))
+
+    for i, (sym_name, sym_off, orig_hex, pat_hex) in enumerate(OA_SYMBOL_PATCHES):
+        n = len(OA_PATCHES) + i + 1
+        orig = bytes.fromhex(orig_hex)
+        pat  = bytes.fromhex(pat_hex)
+        if len(orig) != len(pat):
+            raise AssertionError(f"OA.ko patch {n}: orig/pat length mismatch in table")
+
+        file_off = None
+        if sym_name in symbols:
+            shndx, sym_val = symbols[sym_name]
+            sec_base = sec_foff.get(shndx)
+            if sec_base is not None:
+                file_off = sec_base + sym_val + sym_off
+
+        if file_off is None:
+            fallback_rel = _OA_SYMBOL_FALLBACK.get((sym_name, sym_off))
+            if fallback_rel is None or text_off is None:
+                print(f"  [OA.ko patch {n:2d}] ERROR: symbol {sym_name!r} not found and no fallback offset known")
+                errors += 1
+                continue
+            file_off = text_off + fallback_rel
+            print(f"  [OA.ko patch {n:2d}] symbol {sym_name!r} not found — used fallback .text offset 0x{fallback_rel:x} (3.2.1/3.2.2 only)")
+
+        cur = bytes(out[file_off:file_off + len(orig)])
+        tag = sym_name if len(sym_name) <= 55 else sym_name[:52] + "..."
+        if cur == pat:
+            print(f"  [OA.ko patch {n:2d}] {tag:56s} +0x{sym_off:06x}  already patched")
+            already += 1
+        elif cur == orig:
+            if not verify_only:
+                out[file_off:file_off + len(pat)] = pat
+            print(f"  [OA.ko patch {n:2d}] {tag:56s} +0x{sym_off:06x}  {'would patch' if verify_only else 'patched'} ({len(pat)} bytes)")
+            applied += 1
+        else:
+            print(f"  [OA.ko patch {n:2d}] {tag:56s} +0x{sym_off:06x}  ERROR: unexpected bytes")
+            print(f"        expected: {orig[:16].hex()}{'...' if len(orig) > 16 else ''}")
+            print(f"        found   : {cur[:16].hex()}{'...' if len(cur) > 16 else ''}")
+            errors += 1
+
     if errors:
         raise RuntimeError(f"OA.ko: {errors} patch site(s) had unexpected bytes — refusing to proceed")
 
@@ -739,6 +800,27 @@ def _assemble_eva_cave() -> bytes:
     return b"/proc/.oaauth\x00" + code_bytes
 
 
+def _scan_absolute_refs(data: bytes, lo_vma: int, hi_vma: int,
+                        exclude_off: int = None, exclude_len: int = 0):
+    """Find every place in `data` holding a 4-byte little-endian absolute
+    pointer into [lo_vma, hi_vma). Eva is a fixed-base, non-PIE ET_EXEC, so any
+    live reference to bytes in that range (a string table entry, a vtable
+    slot, ...) has to show up this way -- a linked binary keeps no relocation
+    table to consult instead. Returns [(file_offset, target_vma), ...]."""
+    hits = []
+    for target in range(lo_vma, hi_vma):
+        needle = struct.pack("<I", target)
+        start = 0
+        while True:
+            idx = data.find(needle, start)
+            if idx == -1:
+                break
+            if exclude_off is None or not (exclude_off <= idx < exclude_off + exclude_len):
+                hits.append((idx, target))
+            start = idx + 1
+    return hits
+
+
 def patch_eva(data: bytes, verify_only: bool = False) -> bytes:
     out = bytearray(data)
 
@@ -746,10 +828,11 @@ def patch_eva(data: bytes, verify_only: bool = False) -> bytes:
     cave_foff = _eva_vma_to_file(EVA_CAVE_VMA)
     nop_foff  = _eva_vma_to_file(EVA_NOP_START_VMA)
     nop_len   = EVA_NOP_END_VMA - EVA_NOP_START_VMA
+    cave_len  = 206
 
     # Sanity checks
     cur_call = bytes(out[call_foff:call_foff + 5])
-    cave_region = bytes(out[cave_foff:cave_foff + 206])
+    cave_region = bytes(out[cave_foff:cave_foff + cave_len])
     patched_call = b"\xe8" + _eva_rel32(EVA_CALL_PATCH_VMA, EVA_CAVE_VMA + 0x0e)
 
     if cur_call == patched_call and bytes(out[nop_foff:nop_foff + nop_len]) == bytes([0x90] * nop_len):
@@ -764,9 +847,24 @@ def patch_eva(data: bytes, verify_only: bool = False) -> bytes:
 
     nz = sum(1 for x in cave_region if x != 0)
     if nz > 0:
-        raise RuntimeError(
-            f"Eva: cave region at VMA {EVA_CAVE_VMA:#010x} is not all zeros "
-            f"({nz} non-zero bytes) — check firmware version.")
+        # Non-zero bytes alone don't make the cave unsafe. .rodata string-merge
+        # (SHF_MERGE|STRINGS) sections can leave orphaned tail fragments behind
+        # once a recompile changes which strings get deduplicated (confirmed on
+        # 3.2.3: a staircase of stray '\r' bytes here, not code or a live
+        # string). What *would* make it unsafe is some other still-live string
+        # tail-sharing into this exact range. Confirm by scanning the whole
+        # binary for an absolute pointer landing inside it.
+        refs = _scan_absolute_refs(data, EVA_CAVE_VMA, EVA_CAVE_VMA + cave_len,
+                                    exclude_off=cave_foff, exclude_len=cave_len)
+        if refs:
+            detail = ", ".join(f"file+{off:#x}->{vma:#010x}" for off, vma in refs[:8])
+            raise RuntimeError(
+                f"Eva: cave region at VMA {EVA_CAVE_VMA:#010x} is not all zeros "
+                f"({nz} non-zero bytes) AND is still referenced elsewhere in the "
+                f"binary ({detail}) — unsafe to overwrite, check firmware version.")
+        print(f"  Eva: cave region has {nz} non-zero byte(s) ({cave_region.hex()}) "
+              f"but nothing else in the binary holds a pointer into this range "
+              f"(scanned) — safe to overwrite as dead .rodata merge leftover.")
 
     cave_bytes = _assemble_eva_cave()
     code_start_vma = EVA_CAVE_VMA + 0x0e

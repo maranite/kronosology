@@ -370,9 +370,14 @@ device-resident credential separate from the system files.
 ## How firmware updates change (or don't change) the keys
 
 Comparison of every encrypted volume across the 3.2.1 → 3.2.2 update,
-produced by [`scripts/diff_kronos_versions.sh`](../../scripts/diff_kronos_versions.sh)
-(see [`workflow/firmware_version_diff.md`](../workflow/firmware_version_diff.md)
-for the methodology):
+produced by `scripts/diff_kronos_versions.sh` (that script no longer exists —
+removed in the `auto-auth and offline-patcher` reorg commit — but the same
+methodology is described in
+[`workflow/firmware_version_diff.md`](../workflow/firmware_version_diff.md)
+and is what the 3.2.2 → 3.2.3 comparison below repeats manually: decrypt with
+`offline-patcher/patch_firmware_offline.py`'s `_decrypt_img`, `debugfs -R
+"rdump / <dir>" <img>` to extract, `diff -rq` + per-function symbol-table
+diffing to localize changes):
 
 | Volume          | Files changed |
 |-----------------|----------------|
@@ -384,6 +389,72 @@ The keys themselves did not change. Korg's firmware-update process
 does not appear to touch `/.pairFact3` — consistent with the file's
 factory-provisioning mtime not advancing across firmware updates on
 the unit we examined.
+
+### 3.2.2 → 3.2.3 (2026-07-23)
+
+Same universal keys, same methodology, decrypted and diffed both `Mod.img`
+and `Eva.img` in full:
+
+| Volume          | Files changed |
+|-----------------|----------------|
+| `Mod.img`       | 1 of 3 — `OA.ko` (+240 bytes: `.text` +176B, `.rodata` +64B) |
+| `Eva.img`       | 3 of 23 — `Eva` (−22 bytes), `NAND/EDITRES/ENG/TSTENG.PEG` (+69B), `NAND/STARTUP/ALL/EDITRES/BITMAPS.PEG` (+76,784B) |
+| `WaveMotion.img`| content changed (same file, +26.3MB in the outer encrypted image; see below) |
+
+`OA.ko` has the same function/symbol count as 3.2.2 (0 added, 0 removed) — only
+5 functions changed size, all identified by disassembling and tracing
+relocations rather than trusting the raw byte diff (which is 10 of 14.3MB,
+almost entirely address-drift noise from the 176-byte `.text` growth, not
+actual content change):
+
+| Function | Δ size | Finding |
+|---|---|---|
+| `CSTGKLMManager::AuthorizeProduct` | +141B | New block compares an installed product's ID against literal string `"S043"` (at `.rodata.str1.1+0x520`); on match, auto-authorizes it directly via a call to itself recursively-adjacent-looking `AuthorizeProduct`, ahead of the normal per-user `AuthorizationStrings` flow. Reads as Korg auto-whitelisting one new factory-bundled product, not an anti-tamper measure. |
+| `CSTGInstalledEXProducts::Initialize` | +147B | Gained the `"S043"` auto-authorize loop above (confirmed via relocations: `CountProductCallback`, `LoadProductCallback`, `kAuthFileName`, `ParseAuths`, `CSTGFile_ReadFile`/`FreeReadFile`). |
+| `CSTGInstalledEXProducts::ReInitialize` | −160B | Lost an ~40-instruction block that is (by relocation signature) the same code that appeared in `Initialize` above — a refactor/move, not new logic. |
+| `CSTGEPModel::GetTotalWaveMotionDataSize` | +8B | Consistent with the WaveMotion content growth below. |
+| `CSTGEPModel::Initialize` | +16B | Consistent with the WaveMotion content growth below. |
+
+`AuthorizeProduct`'s growth is **not** auth-bypass hardening either: the new
+comparison there is against `CSTGMultisampleBankUUIDBase::sLegacyBankPrefix`,
+followed by a call to `CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias`
+— legacy multisample-bank-UUID addressing compatibility, unrelated to license
+checking.
+
+**Practical fallout for the offline patcher:** 9 of `OA.ko`'s 11 known bypass
+patch sites still match byte-for-byte at their old offsets. The other 2
+(`CSTGTG92OscBase`/`CPianoOsc`'s `IsUsingAnyUnauthorizedMultisamples`) contain
+the *exact same unpatched bytes* as 3.2.2, just shifted +0x90 (144 bytes)
+further into `.text` by the unrelated growth above — not deliberately moved to
+dodge the patch table. Fixed in `patch_firmware_offline.py` by resolving those
+two via `.symtab` symbol name instead of a raw section offset (see
+`OA_SYMBOL_PATCHES` — same mechanism `loadmod.ko`'s patches already use).
+
+`loadmod.ko` (outside the encrypted volumes): `.text`/`.init.text`/`.rodata`
+byte-identical to 3.2.2 — only a 990-byte `.data` blob changed (some constant
+table, not code). All 3 `loadmod.ko` patch sites unaffected.
+
+`Eva`'s −22 bytes turned out to matter for the patcher: the 206-byte `.rodata`
+code cave the auto-auth injection uses, all-zero on 3.2.1/3.2.2, now contains
+22 non-zero bytes on 3.2.3 (a staircase of stray `\r` fragments — leftover
+from `SHF_MERGE|STRINGS` section deduplication shifting, not real code).
+**Fixed**: confirmed those 22 bytes are genuinely dead by scanning the entire
+22.9MB `Eva` binary for any 4-byte absolute pointer landing inside the
+206-byte cave range — zero hits, meaning nothing still references that space
+(Eva is a fixed-base, non-PIE ET_EXEC, so a live reference has to appear this
+way; there's no relocation table left to consult in a linked binary).
+`patch_eva()`'s safety check now performs that same scan instead of requiring
+literal all-zero bytes, and only refuses if it finds a reference. Verified
+end-to-end: a full build against a real 3.2.3 tree produces an `Eva.elf` with
+the cave correctly overwritten (`/proc/.oaauth\0` + the auto-auth code) and
+the call-site redirect and NOP sled both applied.
+
+No new integrity/anti-tamper/anti-debug checks were found anywhere in this
+diff. The one functional addition (`"S043"` auto-authorization) correlates
+with `WaveMotion.img` growing +26.3MB and `CSTGEPModel` (the EP-1
+Rhodes/Wurlitzer physical model) gaining code in the same release — most
+likely a new factory-bundled expansion that ships pre-authorized, not a
+response to any patching activity.
 
 ---
 
