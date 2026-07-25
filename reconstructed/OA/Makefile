@@ -70,6 +70,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_queue_init.o \
            src/engine/midi_port_manager.o \
            src/engine/audio_input_mixer.o \
+           src/engine/set_list_eq_init.o \
            src/engine/waveseq_setlist_init.o \
            src/engine/alias_bank_init.o \
            src/engine/alias_bank_convert.o \
@@ -479,7 +480,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_sequence_combi_init \
          verify/test_atmel_setup \
          verify/test_init_module_real_atmel \
-         verify/test_klm_authorize_builtins
+         verify/test_klm_authorize_builtins \
+         verify/test_set_list_eq_init
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -608,6 +610,9 @@ verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_set_list_eq_init: verify/test_set_list_eq_init.cpp src/engine/set_list_eq_init.cpp src/engine/eq_coefficients.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_set_list_eq_init.cpp src/engine/set_list_eq_init.cpp src/engine/eq_coefficients.cpp -o $@
 
 verify/test_waveseq_setlist_init: verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_waveseq_setlist_init.cpp src/engine/waveseq_setlist_init.cpp -o $@

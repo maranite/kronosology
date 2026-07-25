@@ -2183,8 +2183,17 @@ struct CSetListEQ {
 	 * `mgr+0x2160` comment below documents -- independently
 	 * cross-confirming that offset) and `count = i`, the same 0/1
 	 * double-buffer slot index the other three sibling Initialize()
-	 * calls in that same function use. Own body not reconstructed this
-	 * pass -- confirmed real, deliberately deferred.
+	 * calls in that same function use.
+	 *
+	 * Real now, batch 59 -- see src/engine/set_list_eq_init.cpp:
+	 * `.text+0x202320`, 360 bytes. A run-once module-static 9-band
+	 * peaking-EQ coefficient table build (via the already-real
+	 * `CSTGEQ::CalculatePeakingBeta`, sec 10.178) plus an unconditional
+	 * per-call instance setup writing this object's own confirmed real
+	 * `+0x0` (the `count` argument) and `+0x4` (a cached pointer into
+	 * `CSTGAudioBusManager::sEffectThreadBusSets`, slot `count*120+12` --
+	 * the SAME formula/slot as `CSTGMasterLRMixer::Initialize()`'s own
+	 * `+0x14` field, batch 58) fields.
 	 */
 	void Initialize(unsigned int count);
 };

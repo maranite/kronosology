@@ -541,10 +541,10 @@ void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
  * own ctor, CSTGAudioInputMixer::Initialize(), CSTGMasterLRMixer::
  * Initialize(), and CSTGAudioInputMixerBase::SetSendBuses() are all real
  * now, batch 58 -- see src/engine/audio_input_mixer.cpp.
- * CSTGEffectRackVars::Initialize/CSetListEQ::Initialize remain deferred,
- * stubbed below. */
+ * CSTGEffectRackVars::Initialize remains deferred, stubbed below.
+ * CSetListEQ::Initialize() is real now, batch 59 -- see
+ * src/engine/set_list_eq_init.cpp. */
 void CSTGEffectRackVars::Initialize(CSTGPerformanceVars *) {}
-void CSetListEQ::Initialize(unsigned int) {}
 /* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now, sec 10.150 -- see
  * src/engine/engine_init.cpp. Needs its own confirmed 40-byte vtable
  * placeholder, _ZTV17CSTGPlaybackEvent, declared below alongside its
