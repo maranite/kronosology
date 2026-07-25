@@ -625,10 +625,27 @@ void *SysExApi = 0;
  * precedent, omega_vtables.cpp). RegisterApi()/AssignScope() etc. are still
  * correct to call directly by name -- only the CKernel-side phase-hook
  * dispatch was the gap.
+ *
+ * WORKAROUND #2 (2026-07-25): PTR__CEditApiInstance_08e85da8 specifically (the
+ * other 5 XxxApiInstance vtables below are untouched -- nothing reconstructed
+ * dispatches through them past slot 5 yet) bumped 6 -> 20 slots. Stage 6
+ * batch 6 (stg_unsol_msg_handler.cpp) added real dispatch through EditApi's
+ * own vtable at byte offsets +0x28/+0x2c (GetScopeId/QueryFlag, `EndHandling()`
+ * -- dead-branch only, never actually invoked given this pass's own data) and
+ * this batch (2026-07-25) added five real, *unconditionally invoked* callers of
+ * +0x28/+0x30 (PatchMsgHandler/EffectMgrMsgHandler/EffectMsgHandler/
+ * HDRTrackMsgHandler/SetListMsgHandler) -- +0x30/4 = slot 12, +0x3c/4 = slot 15,
+ * both past the old 6-slot bound. That combination is no longer a "dead branch
+ * that happens to never execute" case: these five handlers hit it on every
+ * call. Same fix shape as WORKAROUND #1 above, just a bigger array (20 slots
+ * gives headroom past the highest confirmed offset, +0x3c).
  */
-extern "C" void *PTR__CEditApiInstance_08e85da8[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+extern "C" void *PTR__CEditApiInstance_08e85da8[20] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CSeqApiInstance_08e88fa8[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,

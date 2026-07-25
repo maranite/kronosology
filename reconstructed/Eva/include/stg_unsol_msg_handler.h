@@ -78,19 +78,62 @@
  * BeginHandling(), also 1-byte no-ops, also confirmed static/cdecl). These are real
  * facts about the shipped binary, not something this pass simplified.
  *
+ * Tier A, batch 2 (2026-07-25 -- promoted from Tier B below): PatchMsgHandler (340B),
+ * EffectMgrMsgHandler (541B), EffectMsgHandler (660B), HDRTrackMsgHandler (488B),
+ * SetListMsgHandler (549B). All five share one real, repeated shape confirmed across
+ * every one of them by direct disassembly: (1) an optional CStorage-current-selection
+ * guard (skippable via the msg's own 0xffff/0xfffe "wildcard target" codes -- same
+ * convention CSTGUnsolMsgHandler already establishes elsewhere), (2) a
+ * `EditApi_vtbl+0x28` scope-id lookup ("ESProg"/"ESCombi"/"ESSong"/"ESSetList"/
+ * "ESEffect"), (3) a small compile-time byte lookup table (a real local `static
+ * const` table inside a *different*, not-reconstructed free function --
+ * HandleHDRMsg/HandleEffectLFOParam/etc -- read directly out of the real binary's
+ * .rodata via `readelf -l` VA->file-offset + raw byte read, not guessed, same
+ * technique the ctor's own float constants used in batch 1) mapping the message's own
+ * subtype/sub-index field to a (code, value) byte pair, and (4) the same
+ * `EditApi_vtbl+0x30` "set param" dispatch already established by EndHandling()'s own
+ * dead branch, now a real, unconditionally-exercised call. See
+ * src/ipc/stg_unsol_msg_handler.cpp's own header comment for the raw table bytes and
+ * the `EditApiGetScopeId`/`EditApiSendParamMsg` shared helpers factoring this repeated
+ * shape. A REAL BUG was found and fixed alongside this: EditApi's own vtable
+ * (`PTR__CEditApiInstance_08e85da8`, mains.cpp) was sized 6 slots, enough for
+ * EndHandling()'s dead-branch-only +0x28/+0x2c reads but not for these five
+ * handlers' unconditional +0x28/+0x30 dispatch (+0x30/4 = slot 12) -- bumped to 20,
+ * see mains.cpp's own WORKAROUND #2 comment.
+ *
  * Tier B (real signature, not implemented -- genuinely deep per-subsystem STG message
- * processing, hundreds to ~4900 bytes each, reaching into CCombi/CProg/CGlobal/
- * CControlSurface/effect-slot/voice-model state this pass does not reconstruct):
- * ControlMsgHandler (4886B), GlobalMsgHandler (2012B), CombiMsgHandler (2951B),
- * ProgramSlotMsgHandler (1792B), ProgramMsgHandler (3114B), PatchMsgHandler (340B),
- * VoiceModelMsgHandler (2487B), EffectMgrMsgHandler (541B), EffectSlotMsgHandler
- * (1796B), EffectMsgHandler (660B), HDRTrackMsgHandler (488B), SetListMsgHandler
- * (549B). Reference-vs-pointer parameter shape for every method below (including
- * these) is taken from symbols.csv's own demangled names, not functions.csv's
- * ABI-level (pointer-only) view -- e.g. real mangling is
- * `CSTGUnsolMsgHandler::ControlMsgHandler(STGMessage const&)`, so that one alone
- * takes `const STGMessage&`; every other STGMessage-taking method (including the 5
- * static no-ops) takes a plain non-const `STGMessage&`.
+ * processing reaching into CCombi/CProg/CGlobal/CControlSurface/CMMI/CModeManager/
+ * CControlSurface/CDiskUtil/CForm-family classes,voice-model-algorithm-database state this pass does
+ * not reconstruct): ControlMsgHandler (4886B, dispatches into CControlSurface/CMMI/
+ * CDiskUtil/CForm-family classes,CHelpManager -- by far the deepest), GlobalMsgHandler (2012B,
+ * per-global-param switch over ~0x70 codes plus a `SetWithoutUpdatingSTG()` free-
+ * function dependency this pass doesn't reconstruct), CombiMsgHandler (2951B, CMMI/
+ * CModeManager/CPrograms/CToneAdjustTool), ProgramSlotMsgHandler (1792B, CMMI::
+ * GetInstance()/CModeManager::IsOnTimbreProgramEditInContext/ChangeToTopPage/
+ * CKGMsgProcessor::GetInstance()), ProgramMsgHandler (3114B, CMMI), VoiceModelMsgHandler
+ * (2487B, CStorage::GetInstance()'s own algorithm-database vtable dispatch,
+ * CSTGMultisampleBankUUIDBase, an Api-vtable assertion call, `SetWithoutUpdatingSTG()`).
+ *
+ * EffectSlotMsgHandler (1796B) is ALSO left Tier B, but for a different, worth-
+ * distinguishing reason than the six above: it reaches no new subsystem (same
+ * EditApi/CStorage/local-byte-table shape as the five just promoted), but its real
+ * body is a genuinely intricate goto/switch tangle with a reused 28-byte stack buffer
+ * (`local_2c`) written and read at three different widths (whole int / low byte /
+ * `._1_3_` upper-3-bytes-of-a-partially-written-int) across different branches --
+ * including at least one spot the real compiler itself left as an uninitialized-
+ * stack-garbage read (matching the `SEncoderEvt` padding precedent already documented
+ * above, but here feeding directly into an outgoing STG message rather than a
+ * discarded struct field). Faithfully untangling that buffer's real per-branch
+ * lifetime with confidence was judged disproportionate for one 1796-byte function
+ * given this pass's remaining scope -- a good candidate for a future dedicated pass,
+ * not a hard blocker.
+ *
+ * Reference-vs-pointer parameter shape for every method below is taken from
+ * symbols.csv's own demangled names, not functions.csv's ABI-level (pointer-only)
+ * view -- e.g. real mangling is `CSTGUnsolMsgHandler::ControlMsgHandler(STGMessage
+ * const&)`, so that one alone takes `const STGMessage&`; every other STGMessage-
+ * taking method (including the 5 static no-ops) takes a plain non-const
+ * `STGMessage&`.
  */
 
 #ifndef STG_UNSOL_MSG_HANDLER_H
@@ -228,10 +271,15 @@ public:
 	void CombiMsgHandler(STGMessage &msg);
 	void ProgramSlotMsgHandler(STGMessage &msg);
 	void ProgramMsgHandler(STGMessage &msg);
-	void PatchMsgHandler(STGMessage &msg);
 	void VoiceModelMsgHandler(STGMessage &msg);
-	void EffectMgrMsgHandler(STGMessage &msg);
+	/* Tier B, different reason (intricate goto/switch + reused partial-width
+	 * stack buffer) -- see header comment.
+	 */
 	void EffectSlotMsgHandler(STGMessage &msg);
+
+	/* Tier A, batch 2 (2026-07-25) -- real bodies, see header comment. */
+	void PatchMsgHandler(STGMessage &msg);
+	void EffectMgrMsgHandler(STGMessage &msg);
 	void EffectMsgHandler(STGMessage &msg);
 	void HDRTrackMsgHandler(STGMessage &msg);
 	void SetListMsgHandler(STGMessage &msg);
@@ -263,6 +311,17 @@ private:
 	uint8_t mForceSaveOnEnd;
 
 	static CSTGUnsolMsgHandler *sInstance;
+
+	/* Shared EditApi vtable-dispatch helpers used by the five Tier A batch-2
+	 * handlers (PatchMsgHandler/EffectMgrMsgHandler/EffectMsgHandler/
+	 * HDRTrackMsgHandler/SetListMsgHandler) -- private static (touch no
+	 * instance state, but need friend access into USTGUserAPI::
+	 * mNowStopMessaging, hence members of this class rather than free
+	 * functions). See src/ipc/stg_unsol_msg_handler.cpp's own header comment.
+	 */
+	static unsigned char EditApiGetScopeId(const char *name);
+	static void EditApiSendParamMsg(unsigned char scope, unsigned char code, unsigned char value,
+	                                 void *payload, int len, int flag);
 };
 
 #endif /* STG_UNSOL_MSG_HANDLER_H */

@@ -71,6 +71,133 @@ static int sLastValueSlider = 0;
 static int sEncoderValue = 0;
 static int s_bIsInGlobalObjectEdit = 0;
 
+/* --- Stage 6 batch 2 (2026-07-25): PatchMsgHandler/EffectMgrMsgHandler/
+ * EffectMsgHandler/HDRTrackMsgHandler/SetListMsgHandler support data ------------
+ *
+ * CStorage -- a whole not-reconstructed class (symbols.csv shows dozens of
+ * methods). Only its three "current selection" statics are needed here, real
+ * addresses/sizes confirmed via symbols.csv's own mangled names:
+ *   CStorage::sm_ucCurrentProg   0x0af30548 (1 byte)
+ *   <unnamed byte>               0x0af30549 (1 byte, immediately adjacent -- real,
+ *                                 read by every one of these handlers as a paired
+ *                                 "sub-id" alongside sm_ucCurrentProg, but never
+ *                                 independently named by any mangled symbol in this
+ *                                 export -- kept as a plain DAT_ name rather than
+ *                                 guessing a real member name)
+ *   CStorage::sm_ucCurrentCombi  0x0af3054a (1 byte)
+ *   <unnamed byte>               0x0af3054b (1 byte, same pairing as above)
+ *   CStorage::sm_usCurrentSong   0x0af3054c (2 bytes, "us" = unsigned short)
+ * All five live in the real binary's own huge bss segment (mutable runtime
+ * selection state, not a compile-time constant) -- declared here as genuine
+ * zero-initialized globals, same treatment as EditApi/s_eNowRestoreSeqParameters
+ * below, not merely `extern` to a symbol this reconstruction doesn't define.
+ */
+class CStorage {
+public:
+	static unsigned char sm_ucCurrentProg;
+	static unsigned char sm_ucCurrentCombi;
+	static unsigned short sm_usCurrentSong;
+};
+unsigned char CStorage::sm_ucCurrentProg = 0;
+unsigned char CStorage::sm_ucCurrentCombi = 0;
+unsigned short CStorage::sm_usCurrentSong = 0;
+unsigned char DAT_0af30549 = 0; /* paired with sm_ucCurrentProg, see above */
+unsigned char DAT_0af3054b = 0; /* paired with sm_ucCurrentCombi, see above */
+
+/* Real global byte flag (0x0af0df1e, bss), gates PatchMsgHandler's entire body on
+ * `(DAT_0af0df1e & 7) == 3` -- purpose not traced (a mode/state byte read nowhere
+ * else in this reconstruction), kept opaque per this project's own "confirm one
+ * field, don't retype the whole struct" convention. Non-static (plain external
+ * linkage) so verify/test_stg_unsol_msg_handler.cpp can drive it directly.
+ */
+unsigned char DAT_0af0df1e = 0;
+
+/* Real global, confirmed via disassembly of every one of these five handlers'
+ * `if (s_eNowRestoreSeqParameters != 0) call(EditApi_vtbl+0x3c)` / `+0x38`
+ * bracket -- never set nonzero by anything reconstructed in this project (same
+ * "faithful but currently dead branch" status as sNowValueSlider et al. above),
+ * so kept `static` (no test needs to touch it).
+ */
+static int s_eNowRestoreSeqParameters = 0;
+
+/* CEditor::lastEditMessage -- real global, `_ZN7CEditor15lastEditMessageE`,
+ * 0x0939c1e0, confirmed 2 bytes (every real store is a 16-bit `mov WORD PTR
+ * ...,0x500c`). CEditor itself is not reconstructed as a class anywhere in this
+ * project (see panel_ifc_task.h's own header comment) -- this static is declared
+ * directly in the `CEditor` namespace that header already opened, same "just the
+ * one field/method a caller needs" convention as CStorage above.
+ */
+namespace CEditor {
+unsigned short lastEditMessage = 0;
+}
+
+/* CESSongTask::ms_bShouldDirectStorePMRStatus -- real static, gates a direct-store
+ * mode around HDRTrackMsgHandler's own two-track (subtype 0xb/0xc) special case.
+ * CESSongTask is a large not-reconstructed class (many real methods per
+ * symbols.csv) -- only this one static is declared here, file-local, same
+ * Tier-B-adjacent convention as USTGAPIControl above.
+ */
+class CESSongTask {
+public:
+	static unsigned char ms_bShouldDirectStorePMRStatus;
+};
+unsigned char CESSongTask::ms_bShouldDirectStorePMRStatus = 0;
+
+/* Real local `static const` byte tables, each belonging to a different,
+ * not-reconstructed free function in the real binary (Ghidra's own
+ * `Function(Args)::s_akbyAP`-style qualified names) -- read directly out of the
+ * real binary's .rodata (readelf -l VA->file-offset, then a raw byte read), NOT
+ * transcribed from the decompile's opaque table reference alone. Each is a
+ * `{code, value}` byte-pair table indexed by the message's own subtype/sub-index
+ * field. Real addresses/spans confirmed via each mangled `_ZZ...s_akbyAP`
+ * symbol's own address up to the next such symbol in symbols.csv -- NOT the
+ * CSWTCH_NNN Ghidra-synthesized switch-table names, which are per-decompile
+ * artifacts and not reliable global symbols (see CSWTCH_290/CSWTCH_231 note
+ * below, confirmed instead via direct disassembly of the real load instruction's
+ * immediate operand).
+ */
+static const unsigned char kHandleEffectLFOParam_s_akbyAP[16] = {
+	0x13,0x00, 0x13,0x01, 0x13,0x02, 0x13,0x04, 0x13,0x03, 0x13,0x05, 0x13,0x06, 0x13,0x07,
+}; /* HandleEffectLFOParam(STGEffectSlotMsg*)::s_akbyAP, 0x08f1bd3c, 16 bytes */
+
+static const unsigned char kHandleHDRMsg_s_akbyAP[30] = {
+	0x58,0x0b, 0x58,0x10, 0x58,0x0f, 0x58,0x12, 0x58,0x11, 0x58,0x13, 0x58,0x14,
+	0x58,0x08, 0x58,0x09, 0x58,0x0a, 0x58,0x03, 0x6b,0x00, 0x6b,0x10, 0x58,0x0c, 0x58,0x0d,
+}; /* HandleHDRMsg(STGHDRTrackMsg*)::s_akbyAP, 0x08f1bd00, 30 bytes */
+
+static const unsigned char kSetListMsgHandler_s_akbyAPSlot[10] = {
+	0x13,0x04, 0x13,0x05, 0x13,0x06, 0x13,0x07, 0x13,0x0b,
+}; /* CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage&)::s_akbyAPSlot, 0x08f1bcdc, 10 bytes */
+
+static const unsigned char kSetListMsgHandler_s_akbyAP[26] = {
+	0x01,0x00, 0x01,0x01, 0x01,0x02, 0x01,0x03, 0x01,0x04, 0x01,0x05, 0x01,0x06,
+	0x01,0x07, 0x01,0x08, 0x01,0x09, 0x02,0x10, 0x02,0x11, 0x01,0x0a,
+}; /* CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage&)::s_akbyAP, 0x08f1bce6, 26 bytes */
+
+/* CSWTCH_290 -- SetListMsgHandler's own switch-validity table. Ghidra's decompile
+ * expressed this as `CSWTCH_290[iVar3 + 0xf]` (a table it chose to start 15 bytes
+ * before the first byte actually referenced); real disassembly
+ * (`cmp BYTE PTR [edx+0x8f1c4a0],0x0` with edx holding the message's own raw
+ * subtype field, unadjusted) shows the real base is 0x08f1c4a0 indexed directly
+ * by the raw subtype -- both describe the same real bytes; this table uses the
+ * direct-index form. Real span confirmed to cover indices 0..23 (only 3/4/5/
+ * 0x12/0x14 are nonzero, matching the switch's own 5 real cases exactly).
+ */
+static const unsigned char kCSWTCH_290[24] = {
+	1,0,1,1,1,1,0,0, 0,0,0,0,0,0,0,0, 0,0,1,0,1,0,0,0,
+}; /* 0x08f1c4a0, real bytes */
+
+/* CSWTCH_231 (EffectSlotMsgHandler's own real int[9] table at 0x08f1c460,
+ * `mov ebp,[edi*4+0x8f1c460]`) is NOT the same table as the byte array Ghidra
+ * also happens to name "CSWTCH_231" inside GlobalMsgHandler (a different,
+ * unrelated table at a different real address -- confirmed by disassembling both
+ * sites separately; Ghidra's CSWTCH_NNN names are a per-decompile-run counter,
+ * not a real shared symbol). Not used by any handler implemented in this batch
+ * (EffectSlotMsgHandler stays Tier B, see header) -- recorded here only as a
+ * fact for whoever picks that one up next: real bytes are { 4,1,2,1,1,3,1,4,2 }
+ * (int, little-endian, 9 entries, 36 bytes).
+ */
+
 /* --- ABI-level helpers to fill the raw {code*, adj} dispatch table -----------------
  *
  * The real ctor stores each handler as a bare code-pointer assignment
@@ -278,6 +405,62 @@ void CSTGUnsolMsgHandler::EndHandling()
 	}
 }
 
+/* --- Shared EditApi vtable-dispatch helpers (Stage 6 batch 2, 2026-07-25) --------
+ *
+ * Every one of the five handlers below repeats the exact same real shape already
+ * established (in raw, inlined form) by EndHandling() just above: fetch a scope id
+ * via vtbl+0x28, optionally bracket the vtbl+0x30 "set param" call with vtbl+0x3c/
+ * +0x38 if a sequencer-parameter restore is in progress, and toggle
+ * USTGUserAPI::mNowStopMessaging/CEditor::lastEditMessage around the +0x30 call
+ * itself. Factored here rather than re-inlined five times -- still byte-for-byte
+ * the same real vtable offsets/argument shapes as each handler's own disassembly,
+ * not a behavioral simplification. Every real call site also re-fetches `*EditApi`
+ * AFTER the optional +0x3c call (visible in the disassembly as a fresh
+ * `iVar = *EditApi;` reload) rather than reusing an earlier cached vtbl pointer --
+ * preserved here for faithfulness even though s_eNowRestoreSeqParameters is always
+ * 0 in this pass's own data, making the reload currently a no-op.
+ *
+ * REAL BUG found and fixed alongside this: PTR__CEditApiInstance_08e85da8
+ * (mains.cpp) was sized 6 slots -- enough for EndHandling()'s own dead-branch-only
+ * +0x28/+0x2c reads above, but not for these five handlers' unconditional +0x28/
+ * +0x30 dispatch (+0x30/4 = slot 12). Bumped to 20 slots, see mains.cpp's own
+ * WORKAROUND #2 comment.
+ */
+typedef unsigned char (*EditApiGetScopeIdFn)(void *, const char *);
+typedef void (*EditApiVoidSelfFn)(void *);
+typedef void (*EditApiSetParamFn)(void *, unsigned char, unsigned char, unsigned char, void *, int, int);
+
+unsigned char CSTGUnsolMsgHandler::EditApiGetScopeId(const char *name)
+{
+	void *vtbl = *(void **)EditApi;
+	EditApiGetScopeIdFn fn = *(EditApiGetScopeIdFn *)((char *)vtbl + 0x28);
+	return fn(EditApi, name);
+}
+
+void CSTGUnsolMsgHandler::EditApiSendParamMsg(unsigned char scope, unsigned char code, unsigned char value,
+                                               void *payload, int len, int flag)
+{
+	if (s_eNowRestoreSeqParameters != 0) {
+		void *vtbl = *(void **)EditApi;
+		EditApiVoidSelfFn beginRestore = *(EditApiVoidSelfFn *)((char *)vtbl + 0x3c);
+		beginRestore(EditApi);
+	}
+
+	void *vtbl = *(void **)EditApi; /* real: fresh reload after the +0x3c call above */
+	EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+
+	USTGUserAPI::mNowStopMessaging = 1;
+	CEditor::lastEditMessage = 0x500c;
+	setParam(EditApi, scope, code, value, payload, len, flag);
+	USTGUserAPI::mNowStopMessaging = 0;
+
+	if (s_eNowRestoreSeqParameters != 0) {
+		void *vtbl2 = *(void **)EditApi;
+		EditApiVoidSelfFn endRestore = *(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38);
+		endRestore(EditApi);
+	}
+}
+
 /* --- slider/encoder value senders ------------------------------------------------ */
 
 void CSTGUnsolMsgHandler::SendValueSlider()
@@ -323,10 +506,222 @@ void CSTGUnsolMsgHandler::GlobalMsgHandler(const STGMessage &) { /* Tier-B link-
 void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919360, 2951 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08918410, 1792 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919fd0, 3114 bytes. */ }
-void CSTGUnsolMsgHandler::PatchMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08916d90, 340 bytes. */ }
 void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
-void CSTGUnsolMsgHandler::EffectMgrMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08916600, 541 bytes. */ }
+/* Tier B, different reason (intricate goto/switch + reused partial-width stack
+ * buffer) -- see header comment.
+ */
 void CSTGUnsolMsgHandler::EffectSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917cd0, 1796 bytes. */ }
-void CSTGUnsolMsgHandler::EffectMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08916840, 660 bytes. */ }
-void CSTGUnsolMsgHandler::HDRTrackMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917ad0, 488 bytes. */ }
-void CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08916b00, 549 bytes. */ }
+
+/* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
+ *
+ * All five share the guard/scope/table/dispatch shape documented at this file's
+ * own top (CStorage/DAT_.../kCSWTCH_290/EditApiGetScopeId/EditApiSendParamMsg).
+ * STGMessage stays opaque -- every field access below is raw byte-offset pointer
+ * arithmetic on `&msg` cast to `unsigned char *`, same convention as
+ * HandleMessage()'s own offset+4 read (STGMessage is Ghidra's own effectively
+ * 1-byte-element type here, matching the real `param_1 + 0xN` = byte offset N in
+ * every one of these functions' own decompile).
+ */
+
+/* CSTGUnsolMsgHandler::PatchMsgHandler(STGMessage&), .text+0x08916d90, 340 bytes. */
+void CSTGUnsolMsgHandler::PatchMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 0)
+		return;
+
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	if ((*(unsigned int *)(p + 0xc) == (unsigned int)CStorage::sm_ucCurrentProg && target == (unsigned int)DAT_0af30549)
+	    || target == 0xfffe) {
+		if (target == 0xfffe && s_bIsInGlobalObjectEdit == 0)
+			return;
+	} else if (target != 0xffff) {
+		return;
+	}
+
+	/* real: entire remaining body gated on this opaque mode/state byte, see
+	 * this file's own top comment on DAT_0af0df1e.
+	 */
+	if ((DAT_0af0df1e & 7) != 3)
+		return;
+
+	if (*(int *)(p + 0x18) > 0)
+		*(int *)(p + 0x18) -= 1;
+
+	unsigned char value = p[0x14];
+	unsigned char scope = EditApiGetScopeId("ESProg");
+
+	EditApiSendParamMsg(scope, 0x53, value, p + 0x18, 4, 1);
+}
+
+/* CSTGUnsolMsgHandler::EffectMgrMsgHandler(STGMessage&), .text+0x08916600, 541 bytes. */
+void CSTGUnsolMsgHandler::EffectMgrMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 0)
+		return;
+
+	int kind = *(int *)(p + 0x20);
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	unsigned int objId, objSub;
+
+	if (kind == 1)      { objId = (unsigned int)CStorage::sm_ucCurrentProg;  objSub = (unsigned int)DAT_0af30549; }
+	else if (kind == 2) { objSub = (unsigned int)CStorage::sm_usCurrentSong; objId = 0; }
+	else if (kind == 0) { objId = (unsigned int)CStorage::sm_ucCurrentCombi; objSub = (unsigned int)DAT_0af3054b; }
+	else                { objId = 0; objSub = 0; }
+
+	if ((*(unsigned int *)(p + 0xc) != objId || target != objSub) && target != 0xfffe && target != 0xffff)
+		return;
+
+	int idx = *(int *)(p + 0x18);
+	unsigned char code  = kHandleEffectLFOParam_s_akbyAP[idx * 2];
+	unsigned char value = kHandleEffectLFOParam_s_akbyAP[idx * 2 + 1];
+	unsigned char scope;
+
+	if (kind == 1) {
+		if (target == 0xfffe && s_bIsInGlobalObjectEdit == 0) { scope = EditApiGetScopeId("ESSampling"); code += 3; }
+		else                                                  { scope = EditApiGetScopeId("ESProg");     code += 2; }
+	} else if (kind == 0) {
+		scope = EditApiGetScopeId("ESCombi");
+	} else {
+		if (kind != 2)
+			return;
+		scope = EditApiGetScopeId("ESSong");
+	}
+
+	unsigned char slotVal = p[0x14];
+	EditApiSendParamMsg(scope, (unsigned char)(code + slotVal), value, p + 0x1c, 4, 1);
+}
+
+/* CSTGUnsolMsgHandler::EffectMsgHandler(STGMessage&), .text+0x08916840, 660 bytes. */
+void CSTGUnsolMsgHandler::EffectMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 0)
+		return;
+
+	int kind = *(int *)(p + 0x20);
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	unsigned int objId, objSub;
+
+	if (kind == 1)      { objId = (unsigned int)CStorage::sm_ucCurrentProg;  objSub = (unsigned int)DAT_0af30549; }
+	else if (kind == 2) { objSub = (unsigned int)CStorage::sm_usCurrentSong; objId = 0; }
+	else if (kind == 0) { objId = (unsigned int)CStorage::sm_ucCurrentCombi; objSub = (unsigned int)DAT_0af3054b; }
+	else                { objId = 0; objSub = 0; }
+
+	if ((*(unsigned int *)(p + 0xc) != objId || target != objSub) && target != 0xfffe && target != 0xffff)
+		return;
+
+	unsigned char scope = EditApiGetScopeId("ESEffect");
+	unsigned char code, value;
+
+	if (*(unsigned int *)(p + 0x18) == 0) {
+		int sub = *(int *)(p + 0x14) + (*(int *)(p + 0x14) > 0xb ? 1 : 0);
+		int k2 = *(int *)(p + 0x20);
+
+		if (k2 == 1) {
+			if (*(int *)(p + 0x10) == 0xfffe && s_bIsInGlobalObjectEdit == 0) { code = (unsigned char)((sub + 4) & 0xff); scope = EditApiGetScopeId("ESSampling"); }
+			else                                                              { code = (unsigned char)((sub + 3) & 0xff); scope = EditApiGetScopeId("ESProg"); }
+		} else if (k2 == 0) {
+			code = (unsigned char)((sub + 1) & 0xff);
+			scope = EditApiGetScopeId("ESCombi");
+		} else {
+			if (k2 != 2)
+				return;
+			scope = EditApiGetScopeId("ESSong");
+			code = (unsigned char)((sub + 1) & 0xff);
+		}
+
+		/* real: turns the payload dword into a plain 0/1 boolean in place
+		 * before it's sent (as the 4-byte payload) below.
+		 */
+		*(unsigned int *)(p + 0x1c) = (*(unsigned int *)(p + 0x1c) == 0) ? 1u : 0u;
+		value = 1;
+	} else {
+		value = (unsigned char)(*(unsigned int *)(p + 0x18) & 0xff);
+		code = p[0x14];
+	}
+
+	EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+}
+
+/* CSTGUnsolMsgHandler::HDRTrackMsgHandler(STGMessage&), .text+0x08917ad0, 488 bytes. */
+void CSTGUnsolMsgHandler::HDRTrackMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 0)
+		return;
+	unsigned int target = *(unsigned int *)(p + 0xc);
+	if (target != (unsigned int)CStorage::sm_usCurrentSong && target != 0xfffe && target != 0xffff)
+		return;
+
+	int idx = *(int *)(p + 0x14);
+	unsigned char scope = EditApiGetScopeId("ESSong");
+	unsigned int field10 = *(unsigned int *)(p + 0x10);
+	unsigned char code, value;
+
+	if ((unsigned int)(idx - 0xb) < 2) {
+		/* real: brackets the dispatch below in a "direct store PMR status"
+		 * mode -- table byte ordering swaps vs. the else branch (see header).
+		 */
+		CESSongTask::ms_bShouldDirectStorePMRStatus = 1;
+		code  = kHandleHDRMsg_s_akbyAP[idx * 2];
+		value = (unsigned char)((char)field10 + (char)kHandleHDRMsg_s_akbyAP[idx * 2 + 1]);
+		EditApiSendParamMsg(scope, code, value, p + 0x18, 4, 1);
+		CESSongTask::ms_bShouldDirectStorePMRStatus = 0;
+	} else {
+		code  = (unsigned char)((char)field10 + (char)kHandleHDRMsg_s_akbyAP[idx * 2]);
+		value = kHandleHDRMsg_s_akbyAP[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, p + 0x18, 4, 1);
+	}
+}
+
+/* CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage&), .text+0x08916b00, 549 bytes. */
+void CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	unsigned char scope = EditApiGetScopeId("ESSetList");
+	int subtype = *(int *)(p + 0x14);
+	unsigned char code, value;
+
+	if ((unsigned int)(subtype - 3) < 0x12 && kCSWTCH_290[subtype] != 0) {
+		int idx;
+		switch (subtype) {
+		case 3:    idx = 1; break;
+		case 4:    idx = 2; break;
+		case 5:    idx = 3; break;
+		case 0x12: idx = 0; break;
+		case 0x14: idx = 4; break;
+		default:   return;
+		}
+		code  = (unsigned char)((kSetListMsgHandler_s_akbyAPSlot[idx * 2] + *(int *)(p + 0x10)) & 0xff);
+		value = kSetListMsgHandler_s_akbyAPSlot[idx * 2 + 1];
+	} else {
+		int idx;
+		switch (subtype) {
+		case 6:    idx = 0;   break;
+		case 7:    idx = 1;   break;
+		case 8:    idx = 2;   break;
+		case 9:    idx = 3;   break;
+		case 10:   idx = 4;   break;
+		case 0xb:  idx = 5;   break;
+		case 0xc:  idx = 6;   break;
+		case 0xd:  idx = 7;   break;
+		case 0xe:  idx = 8;   break;
+		case 0xf:  idx = 9;   break;
+		case 0x10: idx = 10;  break;
+		case 0x11: idx = 0xb; break;
+		case 0x13: idx = 0xc; break;
+		default:   return;
+		}
+		code  = kSetListMsgHandler_s_akbyAP[idx * 2];
+		value = kSetListMsgHandler_s_akbyAP[idx * 2 + 1];
+	}
+
+	EditApiSendParamMsg(scope, code, value, p + 0x18, 4, 1);
+}

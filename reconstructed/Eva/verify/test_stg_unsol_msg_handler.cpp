@@ -25,6 +25,15 @@
 #include <cstring>
 #include "stg_unsol_msg_handler.h"
 
+/* Real globals defined in mains.cpp / stg_unsol_msg_handler.cpp -- declared here
+ * (file scope; `extern "C"` linkage-specifications for a single declaration are
+ * not legal at block/function scope, so these can't be declared right where
+ * they're used below) so test [6] can swap EditApi to a fake object and drive
+ * PatchMsgHandler's own DAT_0af0df1e mode-gate byte directly.
+ */
+extern void *EditApi;
+extern unsigned char DAT_0af0df1e;
+
 static int g_fail;
 static void check(const char *label, bool ok)
 {
@@ -134,6 +143,206 @@ int main()
 		handler.SendValueSlider();   /* unconditional real call into the Tier-B OnAnalogEvent stub */
 		handler.SendValueEncoder();  /* conditional on sEncoderValue!=0 -- stays 0, so a real no-op here */
 		check("no crash across the remaining real (mostly currently-dead-branch) methods", true);
+	}
+
+	/* --- Stage 6 batch 2 (2026-07-25): PatchMsgHandler/EffectMgrMsgHandler/
+	 * EffectMsgHandler/HDRTrackMsgHandler/SetListMsgHandler -----------------
+	 *
+	 * All five unconditionally dispatch through EditApi's own vtable (+0x28
+	 * GetScopeId, +0x30 SetParam) -- exercising them for real requires a
+	 * controllable fake EditApi object with a real vtable at those offsets,
+	 * capturing the args each handler computed. Real EditApi is swapped out
+	 * for the duration of this block and restored after.
+	 */
+	printf("[6] PatchMsgHandler/EffectMgrMsgHandler/EffectMsgHandler/HDRTrackMsgHandler/SetListMsgHandler (Stage 6 batch 2, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool called;
+			const char *scopeName;
+			unsigned char scope, code, value;
+			unsigned int payload;
+			int len, flag;
+		};
+		static Capture cap;
+
+		struct Fake {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeName = name;
+				return 0x40; /* fixed, distinguishable scope id */
+			}
+			static void SetParam(void *, unsigned char scope, unsigned char code, unsigned char value,
+			                     void *payload, int len, int flag)
+			{
+				cap.called = true;
+				cap.scope = scope;
+				cap.code = code;
+				cap.value = value;
+				cap.len = len;
+				cap.flag = flag;
+				cap.payload = 0;
+				if (len > 0 && (size_t)len <= sizeof(cap.payload))
+					memcpy(&cap.payload, payload, (size_t)len);
+			}
+		};
+
+		/* 16-slot fake vtable -- covers every offset any of these five
+		 * handlers dispatch through (+0x28/+0x30; +0x2c/+0x38/+0x3c are never
+		 * reached since s_eNowRestoreSeqParameters stays 0, but filled with a
+		 * harmless no-op for parity with mains.cpp's own EvaVTableStub
+		 * precedent regardless).
+		 */
+		struct Trap { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake::GetScopeId;
+		fakeVtbl[0x30 / 4] = (void *)Fake::SetParam;
+
+		void *fakeObj = fakeVtbl; /* first field of the fake object IS its vtable ptr */
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char buf[64];
+
+		/* -- PatchMsgHandler: needs the opaque DAT_0af0df1e mode byte == 3
+		 * (mod 8) to take its one real branch at all -- see header/.cpp.
+		 */
+		{
+			unsigned char saved = DAT_0af0df1e;
+			DAT_0af0df1e = 3;
+
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0xc) = 0xdeadbeef; /* irrelevant -- bypassed via target==0xffff */
+			*(unsigned int *)(buf + 0x10) = 0xffff;    /* wildcard target -- always accepted */
+			buf[0x14] = 7;                              /* SVar1 */
+			*(int *)(buf + 0x18) = 5;                    /* decremented to 4, then sent as payload */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.PatchMsgHandler(msg);
+
+			check("PatchMsgHandler: dispatched", cap.called);
+			check("PatchMsgHandler: scope name == \"ESProg\"", cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			check("PatchMsgHandler: scope id == fake 0x40", cap.scope == 0x40);
+			check("PatchMsgHandler: code == 0x53 (real constant)", cap.code == 0x53);
+			check("PatchMsgHandler: value == SVar1 (7)", cap.value == 7);
+			check("PatchMsgHandler: payload decremented 5 -> 4", cap.payload == 4);
+			check("PatchMsgHandler: len == 4, flag == 1", cap.len == 4 && cap.flag == 1);
+
+			DAT_0af0df1e = saved;
+		}
+
+		/* -- EffectMgrMsgHandler: kind==1 (prog), table idx 0 (19,0), target
+		 * wildcard 0xffff so the ESProg (not ESSampling) branch is taken,
+		 * cVar6 += 2 -> base 21, + SVar1(5) -> 26.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(int *)(buf + 0x20) = 1;                  /* kind == prog */
+			*(unsigned int *)(buf + 0x10) = 0xffff;    /* wildcard target */
+			buf[0x14] = 5;                              /* SVar1 */
+			*(int *)(buf + 0x18) = 0;                    /* LFO table index 0 -> (19,0) */
+			*(unsigned int *)(buf + 0x1c) = 0x11223344; /* payload */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.EffectMgrMsgHandler(msg);
+
+			check("EffectMgrMsgHandler: dispatched", cap.called);
+			check("EffectMgrMsgHandler: scope name == \"ESProg\"", cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			check("EffectMgrMsgHandler: code == 26 (19+2+5)", cap.code == 26);
+			check("EffectMgrMsgHandler: value == 0 (table[1])", cap.value == 0);
+			check("EffectMgrMsgHandler: payload == 0x11223344", cap.payload == 0x11223344);
+		}
+
+		/* -- EffectMsgHandler: kind==1, target wildcard 0xffff, +0x18 != 0
+		 * branch (value = low byte of +0x18, code = raw byte at +0x14).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(int *)(buf + 0x20) = 1;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned int *)(buf + 0x18) = 7;   /* nonzero -> "else" branch, value = 7 */
+			buf[0x14] = 42;                       /* code */
+			*(unsigned int *)(buf + 0x1c) = 0xcafebabe;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.EffectMsgHandler(msg);
+
+			check("EffectMsgHandler: dispatched", cap.called);
+			check("EffectMsgHandler: scope name == \"ESEffect\"", cap.scopeName && strcmp(cap.scopeName, "ESEffect") == 0);
+			check("EffectMsgHandler: code == 42 (raw byte at +0x14)", cap.code == 42);
+			check("EffectMsgHandler: value == 7 (low byte of +0x18)", cap.value == 7);
+			check("EffectMsgHandler: payload == 0xcafebabe", cap.payload == 0xcafebabe);
+		}
+
+		/* -- HDRTrackMsgHandler: target==0xffff wildcard, subtype 0 (not the
+		 * 0xb/0xc special case) -> else branch: code = field10_byte + table[0],
+		 * value = table[1]. Table[0] pair (idx0) is (0x58,0x0b) = (88,11).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0xc) = 0xffff;  /* wildcard target (this handler checks +0xc) */
+			*(int *)(buf + 0x14) = 0;                /* subtype 0 */
+			*(unsigned int *)(buf + 0x10) = 5;       /* field10, low byte combined into code */
+			*(unsigned int *)(buf + 0x18) = 0xaabbccdd;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.HDRTrackMsgHandler(msg);
+
+			check("HDRTrackMsgHandler: dispatched", cap.called);
+			check("HDRTrackMsgHandler: scope name == \"ESSong\"", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+			check("HDRTrackMsgHandler: code == 93 (5+88)", cap.code == 93);
+			check("HDRTrackMsgHandler: value == 11 (table[1])", cap.value == 11);
+			check("HDRTrackMsgHandler: payload == 0xaabbccdd", cap.payload == 0xaabbccdd);
+		}
+
+		/* -- SetListMsgHandler, "else" branch (subtype 6 -> idx 0, table
+		 * (1,0)): code == 1, value == 0.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 0x14) = 6;
+			*(unsigned int *)(buf + 0x18) = 0x12345678;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.SetListMsgHandler(msg);
+
+			check("SetListMsgHandler (case 6): dispatched", cap.called);
+			check("SetListMsgHandler (case 6): scope name == \"ESSetList\"", cap.scopeName && strcmp(cap.scopeName, "ESSetList") == 0);
+			check("SetListMsgHandler (case 6): code == 1", cap.code == 1);
+			check("SetListMsgHandler (case 6): value == 0", cap.value == 0);
+			check("SetListMsgHandler (case 6): payload == 0x12345678", cap.payload == 0x12345678);
+		}
+
+		/* -- SetListMsgHandler, "CSWTCH_290-gated" branch (subtype 3 -> idx 1,
+		 * s_akbyAPSlot pair (19,5)): code == (19 + field0x10) & 0xff, value == 5.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 0x14) = 3;
+			*(int *)(buf + 0x10) = 2; /* added into the code byte */
+			*(unsigned int *)(buf + 0x18) = 0x99aabbcc;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.SetListMsgHandler(msg);
+
+			check("SetListMsgHandler (case 3): dispatched", cap.called);
+			check("SetListMsgHandler (case 3): code == 21 (19+2)", cap.code == 21);
+			check("SetListMsgHandler (case 3): value == 5", cap.value == 5);
+			check("SetListMsgHandler (case 3): payload == 0x99aabbcc", cap.payload == 0x99aabbcc);
+		}
+
+		EditApi = realEditApi;
 	}
 
 	printf("\n%d checks failed\n", g_fail);

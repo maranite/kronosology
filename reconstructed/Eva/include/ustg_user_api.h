@@ -151,6 +151,14 @@ public:
 	 */
 	friend struct UstgUserApiTestHooks;
 
+	/* CSTGUnsolMsgHandler::EditApiSendParamMsg() (stg_unsol_msg_handler.cpp,
+	 * Stage 6 batch 2, 2026-07-25) toggles mNowStopMessaging around every real
+	 * EditApi "set param" dispatch, matching SendSTGMessageWithSource()'s own
+	 * real gate above -- friended rather than adding a public setter, same
+	 * "real class has no public setter" shape as the fd-cache test hook above.
+	 */
+	friend class CSTGUnsolMsgHandler;
+
 private:
 	static CSTGHandle *mSharedMem;
 

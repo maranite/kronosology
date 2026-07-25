@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **Batch 6 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), and now `CSTGUnsolMsgHandler` — a whole 30-method unsolicited-STGMessage-dispatcher class found 100% unclaimed by a broad `nm -C` sweep, 18 methods reconstructed (batch 6 — see "Stage 6: breadth sweep, batch 6" below). 137 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **`CSTGUnsolMsgHandler` batch 2 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch (see its own section below). 145 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -1591,6 +1591,92 @@ Once the concurrent `CModule`/`CTask` pass lands a real `CTask`, revisit whether
 `CEditor::CPanelIfcTask`'s own constructor becomes tractable (it would make this
 class's boot-path caller fully real end to end, not just "real address, not-yet-owned
 base class").
+
+## Stage 6: breadth sweep, `CSTGUnsolMsgHandler` batch 2 — 2026-07-25
+
+Follow-up to batch 6 above, closing out 5 of its 12 remaining Tier-B handlers:
+`PatchMsgHandler` (340B), `EffectMgrMsgHandler` (541B), `EffectMsgHandler` (660B),
+`HDRTrackMsgHandler` (488B), `SetListMsgHandler` (549B). All five share one real,
+repeated shape confirmed by disassembling each in full: an optional CStorage-current-
+selection guard (bypassable via the message's own `0xffff`/`0xfffe` wildcard-target
+codes), an `EditApi_vtbl+0x28` scope-id lookup, a small real compile-time byte lookup
+table belonging to a *different*, not-reconstructed free function (`HandleHDRMsg`/
+`HandleEffectLFOParam`/etc — read directly out of the real binary's `.rodata` via
+`readelf -l` VA→file-offset + a raw byte read, not guessed), and the same
+`EditApi_vtbl+0x30` "set param" dispatch batch 6's own `EndHandling()` already
+established (there, a dead branch — here, real and unconditionally exercised). Shared
+across all five via two new private static helpers on the class itself
+(`EditApiGetScopeId`/`EditApiSendParamMsg`, `stg_unsol_msg_handler.cpp`).
+
+The remaining 7 stay Tier B: `ControlMsgHandler`/`GlobalMsgHandler`/`CombiMsgHandler`/
+`ProgramSlotMsgHandler`/`ProgramMsgHandler`/`VoiceModelMsgHandler` reach genuinely deeper
+subsystems (`CControlSurface`/`CMMI`/`CModeManager`/`CPrograms`/`CDiskUtil`/`CForm`-family
+classes/`CKGMsgProcessor`/a voice-model algorithm-database vtable dispatch, confirmed by
+grepping each decompile for non-`EditApi`/`CStorage` class calls). `EffectSlotMsgHandler`
+(1796B) is the one exception left Tier B for a *different* reason — same shallow
+EditApi/CStorage/table shape as the five promoted here, but a genuinely intricate
+goto/switch tangle around a reused 28-byte stack buffer written/read at three different
+widths (including at least one real uninitialized-stack-garbage read) — judged
+disproportionate for this batch, a good candidate for a dedicated future pass.
+
+Two real, worth-flagging findings alongside the transcription:
+- **A genuine bug in `EditApi`'s own vtable size, found and fixed**:
+  `PTR__CEditApiInstance_08e85da8` (`mains.cpp`) was sized 6 slots — enough for
+  `EndHandling()`'s own dead-branch-only `+0x28`/`+0x2c` reads, but not for these five
+  handlers' *unconditional* `+0x28`/`+0x30` dispatch (`+0x30`/4 = slot 12). Bumped to 20
+  slots, same "safe regardless of real slot count" fix shape already used for
+  `PTR__CSysApiInstance_08e81008[94]`. Without this fix, calling any of these five
+  handlers for real would read a function pointer from unrelated adjacent static data.
+- **Ghidra's `CSWTCH_NNN` switch-table names are not reliable global symbols**: both
+  `SetListMsgHandler` and (unrelated, in the still-deferred `GlobalMsgHandler`) share
+  the auto-generated name `CSWTCH_231` for two genuinely *different* tables at two
+  different real addresses — confirmed by disassembling both call sites separately
+  (`mov ebp,[edi*4+0x8f1c460]` inside the still-Tier-B `EffectSlotMsgHandler` vs. a
+  different site inside `GlobalMsgHandler`). Real byte-table addresses in this batch
+  were all confirmed via each mangled `_ZZ...s_akbyAP` symbol's own address in
+  `symbols.csv` (a real linker symbol) rather than trusting any `CSWTCH_NNN` name.
+
+Also fixed independently along the way: a stray `` CForm*/ `` inside batch 6's own
+header comment (the `*/` read as an accidental C-comment terminator, silently
+truncating the rest of the block comment into raw code) — confirmed via the concurrent
+`CTask::CTask()` batch's own README section above to have been a live, uncommitted,
+in-progress edit at the time that batch ran (it explicitly deferred fixing it, not this
+batch's scope at the time) — now fixed here.
+
+### Verification
+
+`verify/test_stg_unsol_msg_handler.cpp` extended with a new check block (14 new checks)
+using a controllable fake `EditApi` object (a one-field stand-in whose "vtable" is a
+16-slot local array) swapped in for the duration of the test and restored after —
+`GetScopeId`/`SetParam` slots capture the real args each handler computed (scope-id
+request string, code byte, value byte, 4-byte payload) and assert them against values
+hand-derived from the same real byte tables transcribed into the source. All 5 handlers
+passed on the first real run once the private-access/comment-syntax build errors below
+were fixed, which is decent independent corroboration of the table-byte transcription.
+
+Two real build issues surfaced and fixed while wiring this test up (neither a
+behavioral bug, both pure build-mechanics): `extern "C" <decl>;` (a single-declaration
+linkage-specification) is not legal at block/function scope in this dialect — moved the
+`EditApi`/`DAT_0af0df1e` test-side externs to file scope; and
+`USTGUserAPI::mNowStopMessaging` is private, so the two new shared dispatch helpers were
+made private *static methods of `CSTGUnsolMsgHandler`* (not free functions) with
+`CSTGUnsolMsgHandler` added as a friend of `USTGUserAPI`, rather than free functions
+needing their own friend-by-name declaration.
+
+`make` (32/32 new + existing checks pass, 0 regressions across every other verify
+binary) and `tools/build_lenny.sh` (`LINK OK`, real on-image-lib link against
+`RestoreDVD_SystemMNT`) both clean. No live `kronos_vm` boot test — same reasoning as
+batch 6 (`CModuleManager::Setup()` still dispatches through a placeholder generic
+vtable, so `CEditor::CPanelIfcTask`'s ctor — and therefore this class — isn't actually
+exercised by the currently-wired boot path regardless).
+
+### Manifest delta
+
+5 rows (`08916600` `EffectMgrMsgHandler`, `08916840` `EffectMsgHandler`, `08916b00`
+`SetListMsgHandler`, `08916d90` `PatchMsgHandler`, `08917ad0` `HDRTrackMsgHandler`)
+marked `pending` → `reconstructed`. `EffectSlotMsgHandler` (`08917cd0`) and the other 6
+Tier-B siblings left `pending`. (`manifest/eva_functions.csv` is gitignored/regenerated
+locally, not committed — current total 145 reconstructed of 37,795.)
 
 ## Stage 6: breadth sweep, `CTask::CTask()` reconstruction batch — 2026-07-25
 
