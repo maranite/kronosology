@@ -194,6 +194,234 @@
 #include "oa_setup_global_resources.h"
 
 /* ---------------------------------------------------------------------
+ * Follow-up pass (2026-07-25): nine of the 22 deferred `AnalogXxxHandler`
+ * callees reconstructed for real -- the physical one-to-one controllers
+ * (joystick/ribbon/vector/foot-pedal/foot-switch/damper/value-slider),
+ * genuinely hardware/UI parameter-update code, not DSP. Ground-truthed
+ * via `objdump -dr -M intel` against the real OA.ko. All raw
+ * `CSTGControllerRTData`/`CSTGGlobal`/`STGAPIFrontPanelStatus` byte
+ * offsets below are UNCONFIRMED-NAME fields (single-purpose reads/writes
+ * observed, no independent cross-reference to name them) -- accessed via
+ * raw pointer arithmetic per this project's established convention for
+ * fields not yet independently identified. See HARDWARE_REVIEW_LOG.md.
+ *
+ * `kDamperFilterTable` (real mangled `_ZZN18CSTGControllerInfo19
+ * AnalogDamperHandlerEttE14s_akucAdToMidi`, a FUNCTION-LOCAL static
+ * inside the real `AnalogDamperHandler`, `.rodata+0x47ee0`, 256 bytes,
+ * confirmed real via raw-byte extraction) -- a 10-bit-to-7-bit "AD to
+ * MIDI" conversion curve: 42 leading zero entries, a nonlinear ramp
+ * 0x1e..0x7f over the next ~65 entries, then clamped flat at 0x7f for
+ * the rest. Feeds
+ * `CPedalFilter::Filter()` (itself a deferred extern).
+ */
+static const unsigned char kDamperFilterTable[256] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1e, 0x1f, 0x21, 0x22, 0x24, 0x25,
+	0x27, 0x28, 0x2a, 0x2b, 0x2d, 0x2e, 0x30, 0x32, 0x33, 0x35, 0x36, 0x38, 0x39, 0x3b, 0x3c, 0x3e,
+	0x3f, 0x41, 0x42, 0x44, 0x46, 0x47, 0x49, 0x4a, 0x4c, 0x4d, 0x4f, 0x50, 0x52, 0x53, 0x55, 0x56,
+	0x58, 0x5a, 0x5b, 0x5d, 0x5e, 0x60, 0x61, 0x63, 0x64, 0x66, 0x67, 0x69, 0x6b, 0x6c, 0x6e, 0x6f,
+	0x71, 0x72, 0x74, 0x75, 0x77, 0x78, 0x7a, 0x7b, 0x7d, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+	0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f,
+};
+
+const unsigned char CSTGControllerRTData::kControllerLockFlagTable[11] = {
+	0x00, 0x01, 0x06, 0x02, 0x04, 0x08, 0x09, 0x0e, 0x0a, 0x0c, 0x10,
+};
+
+/* AnalogRibbonZHandler(a, b) -- `.text+0x97790`, 16 bytes. Confirmed
+ * real: literal `ret`, no-op both parameters, matching
+ * `AnalogControllerHandler`'s own already-established note that
+ * RibbonZ's busy-flag-SET echo slot also has no write. */
+void CSTGControllerInfo::AnalogRibbonZHandler(unsigned short, unsigned short) {}
+
+/* AnalogFootSwitchHandler(a, b) -- `.text+0x97830`, 32 bytes. Confirmed
+ * real: `this` (self) is discarded entirely -- calls straight through to
+ * `CSTGControllerRTData::sInstance->HandleFootSwitchChange(a > 0x3f)`.
+ * `b` unused. */
+void CSTGControllerInfo::AnalogFootSwitchHandler(unsigned short a, unsigned short)
+{
+	CSTGControllerRTData::sInstance->HandleFootSwitchChange(a > 0x3f);
+}
+
+/* AnalogFootPedalHandler(a, b) -- `.text+0x97850`, 32 bytes. Confirmed
+ * real: SAME "self discarded, calls through to rtd" shape as
+ * AnalogFootSwitchHandler. `b` unused. */
+void CSTGControllerInfo::AnalogFootPedalHandler(unsigned short a, unsigned short)
+{
+	CSTGControllerRTData::sInstance->HandleFootPedalChange((unsigned char)a);
+}
+
+/* AnalogJoystickYHandler(a, b) -- `.text+0x9b360`, 32 bytes. Confirmed
+ * real: unlike the two above, `this` (self) IS used here -- tail-calls
+ * the sibling `ProcessJoystickY(b)` on `self`. `a` unused. */
+void CSTGControllerInfo::AnalogJoystickYHandler(unsigned short, unsigned short b)
+{
+	ProcessJoystickY(b);
+}
+
+/* AnalogValueSliderHandler(a, b) -- `.text+0x97ab0`, 80 bytes. Confirmed
+ * real: `b` (param3) entirely unused. */
+void CSTGControllerInfo::AnalogValueSliderHandler(unsigned short a, unsigned short)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+
+	if (rtdBytes[0x49] & 1)
+		rtd->SendCCToKG(0x12, (unsigned char)a);
+	rtd->SendUnsolControl2MessageToUI(0xf, 9, a, 1);
+}
+
+/* AnalogDamperHandler(a, b) -- `.text+0x977a0`, 144 bytes. Confirmed
+ * real: `a` (param2) entirely unused, only `b` (param3, the pedal
+ * position) matters. `CSTGGlobal+0x29c9fbc` gates a polarity inversion
+ * (dword, nonzero -> invert) BEFORE the curve lookup; the STGAPI echo
+ * write at the end always uses the RAW (non-inverted) `b`. */
+void CSTGControllerInfo::AnalogDamperHandler(unsigned short, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+
+	int value = (int)b;
+	if (*(unsigned int *)(g + 0x29c9fbc) != 0)
+		value = 0x3ff - value;
+	int scaled = value + 0x98;
+	int clamped = (scaled <= 0x3ff) ? scaled : 0x3ff;
+	unsigned char filtered = kDamperFilterTable[(unsigned int)(clamped >> 2) & 0xff];
+
+	if (rtd->PedalFilter()->Filter(filtered)) {
+		unsigned char *rtdBytes = (unsigned char *)CSTGControllerRTData::sInstance;
+		rtd->SendCCToKG(rtdBytes[0xc], 0x40, filtered);
+		*(unsigned short *)((unsigned char *)STGAPIFrontPanelStatus::sInstance + 0x106) =
+			(unsigned short)(0x3ff - b);
+	}
+}
+
+/* AnalogVectorYHandler(a, b) -- `.text+0x97870`, 144 bytes. Confirmed
+ * real: `b` (param3) entirely unused, only `a` (param2) matters.
+ * `CSTGGlobal+0x6c0`/`+0x6c1` are signed-byte "assignment" fields
+ * (negative = unassigned, gates a no-op) -- SAME two fields
+ * `AnalogVectorXHandler` reads, just used in the opposite roles between
+ * the two handlers' own "direct send" sub-paths. */
+void CSTGControllerInfo::AnalogVectorYHandler(unsigned short a, unsigned short)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+
+	if (rtdBytes[0x2f] & 2) {
+		/* busy2 SET: recenter BOTH axes' CCs to 0x40 if assigned. */
+		signed char assignX = (signed char)g[0x6c0];
+		signed char assignY = (signed char)g[0x6c1];
+		if (assignX >= 0)
+			rtd->SendCCToKG((unsigned char)assignX, 0x40);
+		if (assignY >= 0)
+			rtd->SendCCToKG((unsigned char)assignY, 0x40);
+		return;
+	}
+
+	signed char assignY = (signed char)g[0x6c1];
+	if (assignY < 0)
+		return;
+	rtd->SendCCToKG((unsigned char)assignY, (unsigned char)a);
+}
+
+/* AnalogVectorXHandler(a, b) -- `.text+0x97900`, 144 bytes. SAME shape
+ * as AnalogVectorYHandler, mirrored: the direct-send sub-path uses
+ * `CSTGGlobal+0x6c0` instead of `+0x6c1`. */
+void CSTGControllerInfo::AnalogVectorXHandler(unsigned short a, unsigned short)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+
+	if (rtdBytes[0x2f] & 2) {
+		signed char assignX = (signed char)g[0x6c0];
+		signed char assignY = (signed char)g[0x6c1];
+		if (assignX >= 0)
+			rtd->SendCCToKG((unsigned char)assignX, 0x40);
+		if (assignY >= 0)
+			rtd->SendCCToKG((unsigned char)assignY, 0x40);
+		return;
+	}
+
+	signed char assignX = (signed char)g[0x6c0];
+	if (assignX < 0)
+		return;
+	rtd->SendCCToKG((unsigned char)assignX, (unsigned char)a);
+}
+
+/* AnalogRibbonXHandler(a, b) -- `.text+0x97990`, 288 bytes. Confirmed
+ * real: `b` doubles as a "ribbon touched" flag (`b == 0` means
+ * released/untouched) AND (when nonzero) the raw position value.
+ * `CSTGControllerRTData+0x14/0x15/0x16` are signed-byte indices into
+ * `kControllerLockFlagTable`; `+0x20` is the ribbon's own last-sent
+ * value; `+0x2f` bit 0 is a "ribbon active" latch (DISTINCT from the
+ * busy/busy2 bits `ButtonPressHandler`/`AnalogControllerHandler`'s own
+ * device-8..23 gates use); `CSTGGlobal+0x6ac` is a byte flag that, when
+ * set, forces the touched-with-unchanged-value case to re-send anyway.
+ * `STGAPIFrontPanelStatus+0x108`/`+0x10a` are written here as a raw
+ * position/active-flag pair -- NOT necessarily the same-purpose fields
+ * as the `STGAPI_OFF_ANALOG_ECHO_*` constants that happen to share the
+ * 0x108 offset (those are written only from `AnalogControllerHandler`'s
+ * own SEPARATE busy-flag-SET direct-echo path; this is the non-busy
+ * direct-send path, most likely a different logical field at the same
+ * numeric offset -- not claimed identical). */
+void CSTGControllerInfo::AnalogRibbonXHandler(unsigned short a, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	unsigned char *stgapi = (unsigned char *)STGAPIFrontPanelStatus::sInstance;
+
+	if (b == 0) {
+		stgapi[0x10a] = 0;
+		if (!(rtdBytes[0x2f] & 1))
+			return;
+		unsigned char combined = CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x14]] |
+					  CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x15]] |
+					  CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x16]];
+		if (combined & 8) {
+			rtdBytes[0x2f] &= ~1;
+			return;
+		}
+		rtdBytes[0x20] = 0x40;
+		rtd->SendCCToKG(0x10, 0x40);
+		rtdBytes[0x2f] &= ~1;
+		return;
+	}
+
+	if (!(rtdBytes[0x2f] & 1)) {
+		rtdBytes[0x20] = (unsigned char)a;
+		rtd->SendCCToKG(0x10, (unsigned char)a);
+		stgapi[0x10a] = 1;
+		*(unsigned short *)(stgapi + 0x108) = (unsigned short)(0x3ff - b);
+		rtdBytes[0x2f] |= 1;
+		return;
+	}
+
+	/* +0x2f bit0 already set (touched last time too). */
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	if (g[0x6ac] == 0 && (unsigned short)rtdBytes[0x20] == a) {
+		/* unchanged value, no forced re-send: just re-latch. */
+		rtdBytes[0x2f] |= 1;
+		return;
+	}
+	rtdBytes[0x20] = (unsigned char)a;
+	rtd->SendCCToKG(0x10, (unsigned char)a);
+	stgapi[0x10a] = 1;
+	*(unsigned short *)(stgapi + 0x108) = (unsigned short)(0x3ff - b);
+	rtdBytes[0x2f] |= 1;
+}
+
+/* ---------------------------------------------------------------------
  * Local, file-scope extractions of the three DSP-adjacent inlined
  * sub-branches this pass deliberately does not trace (see header
  * comment). These are NOT real OA.ko symbols -- just named stand-ins so

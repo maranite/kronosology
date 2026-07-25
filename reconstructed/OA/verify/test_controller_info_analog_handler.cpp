@@ -115,18 +115,17 @@ void CSTGControllerInfo::SendExtModeSliderEvent(int fader, unsigned int value, b
 	void CSTGControllerInfo::name(unsigned int idx, unsigned short a, unsigned short b) { \
 		g_##name##_calls++; g_##name##_idx = idx; g_##name##_a = a; g_##name##_b = b; }
 
+/* AnalogJoystickYHandler/AnalogRibbonXHandler/AnalogRibbonZHandler/
+ * AnalogVectorXHandler/AnalogVectorYHandler/AnalogValueSliderHandler/
+ * AnalogFootPedalHandler/AnalogFootSwitchHandler/AnalogDamperHandler are
+ * now REAL (follow-up pass) -- see the new mocks/tests below for their
+ * own deferred callees (SendCCToKG, HandleFootSwitchChange,
+ * HandleFootPedalChange, ProcessJoystickY, CPedalFilter::Filter)
+ * instead of a generic call-counter stub for the handler itself.
+ */
 DEF_HANDLER2(AnalogJoystickXHandler)
-DEF_HANDLER2(AnalogJoystickYHandler)
-DEF_HANDLER2(AnalogRibbonXHandler)
-DEF_HANDLER2(AnalogRibbonZHandler)
-DEF_HANDLER2(AnalogVectorXHandler)
-DEF_HANDLER2(AnalogVectorYHandler)
 DEF_HANDLER2(AnalogAftertouchHandler)
-DEF_HANDLER2(AnalogValueSliderHandler)
 DEF_HANDLER2(AnalogTempoHandler)
-DEF_HANDLER2(AnalogFootPedalHandler)
-DEF_HANDLER2(AnalogFootSwitchHandler)
-DEF_HANDLER2(AnalogDamperHandler)
 DEF_HANDLER3(AnalogSliderExtHandler)
 DEF_HANDLER3(AnalogSliderRTKHandler)
 DEF_HANDLER3(AnalogSliderTAHandler)
@@ -138,6 +137,48 @@ DEF_HANDLER3(AnalogKnobTAHandler)
 DEF_HANDLER3(AnalogKnobAInHandler)
 DEF_HANDLER3(AnalogKnobSetListEQHandler)
 
+/* ---- new deferred-callee mocks for the 9 newly-real handlers ---- */
+static int g_sendCCToKG2Calls; static unsigned char g_lastCC2A, g_lastCC2B;
+void CSTGControllerRTData::SendCCToKG(unsigned char a, unsigned char b)
+{
+	g_sendCCToKG2Calls++;
+	g_lastCC2A = a;
+	g_lastCC2B = b;
+}
+static int g_sendCCToKG3Calls; static unsigned char g_lastCC3A, g_lastCC3B, g_lastCC3C;
+void CSTGControllerRTData::SendCCToKG(unsigned char a, unsigned char b, unsigned char c)
+{
+	g_sendCCToKG3Calls++;
+	g_lastCC3A = a;
+	g_lastCC3B = b;
+	g_lastCC3C = c;
+}
+static int g_footSwitchCalls; static bool g_lastFootSwitchPressed;
+void CSTGControllerRTData::HandleFootSwitchChange(bool pressed)
+{
+	g_footSwitchCalls++;
+	g_lastFootSwitchPressed = pressed;
+}
+static int g_footPedalCalls; static unsigned char g_lastFootPedalValue;
+void CSTGControllerRTData::HandleFootPedalChange(unsigned char value)
+{
+	g_footPedalCalls++;
+	g_lastFootPedalValue = value;
+}
+static int g_processJoystickYCalls; static unsigned short g_lastProcessJoystickYValue;
+void CSTGControllerInfo::ProcessJoystickY(unsigned short value)
+{
+	g_processJoystickYCalls++;
+	g_lastProcessJoystickYValue = value;
+}
+static int g_pedalFilterCalls; static unsigned char g_lastPedalFilterValue; static bool g_pedalFilterReturn;
+bool CSTGControllerRTData::CPedalFilter::Filter(unsigned char value)
+{
+	g_pedalFilterCalls++;
+	g_lastPedalFilterValue = value;
+	return g_pedalFilterReturn;
+}
+
 static void ResetCounters()
 {
 	g_checkPositionCalls = g_updateStatusCalls = g_unsolCalls = g_setAssignCalls = 0;
@@ -145,18 +186,17 @@ static void ResetCounters()
 	g_checkPositionReturn = false;
 	g_editKnobReturn = g_editSliderReturn = false;
 #define RESET_COUNTER(name) g_##name##_calls = 0;
-	RESET_COUNTER(AnalogJoystickXHandler) RESET_COUNTER(AnalogJoystickYHandler)
-	RESET_COUNTER(AnalogRibbonXHandler) RESET_COUNTER(AnalogRibbonZHandler)
-	RESET_COUNTER(AnalogVectorXHandler) RESET_COUNTER(AnalogVectorYHandler)
-	RESET_COUNTER(AnalogAftertouchHandler) RESET_COUNTER(AnalogValueSliderHandler)
-	RESET_COUNTER(AnalogTempoHandler) RESET_COUNTER(AnalogFootPedalHandler)
-	RESET_COUNTER(AnalogFootSwitchHandler) RESET_COUNTER(AnalogDamperHandler)
+	RESET_COUNTER(AnalogJoystickXHandler)
+	RESET_COUNTER(AnalogAftertouchHandler) RESET_COUNTER(AnalogTempoHandler)
 	RESET_COUNTER(AnalogSliderExtHandler) RESET_COUNTER(AnalogSliderRTKHandler)
 	RESET_COUNTER(AnalogSliderTAHandler) RESET_COUNTER(AnalogSliderAInHandler)
 	RESET_COUNTER(AnalogSliderSetListEQHandler) RESET_COUNTER(AnalogKnobExtHandler)
 	RESET_COUNTER(AnalogKnobRTKHandler) RESET_COUNTER(AnalogKnobTAHandler)
 	RESET_COUNTER(AnalogKnobAInHandler) RESET_COUNTER(AnalogKnobSetListEQHandler)
 #undef RESET_COUNTER
+	g_sendCCToKG2Calls = g_sendCCToKG3Calls = 0;
+	g_footSwitchCalls = g_footPedalCalls = g_processJoystickYCalls = 0;
+	g_pedalFilterCalls = 0; g_pedalFilterReturn = false;
 }
 
 int main()
@@ -231,11 +271,17 @@ int main()
 	check_eq("joystickX-busy: echo value", *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_JOYX), 0x2ab);
 	check_eq("joystickX-busy: no real handler call", g_AnalogJoystickXHandler_calls, 0);
 
-	/* --- fixed 1-7 busy: RibbonZ has no echo write (just verify no crash + no dispatch) --- */
+	/* --- fixed 1-7 busy: RibbonZ has no echo write (just verify no crash) --- */
 	ResetFixtures(); ResetCounters();
 	g_rtdBuf[0x2f] = 0x8;
 	self.AnalogControllerHandler(4, 0, 0x1);
-	check_eq("ribbonZ-busy: no real handler call", g_AnalogRibbonZHandler_calls, 0);
+	check_eq("ribbonZ-busy: no CC send (busy path doesn't call the handler)", g_sendCCToKG2Calls + g_sendCCToKG3Calls, 0);
+
+	/* --- fixed 1-7 non-busy: RibbonZ real body is a literal no-op --- */
+	ResetFixtures(); ResetCounters();
+	self.AnalogControllerHandler(4, 5, 6);
+	check_eq("ribbonZ-nonbusy: no CC send", g_sendCCToKG2Calls + g_sendCCToKG3Calls, 0);
+	check_eq("ribbonZ-nonbusy: no unsol", g_unsolCalls, 0);
 
 	/* --- fixed 0x19-0x1D busy specials --- */
 	ResetFixtures(); ResetCounters();
@@ -270,10 +316,166 @@ int main()
 	check_eq("dev19-busy: id", g_lastId, 9);
 	check_eq("dev19-busy: value=param2", g_lastValue, 0x66);
 
-	/* --- fixed 0x19-0x1D normal dispatch --- */
+	/* --- fixed 0x19-0x1D normal dispatch: AnalogDamperHandler, no invert,
+	 * Filter() returns true -- real table-verified filtered byte 0x7a
+	 * (kDamperFilterTable[102], (0x100+0x98)>>2=102). */
 	ResetFixtures(); ResetCounters();
-	self.AnalogControllerHandler(0x1d, 1, 2);
-	check_eq("dev1d-normal: Damper handler calls", g_AnalogDamperHandler_calls, 1);
+	g_pedalFilterReturn = true;
+	self.AnalogControllerHandler(0x1d, 1, 0x100);
+	check_eq("dev1d-normal: PedalFilter calls", g_pedalFilterCalls, 1);
+	check_eq("dev1d-normal: PedalFilter arg (real curve table value)", g_lastPedalFilterValue, 0x7a);
+	check_eq("dev1d-normal: SendCCToKG(3-arg) calls", g_sendCCToKG3Calls, 1);
+	check_eq("dev1d-normal: SendCCToKG cc=rtd[0xc]", g_lastCC3A, g_rtdBuf[0xc]);
+	check_eq("dev1d-normal: SendCCToKG fixed 0x40", g_lastCC3B, 0x40);
+	check_eq("dev1d-normal: SendCCToKG value=filtered", g_lastCC3C, 0x7a);
+	check_eq("dev1d-normal: STGAPI+0x106 echo = 0x3ff-b",
+		 *(unsigned short *)(g_frontPanelBuf + 0x106), 0x3ff - 0x100);
+
+	/* --- same, but with the CSTGGlobal+0x29c9fbc polarity-invert flag
+	 * set: filtered value changes, echo write still uses the RAW b. --- */
+	ResetFixtures(); ResetCounters();
+	*(unsigned int *)(g_globalBuf + 0x29c9fbc) = 1;
+	g_pedalFilterReturn = true;
+	self.AnalogControllerHandler(0x1d, 1, 0x50);
+	check_eq("dev1d-invert: PedalFilter arg (inverted curve value)", g_lastPedalFilterValue, 0x7f);
+	check_eq("dev1d-invert: STGAPI echo STILL uses raw b",
+		 *(unsigned short *)(g_frontPanelBuf + 0x106), 0x3ff - 0x50);
+
+	/* --- Filter() returns false: no CC send, no echo write --- */
+	ResetFixtures(); ResetCounters();
+	g_pedalFilterReturn = false;
+	self.AnalogControllerHandler(0x1d, 1, 0x100);
+	check_eq("dev1d-filterfalse: no CC send", g_sendCCToKG3Calls, 0);
+	check_eq("dev1d-filterfalse: no echo write",
+		 *(unsigned short *)(g_frontPanelBuf + 0x106), 0);
+
+	/* --- AnalogJoystickYHandler: self-discards a, tail-calls
+	 * ProcessJoystickY(b) on self. --- */
+	ResetFixtures(); ResetCounters();
+	self.AnalogControllerHandler(2, 0x11, 0x22);
+	check_eq("joystickY: ProcessJoystickY calls", g_processJoystickYCalls, 1);
+	check_eq("joystickY: value=b(param3)", g_lastProcessJoystickYValue, 0x22);
+
+	/* --- AnalogFootSwitchHandler/AnalogFootPedalHandler: reached via
+	 * AnalogControllerHandler's own devices 0x1c/0x1b non-busy dispatch
+	 * (only the busy-flag-SET path is exercised in the "fixed 0x19-0x1D
+	 * busy" block above) -- exercise the real handler bodies directly
+	 * here instead, same as this file's own established convention for
+	 * device-0x18 sub-handlers elsewhere. */
+	ResetFixtures(); ResetCounters();
+	self.AnalogFootSwitchHandler(0x40, 0);
+	check_eq("footswitch: HandleFootSwitchChange calls", g_footSwitchCalls, 1);
+	check_eq("footswitch: pressed=true (a>0x3f)", g_lastFootSwitchPressed, true);
+
+	ResetFixtures(); ResetCounters();
+	self.AnalogFootSwitchHandler(0x3f, 0);
+	check_eq("footswitch-boundary: pressed=false (a==0x3f)", g_lastFootSwitchPressed, false);
+
+	ResetFixtures(); ResetCounters();
+	self.AnalogFootPedalHandler(0x55, 0);
+	check_eq("footpedal: HandleFootPedalChange calls", g_footPedalCalls, 1);
+	check_eq("footpedal: value=(u8)a", g_lastFootPedalValue, 0x55);
+
+	/* --- AnalogValueSliderHandler: b unused, rtd[0x49]&1 gates an
+	 * extra SendCCToKG before the always-sent UI message. --- */
+	ResetFixtures(); ResetCounters();
+	self.AnalogValueSliderHandler(0x33, 0x999);
+	check_eq("valueslider-flagclear: no CC send", g_sendCCToKG2Calls, 0);
+	check_eq("valueslider-flagclear: unsol msgType/id", g_lastMsgType * 100 + g_lastId, 0xf * 100 + 9);
+	check_eq("valueslider-flagclear: unsol value=a", g_lastValue, 0x33);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x49] = 1;
+	self.AnalogValueSliderHandler(0x33, 0x999);
+	check_eq("valueslider-flagset: CC send calls", g_sendCCToKG2Calls, 1);
+	check_eq("valueslider-flagset: CC arg0=0x12", g_lastCC2A, 0x12);
+	check_eq("valueslider-flagset: CC arg1=(u8)a", g_lastCC2B, 0x33);
+	check_eq("valueslider-flagset: unsol still sent", g_unsolCalls, 1);
+
+	/* --- AnalogVectorYHandler / AnalogVectorXHandler --- */
+	ResetFixtures(); ResetCounters();
+	g_globalBuf[0x6c0] = 5;
+	g_globalBuf[0x6c1] = 7;
+	self.AnalogVectorYHandler(0x20, 0);
+	check_eq("vectorY-nonbusy: CC send calls", g_sendCCToKG2Calls, 1);
+	check_eq("vectorY-nonbusy: CC arg0=Global[0x6c1]", g_lastCC2A, 7);
+	check_eq("vectorY-nonbusy: CC arg1=(u8)a", g_lastCC2B, 0x20);
+
+	ResetFixtures(); ResetCounters();
+	g_globalBuf[0x6c1] = 0xff; /* signed -1: unassigned */
+	self.AnalogVectorYHandler(0x20, 0);
+	check_eq("vectorY-unassigned: no CC send", g_sendCCToKG2Calls, 0);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2; /* busy2 */
+	g_globalBuf[0x6c0] = 3;
+	g_globalBuf[0x6c1] = 9;
+	self.AnalogVectorYHandler(0x20, 0);
+	check_eq("vectorY-busy2: CC send calls (both axes recentered)", g_sendCCToKG2Calls, 2);
+	check_eq("vectorY-busy2: last CC arg0=Global[0x6c1]", g_lastCC2A, 9);
+	check_eq("vectorY-busy2: last CC arg1=0x40", g_lastCC2B, 0x40);
+
+	ResetFixtures(); ResetCounters();
+	g_globalBuf[0x6c0] = 4;
+	g_globalBuf[0x6c1] = 6;
+	self.AnalogVectorXHandler(0x30, 0);
+	check_eq("vectorX-nonbusy: CC arg0=Global[0x6c0]", g_lastCC2A, 4);
+	check_eq("vectorX-nonbusy: CC arg1=(u8)a", g_lastCC2B, 0x30);
+
+	/* --- AnalogRibbonXHandler --- */
+	ResetFixtures(); ResetCounters();
+	self.AnalogRibbonXHandler(0x40, 0x100);
+	check_eq("ribbonX-firsttouch: CC send calls", g_sendCCToKG2Calls, 1);
+	check_eq("ribbonX-firsttouch: CC arg0=0x10", g_lastCC2A, 0x10);
+	check_eq("ribbonX-firsttouch: CC arg1=(u8)a", g_lastCC2B, 0x40);
+	check_eq("ribbonX-firsttouch: rtd[0x20]=a", g_rtdBuf[0x20], 0x40);
+	check_eq("ribbonX-firsttouch: rtd[0x2f] bit0 latched", g_rtdBuf[0x2f] & 1, 1);
+	check_eq("ribbonX-firsttouch: STGAPI+0x10a=1", g_frontPanelBuf[0x10a], 1);
+	check_eq("ribbonX-firsttouch: STGAPI+0x108=0x3ff-b",
+		 *(unsigned short *)(g_frontPanelBuf + 0x108), 0x3ff - 0x100);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 1;
+	g_rtdBuf[0x20] = 0x40;
+	self.AnalogRibbonXHandler(0x40, 0x100); /* same value, Global[0x6ac]==0 -> no re-send */
+	check_eq("ribbonX-unchanged: no CC send", g_sendCCToKG2Calls, 0);
+	check_eq("ribbonX-unchanged: bit0 stays latched", g_rtdBuf[0x2f] & 1, 1);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 1;
+	g_rtdBuf[0x20] = 0x40;
+	self.AnalogRibbonXHandler(0x41, 0x100); /* different value -> re-send */
+	check_eq("ribbonX-changed: CC send calls", g_sendCCToKG2Calls, 1);
+	check_eq("ribbonX-changed: rtd[0x20] updated", g_rtdBuf[0x20], 0x41);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 1;
+	g_rtdBuf[0x20] = 0x40;
+	g_globalBuf[0x6ac] = 1; /* force re-send even if unchanged */
+	self.AnalogRibbonXHandler(0x40, 0x100);
+	check_eq("ribbonX-forced: CC send calls", g_sendCCToKG2Calls, 1);
+
+	ResetFixtures(); ResetCounters();
+	self.AnalogRibbonXHandler(0x40, 0); /* b==0: release */
+	check_eq("ribbonX-release-notactive: no CC send", g_sendCCToKG2Calls, 0);
+	check_eq("ribbonX-release-notactive: STGAPI+0x10a cleared", g_frontPanelBuf[0x10a], 0);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 1; /* active latch set; rtd[0x14/0x15/0x16] default 0 -> real
+			     * table[0]|table[0]|table[0] = 0 (unlocked) */
+	self.AnalogRibbonXHandler(0x40, 0); /* b==0, active -> recenter+send */
+	check_eq("ribbonX-release-active-unlocked: CC send calls", g_sendCCToKG2Calls, 1);
+	check_eq("ribbonX-release-active-unlocked: CC arg0=0x10", g_lastCC2A, 0x10);
+	check_eq("ribbonX-release-active-unlocked: CC arg1=0x40(recenter)", g_lastCC2B, 0x40);
+	check_eq("ribbonX-release-active-unlocked: rtd[0x20] recentered", g_rtdBuf[0x20], 0x40);
+	check_eq("ribbonX-release-active-unlocked: bit0 cleared", g_rtdBuf[0x2f] & 1, 0);
+
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 1;
+	g_rtdBuf[0x14] = 5; g_rtdBuf[0x15] = 5; g_rtdBuf[0x16] = 5; /* table[5]=8 -> &8 nonzero -> locked */
+	self.AnalogRibbonXHandler(0x40, 0);
+	check_eq("ribbonX-release-active-locked: no CC send", g_sendCCToKG2Calls, 0);
+	check_eq("ribbonX-release-active-locked: bit0 cleared", g_rtdBuf[0x2f] & 1, 0);
 
 	/* --- device 0x18 (Value), mode 4, busy2=0: CheckPosition true --- */
 	ResetFixtures(); ResetCounters();

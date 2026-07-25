@@ -456,6 +456,56 @@ public:
 	}
 
 	/*
+	 * CPedalFilter (follow-up pass reconstructing AnalogControllerHandler's
+	 * own deferred callees) -- a nested sub-object confirmed embedded at
+	 * `CSTGControllerRTData::sInstance+0xc` (`AnalogDamperHandler`'s own
+	 * call site computes `this+0xc` before calling `Filter`, SAME
+	 * "declare the shape, defer the body" idiom as `CJumpCatch` above).
+	 * `Filter(unsigned char)` (real mangled `...CPedalFilter6FilterEh`)
+	 * returns bool, deliberately deferred extern -- own body not
+	 * reconstructed. `PedalFilter()` is a convenience accessor, not a
+	 * real symbol.
+	 */
+	struct CPedalFilter {
+		bool Filter(unsigned char value);
+	};
+	static CPedalFilter *PedalFilter()
+	{
+		return (CPedalFilter *)((unsigned char *)sInstance + 0xc);
+	}
+
+	/*
+	 * SendCCToKG -- TWO real overloads, both confirmed via mangled-name
+	 * relocations from the newly-reconstructed AnalogDamperHandler/
+	 * AnalogVectorXHandler/AnalogVectorYHandler/AnalogRibbonXHandler/
+	 * AnalogValueSliderHandler (follow-up pass): `SendCCToKGEhh` (2
+	 * explicit unsigned char args) and `SendCCToKGEhhh` (3). Own bodies
+	 * not reconstructed -- deliberately deferred externs.
+	 */
+	void SendCCToKG(unsigned char a, unsigned char b);
+	void SendCCToKG(unsigned char a, unsigned char b, unsigned char c);
+
+	/*
+	 * HandleFootSwitchChange(bool)/HandleFootPedalChange(unsigned char)
+	 * -- confirmed real, deliberately deferred externs (own bodies not
+	 * reconstructed), called directly from the newly-reconstructed
+	 * AnalogFootSwitchHandler/AnalogFootPedalHandler (follow-up pass).
+	 */
+	void HandleFootSwitchChange(bool pressed);
+	void HandleFootPedalChange(unsigned char value);
+
+	/*
+	 * kControllerLockFlagTable (`.rodata+0x346`, 11 bytes, confirmed
+	 * real via `readelf -sW`/raw-byte extraction, follow-up pass) --
+	 * `{0,1,6,2,4,8,9,0xe,0xa,0xc,0x10}`. `AnalogRibbonXHandler`'s own
+	 * body indexes it three times via three different signed-byte
+	 * fields at `this+0x14/0x15/0x16`, then tests bit 3 (`&8`) of the
+	 * OR of all three -- consistent with these being small per-slot
+	 * "controller assignment lock" bitmask values.
+	 */
+	static const unsigned char kControllerLockFlagTable[11];
+
+	/*
 	 * SendUnsolControl2MessageToUI(eSTGUnsolControlMsg, int, int,
 	 * eSTGMidiSource) (batch 65, confirmed real via ~15 independent call
 	 * sites across `AnalogControllerHandler`/`ButtonPressHandler`,
@@ -2489,10 +2539,34 @@ struct CSTGControllerInfo {
 	 * tables (batch 65; all confirmed via direct R_386_32 relocations at
 	 * each table SLOT, not guessed from position -- see
 	 * controller_info_analog_handler.cpp's own header for the full
-	 * table-to-symbol map). Confirmed real, deliberately deferred
-	 * externs -- own bodies not reconstructed (each is presumably
-	 * comparable in scope to the `CSTGKeybedInterface` per-mode handlers,
-	 * a future batch's worth of work on its own).
+	 * table-to-symbol map).
+	 *
+	 * A follow-up pass reconstructed NINE of these for real (the physical
+	 * one-to-one controllers, genuinely hardware/UI parameter-update code,
+	 * not DSP): `AnalogJoystickYHandler`, `AnalogRibbonXHandler`,
+	 * `AnalogRibbonZHandler`, `AnalogVectorXHandler`,
+	 * `AnalogVectorYHandler`, `AnalogFootPedalHandler`,
+	 * `AnalogFootSwitchHandler`, `AnalogDamperHandler`,
+	 * `AnalogValueSliderHandler` -- see
+	 * controller_info_analog_handler.cpp's own per-function comments. The
+	 * remaining THIRTEEN are still confirmed real, deliberately deferred
+	 * externs (own bodies not reconstructed) -- real ground-truth
+	 * addresses/sizes (`.text`, from `nm -C`/section-boundary diffing):
+	 * `AnalogJoystickXHandler` (0x98a60, 416B), `AnalogAftertouchHandler`
+	 * (0x98260, 160B), `AnalogTempoHandler` (0x97cc0, 304B -- confirmed
+	 * DSP, a float tempo-curve conversion, SAME one `HandleValueKnobDevice`'s
+	 * own `ApplyValueKnobTempoCurve` stub already flags),
+	 * `AnalogKnobSetListEQHandler` (0x97b00, 144B), `AnalogSliderSetListEQHandler`
+	 * (0x98500, 432B -- both confirmed DSP, EQ-curve math, matching
+	 * `ApplyValueKnobEQCurve`'s own note), `AnalogSliderAInHandler`
+	 * (0x97b90, 304B), `AnalogKnobTAHandler` (0x98300, 512B),
+	 * `AnalogSliderRTKHandler` (0x986b0, 288B), `AnalogSliderTAHandler`
+	 * (0x987d0, 656B), `AnalogKnobRTKHandler` (0x99670, 288B),
+	 * `AnalogKnobExtHandler` (0x9a1d0, 240B), `AnalogSliderExtHandler`
+	 * (0x9a500, 240B), `AnalogKnobAInHandler` (0x9efb0, 672B) -- each
+	 * presumably comparable in scope to the `CSTGKeybedInterface`
+	 * per-mode handlers, a future batch's worth of work on its own
+	 * (~3900 bytes combined, not "individually small").
 	 *
 	 * The knob/slider "adjustment" table field (the pointer-to-member
 	 * representation's second dword) is confirmed ZERO for every one of
@@ -2528,6 +2602,17 @@ struct CSTGControllerInfo {
 	void AnalogKnobTAHandler(unsigned int idx, unsigned short a, unsigned short b);
 	void AnalogKnobAInHandler(unsigned int idx, unsigned short a, unsigned short b);
 	void AnalogKnobSetListEQHandler(unsigned int idx, unsigned short a, unsigned short b);
+
+	/*
+	 * ProcessJoystickY(unsigned short) -- confirmed real, deliberately
+	 * deferred extern (own body not reconstructed), called directly from
+	 * the newly-reconstructed `AnalogJoystickYHandler` (follow-up pass).
+	 * A sibling `ProcessJoystickX(unsigned short)` exists in the real
+	 * binary too (`.text+0x9b030`, called from the still-deferred
+	 * `AnalogJoystickXHandler`) but is not declared here since nothing
+	 * in this project calls it yet.
+	 */
+	void ProcessJoystickY(unsigned short value);
 
 	/*
 	 * The 8 remaining knob/slider-mode table slots (T18/T916/A18/A916,
