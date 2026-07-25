@@ -1919,7 +1919,38 @@ public:
 
 	/*
 	 * ProcessClock() (`.text+0x68650`, 174 bytes) -- CONFIRMED REAL,
-	 * examined but DELIBERATELY DEFERRED. See class comment.
+	 * examined but DELIBERATELY DEFERRED. See class comment. Follow-up
+	 * pass (independent re-disassembly, full instruction-by-instruction
+	 * decode) confirms the class comment's own characterization exactly
+	 * (fieldAt(0xa8)&7 ring index into the fieldAt(0x40) ring, calls to
+	 * EstimateTempoAndPredictNextClock()/MeasureJitter()) and adds:
+	 * increments/clamps TWO separate counters, fieldAt(0xb4) (int,
+	 * saturates at 0x7fffffff via `cmovs`) and fieldAt(0xb8) (plain
+	 * int, no clamp -- this is the SAME counter MeasureJitter's own
+	 * `fieldAt(0xb8)&0x1f` indexes into the 32-entry delta ring at
+	 * fieldAt(0xbc), i.e. ProcessClock is confirmed to be that ring's
+	 * real producer too, not just the event ring's consumer-side
+	 * reader). Reads the ring slot at fieldAt(0x40+idx*0xc) TWO dwords
+	 * at once, +0x8 and +0xc -- the +0xc read is OUTSIDE this same
+	 * slot's own 0xc-byte span (it lands in the FIRST dword of ring
+	 * slot idx+1, or one dword past the ring's own end when idx==7) --
+	 * a genuine unresolved structural question (not a transcription
+	 * slip -- re-decoded the `lea edx,[edx+edx*2]` / `lea edx,[ebx+
+	 * edx*4+0x40]` pair by hand against the raw ModRM/SIB bytes, matches
+	 * objdump exactly): either the two dwords are read from DIFFERENT,
+	 * not-yet-identified parallel arrays that merely alias this
+	 * addressing arithmetic, or the ring's real per-entry stride is NOT
+	 * simply 0xc/12 bytes despite GetEventStatusByte()'s own indexing
+	 * using that exact multiplier. Computes a delta (from fieldAt(0xac),
+	 * a cached "previous timestamp", UNLESS fieldAt(0x8)==2 in which case
+	 * the subtrahend is fieldAt(0x1cc) instead) and stores it into the
+	 * fieldAt(0xbc) 32-entry ring at index fieldAt(0xb8)&0x1f -- but only
+	 * once fieldAt(0xb4) > 1 (the first call after NotifySyncDetected()'s
+	 * own zero-init just caches fieldAt(0xac)/fieldAt(0xb0) without
+	 * computing a delta). This delta-producer shape is now confirmed;
+	 * the +0xc boundary question above is the one thing worth resolving
+	 * FIRST in any future session attempting this trio, before writing
+	 * the ring slot layout down as ground truth.
 	 */
 	void ProcessClock();
 
