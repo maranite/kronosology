@@ -103,8 +103,26 @@ int main(int argc, char **argv, char **envp)
 
 	/* Real constructing overload -- the only place the CCommDriver singleton is
 	 * ever created (see comm_driver.h).
+	 *
+	 * REAL BUG FIX (verification pass, 2026-07-25): this was `getInstance(argv)`.
+	 * Ground truth (main@0804cd50.c) calls `CCommDriver::getInstance(param_3)`,
+	 * where `param_3` is main's THIRD parameter (`char **envp`), not the second
+	 * (`argv`, `param_2`) -- confirmed by param_2 alone being dereferenced for
+	 * the argv[0]-basename check above (`*param_2`), while param_3 is passed
+	 * untouched straight into getInstance(). setupfifoname() (comm_driver.cpp)
+	 * unconditionally strchr()'s every entry of whatever pointer it's given for
+	 * '=' with no NULL check -- fine for envp (POSIX-guaranteed NAME=VALUE
+	 * entries) but a certain segfault on argv[0] (a bare path/name, never
+	 * containing '=') for any real invocation. This was latent and harmless
+	 * before today's Stage 6 batch 4 (`94ad5fc`) made setupfifoname() do real
+	 * work; confirmed live via kronos_vm boot test (segfault at the exact
+	 * `strchr()`-result dereference in setupfifoname(), `Eva[...]: segfault at
+	 * 0 ip 0804c316`) both before and, mistakenly, after a first attempt at
+	 * working around it from the VM harness side instead of here. Fixed at the
+	 * real root cause; re-verified live, clean `Start closing`/`End closing`
+	 * exit restored -- see README.md.
 	 */
-	CCommDriver::getInstance(argv);
+	CCommDriver::getInstance(envp);
 
 	puts("begin omega init");
 	Omega.Init(0);
