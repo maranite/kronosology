@@ -85,13 +85,11 @@
  *     if (!(flags(0x2f) & 8)) goto DEFERRED_BUSY_CLEAR;  // per-code
  *     set bit `code` in the +0x30 bitmap;
  *     SendUnsolControl2MessageToUI(msgType, buttonId, 0x7f, 1);
- *   The gated/inline part is fully reconstructed (real `(msgType,
- *   buttonId)` pairs below); the two per-code "deferred" branches (20
- *   addresses total, structurally identical shape to each other but each
- *   with its own distinct real body) are NOT traced this pass -- see
- *   `HandleButtonPatternBDeferred()`'s own comment for the full address
- *   table. This is a bounded, well-characterized future batch (same
- *   scale class as the `CSTGKeybedInterface` per-mode handlers).
+ *   The gated/inline part AND both per-code "deferred" branches (20
+ *   addresses total) are now FULLY RECONSTRUCTED (follow-up pass) -- see
+ *   `HandleButtonPatternBDeferred()`'s own comment for the complete
+ *   per-address derivation (two genuinely different real shapes across
+ *   the 10 codes, confirmed via disassembly, not assumed uniform).
  *
  * TABLE 2 "MIXER SWITCH" (16 codes, 0x3a-0x49): unconditionally
  *   `this->ProcessMixerSwitchPress(code, pressed)` (a real, distinct
@@ -101,14 +99,14 @@
  * TABLES 1+3 "SPECIAL BUTTONS" (12 codes: 9, 0x2c, 0x35-0x39, 0x4a-0x4e)
  *   -- each has its own genuinely distinct press-time (table 1) and
  *   release-time (table 3) body, individually reconstructed below in
- *   `HandleButtonPressSpecial()`/`HandleButtonReleaseSpecial()`. Several
- *   branches within these 12 (mostly "else" paths gated on the busy/
- *   busy2 flags) go to genuinely un-traced code further down the same
- *   function and are left as named, address-documented local stubs
- *   (`ButtonDeferred_0xNNNNN()`) -- NOT DSP in the audio-engine sense,
- *   but deeper front-panel UI/mode-switching logic this pass did not
- *   have budget to fully trace; see each stub's own comment for its
- *   real address and the little that's confirmed about it.
+ *   `HandleButtonPressSpecial()`/`HandleButtonReleaseSpecial()`. The 17
+ *   "else" sub-branches gated on the busy/busy2 flags (named,
+ *   address-documented `ButtonDeferred_0xNNNNN()` functions) are now ALL
+ *   FULLY RECONSTRUCTED too (follow-up pass) -- three of them (codes
+ *   0x35/0x36/0x39) turned out to cascade into a previously-undiscovered
+ *   `ChangeControlSurfaceMode(int)` UI-mode state machine spanning
+ *   several more real addresses each; see each function's own comment
+ *   for the complete per-address trail.
  *
  * Two of the 12 (buttonCode 0x4c "SetSoloSelected" and 0x4a "SetMixer-
  * KnobMode") call the WEAK-UNDEFINED 2-arg `NotifyParam(unsigned int,
@@ -159,35 +157,88 @@ static void SendButtonPatternA(unsigned int code, bool pressed, int msgType, int
 }
 
 /* ---------------------------------------------------------------------
- * Table 2 "Pattern B" deferred branches -- see this file's own header
- * comment. Real ground-truth addresses for the 10 codes' two branches
- * each (NOT traced this pass):
+ * Table 2 "Pattern B" -- both deferred branches, NOW FULLY RECONSTRUCTED
+ * (follow-up pass, ground-truthed via `objdump -dr -M intel` on every one
+ * of the 20 real addresses below -- not a guess/pattern extrapolation).
+ * Real ground-truth addresses for the 10 codes' two branches each:
  *
- *   code  msgType/id   !pressed-branch   busy-flag-clear-branch
- *   0x26 (38) 11/5      .text+0x96f06     .text+0x97361
- *   0x27 (39) 11/4      .text+0x96eca     .text+0x97348
- *   0x28 (40) 11/3      .text+0x97180     .text+0x972d8
- *   0x29 (41) 11/2      .text+0x96e8e     .text+0x9732f
- *   0x2a (42) 11/1      .text+0x9725b     .text+0x97297
- *   0x2b (43) 11/0      .text+0x96e52     .text+0x97316
- *   0x2f (47) 3/0       .text+0x971bc     .text+0x972f1
- *   0x30 (48) 2/0       .text+0x96e20     .text+0x97305
- *   0x31 (49) 2/1       .text+0x971f1     .text+0x972b0
- *   0x32 (50) 2/3       .text+0x97226     .text+0x972c4
+ *   code  msgType/id   !pressed-branch   busy-flag-clear-branch  ccNo  shape
+ *   0x26 (38) 11/5      .text+0x96f06     .text+0x97361            0x2d   1
+ *   0x27 (39) 11/4      .text+0x96eca     .text+0x97348            0x26   1
+ *   0x28 (40) 11/3      .text+0x97180     .text+0x972d8            0x25   1
+ *   0x29 (41) 11/2      .text+0x96e8e     .text+0x9732f            0x2c   1
+ *   0x2a (42) 11/1      .text+0x9725b     .text+0x97297            0x2b   1
+ *   0x2b (43) 11/0      .text+0x96e52     .text+0x97316            0x2a   1
+ *   0x2f (47) 3/0       .text+0x971bc     .text+0x972f1            3      2
+ *   0x30 (48) 2/0       .text+0x96e20     .text+0x97305            0      2
+ *   0x31 (49) 2/1       .text+0x971f1     .text+0x972b0            1      2
+ *   0x32 (50) 2/3       .text+0x97226     .text+0x972c4            0x32   2
  *
- * All 20 blocks share the same rough shape as each other and as several
- * of the table-1/3 special-button branches below (busy/mode-byte reads,
- * occasional MIDI sends) but were not individually disassembled this
- * pass -- a bounded, well-scoped future batch. No-op here, loudly
- * documented rather than inventing behavior.
+ * Two genuinely DIFFERENT real shapes exist (confirmed per-code via
+ * disassembly, not assumed uniform -- codes 0x26-0x2b share one shape,
+ * 0x2f/0x30/0x31/0x32 share the other):
+ *
+ *   Shape 1 (0x26-0x2b): on release, `SendUnsolControl2MessageToUI(
+ *     msgType, id, 0, 1)` is ALWAYS sent; `SendKarmaCCToKG(ccNo, 0)` is
+ *     ADDITIONALLY sent first, but only if the button's active bit was
+ *     NOT already set. On press-but-not-busy (the "busy-flag-clear"
+ *     branch), BOTH `SendKarmaCCToKG(ccNo, 0x7f)` and
+ *     `SendUnsolControl2MessageToUI(msgType, id, 0x7f, 1)` are sent
+ *     unconditionally, but the active bit is deliberately NOT set (only
+ *     the normal busy-flag-SET press path sets it).
+ *
+ *   Shape 2 (0x2f/0x30/0x31/0x32): on release, the two sends are
+ *     MUTUALLY EXCLUSIVE -- `SendUnsolControl2MessageToUI(msgType, id,
+ *     0, 1)` only if the active bit WAS set, `SendKarmaCCToKG(ccNo, 0)`
+ *     only if it was NOT. On press-but-not-busy, ONLY
+ *     `SendKarmaCCToKG(ccNo, 0x7f)` is sent -- no UI message at all.
+ *
+ * Both shapes always clear the active bit on the release path (matching
+ * every other release path in this file).
  */
-static void HandleButtonPatternBDeferred(unsigned int code, bool pressed, bool busyClearBranch)
+static void HandleButtonPatternBDeferred(unsigned int code, bool pressed, bool busyClearBranch,
+					  int msgType, int buttonId)
 {
-	(void)code;
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
 	(void)pressed;
-	(void)busyClearBranch;
-	/* TODO (not reconstructed this pass): see this function's own
-	 * comment block above for the real per-code address table. */
+
+	static const struct { unsigned char code; unsigned char shape; int ccNo; } kTable[10] = {
+		{ 0x26, 1, 0x2d }, { 0x27, 1, 0x26 }, { 0x28, 1, 0x25 },
+		{ 0x29, 1, 0x2c }, { 0x2a, 1, 0x2b }, { 0x2b, 1, 0x2a },
+		{ 0x2f, 2, 3    }, { 0x30, 2, 0    }, { 0x31, 2, 1    },
+		{ 0x32, 2, 0x32 },
+	};
+	int shape = 1, ccNo = 0;
+	for (unsigned int i = 0; i < 10; i++) {
+		if (kTable[i].code == code) {
+			shape = kTable[i].shape;
+			ccNo = kTable[i].ccNo;
+			break;
+		}
+	}
+
+	if (busyClearBranch) {
+		/* pressed == true, busy flag(&8) NOT set. */
+		rtd->SendKarmaCCToKG(ccNo, 0x7f);
+		if (shape == 1)
+			rtd->SendUnsolControl2MessageToUI(msgType, buttonId, 0x7f, 1);
+		return;
+	}
+
+	/* !pressed (release). */
+	bool wasActive = TestButtonActiveBit(rtdBytes, code);
+	if (shape == 1) {
+		if (!wasActive)
+			rtd->SendKarmaCCToKG(ccNo, 0);
+		rtd->SendUnsolControl2MessageToUI(msgType, buttonId, 0, 1);
+	} else {
+		if (wasActive)
+			rtd->SendUnsolControl2MessageToUI(msgType, buttonId, 0, 1);
+		else
+			rtd->SendKarmaCCToKG(ccNo, 0);
+	}
+	ClearButtonActiveBit(rtdBytes, code);
 }
 
 /* Table 2 "Pattern B" -- see this file's own header comment. */
@@ -197,11 +248,11 @@ static void HandleButtonPatternB(unsigned int code, bool pressed, int msgType, i
 	unsigned char *rtdBytes = (unsigned char *)rtd;
 
 	if (!pressed) {
-		HandleButtonPatternBDeferred(code, pressed, false);
+		HandleButtonPatternBDeferred(code, pressed, false, msgType, buttonId);
 		return;
 	}
 	if (!(rtdBytes[0x2f] & 8)) {
-		HandleButtonPatternBDeferred(code, pressed, true);
+		HandleButtonPatternBDeferred(code, pressed, true, msgType, buttonId);
 		return;
 	}
 	SetButtonActiveBit(rtdBytes, code);
@@ -209,30 +260,230 @@ static void HandleButtonPatternB(unsigned int code, bool pressed, int msgType, i
 }
 
 /* ---------------------------------------------------------------------
- * Table 1/3 "special button" deferred sub-branches -- named by their
- * real ground-truth address, one per unique far-jump target. None of
- * these were traced this pass; each comment states the little that IS
- * confirmed about the branch's real gating condition (from the caller
- * side) even though the branch body itself is not reconstructed.
+ * Table 1/3 "special button" sub-branches -- named by their real
+ * ground-truth address, one per unique far-jump target. ALL 17 NOW
+ * RECONSTRUCTED (follow-up pass, ground-truthed via `objdump -dr -M
+ * intel` on every address, including their own further targets --
+ * several of these (0x35/0x36/0x39) turned out to cascade into a
+ * previously-undiscovered `ChangeControlSurfaceMode(int)` state
+ * machine spanning MANY more real addresses than the original 17-item
+ * count suggested; see each function's own comment for the full
+ * per-address trail). Real `CSTGGlobal` fields used below (`+0x684`
+ * dword "mode", `+0x6a4` byte flag) are the SAME already-established
+ * fields `global.cpp`/`front_panel_handlers.cpp`/etc. read elsewhere in
+ * this project -- not new discoveries, cross-confirms these decodes.
  */
-static void ButtonDeferred_0x97569(void) { /* code 0x2c (44) press, busy flag(&8) CLEAR */ }
-static void ButtonDeferred_0x9746a(void) { /* code 0x35 (53) press, busy2(&2) CLEAR */ }
-static void ButtonDeferred_0x9739d(void) { /* code 0x36 (54) press, busy2(&2) CLEAR */ }
-static void ButtonDeferred_0x9757d(void) { /* code 0x37 (55) press, busy flag(&8) SET */ }
-static void ButtonDeferred_0x974e0(void) { /* code 0x37 (55) press, busy2(&2) CLEAR (busy flag already confirmed clear) */ }
-static void ButtonDeferred_0x9752e(void) { /* code 0x38 (56) press, busy flag(&8) SET */ }
-static void ButtonDeferred_0x974b5(void) { /* code 0x38 (56) press, busy2(&2) CLEAR (busy flag already confirmed clear) */ }
-static void ButtonDeferred_0x973e0(void) { /* code 0x39 (57) press, busy2(&2) CLEAR */ }
-static void ButtonDeferred_0x9737a(void) { /* code 0x4a (74) press, mode not in {0,1,2,3,7} OR busy flag(&8) SET (two guards share this one target) */ }
-static void ButtonDeferred_0x97433(void) { /* code 0x4b (75) press, busy flag(&8) SET */ }
-static void ButtonDeferred_0x97627(void) { /* code 0x4b (75) press, CSTGGlobal::sInstance+0x29cc4e8 byte == 0 (busy flag already confirmed clear) */ }
-static void ButtonDeferred_0x975b1(void) { /* code 0x4c (76) press, busy flag(&8) SET */ }
-static void ButtonDeferred_0x97641(void) { /* code 0x4c (76) press, mode in {0,1,2,3,7} AND busy2(&2) SET */ }
-static void ButtonDeferred_0x97450(void) { /* codes 0x4d/0x4e (77/78) press, busy flag(&8) CLEAR (shared target, id = code-0x4d) */ }
 
-static void ButtonDeferred_0x975d4(void) { /* code 0x38 (56) release, per-button active bit NOT set */ }
-static void ButtonDeferred_0x9751d(void) { /* code 0x4b (75) release, per-button active bit NOT set */ }
-static void ButtonDeferred_0x974a3(void) { /* codes 0x4d/0x4e (77/78) release, per-button active bit NOT set (shared target) */ }
+/* code 0x2c (44) press, busy flag(&8) CLEAR. Real: `.text+0x97569`
+ * falls through into the ALREADY-known "busy SET" send at `.text+
+ * 0x96dbe` after its own extra Karma CC send -- i.e. the UI message is
+ * sent EITHER way, busy-clear just also sends a Karma CC first. */
+static void ButtonDeferred_0x97569(CSTGControllerRTData *rtd)
+{
+	rtd->SendKarmaCCToKG(0x27, 0x7f);
+	rtd->SendUnsolControl2MessageToUI(0xb, 6, 0x7f, 1);
+}
+
+/* code 0x35 (53) press, busy2(&2) CLEAR. Real: `.text+0x9746a` ->
+ * (busy flag(&8) SET -> shared send, matches the already-modeled
+ * busy2-SET path) -> CSTGGlobal+0x684==0 -> ChangeControlSurfaceMode(0)
+ * -> else mode(rtd+0x2b)==0 -> ChangeControlSurfaceMode(1); mode==1 ->
+ * ChangeControlSurfaceMode(0); else -> ChangeControlSurfaceMode(rtd+0x2c). */
+static void ButtonDeferred_0x9746a(CSTGControllerInfo *self, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	if (rtdBytes[0x2f] & 8) {
+		rtd->SendUnsolControl2MessageToUI(7, 0, 0x7f, 1);
+		return;
+	}
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	if (*(unsigned int *)(g + 0x684) == 0) {
+		self->ChangeControlSurfaceMode(0);
+		return;
+	}
+	signed char mode = (signed char)rtdBytes[0x2b];
+	if (mode == 0) { self->ChangeControlSurfaceMode(1); return; }
+	if (mode == 1) { self->ChangeControlSurfaceMode(0); return; }
+	self->ChangeControlSurfaceMode((signed char)rtdBytes[0x2c]);
+}
+
+/* code 0x36 (54) press, busy2(&2) CLEAR. Real: `.text+0x9739d` ->
+ * (busy flag(&8) SET -> shared send) -> CSTGGlobal+0x684!=2 ->
+ * ChangeControlSurfaceMode(7) -> else mode==3 -> CCSM(7); mode==7 ->
+ * CCSM(2); mode==2 -> CCSM(3); else -> CCSM(rtd+0x2d). */
+static void ButtonDeferred_0x9739d(CSTGControllerInfo *self, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	if (rtdBytes[0x2f] & 8) {
+		rtd->SendUnsolControl2MessageToUI(7, 1, 0x7f, 1);
+		return;
+	}
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	if (*(unsigned int *)(g + 0x684) != 2) {
+		self->ChangeControlSurfaceMode(7);
+		return;
+	}
+	signed char mode = (signed char)rtdBytes[0x2b];
+	if (mode == 3) { self->ChangeControlSurfaceMode(7); return; }
+	if (mode == 7) { self->ChangeControlSurfaceMode(2); return; }
+	if (mode == 2) { self->ChangeControlSurfaceMode(3); return; }
+	self->ChangeControlSurfaceMode((signed char)rtdBytes[0x2d]);
+}
+
+/* code 0x37 (55) press, busy flag(&8) SET. Real: `.text+0x9757d`,
+ * simple unconditional send. */
+static void ButtonDeferred_0x9757d(CSTGControllerRTData *rtd)
+{
+	rtd->SendUnsolControl2MessageToUI(7, 2, 0x7f, 1);
+}
+
+/* code 0x37 (55) press, busy2(&2) CLEAR (busy flag already confirmed
+ * clear). Real: `.text+0x974e0` -- mode(rtd+0x2b)==4 is a confirmed
+ * real no-op here (distinct from the caller's own mode==4 check, which
+ * only applies on the busy2-SET path); otherwise ChangeControlSurfaceMode(4). */
+static void ButtonDeferred_0x974e0(CSTGControllerInfo *self, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	if ((signed char)rtdBytes[0x2b] == 4)
+		return; /* confirmed real no-op */
+	self->ChangeControlSurfaceMode(4);
+}
+
+/* code 0x38 (56) press, busy flag(&8) SET. Real: `.text+0x9752e` --
+ * sets the active bit (unlike most busy-SET press paths, which only
+ * send) then sends. */
+static void ButtonDeferred_0x9752e(unsigned int code, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	SetButtonActiveBit(rtdBytes, code);
+	rtd->SendUnsolControl2MessageToUI(7, 3, 0x7f, 1);
+}
+
+/* code 0x38 (56) press, busy2(&2) CLEAR (busy flag already confirmed
+ * clear). Real: `.text+0x974b5` -- mode(rtd+0x2b)!=5 ->
+ * ChangeControlSurfaceMode(5) first; either way, always sends a Karma
+ * CC afterward (ccNo 0x31). */
+static void ButtonDeferred_0x974b5(CSTGControllerInfo *self, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	if ((signed char)rtdBytes[0x2b] != 5)
+		self->ChangeControlSurfaceMode(5);
+	rtd->SendKarmaCCToKG(0x31, 0x7f);
+}
+
+/* code 0x39 (57) press, busy2(&2) CLEAR. Real: `.text+0x973e0` ->
+ * (busy flag(&8) SET -> shared send) -> CSTGGlobal+0x6a4==0 branch:
+ * mode(rtd+0x2b)!=6 -> ChangeControlSurfaceMode(6); mode==6 ->
+ * (CSTGGlobal+0x684==0 -> no-op; else -> set flags bit&4 + send) --
+ * else (+0x6a4!=0) branch: mode==6 -> CCSM(8); mode==8 -> CCSM(6);
+ * else -> CCSM(rtd+0x2e). */
+static void ButtonDeferred_0x973e0(CSTGControllerInfo *self, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	if (rtdBytes[0x2f] & 8) {
+		rtd->SendUnsolControl2MessageToUI(7, 4, 0x7f, 1);
+		return;
+	}
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	if (g[0x6a4] == 0) {
+		if ((signed char)rtdBytes[0x2b] != 6) {
+			self->ChangeControlSurfaceMode(6);
+			return;
+		}
+		if (*(unsigned int *)(g + 0x684) == 0)
+			return; /* confirmed real no-op */
+		rtdBytes[0x2f] |= 4;
+		rtd->SendUnsolControl2MessageToUI(7, 4, 0x7f, 1);
+		return;
+	}
+	signed char mode = (signed char)rtdBytes[0x2b];
+	if (mode == 6) { self->ChangeControlSurfaceMode(8); return; }
+	if (mode == 8) { self->ChangeControlSurfaceMode(6); return; }
+	self->ChangeControlSurfaceMode((signed char)rtdBytes[0x2e]);
+}
+
+/* code 0x4a (74) press, mode not in {0,1,2,3,7} OR busy flag(&8) SET
+ * (two guards share this one target). Real: `.text+0x9737a`, simple
+ * unconditional send. */
+static void ButtonDeferred_0x9737a(CSTGControllerRTData *rtd)
+{
+	rtd->SendUnsolControl2MessageToUI(7, 5, 0x7f, 1);
+}
+
+/* code 0x4b (75) press, busy flag(&8) SET. Real: `.text+0x97433` --
+ * sets the active bit then sends (SAME (8,2,0x7f,1) the caller's own
+ * post-gate real path also sends). */
+static void ButtonDeferred_0x97433(unsigned int code, CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	SetButtonActiveBit(rtdBytes, code);
+	rtd->SendUnsolControl2MessageToUI(8, 2, 0x7f, 1);
+}
+
+/* code 0x4b (75) press, CSTGGlobal::sInstance+0x29cc4e8 byte == 0
+ * (busy flag already confirmed clear). Real: `.text+0x97627` -- sets
+ * busy2(&2), sends a Karma CC (ccNo 0x2e), then the same UI send. */
+static void ButtonDeferred_0x97627(CSTGControllerRTData *rtd)
+{
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	rtdBytes[0x2f] |= 2;
+	rtd->SendKarmaCCToKG(0x2e, 0x7f);
+	rtd->SendUnsolControl2MessageToUI(8, 2, 0x7f, 1);
+}
+
+/* code 0x4c (76) press, busy flag(&8) SET. Real: `.text+0x975b1`,
+ * simple unconditional send. */
+static void ButtonDeferred_0x975b1(CSTGControllerRTData *rtd)
+{
+	rtd->SendUnsolControl2MessageToUI(7, 6, 0x7f, 1);
+}
+
+/* code 0x4c (76) press, mode in {0,1,2,3,7} AND busy2(&2) SET. Real:
+ * `.text+0x97641`, calls the real sibling `ResetSolo()`. */
+static void ButtonDeferred_0x97641(CSTGControllerInfo *self)
+{
+	self->ResetSolo();
+}
+
+/* codes 0x4d/0x4e (77/78) press, busy flag(&8) CLEAR (shared target,
+ * id = code-0x4d). Real: `.text+0x97450`, calls the real sibling
+ * `ProcessPerfSwitchPress(id, true)` -- a genuinely different callee
+ * than the busy-SET path's own inline send+bit-set. */
+static void ButtonDeferred_0x97450(CSTGControllerInfo *self, unsigned int code)
+{
+	int id = (int)(code - 0x4d);
+	self->ProcessPerfSwitchPress(id, true);
+}
+
+/* code 0x38 (56) release, per-button active bit NOT set. Real:
+ * `.text+0x975d4` -- sends a Karma CC (ccNo 0x31) THEN the same UI
+ * message the "bit was set" path also sends (matches Pattern B's own
+ * shape-1 "always send UI, conditionally also Karma" idiom). Caller
+ * clears the active bit itself (already 0 here, harmless). */
+static void ButtonDeferred_0x975d4(CSTGControllerRTData *rtd)
+{
+	rtd->SendKarmaCCToKG(0x31, 0);
+	rtd->SendUnsolControl2MessageToUI(7, 3, 0, 1);
+}
+
+/* code 0x4b (75) release, per-button active bit NOT set. Real:
+ * `.text+0x9751d` -- SAME shape as 0x975d4 above (Karma ccNo 0x2e then
+ * the UI send). */
+static void ButtonDeferred_0x9751d(CSTGControllerRTData *rtd)
+{
+	rtd->SendKarmaCCToKG(0x2e, 0);
+	rtd->SendUnsolControl2MessageToUI(8, 2, 0, 1);
+}
+
+/* codes 0x4d/0x4e (77/78) release, per-button active bit NOT set
+ * (shared target). Real: `.text+0x974a3` -- calls the real sibling
+ * `ProcessPerfSwitchPress(id, false)` (SAME callee the press-time
+ * busy-clear branch above uses, with `pressed=false`). */
+static void ButtonDeferred_0x974a3(CSTGControllerInfo *self, unsigned int code)
+{
+	int id = (int)(code - 0x4d);
+	self->ProcessPerfSwitchPress(id, false);
+}
 
 /*
  * Table 1 -- PRESS-time bodies for the 12 special buttons (only reached
@@ -262,7 +513,7 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 			rtd->SendUnsolControl2MessageToUI(0xb, 6, 0x7f, 1);
 			return;
 		}
-		ButtonDeferred_0x97569();
+		ButtonDeferred_0x97569(rtd);
 		return;
 
 	case 0x35: /* 53 */
@@ -270,7 +521,7 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 			rtd->SendUnsolControl2MessageToUI(7, 0, 0x7f, 1);
 			return;
 		}
-		ButtonDeferred_0x9746a();
+		ButtonDeferred_0x9746a(self, rtd);
 		return;
 
 	case 0x36: /* 54 */
@@ -278,16 +529,16 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 			rtd->SendUnsolControl2MessageToUI(7, 1, 0x7f, 1);
 			return;
 		}
-		ButtonDeferred_0x9739d();
+		ButtonDeferred_0x9739d(self, rtd);
 		return;
 
 	case 0x37: /* 55 -- confirmed real: if mode==4, ResetAllExtModeControllers(); else no-op. */
 		if (rtdBytes[0x2f] & 8) {
-			ButtonDeferred_0x9757d();
+			ButtonDeferred_0x9757d(rtd);
 			return;
 		}
 		if (!(rtdBytes[0x2f] & 2)) {
-			ButtonDeferred_0x974e0();
+			ButtonDeferred_0x974e0(self, rtd);
 			return;
 		}
 		if ((signed char)rtdBytes[0x2b] == 4)
@@ -300,11 +551,11 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 		    * CSTGMidiQueueWriter idiom as front_panel_handlers.cpp's
 		    * own SendFrontPanelKeyMidiMessage). */
 		if (rtdBytes[0x2f] & 8) {
-			ButtonDeferred_0x9752e();
+			ButtonDeferred_0x9752e(code, rtd);
 			return;
 		}
 		if (!(rtdBytes[0x2f] & 2)) {
-			ButtonDeferred_0x974b5();
+			ButtonDeferred_0x974b5(self, rtd);
 			return;
 		}
 		if ((signed char)rtdBytes[0x2b] != 5)
@@ -331,14 +582,14 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 			rtd->SendUnsolControl2MessageToUI(7, 4, 0x7f, 1);
 			return;
 		}
-		ButtonDeferred_0x973e0();
+		ButtonDeferred_0x973e0(self, rtd);
 		return;
 
 	case 0x4a: { /* 74 -- confirmed real: "Mixer Knob Mode" cycle button. */
 		signed char mode = (signed char)rtdBytes[0x2b];
 		bool inRange = (mode == 7) || ((unsigned char)mode <= 3);
 		if (!inRange || (rtdBytes[0x2f] & 8)) {
-			ButtonDeferred_0x9737a();
+			ButtonDeferred_0x9737a(rtd);
 			return;
 		}
 		unsigned char *selfBytes = (unsigned char *)self;
@@ -350,11 +601,11 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 
 	case 0x4b: /* 75 */
 		if (rtdBytes[0x2f] & 8) {
-			ButtonDeferred_0x97433();
+			ButtonDeferred_0x97433(code, rtd);
 			return;
 		}
 		if (((unsigned char *)CSTGGlobal::sInstance)[0x29cc4e8] == 0) {
-			ButtonDeferred_0x97627();
+			ButtonDeferred_0x97627(rtd);
 			return;
 		}
 		rtd->SendUnsolControl2MessageToUI(8, 2, 0x7f, 1);
@@ -362,14 +613,14 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 
 	case 0x4c: { /* 76 -- confirmed real: SetSoloSelected() toggle button. */
 		if (rtdBytes[0x2f] & 8) {
-			ButtonDeferred_0x975b1();
+			ButtonDeferred_0x975b1(rtd);
 			return;
 		}
 		signed char mode = (signed char)rtdBytes[0x2b];
 		if (mode != 7 && (unsigned char)mode > 3)
 			return; /* confirmed real no-op */
 		if (rtdBytes[0x2f] & 2) {
-			ButtonDeferred_0x97641();
+			ButtonDeferred_0x97641(self);
 			return;
 		}
 		bool newSelected = !(rtdBytes[0x21] & 1);
@@ -381,7 +632,7 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
 	case 0x4d: /* 77 */
 	case 0x4e: /* 78 */
 		if (!(rtdBytes[0x2f] & 8)) {
-			ButtonDeferred_0x97450();
+			ButtonDeferred_0x97450(self, code);
 			return;
 		}
 		{
@@ -412,7 +663,7 @@ static void HandleButtonPressSpecial(CSTGControllerInfo *self, unsigned int code
  * press, e.g. 44/53/54/55/74/76 -- harmless/idempotent, but genuinely
  * executed in the real binary, reproduced here for fidelity).
  */
-static void HandleButtonReleaseSpecial(unsigned int code)
+static void HandleButtonReleaseSpecial(CSTGControllerInfo *self, unsigned int code)
 {
 	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
 	unsigned char *rtdBytes = (unsigned char *)rtd;
@@ -447,7 +698,7 @@ static void HandleButtonReleaseSpecial(unsigned int code)
 
 	case 0x38: /* 56 -- gated on the SAME per-button active bit tables 1/3 share. */
 		if (!TestButtonActiveBit(rtdBytes, code)) {
-			ButtonDeferred_0x975d4();
+			ButtonDeferred_0x975d4(rtd);
 			didRealAction = false;
 			break;
 		}
@@ -471,7 +722,7 @@ static void HandleButtonReleaseSpecial(unsigned int code)
 		    * per-button active bit. */
 		rtdBytes[0x2f] &= ~2;
 		if (!TestButtonActiveBit(rtdBytes, code)) {
-			ButtonDeferred_0x9751d();
+			ButtonDeferred_0x9751d(rtd);
 			didRealAction = false;
 			break;
 		}
@@ -487,7 +738,7 @@ static void HandleButtonReleaseSpecial(unsigned int code)
 	case 0x4e: /* 78 -- shared target, gated on the per-button active bit
 		    * tables 1/3 share (the press-time handler above sets it). */
 		if (!TestButtonActiveBit(rtdBytes, code)) {
-			ButtonDeferred_0x974a3();
+			ButtonDeferred_0x974a3(self, code);
 			didRealAction = false;
 			break;
 		}
@@ -524,7 +775,7 @@ static void DispatchButtonCodeLow(CSTGControllerInfo *self, unsigned int code, b
 		if (pressed)
 			HandleButtonPressSpecial(self, code);
 		else
-			HandleButtonReleaseSpecial(code);
+			HandleButtonReleaseSpecial(self, code);
 		return;
 
 	/* Pattern A: uniform simple send (real (msgType,buttonId) pairs,
@@ -614,7 +865,7 @@ void CSTGControllerInfo::ButtonPressHandler(unsigned int code, bool pressed)
 		unsigned int idx = code - 9;
 		if (idx > 0x45)
 			return; /* confirmed real: out of range, no-op */
-		HandleButtonReleaseSpecial(code);
+		HandleButtonReleaseSpecial(this, code);
 		return;
 	}
 

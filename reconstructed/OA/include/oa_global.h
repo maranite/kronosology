@@ -2362,10 +2362,14 @@ struct CSTGControllerInfo {
 	 * 12 "special" buttons (`buttonCode` 9,0x2c,0x35-0x39,0x4a-0x4e) have
 	 * genuinely distinct press-time (table 1) and release-time (table 3)
 	 * bodies, individually reconstructed -- see the .cpp's own header
-	 * comment for the complete address-by-address derivation, including
-	 * ~17 genuinely DSP/mode-adjacent sub-branches deliberately left as
-	 * local stubs (documented with exact ground-truth addresses). `this`
-	 * at the real call site is NOT `CSTGControllerInfo::sInstance` -- see
+	 * comment for the complete address-by-address derivation. A
+	 * follow-up pass fully reconstructed the remaining 17 UI-mode
+	 * sub-branches too (three of them, codes 0x35/0x36/0x39, cascade
+	 * into a `ChangeControlSurfaceMode` state machine) plus all 20
+	 * Table-2 "Pattern B" deferred branches -- see the three new
+	 * `CSTGControllerInfo` externs below and the .cpp's own per-function
+	 * comments. `this` at the real call site is NOT
+	 * `CSTGControllerInfo::sInstance` -- see
 	 * `AnalogControllerHandler` below for the shared
 	 * `ResolveControllerInfoTarget` resolution both handlers go through.
 	 */
@@ -2388,6 +2392,25 @@ struct CSTGControllerInfo {
 	void SetSoloSelected(bool selected);
 	void ResetAllKnobCCs();
 	void ResetAllExtModeControllers();
+
+	/*
+	 * Three MORE deferred callees, surfaced only once the batch-66
+	 * "17 table1/3 special-button else-branches" were actually traced
+	 * (a follow-up pass, not batch 66 itself -- see
+	 * controller_info_button_handler.cpp's own header for the full
+	 * per-address derivation). Confirmed real via mangled-name
+	 * relocations: `_ZN18CSTGControllerInfo24ChangeControlSurfaceModeE
+	 * 18eControlAssignMode` (real `eControlAssignMode` enum modeled as
+	 * `int`, project convention), `_ZN18CSTGControllerInfo22
+	 * ProcessPerfSwitchPressE11ePerfSwitchb` (real `ePerfSwitch` enum
+	 * modeled as `int`, SAME convention `SetPerfSwitch` above already
+	 * uses), `_ZN18CSTGControllerInfo9ResetSoloEv`. Own bodies not
+	 * reconstructed this pass (deliberately deferred, same idiom as the
+	 * six above).
+	 */
+	void ChangeControlSurfaceMode(int mode);
+	void ProcessPerfSwitchPress(int perfSwitch, bool pressed);
+	void ResetSolo();
 
 	/*
 	 * NotifyParam(unsigned int, long) -- confirmed WEAK UNDEFINED in the
