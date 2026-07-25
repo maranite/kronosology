@@ -189,10 +189,11 @@ void *PTR__CChunkMan_08e85968[7] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-void *PTR__CDumpManMod_08e85ca8[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-};
+/* CDumpManMod's own vtable definition now lives in dump_man_mod.cpp (Stage 6
+ * breadth sweep, 2026-07-25, DumpManager cluster batch) -- slots 2/3/4 (Setup/
+ * Config/Start) are wired to real forwarders there, same "define locally where the
+ * real forwarders live" precedent as es_common.cpp's own PTR__CESCommon_08fbafc8.
+ */
 /* CTask's own real vtable (7 slots) + its 2 embedded sub-object vtables + the
  * embedded CLimiterMan's own vtable + ITS embedded TVector's vtable -- see
  * header comment's "CTask::CTask()/CLimiterMan batch" note. All install-only,
@@ -267,4 +268,38 @@ void *PTR__CSysExMsgOutLink_08e84b28[8] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+
+/* CBufferingTask/CCircByteBuffer/CDumpBuffer/CDumpMachine/CDumpManStateMachine/
+ * CDumpTask vtables -- see header comment. All install-only.
+ */
+void *PTR__CBufferingTask_08e85aa8[14] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CCircByteBuffer_08e85b68[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CDumpBuffer_08e85c10[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CDumpMachine_08e85c48[10] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CDumpManStateMachine_08e85ce8[10] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CDumpTask_08e85d48[14] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+int EvaDataPlaceholder_08e85ac4 = 0;
+int EvaDataPlaceholder_08e85d74 = 0;
 }

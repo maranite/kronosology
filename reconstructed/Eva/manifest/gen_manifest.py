@@ -467,6 +467,54 @@ RECONSTRUCTED = {
     "080a6730",  # CSysExMsgTaskBase::SendMsg(uchar const*, uchar)
     "080a68c0",  # CSysExMsgTaskBase::EventToMessage(CLinkedEvent const*, uchar*, uchar&)
     "080a6970",  # CSysExMsgTaskBase::MessageToEvent(uchar const*, uchar, CLinkedEvent*)
+
+    # --- Stage 6: breadth sweep, DumpManager cluster batch (2026-07-25). Found via a
+    # broad nm -C sweep of what CDumpManMod::Setup() (one of the 6 small "MMainXxx(void)"
+    # derived modules mains.cpp installs a real vtable for but had never traced the
+    # bodies of) actually constructs. CCircByteBuffer/CDumpBuffer/CDumpManStateMachine/
+    # CDumpMachine/CDumpTask/CBufferingTask/CDumpManMod -- see circ_byte_buffer.h/
+    # dump_buffer.h/dump_man_state_machine.h/dump_task.h/buffering_task.h/dump_man_mod.h
+    # for the full reachability chain and per-class writeup. This is the first time
+    # this reconstruction's own wired call graph genuinely exercises CSysExMsgTaskBase's
+    # ECanTransmit==1 branch and CTask::Add(COutLink*) end to end (both previously
+    # "ground-truth reachable but dead in this reconstruction", task.h/sysex_msg_task_
+    # base.h) -- CDumpTask IS-A CSysExMsgTaskBase and is constructed with canTransmit=1.
+    "080ce1c0",  # CCircByteBuffer::CCircByteBuffer(ulong)
+    "080ce160",  # CCircByteBuffer::~CCircByteBuffer() (non-deleting)
+    "080ce190",  # CCircByteBuffer::~CCircByteBuffer() (deleting)
+    "080ce140",  # CCircByteBuffer::Reset()
+    "080ce3e0",  # CCircByteBuffer::Read(uchar*, ulong)
+    "080ce310",  # CCircByteBuffer::Write(uchar const*, ulong)
+    "080ceff0",  # CDumpBuffer::CDumpBuffer(ulong)
+    "080cefa0",  # CDumpBuffer::~CDumpBuffer() (non-deleting)
+    "080cefc0",  # CDumpBuffer::~CDumpBuffer() (deleting)
+    "080cef70",  # CDumpBuffer::Reset()
+    "080cf9b0",  # CDumpManStateMachine::CDumpManStateMachine()
+    "080cf950",  # CDumpManStateMachine::~CDumpManStateMachine() (non-deleting)
+    "080cf980",  # CDumpManStateMachine::~CDumpManStateMachine() (deleting)
+    "080cfa30",  # CDumpManStateMachine::Init()
+    "080cf4d0",  # CDumpMachine::CDumpMachine(CDumpTask&)
+    "08186810",  # CDumpMachine::~CDumpMachine() (non-deleting)
+    "08186830",  # CDumpMachine::~CDumpMachine() (deleting)
+    "080cf2c0",  # CDumpMachine::SetTimeout(ushort)
+    "080cf4a0",  # CDumpMachine::SendSexMessage(uchar const*, uchar)
+    "080cf410",  # CDumpMachine::PutMessage(uchar const*, uchar) -- real forward, Tier-B target
+    "080d1b10",  # CDumpTask::CDumpTask(CModule const&)
+    "080d19d0",  # CDumpTask::~CDumpTask() (non-deleting)
+    "080d1a60",  # CDumpTask::~CDumpTask() (deleting)
+    "080d1c20",  # CDumpTask::OnGetMessage(uchar const*, uchar) -- real forward, Tier-B target
+    "080d18d0",  # CDumpTask::OnReceiveMessage(uchar, uchar const*, uchar) -- real forward
+    "08186880",  # CDumpTask::OnTimeout() -- re-derived from raw objdump -dr (Ghidra's own
+                 # decompile mis-resolved the real tail call as a bogus zero-arg double
+                 # indirection)
+    "080cdd50",  # CBufferingTask::CBufferingTask(CModule const&)
+    "080cdc10",  # CBufferingTask::~CBufferingTask() (non-deleting)
+    "080cdcb0",  # CBufferingTask::~CBufferingTask() (deleting)
+    "080ce120",  # CBufferingTask::GetDumpLength(ulong&) const
+    "080cf820",  # CDumpManMod::CDumpManMod()
+    "080cf650",  # CDumpManMod::Setup()
+    "080cf500",  # CDumpManMod::Config() (confirmed genuinely empty)
+    "080cf510",  # CDumpManMod::Start() (confirmed genuinely empty)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

@@ -258,6 +258,44 @@ extern void *PTR__COutLink_08e82068[6];
 extern void *PTR__TPtrArray_08e820d8[3];
 extern void *PTR__CSysExMsgClientOutLink_08e84b08[8];
 extern void *PTR__CSysExMsgOutLink_08e84b28[8];
+
+/* CCircByteBuffer/CDumpBuffer/CDumpManStateMachine/CDumpMachine/CDumpTask/
+ * CBufferingTask (Stage 6 breadth sweep, 2026-07-25, DumpManager cluster batch --
+ * circ_byte_buffer.h/dump_buffer.h/dump_man_state_machine.h/dump_task.h/
+ * buffering_task.h). All 6 confirmed via `nm -C Eva`'s own "vtable for X" symbol
+ * (X's PTR__ address = that symbol + 8, same Itanium-ABI tell used throughout this
+ * file), slot counts by the same next-symbol-boundary methodology as the rest of
+ * this file (all 6 sit in one contiguous 08e85aa0..08e85d90 run):
+ *   CBufferingTask         08e85aa0 -> 08e85ae0 (vtable for CDumpApi)         = 14 slots
+ *   CCircByteBuffer        08e85b60 -> 08e85b74 (typeinfo name)              =  3 slots
+ *   CDumpBuffer            08e85c08 -> 08e85c1c (typeinfo name)             =  3 slots
+ *   CDumpMachine           08e85c40 -> 08e85c70 (typeinfo name)             = 10 slots
+ *   CDumpManMod            08e85ca0 -> 08e85cc4 (typeinfo name)             =  7 slots
+ *     (already declared above, Stage 6 CModule/CTaskBuffer/RunLevel batch -- this
+ *     batch changes its DEFINITION, not its declaration, see omega_vtables.cpp/
+ *     dump_man_mod.cpp: slots 2/3/4 (Setup/Config/Start) now wired to real
+ *     forwarders, direct .rodata byte read confirms slots 0/1/5/6 are CModule's own
+ *     dtor pair/Destroy/GetErrorMsg -- see dump_man_mod.cpp's own header comment)
+ *   CDumpManStateMachine   08e85ce0 -> 08e85d10 (typeinfo name)             = 10 slots
+ *   CDumpTask              08e85d40 -> 08e85d80 (typeinfo name)             = 14 slots
+ * Every one except CDumpManMod's slots 2/3/4 is install-only (EvaVTableStub-backed),
+ * same status as every other entry in this file -- none of the deep ~30-method
+ * `CDumpManStateMachine` state-handler overrides these arrays would need to be
+ * individually correct for are dispatched through anywhere in this reconstruction.
+ * Secondary (this-adjusted, multiple-inheritance) vtable placeholders for
+ * `CBufferingTask`/`CDumpTask` (their own `this+8` field, same pattern as CTask's own
+ * `EvaDataPlaceholder_08e82144`/CSysExMsgTaskBase's own `EvaDataPlaceholder_08e84c50`):
+ *   EvaDataPlaceholder_08e85ac4  (CBufferingTask, real address per its own ctor)
+ *   EvaDataPlaceholder_08e85d74  (CDumpTask, real address per its own ctor)
+ */
+extern void *PTR__CBufferingTask_08e85aa8[14];
+extern void *PTR__CCircByteBuffer_08e85b68[3];
+extern void *PTR__CDumpBuffer_08e85c10[3];
+extern void *PTR__CDumpMachine_08e85c48[10];
+extern void *PTR__CDumpManStateMachine_08e85ce8[10];
+extern void *PTR__CDumpTask_08e85d48[14];
+extern int   EvaDataPlaceholder_08e85ac4;
+extern int   EvaDataPlaceholder_08e85d74;
 }
 
 #endif /* OMEGA_VTABLES_H */

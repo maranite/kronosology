@@ -2065,3 +2065,116 @@ misleading result — worth doing once their batch lands cleanly.
 (`BPM::SetLowerLimit`), `0816bb10` (`BPM::SetUpperLimit`), `0816bc00`
 (`BPM::_GLOBAL__I_sm_LowerLimit`, the static ctor) under a new "Stage 6: breadth
 sweep, batch 2026-07-25b" section. Regenerated: 147 → 155 of 37,795.
+
+## Stage 6: breadth sweep, DumpManager cluster batch — 2026-07-25
+
+Broad `nm -C` class-inventory survey for other unclaimed boot-path-adjacent
+territory (following up on this session's own general instruction to keep sweeping
+past `CClientCommServer`/`CSysExMsgTaskBase`, both being finished by a concurrent
+agent this same day). Candidate areas checked: (1) `mains.cpp`'s own 26 `MMainXxx`
+shims (both the 17-member registration-descriptor family and the 9-member
+`InitSystemLayer()`-adjacent family) — already fully investigated in prior batches,
+nothing new; (2) the `Xxx`Api-suffixed facades (`CChkApi`/`CSeqApi`/`CRTRouterApi`/
+`CSysExApi`, config_manager.cpp) — already fully surveyed in the 2026-07-25b batch,
+their real vtable-slot identities either confirmed or left honestly "plausible, not
+proven"; (3) `CConfigManager::CreateResourceFamilies()`'s own `CZ` container
+dependency (247 methods) — confirmed still genuinely too large for a tractable
+subset, left Tier B; (4) **the 6 small derived modules `mains.cpp`'s own
+`InitSystemLayer()`-adjacent `MMainXxx(void)` family installs a real vtable for but
+whose own `Setup()`/`Config()`/`Start()` bodies nobody had actually read yet**
+(`CEditMan`/`CMessagePort`/`CSeqTimer`/`CSysEx`-module/`CChunkMan`/`CDumpManMod`) —
+this is where the batch landed. `nm -C` counts these at 4–17 methods each (`CDumpManMod`
+itself: 9), an order of magnitude smaller than the CForm/CSK-scale god-objects this
+project correctly defers, and genuinely tractable once read.
+
+### What got reconstructed
+
+`CDumpManMod::Setup()` (.text+0x080cf650) turned out to construct a real sibling pair
+of tasks — `CDumpTask` (IS-A `CSysExMsgTaskBase`) and `CBufferingTask` (IS-A `CTask`)
+— and register both via the already-real `CModule::Add(CTask*)` (module.h). Reading
+what THOSE two ctors touch pulled in a small, self-contained, cleanly-layered
+subsystem: `CDumpManStateMachine`/`CDumpMachine` (a genuine Strategy/Template-method
+split — a ~35-method, out-of-scope protocol state machine calling back into a
+9-method concrete I/O adapter) sitting on top of `CDumpBuffer`/`CCircByteBuffer` (a
+small, fully general-purpose power-of-two circular byte ring buffer). New:
+`include/circ_byte_buffer.h`, `dump_buffer.h`, `dump_man_state_machine.h`,
+`dump_task.h`, `buffering_task.h`, `dump_man_mod.h` + matching `src/dump/*.cpp`.
+
+Tier A (34 functions, all self-contained or real one-line forwards into an already-
+real or Tier-B-stub target — see each header's own per-method breakdown):
+`CCircByteBuffer` (ctor/dtor/Reset/Read/Write, all 6, genuinely general-purpose and
+cheap to do in full even though nothing in THIS pass's own call graph reaches
+`Read()`/`Write()` yet), `CDumpBuffer` (ctor/dtor/Reset — `Read()`/`Write()` stay
+Tier B, see below), `CDumpManStateMachine` (ctor/dtor/`Init()`), `CDumpMachine`
+(ctor/dtor/`SetTimeout()`/`SendSexMessage()`/`PutMessage()` — `ReadPacket()`/
+`WritePacket()`/`IsDumpEnded()` stay Tier B), `CDumpTask` (ctor/dtor/
+`OnGetMessage()`/`OnReceiveMessage()`/`OnTimeout()` — the last re-derived from raw
+`objdump -dr` after Ghidra's own decompile mis-resolved a genuine tail call as a
+bogus zero-argument double-indirection, same artifact class as `CTask::Add(COutLink*)`
+before it), `CBufferingTask` (ctor/dtor/`GetDumpLength()` — `Exec()`/`Put()` stay
+Tier B, deep `CChunkClient`/`CDumpReqDescr`/`CDumpHeaderDescr` dependency, genuinely
+separate file-transfer-serialization subsystem), `CDumpManMod` (ctor/`Setup()`/
+`Config()`/`Start()`, the last 2 confirmed genuinely empty `return 0;` bodies).
+
+**The actual significance of this batch**: `CDumpTask`'s ctor passes
+`canTransmit=1` to `CSysExMsgTaskBase`, so constructing one for real (which
+`CDumpManMod::Setup()` now genuinely does, on the real boot path, once
+`CModuleManager::Setup()`'s already-real per-module vtable+8 dispatch reaches
+`CDumpManMod`'s own now-real `Setup()` slot) is the FIRST time this reconstruction's
+own wired call graph exercises `CSysExMsgTaskBase`'s `ECanTransmit==1` branch and
+`CTask::Add(COutLink*)` end to end — both were previously documented as "ground-truth
+reachable but dead in this reconstruction's own current call graph" (task.h's/
+sysex_msg_task_base.h's own header comments, from earlier today). `PTR__CDumpManMod_
+08e85ca8`'s own vtable slots 2/3/4 (`Setup`/`Config`/`Start`) are wired to real
+forwarders (`dump_man_mod.cpp`, moved out of `omega_vtables.cpp` the same way
+`es_common.cpp` already does for its own vtable) instead of the generic
+`EvaVTableStub` no-op — direct `.rodata` byte reads of the real vtable confirmed all
+7 slots (dtor pair + `Setup`/`Config`/`Start` + `CModule::Destroy`/`GetErrorMsg`,
+the last 2 confirmed NOT overridden by `CDumpManMod`), the same "Tier-B stub leaves a
+real array/dispatch dead" bug class this project has hit repeatedly today
+(`CModuleManager::AddModule()`, `AddConstructor()`) — except here the array itself
+was always real-sized, only its CONTENTS were the generic no-op.
+
+### A real, deliberately-preserved cross-object field reach
+
+`CDumpBuffer::Read()`/`Write()` (Tier B this pass) reference a dword one past their
+own object's 0x20-byte end — confirmed, via 3 independent call sites all resolving
+to the identical absolute address, to be `CBufferingTask`'s own `mLimitActive` field
+(`this+0x20` relative to the always-fixed `CBufferingTask+0x80` embedding offset).
+Real and deliberate (the field is written by `CBufferingTask::Put()`, a completely
+separate function, at the exact same address), not a Ghidra artifact — documented in
+`dump_buffer.h`'s own header comment rather than silently absorbed into either
+class's own declared layout.
+
+### Verification
+
+Host KAT (`verify/test_dump_manager.cpp`, 20 checks, first-run pass after fixing 2
+checks in the test's OWN expected-arithmetic, not the implementation): `CCircByteBuffer`
+round-trip/wraparound/overflow: `CDumpManMod::Setup()` constructing + registering
+both real siblings into a real `CModule`'s `mTasks` (count 0→2); both cross-links
+(`CDumpTask::BufferingTask()`/`CBufferingTask`'s own `mDumpTask`) wired correctly in
+both directions; `CDumpTask`'s own `mMachine` non-null; **the `CSysExMsgTaskBase`
+`ECanTransmit==1` branch genuinely taken** (`mOutLink` non-null via
+`SysExMsgTaskBaseTestHooks`) — the concrete confirmation of the "actual
+significance" claim above; `CBufferingTask::GetDumpLength()`'s own real not-yet-set
+behavior. `make objs`/`make verify`: clean, 0 failures across the full suite
+(pre-existing tests unaffected). `tools/build_lenny.sh`: `LINK OK` against the real
+on-image target ABI, zero new unresolved symbols.
+
+No live `kronos_vm` boot test this batch: the change is additive and low-risk by this
+project's own established risk profile (wiring already-vtable-sized dispatch slots to
+newly-real functions whose own ctors/dtors follow the identical, already-repeatedly-
+verified "malloc + placement-new + manual vtable install" idiom used everywhere else
+in this project, with every allocation size cross-checked against ground truth's own
+`malloc()` call sites) — same "host KAT + LINK OK is sufficient, live boot reserved for
+safety-critical or previously-crashing paths" treatment several of today's earlier
+non-safety-critical batches already received (e.g. the CTask::CTask()/`SetMask`
+batches). Worth a live re-boot in a future pass together with whatever next batch
+touches this same module-lifecycle spine.
+
+### Manifest delta
+
+`gen_manifest.py`: added 34 functions across `CCircByteBuffer`/`CDumpBuffer`/
+`CDumpManStateMachine`/`CDumpMachine`/`CDumpTask`/`CBufferingTask`/`CDumpManMod`
+under a new "Stage 6: breadth sweep, DumpManager cluster batch" section. Regenerated:
+222 → 256 of 37,795.
