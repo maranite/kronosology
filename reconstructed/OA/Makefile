@@ -478,6 +478,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_effect_manager_run_effects \
          verify/test_hdr_sampler_commands \
          verify/test_file_opener_events \
+         verify/test_front_panel_key_handlers \
          verify/test_hdr_playback_commands \
          verify/test_load_global_resources \
          verify/test_performance_vars_manager_init \
@@ -684,6 +685,9 @@ verify/test_hdr_sampler_commands: verify/test_hdr_sampler_commands.cpp src/engin
 
 verify/test_file_opener_events: verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_bank_memory.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_front_panel_key_handlers: verify/test_front_panel_key_handlers.cpp src/engine/front_panel_handlers.cpp include/oa_setup_global_resources.h include/oa_keybed_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_front_panel_key_handlers.cpp src/engine/front_panel_handlers.cpp -o $@
 
 verify/test_hdr_playback_commands: verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_daemons.h include/oa_bank_memory.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp -o $@

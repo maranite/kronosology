@@ -163,9 +163,67 @@
  *   if (*out_lo != 0x200) *out_lo = 0x3ff - *out_lo;
  * (the `!= 0x200` special case is a real, confirmed quirk -- reproduced
  * verbatim, not "cleaned up").
+ *
+ * ---------------------------------------------------------------------
+ * SetLED/SetLEDBlinking/ResetLED, HandleKeyOn/HandleKeyOff (batch-63
+ * un-triaged candidates 1-3, added in a later pass; see oa_setup_
+ * global_resources.h's own CSTGFrontPanel comment for the confirmed
+ * addresses/sizes/shape summary).
+ *
+ * CSTGFrontPanel::HandleKeyOn (.text+0xbf00, 367 bytes) confirmed shape:
+ *   1. CPowerOffTimer::sInstance flag = 1 (unconditional, same as every
+ *      other handler in this file).
+ *   2. Gate on CSTGMidiPortManager::sInstance's ready flag -- returns
+ *      immediately if not ready (no state touched at all, not even the
+ *      per-key table).
+ *   3. noteRaw = sext8(rtd[0x29] + rtd[0x28] + rtd[0x2a]) + keyNum,
+ *      where rtd = CSTGControllerRTData::sInstance and the three summed
+ *      bytes are unnamed (own semantic meaning not determined beyond
+ *      "some combination of octave-shift/transpose", real field names
+ *      not recovered).
+ *   4. Range-fold noteRaw into a real 0-127 MIDI note number IF it
+ *      overflows above 127 or goes negative -- confirmed via a genuine
+ *      div/mod-by-12 reciprocal-multiply sequence in the real
+ *      disassembly (preserves the note's pitch class while folding it
+ *      into range). This reconstruction computes the SAME final low
+ *      BYTE (the only part of the result any real caller downstream
+ *      ever reads -- confirmed, since every consumer of the folded
+ *      value only ever reads `dl`/`al`) via plain C division/modulo
+ *      instead of hand-transcribing the exact x87-free integer
+ *      reciprocal-multiply trick the compiler chose -- a confirmed-
+ *      honest simplification (same class of simplification as
+ *      `CSTGCPUInfo`'s `1.0f/x` for `rcpss`, engine_startup_bits.cpp),
+ *      NOT verified against real hardware since a front-panel key
+ *      transpose/octave sum extreme enough to hit this fold is a rare
+ *      edge case -- see HARDWARE_REVIEW_LOG.md.
+ *   5. this[4+keyNum] = noteFinal; this[0x84+keyNum] = channel (from
+ *      CSTGGlobal::sInstance+0x6b9, the SAME confirmed real MIDI-channel
+ *      field UpdateMIDIChannel writes, oa_global.h) -- a per-key "what
+ *      note/channel did we actually send" record, confirmed read back
+ *      by HandleKeyOff below.
+ *   6. STGAPIFrontPanelStatus::sInstance[STGAPI_OFF_MIDI_ECHO0/1] =
+ *      {noteFinal, velocity} -- confirmed: both are the SAME final
+ *      (post-fold) values, not the raw pre-fold sum (traced carefully:
+ *      the real code's `edi`/`edx` registers get overwritten with the
+ *      folded result on every path, including the two fold branches,
+ *      before this store).
+ *   7. Sends a real 5-byte message `{channel|0x90, noteFinal, velocity,
+ *      1, 0xfe}` via CSTGMidiPortManager::sInstance+0x208's embedded
+ *      CSTGMidiQueueWriter (the SAME confirmed embedding/idiom
+ *      global.cpp's SendGlobalMidiMessage() already uses).
+ *
+ * CSTGFrontPanel::HandleKeyOff (.text+0xc070, 126 bytes) confirmed
+ * shape: same CPowerOffTimer set + CSTGMidiPortManager gate, then reads
+ * BACK this[0x84+keyNum]/this[4+keyNum] (the channel/note HandleKeyOn
+ * recorded) -- no fold logic, no CSTGGlobal/CSTGControllerRTData
+ * touched at all. Sends a real 5-byte Note-Off message
+ * `{0x80|storedChannel, storedNote, velocity, 1, 0xfe}` via the SAME
+ * CSTGMidiPortManager+0x208 embedded writer. `velocity` (arg2, ECX) is
+ * NOT looked up from any table -- passed straight from the caller.
  */
 
 #include "oa_setup_global_resources.h"
+#include "oa_keybed_init.h" /* CSTGKeybedInterface_sInstance() */
 
 /* Same per-TU local declaration convention already used by every other
  * PushUnsolicitedMessage caller in this project (global.cpp,
@@ -302,4 +360,113 @@ void ShortInvertNkS4AnalogValue(unsigned char byte0, unsigned char byte1,
 	*outHi = (unsigned short)(val >> 3);
 	if (*outLo != 0x200)
 		*outLo = (unsigned short)(0x3ff - *outLo);
+}
+
+static void SendFrontPanelKeyMidiMessage(unsigned char status, unsigned char note,
+					  unsigned char velocity)
+{
+	unsigned char msg[5];
+	msg[0] = status;
+	msg[1] = note;
+	msg[2] = velocity;
+	msg[3] = 1;
+	msg[4] = 0xfe;
+
+	CSTGMidiQueueWriter *writer =
+		(CSTGMidiQueueWriter *)((unsigned char *)CSTGMidiPortManager::sInstance + 0x208);
+	writer->Write(msg, 5, false);
+}
+
+void CSTGFrontPanel::SetLED(unsigned int code)
+{
+	if ((code - 0x49u) <= 1u) {
+		CSTGKeybedInterface *kb =
+			reinterpret_cast<CSTGKeybedInterface *>(CSTGKeybedInterface_sInstance());
+		kb->SetLED(code, 1);
+		return;
+	}
+	unsigned int packed = ((code & 0xffu) << 8) | ((code >> 8) & 0xffu);
+	OmapNKS4OutputFifo_WriteCommand((int)(packed | 0x1500000u));
+}
+
+void CSTGFrontPanel::SetLEDBlinking(unsigned int code)
+{
+	if ((code - 0x49u) <= 1u) {
+		CSTGKeybedInterface *kb =
+			reinterpret_cast<CSTGKeybedInterface *>(CSTGKeybedInterface_sInstance());
+		kb->SetLED(code, 2);
+		return;
+	}
+	unsigned int packed = ((code & 0xffu) << 8) | ((code >> 8) & 0xffu);
+	OmapNKS4OutputFifo_WriteCommand((int)(packed | 0x1510000u));
+}
+
+void CSTGFrontPanel::ResetLED(unsigned int code)
+{
+	if ((code - 0x49u) <= 1u) {
+		CSTGKeybedInterface *kb =
+			reinterpret_cast<CSTGKeybedInterface *>(CSTGKeybedInterface_sInstance());
+		kb->SetLED(code, 0);
+		return;
+	}
+	unsigned int packed = ((code & 0xffu) << 8) | ((code >> 8) & 0xffu);
+	OmapNKS4OutputFifo_WriteCommand((int)(packed | 0x1520000u));
+}
+
+void CSTGFrontPanel::HandleKeyOn(unsigned char keyNum, unsigned char velocity)
+{
+	unsigned char *self = (unsigned char *)this;
+
+	*(unsigned char *)CPowerOffTimer::sInstance = 1;
+	if (*(unsigned char *)CSTGMidiPortManager::sInstance == 0)
+		return;
+
+	unsigned char *global = (unsigned char *)CSTGGlobal::sInstance;
+	unsigned char *rtd = (unsigned char *)CSTGControllerRTData::sInstance;
+	unsigned char channel = global[0x6b9];
+
+	/* rtd[0x28]/[0x29]/[0x2a]: three unnamed CSTGControllerRTData bytes,
+	 * real semantics not determined -- see this file's own header
+	 * comment. */
+	signed char transposeSum = (signed char)(rtd[0x29] + rtd[0x28] + rtd[0x2a]);
+	int noteRaw = (int)(short)transposeSum + (int)keyNum;
+	unsigned char noteFinal;
+
+	if (noteRaw > 0x7f) {
+		/* Fold down into the top octave [0x74..0x7f], preserving the
+		 * note's pitch class -- see header comment re: div/mod
+		 * simplification. */
+		int v = noteRaw - 8;
+		int q = v / 12;
+		noteFinal = (unsigned char)((v - q * 12) + 0x74);
+	} else if (noteRaw < 0) {
+		int q = noteRaw / 12;
+		int r = noteRaw - q * 12;
+		noteFinal = (r == 0) ? 0 : (unsigned char)(noteRaw + 12);
+	} else {
+		noteFinal = (unsigned char)noteRaw;
+	}
+
+	self[4 + keyNum] = noteFinal;
+	self[0x84 + keyNum] = channel;
+
+	unsigned char *panel = STGAPIFrontPanelStatus::sInstance;
+	panel[STGAPI_OFF_MIDI_ECHO0] = noteFinal;
+	panel[STGAPI_OFF_MIDI_ECHO1] = velocity;
+
+	SendFrontPanelKeyMidiMessage((unsigned char)(channel | 0x90), noteFinal, velocity);
+}
+
+void CSTGFrontPanel::HandleKeyOff(unsigned char keyNum, unsigned char velocity)
+{
+	unsigned char *self = (unsigned char *)this;
+
+	*(unsigned char *)CPowerOffTimer::sInstance = 1;
+	if (*(unsigned char *)CSTGMidiPortManager::sInstance == 0)
+		return;
+
+	unsigned char storedChannel = self[0x84 + keyNum];
+	unsigned char storedNote = self[4 + keyNum];
+
+	SendFrontPanelKeyMidiMessage((unsigned char)(storedChannel | 0x80), storedNote, velocity);
 }

@@ -77,3 +77,54 @@ mean either a different, not-yet-identified derived vtable exists, or
 this project's own `ResolveCurrentPerformance()` formula lands somewhere
 other than a `CSTGProgram`/`CSTGCombi` in some mode this batch didn't
 consider.
+
+---
+
+## CSTGFrontPanel::HandleKeyOn — note-range-fold branches use plain C div/mod instead of the real reciprocal-multiply bit trick
+
+Uncertain: the real disassembly folds an out-of-range computed note
+number (keyNum + a 3-byte `CSTGControllerRTData` transpose/octave sum)
+back into 0-127 via a genuine x86 signed-division-by-12
+reciprocal-multiply sequence (two DIFFERENT reciprocal constants for the
+high-overflow vs low-underflow branches). This reconstruction computes
+the mathematically equivalent result via plain C `/`/`%` instead of
+hand-transcribing the exact instruction sequence -- confirmed to produce
+the identical LOW BYTE (the only part any real downstream consumer ever
+reads: the per-key state table, the MIDI Note-On message, and the
+`STGAPIFrontPanelStatus` echo bytes all only ever read `dl`/`al` in the
+real disassembly), and cross-checked by hand for four representative
+cases (in-range, +overflow, -underflow non-multiple-of-12, -underflow
+exact-multiple-of-12) in `verify/test_front_panel_key_handlers.cpp`. NOT
+verified against real hardware: this fold path only fires when a
+front-panel key's own transpose/octave sum pushes it outside 0-127,
+which would need a specific (and unusual) combination of
+`CSTGControllerRTData::sInstance[0x28]/[0x29]/[0x2a]` values -- fields
+whose own real names/semantics were not independently determined by
+this pass. A real-HW test that would help: set an extreme transpose/
+octave-shift combination via the front panel UI (if exposed) and confirm
+a physical front-panel key near the top or bottom of its range still
+sends the musically-expected (same pitch class) note.
+
+---
+
+## CSTGFrontPanel::SetLED/SetLEDBlinking/ResetLED — CSTGKeybedInterface::SetLED left as a no-op stub
+
+Not uncertain from the disassembly itself (the dispatch shape --
+2-value range check on `code`, forward to the real
+`CSTGKeybedInterface::SetLED(code, action)` for that narrow range,
+otherwise a packed command word via the already-real
+`OmapNKS4OutputFifo_WriteCommand()` -- is fully confirmed and KAT-
+covered). What's genuinely deferred is the CALLEE:
+`CSTGKeybedInterface::SetLED` itself (batch-63's own un-triaged
+candidate 1, the whole ~20-method keybed wire-protocol driver class) is
+still a no-op stub in `bar2_stubs.cpp`, so on a real Kronos this
+reconstruction would silently fail to light the two front-panel LEDs
+whose codes fall in the `0x49`/`0x4a` range (identity not independently
+determined -- `eSTGLEDCode` enum values not recovered). Every OTHER LED
+code (the vast majority) already goes out for real via
+`OmapNKS4OutputFifo_WriteCommand()`, unaffected by this gap. A real-HW
+test that would help: once `CSTGKeybedInterface::SetLED` gets its own
+real reconstruction pass, confirm which two physical LEDs
+`0x49`/`0x4a` correspond to (compare against the already-decoded keybed
+serial protocol, agent-memory `kronos_keybed_serial_protocol.md`) and
+that they light/blink/reset correctly through this path.

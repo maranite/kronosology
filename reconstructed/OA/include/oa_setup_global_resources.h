@@ -330,10 +330,76 @@ struct CMeteredDebugOutput {
 	CMeteredDebugOutput();
 };
 
+/*
+ * CSTGKeybedInterface -- MINIMAL forward declaration, `SetLED()` only.
+ * The real class is a whole ~20-method wire-protocol driver (batch-63's
+ * own un-triaged candidate 1, oa_stub_sweep_workflow.md's "Front-panel
+ * driver cluster" section) that this project has NOT reconstructed yet
+ * -- its own storage is already modeled elsewhere (`oa_keybed_init.h`'s
+ * `CSTGKeybedInterface_sInstance()`, a fixed byte blob; `sInstance`
+ * itself is confirmed real STATIC OBJECT storage, not a pointer-to-heap
+ * object, addressed directly by symbol address, never bracket-
+ * dereferenced -- see that header's own comment). This declaration
+ * exists ONLY so `CSTGFrontPanel::SetLED`/`SetLEDBlinking`/`ResetLED`
+ * can call through to the real, confirmed (`.text+0x33d8c0`, 101 bytes)
+ * `CSTGKeybedInterface::SetLED(eSTGLEDCode, eLEDAction)` -- given a
+ * deliberately-empty stub body in bar2_stubs.cpp (same "confirmed real,
+ * deliberately deferred" convention as `CSTGControllerInfo::
+ * ButtonPressHandler`/`AnalogControllerHandler` there already). Real
+ * enum types not modeled -- plain `unsigned int`, matching this file's
+ * own established convention throughout.
+ */
+class CSTGKeybedInterface {
+public:
+	void SetLED(unsigned int code, unsigned int action);
+};
+
 struct CSTGFrontPanel {
 	static CSTGFrontPanel *sInstance;
 	CSTGFrontPanel();
 	void Initialize();
+
+	/*
+	 * SetLED/SetLEDBlinking/ResetLED(eSTGLEDCode) (`.text+0xbdd0`/
+	 * `0xbe10`/`0xbe50`, 59/59/56 bytes, confirmed via objdump -dr
+	 * against OA.ko_Decomp/OA.ko) -- all three share one shape: a
+	 * 2-value range check `(code - 0x49) <= 1` on the incoming code.
+	 *   - in range (code == 0x49 or 0x4a): forwards to
+	 *     `CSTGKeybedInterface::SetLED(code, action)` on the confirmed
+	 *     real `CSTGKeybedInterface` singleton -- `action` is a
+	 *     per-method CONSTANT (1 for SetLED, 2 for SetLEDBlinking, 0 for
+	 *     ResetLED), `code` passed through UNCHANGED (this project's own
+	 *     `eLEDAction` values are the literal constants confirmed in the
+	 *     disassembly, not independently named).
+	 *   - out of range: packs `code`'s low 16 bits into a command word
+	 *     (byte-swapped -- `((code&0xff)<<8) | ((code>>8)&0xff)`,
+	 *     confirmed via the real `movzx eax,dh; movzx edx,dl; shl edx,8;
+	 *     or eax,edx` sequence) OR'd with a per-method base
+	 *     (`0x1500000`/`0x1510000`/`0x1520000`), then calls the already-
+	 *     real `OmapNKS4OutputFifo_WriteCommand()`.
+	 * `this` is unused by all three (confirmed: EAX clobbered by the
+	 * very first instruction, matching HandleSwitchEvent's own family).
+	 */
+	void SetLED(unsigned int code);
+	void SetLEDBlinking(unsigned int code);
+	void ResetLED(unsigned int code);
+
+	/*
+	 * HandleKeyOn(unsigned char keyNum, unsigned char velocity)/
+	 * HandleKeyOff(unsigned char keyNum, unsigned char velocity)
+	 * (`.text+0xbf00`/`0xc070`, 367/126 bytes, confirmed via objdump -dr)
+	 * -- raw physical front-panel key press/release (distinct from the
+	 * keybed's musical keys; `keyNum` doubles as BOTH a 128-entry
+	 * per-key state-table index at `this+0x4..0x83`/`this+0x84..0x103`
+	 * AND a direct note-number contribution, per `CSTGFrontPanel::
+	 * Initialize()`'s own confirmed identity-mapped `this+4+i=i` table,
+	 * engine_startup_bits.cpp). See src/engine/front_panel_handlers.cpp
+	 * for the full confirmed control flow and ground-truth notes
+	 * (including a documented simplification in HandleKeyOn's rare
+	 * note-range-fold branches -- see that file's own header comment).
+	 */
+	void HandleKeyOn(unsigned char keyNum, unsigned char velocity);
+	void HandleKeyOff(unsigned char keyNum, unsigned char velocity);
 
 	/*
 	 * RequestAnalogInputStatus(eSTGAnalogDeviceCode) (sec 10.131,

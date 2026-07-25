@@ -343,6 +343,16 @@ void CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) {}
  * calls in the first place, so a no-op is safe and inert. */
 void CSTGControllerInfo::ButtonPressHandler(unsigned int, bool) {}
 void CSTGControllerInfo::AnalogControllerHandler(unsigned int, unsigned short, unsigned short) {}
+/* CSTGKeybedInterface::SetLED(unsigned int, unsigned int) -- confirmed
+ * real, deliberately deferred: the full ~20-method CSTGKeybedInterface
+ * wire-protocol driver class (batch-63's own un-triaged candidate 1) is
+ * not reconstructed yet, only forward-declared with this ONE method
+ * (oa_setup_global_resources.h) -- needed as a link target now that
+ * CSTGFrontPanel::SetLED/SetLEDBlinking/ResetLED (front_panel_handlers.cpp)
+ * call it for real. Stubbed here: with no physical front-panel/keybed
+ * board attached in a VM, no real hardware LED-state event can ever
+ * reach this call in the first place, so a no-op is safe and inert. */
+void CSTGKeybedInterface::SetLED(unsigned int, unsigned int) {}
 /* CLoadBalancer::BalanceStaticLoad()/BalanceStaticLoadHelper(...) and
  * CSTGSlotVoiceData::EnableSlot() are real now, batch 18 -- see
  * src/engine/load_balancer_static.cpp. Their own fourth cluster sibling,
