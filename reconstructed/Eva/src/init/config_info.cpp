@@ -80,8 +80,32 @@ unsigned char s_atChunkInfo_placeholder[0x40] = {};
  */
 unsigned char s_atResFamilyInfo_placeholder[64] = {};
 
-/* .text+0x091ae7b0, real size confirmed 0x10 (16) via delta to s_apkcSysVars. */
-unsigned char s_tSeqTimerInfo_placeholder[0x10] = {};
+/* .text+0x091ae7b0, real size confirmed 0x10 (16) via delta to s_apkcSysVars.
+ * Real layout (confirmed field-by-field from ConfigureSeqTimer@08056ed0.c,
+ * config_manager.cpp): 4 dwords -- {mode, lowerLimitBpm, upperLimitBpm,
+ * wheelTablePtr}. UNLIKE this file's other placeholders (safe to leave all-zero
+ * because their own first field alone gates whether the real loop body ever
+ * runs), this one is NOT safe to zero: ConfigureSeqTimer() unconditionally
+ * dereferences field 3 as a pointer (`*(int*)sm_ptSeqTimerInfo[3]`) with no
+ * NULL check, and unconditionally passes fields 1/2 to BPM::SetLowerLimit()/
+ * SetUpperLimit() (tempo.cpp), which divide by them with no zero-guard --
+ * both are real, faithfully-preserved hazards in the real binary too (a real
+ * Kronos always has non-zero, well-formed config data here; only THIS
+ * reconstruction's own placeholder convention risked introducing an artificial
+ * crash). Given sane, real-constant-matching non-zero defaults instead: 40/240
+ * BPM (matching BPM::sm_LowerLimit's OWN real static-data initial value of 40,
+ * tempo.cpp, and MPQN's real static-ctor pairing of 250000/1500000us <->
+ * 240/40 BPM) and a valid pointer to a zeroed 2-dword (id=0-terminated) wheel
+ * sub-table instead of NULL. mode=0 (falls to ConfigureSeqTimer()'s real
+ * "default timer type" else-branch).
+ */
+unsigned int s_atSeqTimerWheelTable_placeholder[2] = {};
+unsigned int s_tSeqTimerInfo_placeholder[4] = {
+	0,   /* mode: 0 = default timer type */
+	40,  /* lowerLimitBpm */
+	240, /* upperLimitBpm */
+	(unsigned int)(unsigned long)s_atSeqTimerWheelTable_placeholder,
+};
 
 /* .text+0x08e79ab0 -- entirely separate region; size unconfirmed, rounded placeholder. */
 unsigned char s_ktVersionInfo_placeholder[16] = {};

@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **`CSTGUnsolMsgHandler` batch 2 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch (see its own section below). 145 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch. 155 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -1967,3 +1967,101 @@ zero new signal.
 `OnTimeout`, confirmed-empty) under a new "Stage 6: breadth sweep,
 CClientCommServer/CSysExMsgTaskBase follow-up" section. Regenerated: 140 → 147 of
 37,795.
+
+## Stage 6: breadth sweep, batch 2026-07-25b — CConfigManager's remaining
+## `CKernel::InitUserLayer()` steps + BPM/MPQN
+
+Per this session's own `/goal` directive: continue the broad `nm -C` class-inventory
+sweep of the ground-truth binary (`/home/share/Decomp/EVA_Decomp/Eva`) for
+boot-path-reachable, unclaimed territory, explicitly staying away from
+`CTask`/`CModule`/`CLimiterMan`/`CSysExMsgTaskBase`/`CSTGUnsolMsgHandler` (a
+concurrent agent's own territory this session).
+
+### Survey
+
+Rather than a fresh `nm -C` class hunt, the most tractable unclaimed territory
+turned out to be finishing off a cluster this project had *already* identified but
+left Tier-B: `CKernel::InitUserLayer()`'s own 9-step user-layer bring-up
+(`ckernel.cpp`), of which only `SetupSysex()` had been made real (prior batch). The
+other 8 were re-surveyed individually (real `.text` addresses/sizes via `nm -C -S`,
+full decompile read via `Decomp/EVA_Decomp/eva_export/functions/`):
+
+| Method | Address | Size | Verdict |
+|---|---|---|---|
+| `SetupRouting()` | `08056d80` | 1 byte | **Pursued.** Confirmed genuinely empty (`return;`) in the real binary — promoted to Tier A as a documented-empty function, same "read every one, don't assume" treatment `CSTGUnsolMsgHandler`'s own 8 confirmed-empty slots got. |
+| `MakeConnections()` | `08056d90` | 312 bytes | **Pursued.** Walks `sm_ptConnectInfo` (stride 20 dwords), dispatches through `Api`+0x44 up to 4×/entry. No vtable bump needed (`Api`'s own array is already 94 slots). |
+| `RegisterChunkServer()` | `08056a50` | 316 bytes | **Pursued.** One call (registering `CResMan`/"ResourceManager" as a chunk server) plus the `Finalize()`/`IsOK()` assert tail execute *unconditionally*, regardless of `sm_ptChunkInfo`'s own contents — required bumping `ChkApi`'s vtable array (was 6 slots, needed offset `+0x38` = slot 14) and adding `CResMan::SysName`/`sm_kbyCurrentVersion`/`sm_kbyCurrentRelease` as new Tier-B placeholder data (real values confirmed by direct `.rodata`/`.data` byte read: `"ResourceManager"`/0/0, not guessed). |
+| `LinkRTRouterTracks()` | `08056840` | 511 bytes | **Pursued.** `RTRouterApi->Reset()` (`+0x2c`) fires unconditionally at function entry — required bumping `RTRouterApi`'s vtable array (was 6 slots, needed offset `+0x3c` = slot 15). Per-entry loop body itself is dead given today's zeroed `sm_ptRTRouterInfo` placeholder. |
+| `ConfigureSeqTimer()` | `08056ed0` | 295 bytes | **Pursued — found and fixed a real crash risk.** See "The divide-by-zero hazard" below. Required bumping `SeqApi`'s vtable array (was 6 slots, needed offset `+0x48` = slot 18) and adding new `BPM`/`MPQN` classes (`tempo.h`/`tempo.cpp`). |
+| `CreateResourceFamilies()` | `08057010` | 1802 bytes | **Not pursued.** By far the largest of the 9; depends on `CZ` (a custom string-set container class, 247 methods per `nm -C`, entirely unreconstructed) for its own per-entry name-parsing logic — genuinely deep, out of proportion with this batch's scope. |
+| `CreateUserModules()` | `08056440` | 778 bytes | **Not pursued.** Walks a *second*, distinct array embedded in `CModuleManager` at `g_poModuleManager+0x28`/`+0x30` (a "module factory" registry) — NOT the same structure as the already-reconstructed `mModules` at `+0x04`/`+0x08` (`AddModule()`, batch 3). Reconstructing this would mean reverse-engineering a whole new `CModuleManager` sub-structure that batch 3 didn't touch; deferred as its own future unit of work. |
+| `CreateFMDrivers()` | `08056760` | 204 bytes | **Not pursued.** Same `FMApi`-vtable-dispatched factory-array idiom as `CreateUserModules()` (`(**(code**)(*FMApi+0x2c))(FMApi,name)` returning a factory object, then invoking *that* object's own vtable slot+8 constructor) — same reasoning, deferred alongside it. |
+
+### The divide-by-zero hazard
+
+`ConfigureSeqTimer()`'s real tail unconditionally calls `BPM::SetLowerLimit()`/
+`SetUpperLimit()` (new, `tempo.h`/`tempo.cpp` — real, tiny classes at
+`.text+0x0816ba80`/`0x0816bb10`, confirmed via `nm -C -S`) with values read straight
+from `sm_ptSeqTimerInfo`'s own table. Both `BPM::SetLowerLimit`/`SetUpperLimit`
+divide `60000000` by their own argument with **no zero-guard** — a real hazard
+confirmed present in the actual disassembly too, not introduced by this
+reconstruction. Every other config-table placeholder in `config_info.cpp` is safe
+to leave all-zero, because each one's own *first* field alone gates whether its
+real loop body ever runs — but `ConfigureSeqTimer()` reaches this call
+*unconditionally*, and also unconditionally dereferences a 4th table field as a
+pointer with no NULL check. Left as an all-zero placeholder, this reconstruction's
+own convention would have introduced an artificial `SIGFPE`/segfault that the real
+binary (which always has well-formed, non-zero config data) never hits.
+
+Fixed by giving `config_info.cpp`'s `SeqTimerInfo` placeholder sane, non-zero, real-
+constant-matching defaults instead: 40/240 BPM (40 matches `BPM::sm_LowerLimit`'s
+own real `.data` initial value, confirmed by direct byte read; 240/40 BPM pairs with
+the real static-ctor-set `MPQN::sm_LowerLimit`/`sm_UpperLimit` = 250000/1500000us,
+`BPM::_GLOBAL__I_sm_LowerLimit`, `.text+0x0816bc00`) and a valid pointer to a zeroed,
+`0`-terminated wheel sub-table instead of `NULL`. This is the same class of fix as
+the earlier `EditApiInstance` pointer-vs-object bug and the undersized
+`PTR__CXxxApiInstance_*` vtable arrays — a genuine hazard this reconstruction's own
+placeholder convention would introduce, found and fixed, not silently worked
+around.
+
+### Verification
+
+New `verify/test_tempo.cpp` (14 checks): the real cross-wiring where
+`SetLowerLimit()` writes `MPQN::sm_UpperLimit` (not `sm_LowerLimit`) and vice versa,
+the `60000000/bpm` formula, the real self-healing branch (setting one limit past
+the other forces the other one up/down to match, rather than rejecting the call),
+and the real static-ctor defaults (250000/1500000). New
+`verify/test_config_manager_boot_slice.cpp` (12 checks): chains the real
+`SetConfigInfo()` into all 5 newly-real `CConfigManager` methods in
+`CKernel::InitUserLayer()`'s own real call order and confirms both "runs to
+completion without crashing" (the actual point, given the divide-by-zero hazard
+above) and that the real values flow all the way through to `BPM`/`MPQN`'s final
+state.
+
+`make objs`: clean, no errors. `make verify`: every **pre-existing** verify binary
+plus both new ones pass with 0 failures — checked individually rather than via a
+bare `make verify` run, because the concurrent `CTask`/`CModule`-family agent's own
+in-progress `test_task` binary was mid-edit and segfaulting at the time (confirmed,
+via a temporary `git stash` of exactly their own touched files + rebuild + rerun +
+`git stash pop`, to be pre-existing in *their* uncommitted work, not caused by
+anything in this batch). `tools/build_lenny.sh` (real on-image-lib link): `LINK OK`,
+zero new unresolved symbols.
+
+No live `kronos_vm` boot test this batch, unlike most of this cluster's siblings
+(batch 3's `AddModule()`/`Setup()`/`Config()` chain, for instance, *did* get one) —
+despite this batch's own functions genuinely being on the currently-wired,
+already-exercised boot path (`CKernel::InitUserLayer()`), the concurrent agent's
+`task.cpp`/`limiter_man.cpp`/`system_api.h`/`omega_vtables.h` are mid-edit in the
+same tree with a confirmed-segfaulting host-side test; a full-binary VM boot right
+now risks observing *their* in-progress bug, not this batch's own code, with no
+clean way to attribute a crash to one or the other. Deferred rather than risking a
+misleading result — worth doing once their batch lands cleanly.
+
+### Manifest delta
+
+`gen_manifest.py`: added `08056d80` (`CConfigManager::SetupRouting`, confirmed-empty),
+`08056d90` (`MakeConnections`), `08056a50` (`RegisterChunkServer`), `08056840`
+(`LinkRTRouterTracks`), `08056ed0` (`ConfigureSeqTimer`), `0816ba80`
+(`BPM::SetLowerLimit`), `0816bb10` (`BPM::SetUpperLimit`), `0816bc00`
+(`BPM::_GLOBAL__I_sm_LowerLimit`, the static ctor) under a new "Stage 6: breadth
+sweep, batch 2026-07-25b" section. Regenerated: 147 → 155 of 37,795.

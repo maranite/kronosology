@@ -33,9 +33,12 @@ public:
 	 */
 	static void AssignEditServerIDs();
 
-	/* CKernel::InitUserLayer()'s own 9-step user-layer bring-up (ckernel.cpp) --
-	 * .text addresses not individually looked up (out of scope for this pass); all 9
-	 * are Tier-B link-stubs (empty bodies), see config_manager.cpp.
+	/* CKernel::InitUserLayer()'s own 9-step user-layer bring-up (ckernel.cpp).
+	 * SetupSysex/SetupRouting/MakeConnections/RegisterChunkServer/
+	 * LinkRTRouterTracks/ConfigureSeqTimer are real (Tier A), transcribed from
+	 * their own .text addresses -- see config_manager.cpp's file header for the
+	 * full breakdown. CreateResourceFamilies/CreateUserModules/CreateFMDrivers
+	 * remain Tier-B link-stubs (empty bodies) -- see config_manager.cpp.
 	 */
 	static void ConfigureSeqTimer();
 	static void CreateResourceFamilies();

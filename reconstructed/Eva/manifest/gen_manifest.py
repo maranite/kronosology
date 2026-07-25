@@ -254,6 +254,33 @@ RECONSTRUCTED = {
     "08184ed0",  # CSysExMsgTaskBase::OnSexLinkError (confirmed-empty)
     "08184ec0",  # CSysExMsgTaskBase::OnReceiveMessage (confirmed-empty)
     "08184ee0",  # CSysExMsgTaskBase::OnTimeout (confirmed-empty)
+
+    # --- Stage 6: breadth sweep, batch 2026-07-25b (CConfigManager's remaining
+    # CKernel::InitUserLayer() bring-up steps + BPM/MPQN). Broad nm -C sweep of the
+    # ground-truth binary for unclaimed territory (explicitly avoiding CTask/CModule/
+    # CLimiterMan/CSysExMsgTaskBase/CSTGUnsolMsgHandler, a concurrent agent's own
+    # territory this session); found this cluster by finishing off CConfigManager's
+    # own already-identified Tier-B stub group (SetupSysex was already done in the
+    # prior batch above). SetupRouting confirmed genuinely a 1-byte `return;` in the
+    # real binary. ConfigureSeqTimer's own real tail unconditionally calls
+    # BPM::SetLowerLimit()/SetUpperLimit() (tempo.cpp, new) -- config_info.cpp's
+    # own SeqTimerInfo placeholder had to be given sane non-zero BPM defaults
+    # (40/240) instead of the usual all-zero convention, since BPM's own real
+    # SetLowerLimit/SetUpperLimit divide by their argument with no zero-guard (a
+    # real hazard this reconstruction pass's own placeholder data would otherwise
+    # trigger). ChkApi/SeqApi/RTRouterApi's own vtable arrays (mains.cpp) bumped
+    # past their old 6-slot bound to safely cover the new real offsets dispatched
+    # through (same "give headroom" fix already applied to EditApiInstance's own
+    # array). See config_manager.cpp/config_info.cpp/tempo.h/tempo.cpp for the
+    # full writeup.
+    "08056d80",  # CConfigManager::SetupRouting (confirmed-empty)
+    "08056d90",  # CConfigManager::MakeConnections
+    "08056a50",  # CConfigManager::RegisterChunkServer
+    "08056840",  # CConfigManager::LinkRTRouterTracks
+    "08056ed0",  # CConfigManager::ConfigureSeqTimer
+    "0816ba80",  # BPM::SetLowerLimit(unsigned int)
+    "0816bb10",  # BPM::SetUpperLimit(unsigned int)
+    "0816bc00",  # BPM::_GLOBAL__I_sm_LowerLimit (static ctor -> MPQN defaults)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

@@ -639,6 +639,17 @@ void *SysExApi = 0;
  * that happens to never execute" case: these five handlers hit it on every
  * call. Same fix shape as WORKAROUND #1 above, just a bigger array (20 slots
  * gives headroom past the highest confirmed offset, +0x3c).
+ *
+ * WORKAROUND #3 (Stage 6 breadth sweep, batch 2026-07-25b, config_manager.cpp):
+ * ChkApi/SeqApi/RTRouterApi (3 of the remaining 5 untouched-past-slot-5 arrays)
+ * bumped for the same reason -- CConfigManager::RegisterChunkServer()/
+ * ConfigureSeqTimer()/LinkRTRouterTracks() dispatch through ChkApi+0x38 (slot
+ * 14), SeqApi+0x48 (slot 18), and RTRouterApi+0x2c (slot 11, UNCONDITIONALLY --
+ * the one real "not even data-gated" case of the three, see LinkRTRouterTracks()'s
+ * own comment) respectively -- all past the old 6-slot bound. ChkApi -> 16,
+ * SeqApi -> 20 (matches EditApiInstance's own headroom convention), RTRouterApi
+ * -> 16. DumpApi/RMApi are untouched -- nothing reconstructed dispatches through
+ * either past slot 5 yet.
  */
 extern "C" void *PTR__CEditApiInstance_08e85da8[20] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -647,21 +658,28 @@ extern "C" void *PTR__CEditApiInstance_08e85da8[20] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-extern "C" void *PTR__CSeqApiInstance_08e88fa8[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+extern "C" void *PTR__CSeqApiInstance_08e88fa8[20] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-extern "C" void *PTR__CChkApiInstance_08e855c8[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+extern "C" void *PTR__CChkApiInstance_08e855c8[16] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CDumpApiInstance_08e85ba8[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-extern "C" void *PTR__CRTRouterApiInstance_08e822e8[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+extern "C" void *PTR__CRTRouterApiInstance_08e822e8[16] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
