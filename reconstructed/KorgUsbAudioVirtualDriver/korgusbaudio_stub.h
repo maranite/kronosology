@@ -84,17 +84,28 @@ void  KorgUsbAudioPrintIndices(void);
  * KorgUsbMidi (etc.) & KorgUsbRealtimeMidiOutput (etc.) family -- same real binary,
  * combined audio+MIDI driver (confirmed via readelf -sW on the real
  * KorgUsbAudioDriver.ko: both families are exported from the same
- * object). Only KorgUsbMidiOutput's argument shape was disassembly-
- * confirmed in this pass (three args under -mregparm=3: a port index,
- * a data pointer, a length) -- the rest use the same shape by
- * inference, not independently confirmed.
+ * object).
+ *
+ * UPDATE (OA.ko reconstruction, reconstructed/OA/src/engine/
+ * midi_korgusb_port.cpp): full `objdump -dr` of OA.ko's own real call
+ * sites (`CKorgUsbAudioDriverMidiPorts::CMidiPortPair::Connect()`/
+ * `Disconnect()`, `CSTGMidiOutPortKorgUsb`'s ctor) proves this file's
+ * PRIOR signatures here were a real ABI mismatch, not just an
+ * unconfirmed guess: `KorgUsbMidiInitialize`/`Initialized`/`Done` all
+ * take a real `int idx` argument (`Initialize` additionally takes 2
+ * `unsigned int` buffer-size args + a `void *userdata`, regparm(3) + 1
+ * stack arg), and `KorgUsbMidiOutput`/`KorgUsbRealtimeMidiOutput`
+ * return `void` (not `int`) and take `unsigned char *` (not
+ * `const void *`). Fixed here to match OA.ko's own confirmed real
+ * calling convention -- see MASTER_REFERENCE.md/HARDWARE_REVIEW_LOG.md
+ * for the cross-reference; this is the actual real ABI, not inference.
  */
-int  KorgUsbMidiInitialize(void);
-int  KorgUsbMidiInitialized(void);
-int  KorgUsbMidiDone(void);
-int  KorgUsbMidiOutput(int port, const void *data, unsigned int length);
+int  KorgUsbMidiInitialize(int idx, unsigned int bufSizeA, unsigned int bufSizeB, void *userdata);
+int  KorgUsbMidiInitialized(int idx);
+int  KorgUsbMidiDone(int idx);
+void KorgUsbMidiOutput(int port, unsigned char *data, unsigned int length);
 int  KorgUsbMidiOutputCanSend(int port);
-int  KorgUsbRealtimeMidiOutput(int port, const void *data, unsigned int length);
+void KorgUsbRealtimeMidiOutput(int port, unsigned char *data, unsigned int length);
 int  KorgUsbRealtimeMidiOutputCanSend(int port);
 
 /*

@@ -96,13 +96,16 @@ void KorgUsbAudioPrintIndices(void)
 {
 }
 
-int KorgUsbMidiInitialize(void) { return 0; }
-int KorgUsbMidiInitialized(void) { return 1; }
-int KorgUsbMidiDone(void) { return 0; }
-int KorgUsbMidiOutput(int, const void *, unsigned int) { return 0; }
-int KorgUsbMidiOutputCanSend(int) { return 1; }
-int KorgUsbRealtimeMidiOutput(int, const void *, unsigned int) { return 0; }
-int KorgUsbRealtimeMidiOutputCanSend(int) { return 1; }
+/* Real ABI (see korgusbaudio_stub.h's own header comment, confirmed via
+ * OA.ko's own disassembly): idx/port-index args, real void return on the
+ * Output pair. */
+int  KorgUsbMidiInitialize(int, unsigned int, unsigned int, void *) { return 0; }
+int  KorgUsbMidiInitialized(int) { return 1; }
+int  KorgUsbMidiDone(int) { return 0; }
+void KorgUsbMidiOutput(int, unsigned char *, unsigned int) { }
+int  KorgUsbMidiOutputCanSend(int) { return 1; }
+void KorgUsbRealtimeMidiOutput(int, unsigned char *, unsigned int) { }
+int  KorgUsbRealtimeMidiOutputCanSend(int) { return 1; }
 
 /* See korgusbaudio_stub.h's own header comment for the "wrong real-hardware
  * home, pragmatic VM stand-in" discrepancy note. Trivial: just remembers

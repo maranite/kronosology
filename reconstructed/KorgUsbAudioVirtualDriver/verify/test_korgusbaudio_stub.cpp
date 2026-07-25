@@ -57,16 +57,18 @@ int main(void)
 	check_eq("KorgUsbAudioInputStarving() == 0", KorgUsbAudioInputStarving(), 0);
 	check_eq("KorgUsbAudioOutputStarving() == 0", KorgUsbAudioOutputStarving(), 0);
 
-	printf("[5] MIDI family: always report ready/success\n");
-	check_eq("KorgUsbMidiInitialize() == 0", KorgUsbMidiInitialize(), 0);
-	check_eq("KorgUsbMidiInitialized() == 1", KorgUsbMidiInitialized(), 1);
+	printf("[5] MIDI family: always report ready/success -- real ABI (idx/port args,\n"
+	       "    void return on Output), fixed to match OA.ko's own confirmed real\n"
+	       "    calling convention (see korgusbaudio_stub.h's own header comment)\n");
+	char midiBuf[1] = { 'x' };
+	check_eq("KorgUsbMidiInitialize(0,...) == 0", KorgUsbMidiInitialize(0, 0x400, 0x400, 0), 0);
+	check_eq("KorgUsbMidiInitialized(0) == 1", KorgUsbMidiInitialized(0), 1);
 	check_eq("KorgUsbMidiOutputCanSend(0) == 1", KorgUsbMidiOutputCanSend(0), 1);
-	check_eq("KorgUsbMidiOutput(...) == 0", KorgUsbMidiOutput(0, "x", 1), 0);
+	KorgUsbMidiOutput(0, (unsigned char *)midiBuf, 1); /* void return -- must not crash */
 	check_eq("KorgUsbRealtimeMidiOutputCanSend(0) == 1",
 		 KorgUsbRealtimeMidiOutputCanSend(0), 1);
-	check_eq("KorgUsbRealtimeMidiOutput(...) == 0",
-		 KorgUsbRealtimeMidiOutput(0, "x", 1), 0);
-	check_eq("KorgUsbMidiDone() == 0", KorgUsbMidiDone(), 0);
+	KorgUsbRealtimeMidiOutput(0, (unsigned char *)midiBuf, 1); /* void return -- must not crash */
+	check_eq("KorgUsbMidiDone(0) == 0", KorgUsbMidiDone(0), 0);
 
 	printf("[6] USBMidiAccessory_SetDrumPadClient: trivial VM stand-in (see\n"
 	       "    korgusbaudio_stub.h's own header comment for the real-hardware-\n"
