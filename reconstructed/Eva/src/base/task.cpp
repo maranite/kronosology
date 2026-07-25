@@ -30,6 +30,12 @@
  */
 extern CSystemApi *Api;
 
+/* Test/stub-only placeholder ctor -- see task.h header comment. Not ground truth. */
+CTask::CTask()
+{
+	memset(this, 0, sizeof(*this));
+}
+
 CTask::CTask(const CModule &owner, const char *name, int level, int scheduleFlag,
              unsigned short lastArg)
 {

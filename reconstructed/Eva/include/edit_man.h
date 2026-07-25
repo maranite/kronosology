@@ -69,10 +69,31 @@ class CEditServer;
  * (`Notify(group, index, subIndex)`, called by `CMainTask::Notify()` below).
  * Not independently reconstructed, same "opaque interface pointer" treatment as
  * `CIfcUnknown` (task.h).
+ *
+ * UPDATE (Stage 6 CEditor batch, 2026-07-25): real total size is now confirmed
+ * as 0xc (12) bytes, not just the 4-byte vtable pointer -- CEditor's own ctor
+ * (editor.h) embeds a CEditClient sub-object at +0x2c immediately followed by a
+ * CEditServer sub-object at +0x38 (edit_server.h, itself confirmed exactly
+ * 0x40038 bytes), so 0x38-0x2c == 0xc exactly. The real ctor/dtor
+ * (CEditClient::CEditClient()/~CEditClient(), .text+0x0806e470/0x0806e3f0) and
+ * the 4 real named methods this class ALSO has in ground truth
+ * (BlockRegister/Register/Unregister/NotifyControls/OnNotify, all operating on
+ * a TPtrArray<CEditControl>-shaped member somewhere in the remaining 8 bytes)
+ * are still genuinely out of scope -- a separate, non-trivial class in its own
+ * right (confirmed via `nm -C`: 9 real methods total, own `TPtrArray<CEditClient>`
+ * container elsewhere too), deferred to its own future pass, same as
+ * `CEditor::CMainTask`'s own deferred Peg-construction tail (editor.h). Ctor/dtor
+ * here are Tier-B link-stubs (real signature, empty body, see edit_man.cpp) --
+ * exactly enough for CEditor's own composed sub-object to construct/destruct
+ * without guessing the remaining 8 bytes' real layout.
  */
 class CEditClient {
 public:
+	CEditClient();
+	~CEditClient();
+
 	void *mVtbl;
+	unsigned char mUnknown04[8]; /* real fields, not yet reconstructed -- see above */
 };
 
 class CEditMan : public CModule {

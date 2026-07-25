@@ -299,3 +299,22 @@ void *PTR__TPtrArray_08e85f40[3] = {
  * EvaDataPlaceholder_08e82144 (omega_vtables.cpp).
  */
 int EvaDataPlaceholder_08e85f04;
+
+/* CEditClient::CEditClient()/~CEditClient() -- Tier-B link-stubs, see edit_man.h's
+ * own header comment. Real ctor (.text+0x0806e470) installs CEditClient's own
+ * vtable and (per every other real CObjectBase-shaped ctor in this project)
+ * presumably zeroes its own remaining fields; real dtor (.text+0x0806e3f0) calls
+ * `CEditApiInstance::UnregisterClient(&EditApiInstance, this)` -- CEditApiInstance
+ * itself is not reconstructed here (separate class, edit_man.h's own deferred-scope
+ * note), so this is left as a real-signature no-op rather than a guessed partial
+ * implementation.
+ */
+CEditClient::CEditClient()
+{
+	mVtbl = 0;
+	memset(mUnknown04, 0, sizeof(mUnknown04));
+}
+
+CEditClient::~CEditClient()
+{
+}

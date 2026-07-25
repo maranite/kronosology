@@ -3,42 +3,56 @@
  * two Tier-B method declarations added by the Stage 6 CSTGUnsolMsgHandler pass
  * (2026-07-25, see stg_unsol_msg_handler.h).
  *
- * CPanelIfcTask itself (constructor, instance fields, vtable, every other real
- * method -- SetupPanelInterface/OnTouchPanelEvent/OnButtonEvent/Exec/SetLEDStatus/
- * ShortBeep/EnterDiagnostics/SetAllLED) is NOT reconstructed here. UPDATE (Stage 6,
- * 2026-07-25, CTask::CTask() reconstruction batch): the real constructor's
- * (.text+0x0824b7e0) own `CTask` base-construction call is now itself reconstructed
- * for real (task.h/task.cpp) -- confirmed via direct disassembly to be
- * `CTask::CTask(this, param_1, "PanelIfcTask", 3, 1, 0x804b)`. The REMAINING reason
- * `CPanelIfcTask`'s own ctor stays out of scope is its post-CTask::CTask() tail: real
- * multiple-inheritance work constructing a second malloc'd sub-object (`COutLinkMono`,
- * 0x3c bytes) and installing it via a `this+8`-adjusted secondary vtable pointer (a
- * classic Itanium virtual-thunk pattern) -- genuinely Peg/UI-editor-toolkit depth
- * (COutLinkMono/CIfcUnknown-adjustment-thunk machinery), not CModule/CTask/
- * CLevelManagerArray/CPoller family depth. `CEditor::Setup()` (.text+0x08249b60,
- * the real caller of this ctor) IS confirmed on the already-real boot-path spine
- * (dispatched by CModuleManager::Setup(), from CKernel::InitSystemLayer()) -- see
- * task.h/module.h for the full writeup -- but `CEditor` itself (a CModule-derived
- * class with its own deep Peg/UI construction, `CEditorConstructor`) is not
- * reconstructed, so this reconstruction's own call graph does not yet actually reach
- * `CPanelIfcTask::CPanelIfcTask()` regardless. Only SetMargin/GetMargin (real
- * boot-path calls, Tier A) and OnAnalogEvent/OnEncoderEvent (declared, not
- * implemented -- Tier B call-contract externs CSTGUnsolMsgHandler needs) are present.
- * The rest of CEditor::CPanelIfcTask -- and CEditor itself -- is Peg/UI-toolkit-
- * adjacent territory, deliberately out of scope for this pass (see PLAN.md Stage 4).
+ * UPDATE (Stage 6 CEditor batch, 2026-07-25): `CEditor` itself is now a real class
+ * (editor.h) rather than a placeholder namespace, so `CPanelIfcTask` is declared
+ * there (forward, as a nested type) and defined out-of-line HERE as a genuine
+ * nested class `CEditor::CPanelIfcTask` -- same "declare nested, define
+ * out-of-line in the sub-object's own file" shape C++ has always supported, just
+ * not needed until CEditor itself existed. Every existing caller that already
+ * wrote `CEditor::CPanelIfcTask::Xxx(...)` (eva_main.cpp, stg_unsol_msg_handler.h/
+ * .cpp) compiles unchanged -- qualified-name lookup doesn't care whether the
+ * enclosing scope is a namespace or a class.
+ *
+ * `CPanelIfcTask` itself (instance fields, vtable, every real instance method --
+ * SetupPanelInterface/OnTouchPanelEvent/OnButtonEvent/Exec/SetLEDStatus/ShortBeep/
+ * EnterDiagnostics/SetAllLED) is STILL not reconstructed here -- see editor.h's own
+ * header comment for a detailed tractability finding (all of the above turn out to
+ * be fully reconstructable now, routing through the already-real
+ * `COutLinkMono::OutMono()` IPC primitive; only `Exec()`'s own bare-CTask-poll
+ * override needs a brand-new, byte-exact-verified `CPanelIfcTask`/anonymous-
+ * `CPanelCfg` vtable pair, genuinely a separate class's worth of work) --
+ * deliberately left as a dedicated future pass rather than folded into this one.
+ *
+ * ALSO ADDED this pass: real inheritance from `CTask` (ground truth's own
+ * `CEditor::CPanelIfcTask::CPanelIfcTask()` begins with a real
+ * `CTask::CTask(owner, "PanelIfcTask", 3, 1, 0x804b)` base-construction call,
+ * CPanelIfcTask@0824b7e0.c) -- needed so `CEditor::Setup()` (editor.cpp) can
+ * `CModule::Add()` a `CPanelIfcTask*` through its real `CTask*` parameter,
+ * matching ground truth's own actual call shape rather than faking a cast. A
+ * second constructor overload, `CPanelIfcTask(CEditor*, void*)`, matches the
+ * real ctor's own signature (`(CEditor const&, PegScreen*)`) and DOES perform
+ * that one real base-construction statement for real -- the rest of the real
+ * ctor body (COutLinkMono sub-object + CSTGUnsolMsgHandler construction, own
+ * new vtable install) stays Tier-B/deferred, see header comment above. The
+ * pre-existing no-argument constructor is KEPT (not replaced) so
+ * `verify/test_stg_unsol_msg_handler.cpp`'s existing `CEditor::CPanelIfcTask
+ * fakeOwner;` stack object keeps compiling unchanged -- it now default-
+ * constructs its `CTask` base via that class's own new test-only placeholder
+ * ctor (task.h), which does NOT match any real ground-truth call site either.
  */
 
 #ifndef PANEL_IFC_TASK_H
 #define PANEL_IFC_TASK_H
+
+#include "editor.h"
+#include "task.h"
 
 namespace CPanelOut {
 struct SAnalogEvt;
 struct SEncoderEvt;
 }
 
-namespace CEditor {
-
-class CPanelIfcTask {
+class CEditor::CPanelIfcTask : public CTask {
 public:
 	/* Real enum recovered from Ghidra's prototype (CEditor::CPanelIfcTask::EMargin);
 	 * exact member names are not confirmed, only that main() calls this with
@@ -50,6 +64,21 @@ public:
 		kMargin2 = 2,
 		kMargin3 = 3,
 	};
+
+	/* Pre-existing default ctor -- kept for source compatibility with the
+	 * already-committed `verify/test_stg_unsol_msg_handler.cpp` stack object.
+	 * Never matched any real ground-truth call site.
+	 */
+	CPanelIfcTask();
+
+	/* .text+0x0824b7e0, 336 bytes real signature -- `owner`/`screen` match
+	 * ground truth's own `(CEditor const&, PegScreen*)` (screen kept `void*`
+	 * here, PegScreen not reconstructed). Tier-B link-stub: `CEditor::Setup()`
+	 * needs this to link/call, but the real body (CTask::CTask() base call +
+	 * COutLinkMono sub-object construction + CSTGUnsolMsgHandler construction)
+	 * is deferred, see this file's own header comment.
+	 */
+	CPanelIfcTask(CEditor *owner, void *screen);
 
 	/* Bounds-checked write into a 4-entry static byte table (values >= 0x32 are
 	 * silently dropped -- real behavior, not a bug).
@@ -73,7 +102,5 @@ public:
 	void OnAnalogEvent(const CPanelOut::SAnalogEvt *evt);
 	void OnEncoderEvent(const CPanelOut::SEncoderEvt *evt);
 };
-
-} /* namespace CEditor */
 
 #endif /* PANEL_IFC_TASK_H */

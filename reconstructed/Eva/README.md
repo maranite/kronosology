@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`). 341 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`), and a dedicated `CEditor` batch (15 direct methods + ctor/dtor, real multiple-inheritance vtable cluster, new self-contained `CParameterString` class -- see that section for the full `Setup()` fan-out analysis and what's deferred). 363 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -2287,3 +2287,162 @@ DumpManager batch above already used.
 `gen_manifest.py`: added 26 functions (13 `CHIDDriver`, 8 `CLinuxPanelDriver`, 5
 `USTGAPIFrontPanel`) under a new "Stage 6: breadth sweep, CHIDDriver/
 CLinuxPanelDriver batch" section. Regenerated: 265 → 291 of 37,795.
+
+## Stage 6: breadth sweep, dedicated `CEditor` batch — 2026-07-25
+
+`CEditor` finally gets its own class (`include/editor.h`, `src/editor/editor.cpp`) --
+previously only a placeholder `namespace CEditor` holding `CPanelIfcTask::SetMargin`
+(Stage 1) and later `CSTGUnsolMsgHandler`'s own instance-method declarations
+(Stage 6). `CEditor::Setup()` (.text+0x08249b60) was flagged as "real,
+boot-path-central, but fans out broadly -- deferred for a dedicated pass" by the
+`CHIDDriver`/`CLinuxPanelDriver` batch immediately above; this batch is that pass.
+
+**Fan-out mapped in full before writing any code** (per this batch's own
+instruction): `Setup()` mallocs+constructs 4 sibling `CTask`-derived objects
+(`CModule::Add()`-ing each, already real) -- `CMainTask` (0x8c bytes),
+`CPanelIfcTask` (0xb8 bytes), `CChunkServerTask` (0x94 bytes, unconditional), and
+`CAlphaKeybIfcTask` (0x84 bytes, only if the ctor's own optional
+"ALPHAKEYBOARD" config string equals "Yes"). Each investigated individually rather
+than assumed uniform:
+
+- **CMainTask**: PARTIALLY tractable. Its own real ctor's FIRST statement
+  (`CTask::CTask(owner, "MainTask", 4, 1, 0x804b)`) is already-real infrastructure,
+  reconstructed as such; the rest of the real ctor (`PegResourceHandler`/
+  `CreatePegScreen()`/`PegMessageQueue`/`CDesktop` construction) is genuine
+  Peg-toolkit depth, explicitly out of scope project-wide (this file's own Stage 5
+  note: "Peg toolkit substrate -- confirmed not necessary"). 2 of its other real
+  methods -- `IsSwitchPressed`/`IsShowCost` -- are pure static-global reads with
+  ZERO Peg dependency and are fully reconstructed; `InitDesktop`/
+  `StopScreenRefresh`/`EnterCheckHardware`/`Exec()` (the last a 2744-byte real GUI
+  event pump touching `CMMI`/`CPageMenuLauncher`/`CHelpManager`/
+  `CControllerGrabber`/`CFanControlStatusHandler`/`CSystemClockErrorHandler`/
+  `CAutoMountHandler`/`CHardwareMonitor`/`CTimer`/`CSTGUnsolMsgProcessor`/
+  `CKGMsgProcessor`/`EditApi` vtable dispatch) stay Tier-B stubs.
+- **CPanelIfcTask**: FINDING for a dedicated future pass -- its own real ctor
+  turns out to be fully tractable now (every dependency it needs --
+  `CTask::CTask`, `CTask::Add(COutLink*)`, `COutLinkMono::COutLinkMono()`,
+  `CSTGUnsolMsgHandler::CSTGUnsolMsgHandler()` -- is already real, courtesy of
+  earlier Stage 6 batches today), and so are `SetLEDStatus`(x3)/`ShortBeep`/
+  `EnterDiagnostics`/`SetupPanelInterface`/`SetAllLED`/`OnTouchPanelEvent`/
+  `OnButtonEvent`/`Exec(CMessage&)` -- all route through the already-real
+  `COutLinkMono::OutMono()` IPC primitive or `PegMessageQueue::Push()` (the one
+  remaining real Peg gap: `PegThing`/`PegMessageQueue` aren't reconstructed
+  anywhere in this project). Only the bare, 0-arg `Exec()` override additionally
+  needs a brand-new, byte-exact-verified `CPanelIfcTask` vtable PLUS a second new
+  anonymous `CPanelCfg`-derived-from-`COutLinkMono` vtable (a real ctor-inline
+  Itanium multiple-inheritance pattern) -- a separate class's worth of work in its
+  own right. NOT attempted this pass, to keep this batch to `CEditor`'s own scope
+  -- `panel_ifc_task.h` only gained the minimal additional ctor overload
+  `CEditor::Setup()` needs to link (Tier-B stub, its one real statement being the
+  same `CTask::CTask()` base call CMainTask's ctor now also performs), plus real
+  `CTask` inheritance (needed so `CModule::Add()` accepts it) -- backed by a new
+  test-only default `CTask()` placeholder ctor (protected, task.h) so the
+  pre-existing `verify/test_stg_unsol_msg_handler.cpp`'s `CEditor::CPanelIfcTask
+  fakeOwner;` stack object keeps compiling unchanged.
+- **CChunkServerTask**: NOT tractable this pass -- needs a new `CChunkServer` base
+  class (21 real methods, .text+0x080cba90..0x080cc0d0, OnUnlock/OnRelock/OnBegin/
+  OnEnd/OnSave x2/OnLoad x2/OnAbort/OnStoppedByUser/GetSaveBuffSize/GetServerID/
+  Unlock/GetServerHandle/Load/Exec) nothing in this project has touched yet.
+  Deferred entirely; kept as an untyped `void*` member in `CEditor` (Setup() still
+  stores the real pointer at the real +0x40078 offset if it were built, just
+  doesn't build it).
+- **CAlphaKeybIfcTask**: NOT tractable this pass -- needs `CEditable`
+  (referenced by name only, edit_man.h) and `CTask::RegisterIfc` (already
+  documented Tier-B, task.h). Kept as an incomplete-type forward-declared
+  pointer member. The real "ALPHAKEYBOARD=Yes" gate condition itself IS fully
+  reconstructed (ground truth's own Duff's-device-unrolled 4-character compare
+  collapses exactly to `strcmp(value, "Yes") == 0`) even though the construction
+  it would gate stays deferred.
+
+**CEditor itself**: all 15 direct methods + ctor + dtor reconstructed
+(`CEditor@08249cd0.c`/`~CEditor@082498f0.c`/`Config@082498a0.c`/`Start@082498b0.c`/
+`Setup@08249b60.c`/3x `SetLEDStatus@08249d*0.c`/`ShortBeep@08249eb0.c`/
+`ShortBeepPolite@08249ee0.c`/`EnterDiagnostics@08249f20.c`/
+`IsSwitchPressed@08249f50.c`/`IsShowCost@08249f60.c`/
+`EnterCheckHardware@08249f70.c`/`StopScreenRefresh@08249f80.c`). The last 4 are
+literal `jmp` tail-calls into `CMainTask`'s own static methods with the same
+argument register/stack slot passed straight through -- confirmed via objdump
+(not a dropped argument, a genuine GCC sibcall). Real layout: base `CModule`
+(0x2c) + `CEditClient` sub-object (+0x2c) + `CEditServer` sub-object (+0x38,
+0x40038 bytes) + 4 sibling-task pointers (+0x40070/74/78/7c) + `CParameterString*`
+(+0x40080). **Preserved real quirk, not fixed**: the real ctor zeroes ONLY
+`mMainTask`/`mChunkServerTask`, never `mPanelIfcTask`/`mAlphaKeybIfcTask` -- the
+latter is a genuine, load-bearing uninitialized-read hazard in ground truth
+(`Start()` reads it with a bare `!= 0` check) if Setup()'s own "ALPHAKEYBOARD"
+branch never fires; reproduced faithfully rather than silently zeroed.
+
+**Vtable**: `CEditor` has a real GCC multiple-inheritance layout -- ONE primary
+vtable (7 slots, same CModule shape) plus TWO this-adjustment secondary
+("virtual thunk") vtables for the `CEditClient` (3 slots) and `CEditServer`
+(5 slots) sub-objects, all THREE confirmed by a direct `.rodata` dword read at
+0x08f29b80 (not inferred from call sites, per this project's own recurring
+undersized-vtable-array bug-class discipline) -- `omega_vtables.h`/`.cpp`'s
+`PTR__CEditor_08f29b88`/`08f29bac`/`08f29bc0`. The `CEditServer` thunk's own 3
+non-dtor slots turned out to be `CEditServer::Get`/`Set`/`SetDefault` --
+byte-identical to that class's own already-reconstructed standalone vtable
+(`PTR__CEditServer_08e817b0`), just re-exposed through `CEditor`'s own
+this-adjusted view (same object, two vtables, per the Itanium ABI). All three
+stay install-only (never dispatched through by any reconstructed caller), same
+status as `CModule`'s own base vtable.
+
+**New self-contained class**: `CParameterString` (`include/parameter_string.h`,
+`src/editor/parameter_string.cpp`) -- a small "key=value,key=value,..." parser
+`CEditor`'s own ctor builds from its optional alpha-keyboard config-string
+argument. Fully real, zero deferred parts: real ctor (a 1001-byte, Duff's-device-
+unrolled whitespace-trimming state machine around `=`/`,` delimiters, collapsed to
+plain loops), dtor, `GetParamStr()`, and the standalone `DecToInt()`/`HexToInt()`
+cursor-advancing parsers. **Real bug found and fixed during KAT authoring** (own
+bug, not ground truth's): the first draft's name-scan wrote the trailing-
+whitespace-trim's nul terminator at the SAME byte as the `'='` delimiter whenever
+there was no whitespace to trim, clobbering the delimiter before the "found `=`
+vs hit end-of-string" check ran -- fixed by capturing that decision (and the
+`+1`-past-`'='` cursor position) BEFORE the destructive write, same shape as the
+value-scan's own pre-existing `afterValue` capture.
+
+**Shared-file changes, why each was necessary and judged low-risk (all verified
+`git status`-clean of other agents' concurrent edits before touching)**:
+`module.h`/`edit_server.h` each gained one `friend class CEditor;` (write access
+to their own private `mVtbl`, needed so `CEditor`'s ctor can self-install its
+vtable inline, matching ground truth's own shape -- unlike the `MMainXxx`-shim
+family, which vtable-swaps externally in mains.cpp); `task.h`/`task.cpp` gained
+one new `protected` test-only default `CTask()` ctor (zeros every field, matches
+no real ground-truth call site) so `CPanelIfcTask` could gain real `CTask`
+inheritance without breaking its pre-existing default-constructible test object;
+`panel_ifc_task.h`/`.cpp` converted from `namespace CEditor` to a real nested
+`class CEditor::CPanelIfcTask` (qualified-name call sites, `eva_main.cpp`/
+`stg_unsol_msg_handler.h`/`.cpp`, compile unchanged); `stg_unsol_msg_handler.cpp`'s
+own `namespace CEditor { unsigned short lastEditMessage = 0; }` became a
+qualified static-member definition against `editor.h`'s own declaration;
+`edit_man.h`/`.cpp`'s `CEditClient` placeholder widened from a bare 4-byte vtable
+scalar to its real, ctor-offset-math-confirmed 0xc-byte size (Register/Unregister/
+NotifyControls/OnNotify -- a separate, non-trivial class in its own right --
+stay deferred; ctor/dtor are new Tier-B link-stubs).
+
+### Verification
+
+New `verify/test_editor.cpp` (33 checks: `CParameterString` parsing/trimming/
+duplicate-precedence/cursor-parsers, `CEditor` ctor/`Config`/`Setup`/`Start`,
+`CMainTask::IsSwitchPressed`/`IsShowCost`, `CPanelIfcTask` default-ctor compat) --
+first clean run only after the `CParameterString` bug above was found and fixed.
+`make objs`: clean. `make verify`: full suite, 0 failures, exit 0 (no concurrent-
+edit interference this time -- tree was clean when this batch ran). `tools/
+build_lenny.sh` (real on-image ABI, Debian Lenny i386 chroot): `LINK OK`, zero
+unresolved symbols belonging to this batch's own new files.
+
+No live `kronos_vm` boot test: this reconstruction's own call graph has no
+confirmed real caller for `CEditor`'s own constructor yet (main()'s own direct
+call site, presumably -- outside this pass's scope to trace), so nothing newly
+real here is reachable from the currently-wired boot path -- a boot test would
+show zero new signal, same reasoning several earlier Stage 6 batches used for the
+same reason.
+
+### Manifest delta
+
+`gen_manifest.py`: added 24 functions (15 `CEditor` direct methods + ctor/dtor, 2
+`CEditor::CMainTask` fully-real methods, 5 `CParameterString` methods) under a new
+"CEditor dedicated batch" section. `CEditor::CMainTask`'s ctor (0824ad90) and
+`CEditor::CPanelIfcTask`'s ctor (0824b7e0) deliberately stay OUT of the
+reconstructed list -- both only partially reconstructed (their real
+`CTask::CTask()` base-construction statement, not the rest of the real body),
+same "stays pending, Tier B" treatment already established for partial ctors
+elsewhere in this file. Regenerated: 339 → 363 of 37,795.

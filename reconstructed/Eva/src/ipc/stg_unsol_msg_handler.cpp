@@ -122,14 +122,13 @@ static int s_eNowRestoreSeqParameters = 0;
 
 /* CEditor::lastEditMessage -- real global, `_ZN7CEditor15lastEditMessageE`,
  * 0x0939c1e0, confirmed 2 bytes (every real store is a 16-bit `mov WORD PTR
- * ...,0x500c`). CEditor itself is not reconstructed as a class anywhere in this
- * project (see panel_ifc_task.h's own header comment) -- this static is declared
- * directly in the `CEditor` namespace that header already opened, same "just the
- * one field/method a caller needs" convention as CStorage above.
+ * ...,0x500c`). UPDATE (Stage 6 CEditor batch, 2026-07-25): `CEditor` is now a
+ * real class (editor.h), which already declares this as a `static` member --
+ * this is just that member's qualified out-of-line definition, dropping the
+ * former `namespace CEditor { ... }` wrapper (declared directly in the
+ * namespace back when CEditor itself wasn't reconstructed as a class yet).
  */
-namespace CEditor {
-unsigned short lastEditMessage = 0;
-}
+unsigned short CEditor::lastEditMessage = 0;
 
 /* CESSongTask::ms_bShouldDirectStorePMRStatus -- real static, gates a direct-store
  * mode around HDRTrackMsgHandler's own two-track (subtype 0xb/0xc) special case.

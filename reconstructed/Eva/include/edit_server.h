@@ -404,6 +404,14 @@ private:
 	 * CEditApiInstance/CNotifyList to drive it through.
 	 */
 	friend struct EditServerTestHooks;
+
+	/* CEditor (editor.h) embeds a CEditServer sub-object at +0x38 and, like
+	 * ground truth's own ctor, overwrites its vtable pointer with CEditor's
+	 * own this-adjusted secondary vtable right after construction -- needs
+	 * direct write access to mVtbl for that, same reasoning as module.h's own
+	 * `friend class CEditor;`.
+	 */
+	friend class CEditor;
 };
 
 /* PTR__CEditServer_08e817b0[7]/PTR__TPtrArray_08e817e8[3] -- declared in

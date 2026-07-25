@@ -682,6 +682,43 @@ RECONSTRUCTED = {
     # MMainSeqTimer/MMainSysEx/MMainChunkMan/MMainRTRouter/MMainDumpMan/MMainResMan),
     # and the real target of Api's own vtable slot +0xa4. See sysapi_instance.h.
     "0806bab0",  # CSysApiInstance::RegisterApi(char const*, CApiBase*)
+
+    # CEditor dedicated batch (Stage 6 breadth sweep, 2026-07-25 -- editor.h/.cpp).
+    # CEditor's own 15 direct methods + ctor/dtor, all real (own control flow
+    # faithfully reconstructed even where a callee is itself a Tier-B stub, same
+    # convention as CModule::Add()'s own Api-vtable-slot calls elsewhere in this
+    # list). CEditor::CMainTask's ctor (0824ad90) and CEditor::CPanelIfcTask's ctor
+    # (0824b7e0) stay OUT of this list -- both only partially reconstructed (their
+    # real CTask::CTask() base-construction statement, not the rest of the real
+    # body), same "stays pending, Tier B" treatment as every other partial-ctor
+    # case in this file (see 0824b7e0's own pre-existing note below).
+    "08249cd0",  # CEditor::CEditor(char const*, char const*)
+    "082498f0",  # CEditor::~CEditor() [D1]
+    "082498a0",  # CEditor::Config()
+    "082498b0",  # CEditor::Start()
+    "08249b60",  # CEditor::Setup()
+    "08249df0",  # CEditor::SetLEDStatus(ELedCode, CPanelCfg::ELedState)
+    "08249e30",  # CEditor::SetLEDStatus(int, unsigned short, unsigned short)
+    "08249e80",  # CEditor::SetLEDStatus(CPanelCfg::ELedState)
+    "08249eb0",  # CEditor::ShortBeep()
+    "08249ee0",  # CEditor::ShortBeepPolite()
+    "08249f20",  # CEditor::EnterDiagnostics(int)
+    "08249f50",  # CEditor::IsSwitchPressed(EButtonCode)
+    "08249f60",  # CEditor::IsShowCost()
+    "08249f70",  # CEditor::EnterCheckHardware(int)
+    "08249f80",  # CEditor::StopScreenRefresh()
+    "0824af80",  # CEditor::CMainTask::IsSwitchPressed(EButtonCode) -- fully real,
+                 # zero Peg dependency (pure bitmask test)
+    "0824afc0",  # CEditor::CMainTask::IsShowCost() -- fully real, pure global read
+
+    # CParameterString (editor.h's own dependency, parameter_string.h/.cpp) --
+    # fully self-contained "key=value,..." parser, entirely real, no deferred
+    # parts.
+    "080b8ac0",  # CParameterString::CParameterString(char const*)
+    "080b8ed0",  # CParameterString::~CParameterString()
+    "080b8fc0",  # CParameterString::GetParamStr(char const*)
+    "080b9020",  # CParameterString::DecToInt(char const*&)
+    "080b90f0",  # CParameterString::HexToInt(char const*&)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

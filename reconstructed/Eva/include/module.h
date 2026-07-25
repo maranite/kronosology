@@ -109,6 +109,14 @@ private:
 	 * extraction pattern already used by comm_driver.h/level_manager_array.h.
 	 */
 	friend struct ModuleTestHooks;
+
+	/* CEditor (editor.h) is the one confirmed real caller whose OWN ctor installs
+	 * its derived vtable inline (`*(void***)this = &PTR__CEditor_...`), unlike the
+	 * MMainXxx-shim family above which vtable-swaps externally in mains.cpp -- needs
+	 * direct write access to mVtbl for that, matching ground truth's own inline
+	 * self-install shape (CEditor@08249cd0.c).
+	 */
+	friend class CEditor;
 };
 
 #endif /* MODULE_H */

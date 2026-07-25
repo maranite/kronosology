@@ -249,6 +249,18 @@ public:
 	 */
 	void Add(COutLink *link);
 
+protected:
+	/* Test/stub-only placeholder (Stage 6 CEditor batch, 2026-07-25) -- zero-
+	 * initializes every field, does NOT correspond to any real ground-truth
+	 * CTask construction (every real CTask is always built via the 5-argument
+	 * ctor above). Exists solely so a Tier-B stub CTask-derived class (e.g.
+	 * `CEditor::CPanelIfcTask`'s own pre-existing default-constructible test
+	 * compat, panel_ifc_task.h) can stay default-constructible without
+	 * fabricating a fake CModule/name/level just to satisfy the real ctor's
+	 * signature. Never invoked by any reconstructed real code path.
+	 */
+	CTask();
+
 private:
 	void          *mVtbl;
 	char          *mName;

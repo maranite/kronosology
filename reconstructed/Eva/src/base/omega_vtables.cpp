@@ -343,4 +343,22 @@ void *PTR__TPtrArray_08e88bb8[3] = {
 void *PTR__TVector_08e88ba8[2] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+
+/* CEditor's own real vtable cluster -- see header comment. All 3 confirmed
+ * install-only, same treatment as PTR__CModule_08e81fe8 above (whose own real
+ * Destroy()/GetErrorMsg() slots stay EvaVTableStub for the same reason: real,
+ * named, ground-truth methods that are simply never dispatched through by any
+ * reconstructed caller).
+ */
+void *PTR__CEditor_08f29b88[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CEditor_08f29bac[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CEditor_08f29bc0[5] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

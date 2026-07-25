@@ -486,6 +486,44 @@ extern void *PTR__CResMan_08e88b08[21];
 extern void *PTR__CRMApiCallBack_08e886e8[7];
 extern void *PTR__TPtrArray_08e88bb8[3];
 extern void *PTR__TVector_08e88ba8[2];
+
+/* CEditor's own real vtable cluster (editor.h, Stage 6 CEditor batch, 2026-07-25):
+ * a real GCC multiple-inheritance layout with ONE primary vtable plus TWO
+ * this-adjustment secondary ("virtual thunk") vtables, all three confirmed by a
+ * direct .rodata dword read at 0x08f29b80 (Eva) -- NOT inferred from call sites,
+ * per this project's own recurring-bug-class discipline:
+ *
+ *   Primary          08f29b80 -> +8 = 08f29b88 install target, 7 slots (same
+ *                     CModule-shape dtor/dtor-deleting/Setup/Config/Start/Destroy/
+ *                     GetErrorMsg as every other CModule-derived vtable in this
+ *                     project): {~CEditor, ~CEditor(deleting), CEditor::Setup,
+ *                     CEditor::Config, CEditor::Start, CModule::Destroy,
+ *                     CModule::GetErrorMsg} -- the last 2 are CModule's own
+ *                     UN-overridden real implementations (module.h), not stubs.
+ *   CEditClient thunk 08f29ba4 -> +8 = 08f29bac install target (this-adjust
+ *                     -0x2c, matching the CEditClient sub-object's real offset
+ *                     within CEditor), 3 slots: {~CEditor thunk, ~CEditor
+ *                     (deleting) thunk, CEditClient::OnNotify} -- OnNotify itself
+ *                     is a Tier-B stub (edit_man.h), consistent with slot content
+ *                     rather than a fabricated one.
+ *   CEditServer thunk 08f29bb8 -> +8 = 08f29bc0 install target (this-adjust
+ *                     -0x38, matching the CEditServer sub-object's real offset),
+ *                     5 slots: {~CEditor thunk, ~CEditor (deleting) thunk,
+ *                     CEditServer::Get, CEditServer::Set,
+ *                     CEditServer::SetDefault} -- Get/Set/SetDefault are
+ *                     CEditServer's OWN already-real methods (edit_server.h),
+ *                     confirmed identical addresses to CEditServer's own
+ *                     stand-alone vtable content (PTR__CEditServer_08e817b0
+ *                     above), just re-exposed here through CEditor's own
+ *                     this-adjusted view -- same object, same functions, two
+ *                     vtables per the Itanium ABI's multiple-inheritance rule.
+ *
+ * All three confirmed install-only (never actually dispatched through by any
+ * reconstructed code) -- same status as CModule's own base vtable.
+ */
+extern void *PTR__CEditor_08f29b88[7];
+extern void *PTR__CEditor_08f29bac[3];
+extern void *PTR__CEditor_08f29bc0[5];
 }
 
 #endif /* OMEGA_VTABLES_H */
