@@ -303,6 +303,110 @@ extern "C" void *stg_get_current_task()
 	return current_task;
 }
 /*
+ * rtwrap_global_save_flags_and_cli()/rtwrap_global_restore_flags() (batch
+ * 2026-07-25): a genuinely DIFFERENT case from every other `rtwrap_*`
+ * wrapper in this project -- confirmed via `nm OA.ko`, these two are `T`
+ * (locally DEFINED, `.text+0x119890`/`.text+0x1198d0`), NOT `U` forwards
+ * to an external RTAI module symbol. Ground truth's own real bodies
+ * implement RTAI's classic `rt_global_cli()`/`rt_global_sti()` global
+ * ticket-spinlock-plus-per-CPU-bitmap algorithm directly, operating on
+ * two real, confirmed `U` externs: `rtai_cpu_lock` (RTAI hal's own global
+ * lock word, opaque placeholder -- same "address-only use, real internal
+ * layout not independently modeled beyond what's needed here" convention
+ * as `rtai_global_heap` in rtwrap.cpp) and `per_cpu__cpu_number` (a
+ * standard 2.6.32 SMP percpu symbol, same `%fs:`-relative access
+ * technique as `stg_get_current_task()` above -- hence this file, not
+ * rtwrap.cpp, which stays host-KAT-linkable and can't safely execute raw
+ * percpu asm).
+ *
+ * Real layout (confirmed via `objdump -dr`): dword bitmap of which CPUs
+ * currently hold the lock at `rtai_cpu_lock+0x0`; a 2-byte x86 ticket
+ * lock at `+0x4`/`+0x5` (`+0x4` = "now serving" owner ticket, `+0x5` =
+ * next ticket to hand out, real ground truth increments it via `lock
+ * xadd` on the WORD at `+0x4`, adding 0x100 so only the high byte
+ * moves).
+ *
+ * Real algorithm faithfully reproduced via GCC atomic builtins (no
+ * kernel-header dependency, matching this file's own header-light
+ * convention) rather than hand-written `lock`-prefixed asm -- functionally
+ * identical, this project's own established RTAI-substitution policy
+ * (real side effects reproduced, exact opcode encoding not load-bearing
+ * for anything outside this self-contained save/restore pair). The two
+ * "should never happen in a well-nested caller" defensive branches ground
+ * truth's own `rtwrap_global_restore_flags()` carries (re-acquiring the
+ * ticket lock if the per-CPU bitmap bit was unexpectedly already clear on
+ * a nested-token restore) are reproduced too, not simplified away.
+ */
+struct rtai_cpu_lock_s {
+	unsigned int  cpuBitmap;	/* +0x0 */
+	unsigned char ticketOwner;	/* +0x4, "now serving" */
+	unsigned char ticketNext;	/* +0x5, next ticket to hand out */
+};
+extern "C" struct rtai_cpu_lock_s rtai_cpu_lock;
+
+static inline unsigned int rtwrap_this_cpu(void)
+{
+	unsigned int n;
+	asm volatile("mov %%fs:per_cpu__cpu_number, %0" : "=r"(n));
+	return n;
+}
+
+extern "C" unsigned int rtwrap_global_save_flags_and_cli(void)
+{
+	unsigned long eflags;
+	asm volatile("pushf ; pop %0" : "=r"(eflags) :: "memory");
+	asm volatile("cli" ::: "memory");
+	unsigned int savedIF = (unsigned int)eflags & 0x200;
+
+	unsigned int bit = 1u << rtwrap_this_cpu();
+	unsigned int prevBitmap = __sync_fetch_and_or(&rtai_cpu_lock.cpuBitmap, bit);
+	if (prevBitmap & bit)
+		return savedIF;	/* already held on this cpu: nested, bit0 stays 0 */
+
+	unsigned char myTicket = __sync_fetch_and_add(&rtai_cpu_lock.ticketNext, 1);
+	while (rtai_cpu_lock.ticketOwner != myTicket)
+		asm volatile("pause" ::: "memory");
+	return savedIF | 1;
+}
+
+extern "C" void rtwrap_global_restore_flags(unsigned int flags)
+{
+	unsigned int heldLock = flags & 1;
+	unsigned int savedIF  = flags & ~1u;
+
+	if (heldLock) {
+		asm volatile("cli" ::: "memory");
+		unsigned int bit = 1u << rtwrap_this_cpu();
+		unsigned int prevBitmap = __sync_fetch_and_and(&rtai_cpu_lock.cpuBitmap, ~bit);
+		if (prevBitmap & bit) {
+			/* Normal case: release the ticket to the next waiter. */
+			rtai_cpu_lock.ticketOwner++;
+		}
+		/* else: real ground-truth defensive branch (our own cpu bit
+		 * was unexpectedly already clear) -- ticket lock left
+		 * untouched, matching `.text+0x1198f8..0x119940`. */
+	} else {
+		/* Nested/recursive restore: this call never held the full
+		 * lock. Real ground truth re-asserts our cpu's bitmap bit
+		 * and, ONLY in the should-never-happen case where it was
+		 * found already clear, re-acquires the ticket lock
+		 * (deliberately NOT released again here -- matches real
+		 * disassembly `.text+0x11991d..0x119938`, a defensive path
+		 * never expected to execute for a well-nested caller). */
+		asm volatile("cli" ::: "memory");
+		unsigned int bit = 1u << rtwrap_this_cpu();
+		unsigned int prevBitmap = __sync_fetch_and_or(&rtai_cpu_lock.cpuBitmap, bit);
+		if (!(prevBitmap & bit)) {
+			unsigned char myTicket = __sync_fetch_and_add(&rtai_cpu_lock.ticketNext, 1);
+			while (rtai_cpu_lock.ticketOwner != myTicket)
+				asm volatile("pause" ::: "memory");
+		}
+	}
+
+	if (savedIF)
+		asm volatile("sti" ::: "memory");
+}
+/*
  * stg_set_fs/stg_restore_fs (sec 10.181): the per-CPU thread_info
  * addr_limit save+set / restore pair -- this kernel's own inlined
  * `set_fs(KERNEL_DS)`/`set_fs(old)` idiom, confirmed real at EVERY

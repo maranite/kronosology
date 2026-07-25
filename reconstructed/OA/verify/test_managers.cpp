@@ -41,6 +41,10 @@ unsigned char _ZTV18CSTGStreamingEvent[40];
  * definition, same "give it its own local storage" treatment as
  * _ZTV18CSTGStreamingEvent just above. */
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
+/* Same treatment, needed by the new CSTGHDRFileReader::ProcessCommands()
+ * test (2026-07-25): its own indexArray[elemIdx]->CSTGPlaybackEvent*
+ * lookup uses this instantiation's sInstance. */
+template<> TSTGArrayManager<CSTGPlaybackEvent> *TSTGArrayManager<CSTGPlaybackEvent>::sInstance = 0;
 
 /* CSTGAudioBusManager::sGlobalBusSet's own real storage lives in
  * audio_bus_manager.cpp (not linked here) -- batch 23's newly-real
@@ -163,6 +167,82 @@ void CSTGVoiceAllocator::FreeVoice(CSTGVoice *voice)
 }
 static int g_doPendingMoveVoicesCalls;
 void CSTGVoiceAllocator::DoPendingMoveVoices() { g_doPendingMoveVoicesCalls++; }
+/* CSTGVoiceAllocator::StealVoice() (2026-07-25) -- confirmed real,
+ * deliberately deferred (genuine voice-stealing DSP logic, out of
+ * scope), same link-satisfying-mock treatment as FreeVoice above. Its
+ * only real caller in this reconstruction is CSTGStreamingEvent::
+ * HandleErrorReading() (streaming_event_manager.cpp, linked by this
+ * test binary's own Makefile rule). */
+static int g_stealVoiceCalls;
+static void *g_lastStolenVoice;
+void CSTGVoiceAllocator::StealVoice(CSTGVoice *voice)
+{
+	g_stealVoiceCalls++;
+	g_lastStolenVoice = (void *)voice;
+}
+
+/* CSTGPlaybackBuffer::HandleAdvanceCancelledEvent()/
+ * EventBufferStartLocationUpdated() are both real (playback_buffer_
+ * events.cpp, NOT linked by this test binary's own Makefile rule) --
+ * link-satisfying mocks with recording counters, same treatment as
+ * FreeVoice/DoPendingMoveVoices above. Exercised by the new
+ * CSTGHDRFileReader::ProcessCommands() test (2026-07-25). */
+static int g_handleAdvanceCancelledEventCalls;
+static void *g_lastHandleAdvanceCancelledEventArg;
+void CSTGPlaybackBuffer::HandleAdvanceCancelledEvent(CSTGPlaybackEvent *event)
+{
+	g_handleAdvanceCancelledEventCalls++;
+	g_lastHandleAdvanceCancelledEventArg = (void *)event;
+}
+static int g_eventBufferStartLocationUpdatedCalls;
+static void *g_lastEventBufferStartLocationUpdatedEvent;
+static void *g_lastEventBufferStartLocationUpdatedLoc;
+void CSTGPlaybackBuffer::EventBufferStartLocationUpdated(CSTGPlaybackEvent *event, char *newLoc)
+{
+	g_eventBufferStartLocationUpdatedCalls++;
+	g_lastEventBufferStartLocationUpdatedEvent = (void *)event;
+	g_lastEventBufferStartLocationUpdatedLoc = (void *)newLoc;
+}
+
+/* CSTGPlaybackEvent::HandleErrorReading() is real (playback_event_
+ * methods.cpp, a confirmed bare `ret` -- NOT linked here) -- same
+ * link-satisfying mock treatment, with a counter so the new
+ * CSTGHDRFileReader::ProcessCommandError() test can confirm it's
+ * actually called. */
+static int g_playbackHandleErrorReadingCalls;
+void CSTGPlaybackEvent::HandleErrorReading() { g_playbackHandleErrorReadingCalls++; }
+
+/* CSTGDiskCostManager::UpdateDiskThroughputBytesRead() is real
+ * (engine_startup_bits2.cpp, NOT linked here) -- same link-satisfying
+ * mock treatment. Exercised by both the new CSTGHDRFileReader::
+ * ProcessCommandFilledSamples() and CSTGStreamingFileReader::
+ * ProcessCommandFilledBytes() tests. */
+static int g_diskThroughputCalls;
+static long g_lastDiskThroughputN;
+void CSTGDiskCostManager::UpdateDiskThroughputBytesRead(long n)
+{
+	g_diskThroughputCalls++;
+	g_lastDiskThroughputN = n;
+}
+
+/* rtwrap_global_save_flags_and_cli()/rtwrap_global_restore_flags() are
+ * real (bar2_stubs_c.cpp, deliberately NOT host-linkable -- raw `%fs:`
+ * percpu asm, only safe under the real -m32 kernel-module build) --
+ * link-satisfying mocks with counters, exercised by the new
+ * CSTGStreamingEventManager::ReturnFreeEvent() test. */
+static int g_saveFlagsCalls, g_restoreFlagsCalls;
+static unsigned int g_lastRestoreFlagsArg;
+extern "C" unsigned int rtwrap_global_save_flags_and_cli(void)
+{
+	g_saveFlagsCalls++;
+	return 0xabcd0000;	/* poison value distinct from 0/1, so the test can
+				 * confirm it round-trips through field14c34 exactly */
+}
+extern "C" void rtwrap_global_restore_flags(unsigned int flags)
+{
+	g_restoreFlagsCalls++;
+	g_lastRestoreFlagsArg = flags;
+}
 
 /* STGAPILR2IndivToPhysBusId's own real content is now homed directly in
  * managers.cpp (sec 10.132), linked into this binary directly -- no
@@ -1386,6 +1466,238 @@ int main(void)
 
 		delete[] fcBuf2;
 		delete mgr2;
+	}
+
+	printf("\n[31] CSTGHDRFileReader::ProcessCommands() (2026-07-25)\n");
+	{
+		/* Own +0x0/+0x4/+0x8/+0xc ring, 8-byte records (word tag,
+		 * signed word elemIdx, dword param). One entry per real
+		 * tag 0..5, elemIdx i resolves to events[i] via
+		 * TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray. */
+		unsigned char *ring = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *events[6];
+		for (int i = 0; i < 6; i++) {
+			events[i] = (unsigned char *)mmap(0, 0x68, PROT_READ | PROT_WRITE,
+							   MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+			memset(events[i], 0, 0x68);
+		}
+
+		unsigned char *indexArr = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		for (int i = 0; i < 6; i++)
+			((unsigned int *)indexArr)[i] = ToU32(events[i]);
+		TSTGArrayManager<CSTGPlaybackEvent> pbMgr;
+		memset(&pbMgr, 0, sizeof(pbMgr));
+		pbMgr.indexArray = ToU32(indexArr);
+		TSTGArrayManager<CSTGPlaybackEvent>::sInstance = &pbMgr;
+
+		for (int i = 0; i < 6; i++) {
+			*(unsigned short *)(ring + i * 8 + 0) = (unsigned short)i;
+			*(short *)(ring + i * 8 + 2) = (short)i;
+			*(int *)(ring + i * 8 + 4) = 0;
+		}
+		/* tag==1 needs param to be a real "newLoc" pointer value
+		 * (forwarded verbatim to EventBufferStartLocationUpdated). */
+		char newLocDummy;
+		*(int *)(ring + 1 * 8 + 4) = (int)(long)&newLocDummy;
+		/* tag==2 needs param to be a real sample count. */
+		*(int *)(ring + 2 * 8 + 4) = 10;
+
+		/* CSTGFileCloser::sInstance -- pushed into by tags 0/3/4. */
+		unsigned char *fcBuf = new unsigned char[32];
+		memset(fcBuf, 0, 32);
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcBuf;
+		unsigned char *fcRing = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		*(unsigned int *)(fcBuf + 0x0) = ToU32(fcRing);
+		*(unsigned int *)(fcBuf + 0xc) = 0x10;
+
+		/* tag==2's ownerBuffer (+0x30) needs to be a real,
+		 * zeroed-buffer-backed CSTGHDRCircularBuffer* (the real
+		 * IncrementAvailableReadBytes() dereferences `this`).
+		 * tags 1/5's ownerBuffer just needs to be a nonzero packed
+		 * value (their own targets are mocked global functions that
+		 * never dereference `this`). */
+		unsigned char *circBufMem = (unsigned char *)mmap(0, 0x34, PROT_READ | PROT_WRITE,
+								   MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(circBufMem, 0, 0x34);
+		*(unsigned int *)(events[1] + 0x30) = 0xdead0001;
+		*(unsigned int *)(events[2] + 0x30) = ToU32(circBufMem);
+		*(unsigned int *)(events[5] + 0x30) = 0xdead0005;
+		events[2][0x1d] = 3;			/* per-frame byte multiplier */
+		*(unsigned int *)(events[2] + 0x44) = 7;	/* windowThreshold, pre-existing */
+
+		unsigned char *hfrMem = (unsigned char *)mmap(0, 0x44, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(hfrMem, 0, 0x44);
+		*(unsigned int *)(hfrMem + 0x0) = ToU32(ring);
+		*(unsigned int *)(hfrMem + 0xc) = 0x10;
+		*(unsigned int *)(hfrMem + 0x4) = 6;	/* 6 entries enqueued */
+
+		CSTGHDRFileReader *hfr = (CSTGHDRFileReader *)hfrMem;
+		hfr->ProcessCommands();
+
+		check_eq("consumer index (+0x8) advanced to 6", *(unsigned int *)(hfrMem + 0x8), 6);
+		check_eq("tag==0: events[0]'s own +0xc field set to 3", *(unsigned int *)(events[0] + 0xc), 3);
+		check_eq("tag==1: EventBufferStartLocationUpdated called once", g_eventBufferStartLocationUpdatedCalls, 1);
+		check_eq("tag==1: called with events[1]", ToU32(g_lastEventBufferStartLocationUpdatedEvent), ToU32(events[1]));
+		check_eq("tag==1: newLoc forwarded verbatim", ToU32(g_lastEventBufferStartLocationUpdatedLoc), ToU32(&newLocDummy));
+		check_eq("tag==2: windowThreshold (+0x44) += param (7+10=17)", *(unsigned int *)(events[2] + 0x44), 17);
+		check_eq("tag==2: circBuf availableReadBytes == 3*10=30 (fieldAt(0x1d)*param)",
+			 *(unsigned int *)(circBufMem + 0x20), 30);
+		check_eq("tag==2: disk throughput updated with same byte count", (unsigned int)g_lastDiskThroughputN, 30);
+		check_eq("tag==3: events[3]'s own +0x10 field set to 1", *(unsigned int *)(events[3] + 0x10), 1);
+		check_eq("tag==3: HandleErrorReading called once", g_playbackHandleErrorReadingCalls, 1);
+		check_eq("tag==3: events[3]'s own +0xc field set to 3", *(unsigned int *)(events[3] + 0xc), 3);
+		check_eq("tag==4: events[4]'s own +0xc field set to 3", *(unsigned int *)(events[4] + 0xc), 3);
+		check_eq("tags 0/3/4: CSTGFileCloser ring cursor advanced to 3",
+			 *(unsigned int *)(fcBuf + 0x4), 3);
+		check_eq("CSTGFileCloser ring entry[0] == events[0] (from tag==0)", ((unsigned int *)fcRing)[0], ToU32(events[0]));
+		check_eq("CSTGFileCloser ring entry[1] == events[3] (from tag==3)", ((unsigned int *)fcRing)[2], ToU32(events[3]));
+		check_eq("CSTGFileCloser ring entry[2] == events[4] (from tag==4)", ((unsigned int *)fcRing)[4], ToU32(events[4]));
+		check_eq("tag==5: HandleAdvanceCancelledEvent called once", g_handleAdvanceCancelledEventCalls, 1);
+		check_eq("tag==5: called with events[5]", ToU32(g_lastHandleAdvanceCancelledEventArg), ToU32(events[5]));
+
+		delete[] fcBuf;
+	}
+
+	printf("\n[32] CSTGStreamingFileReader::ProcessCommands() (2026-07-25)\n");
+	{
+		/* Own +0x0/+0x4/+0x8/+0xc ring, but 12-byte records (word tag,
+		 * signed word elemIdx, dword param, byte continuation flag).
+		 * Entry [0] has continuation==1 (must be drained WITHOUT
+		 * dispatch); entries [1..3] each have continuation==0 and
+		 * cover all 3 real tags. */
+		unsigned char *ring = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(ring, 0, 0x1000);
+		*(unsigned short *)(ring + 0 * 12 + 0) = 99;	/* poison tag: must never dispatch */
+		ring[0 * 12 + 8] = 1;				/* continuation == 1: skip */
+		*(unsigned short *)(ring + 1 * 12 + 0) = 1;	/* FilledBytes */
+		*(short *)(ring + 1 * 12 + 2) = 0;
+		*(int *)(ring + 1 * 12 + 4) = 40;
+		ring[1 * 12 + 8] = 0;
+		*(unsigned short *)(ring + 2 * 12 + 0) = 0;	/* Complete */
+		*(short *)(ring + 2 * 12 + 2) = 1;
+		ring[2 * 12 + 8] = 0;
+		*(unsigned short *)(ring + 3 * 12 + 0) = 2;	/* Error */
+		*(short *)(ring + 3 * 12 + 2) = 2;
+		ring[3 * 12 + 8] = 0;
+
+		unsigned char *semBuf = new unsigned char[sizeof(CSTGStreamingEventManager)];
+		memset(semBuf, 0, sizeof(CSTGStreamingEventManager));
+		CSTGStreamingEventManager *sem = (CSTGStreamingEventManager *)semBuf;
+		CSTGStreamingEventManager::sInstance = sem;
+
+		unsigned char *ev0 = (unsigned char *)&sem->events[0];
+		ev0[0xb8] = 0; ev0[0xb9] = ev0[0xba] = ev0[0xbb] = 0;
+		*(unsigned int *)(ev0 + 0xc4) = 1;	/* +0xb8(0) < +0xc4(1): disk-cost update fires */
+
+		unsigned char *vaBuf = new unsigned char[64];
+		memset(vaBuf, 0, 64);
+		CSTGVoiceAllocator::sInstance = (CSTGVoiceAllocator *)vaBuf;
+
+		unsigned char *fcBuf = new unsigned char[32];
+		memset(fcBuf, 0, 32);
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcBuf;
+		unsigned char *fcRing = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		*(unsigned int *)(fcBuf + 0x0) = ToU32(fcRing);
+		*(unsigned int *)(fcBuf + 0xc) = 0x10;
+
+		unsigned char *sfrMem = (unsigned char *)mmap(0, 0x38, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(sfrMem, 0, 0x38);
+		*(unsigned int *)(sfrMem + 0x0) = ToU32(ring);
+		*(unsigned int *)(sfrMem + 0xc) = 0x40;
+		*(unsigned int *)(sfrMem + 0x4) = 4;	/* 4 entries enqueued */
+
+		g_saveFlagsCalls = g_restoreFlagsCalls = 0;
+		g_playbackHandleErrorReadingCalls = 0;	/* unused here, but reset for clarity */
+		g_diskThroughputCalls = 0;
+		g_stealVoiceCalls = 0;
+
+		CSTGStreamingFileReader *sfr = (CSTGStreamingFileReader *)sfrMem;
+		sfr->ProcessCommands();
+
+		check_eq("consumer index (+0x8) advanced to 4 (poison entry consumed too)",
+			 *(unsigned int *)(sfrMem + 0x8), 4);
+		check_eq("tag==1: circBuf availableReadBytes == 40 (param passed straight through)",
+			 *(unsigned int *)(ev0 + 0x40 + 0x20), 40);
+		check_eq("tag==1: disk throughput updated once (0xb8<0xc4)", g_diskThroughputCalls, 1);
+		check_eq("tag==1: disk throughput arg == param (40)", (unsigned int)g_lastDiskThroughputN, 40);
+		check_eq("tag==0: ReturnFreeEvent ran (freeListTail == &events[1].f30)",
+			 sem->freeListTail, ToU32((unsigned char *)&sem->events[1] + 0x30));
+		check_eq("tag==0: count (+0x14c20) incremented to 1", sem->count, 1);
+		check_eq("tag==0: save_flags/restore_flags each called once", g_saveFlagsCalls, 1);
+		check_eq("tag==0: restore_flags called once too", g_restoreFlagsCalls, 1);
+		check_eq("tag==2: events[2]'s own +0x10 field set to 1",
+			 *(unsigned int *)((unsigned char *)&sem->events[2] + 0x10), 1);
+		check_eq("tag==2: HandleErrorReading -> StealVoice called once", g_stealVoiceCalls, 1);
+
+		delete[] fcBuf;
+	}
+
+	printf("\n[33] CSTGStreamingEventManager::ReturnFreeEvent() (2026-07-25, direct)\n");
+	{
+		/* Direct unit test (not via ProcessCommands()): confirms the
+		 * sounding-events-list unlink, free-list tail-append, and
+		 * global-lock nesting/CloseFileDescriptorsIfNecessary() side
+		 * effects all fire exactly as ground truth's own disassembly
+		 * establishes. */
+		unsigned char *semBuf = new unsigned char[sizeof(CSTGStreamingEventManager)];
+		memset(semBuf, 0, sizeof(CSTGStreamingEventManager));
+		CSTGStreamingEventManager *sem = (CSTGStreamingEventManager *)semBuf;
+		CSTGStreamingEventManager::sInstance = sem;
+
+		CSTGStreamingEvent *event = &sem->events[7];
+		unsigned char *ev = (unsigned char *)event;
+		unsigned int selfLink = ToU32(ev + 0x30);
+
+		/* Simulate `event` as the SOLE member of the sounding-events
+		 * list (selfLink is both head and tail). */
+		sem->field14c24 = selfLink;
+		sem->field14c28 = selfLink;
+		sem->field14c2c = 1;
+		sem->field14c3c = ToU32(ev);	/* matches -> gets reset to 0 */
+
+		/* fdCount==2: one real fd (pushed), one null (skipped). */
+		ev[0x1c] = 2;
+		*(unsigned int *)(ev + 0x94) = 1;	/* fdsEnabled */
+		*(unsigned int *)(ev + 0x24 + 0 * 4) = 0xf00d0001;
+		*(unsigned int *)(ev + 0x24 + 1 * 4) = 0;
+
+		unsigned char *fcBuf = new unsigned char[32];
+		memset(fcBuf, 0, 32);
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcBuf;
+		unsigned char *fcRing = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		*(unsigned int *)(fcBuf + 0x0) = ToU32(fcRing);
+		*(unsigned int *)(fcBuf + 0xc) = 0x10;
+
+		g_saveFlagsCalls = g_restoreFlagsCalls = 0;
+
+		sem->ReturnFreeEvent(event);
+
+		check_eq("sounding list head (+0x14c24) reset to 0", sem->field14c24, 0);
+		check_eq("sounding list tail (+0x14c28) reset to 0", sem->field14c28, 0);
+		check_eq("sounding count (+0x14c2c) decremented to 0", sem->field14c2c, 0);
+		check_eq("field14c3c reset to 0 (matched event on entry)", sem->field14c3c, 0);
+		check_eq("depth counter (+0x14c38) back to 0", sem->field14c38, 0);
+		check_eq("save_flags_and_cli called exactly once", g_saveFlagsCalls, 1);
+		check_eq("restore_flags called exactly once", g_restoreFlagsCalls, 1);
+		check_eq("restore_flags got back the exact save_flags return value",
+			 g_lastRestoreFlagsArg, 0xabcd0000u);
+		check_eq("free list head (+0x14c18) == selfLink (was empty)", sem->freeListHead, selfLink);
+		check_eq("free list tail (+0x14c1c) == selfLink", sem->freeListTail, selfLink);
+		check_eq("free count (+0x14c20) incremented to 1", sem->count, 1);
+		check_eq("CloseFileDescriptorsIfNecessary: fc ring cursor advanced to 1 (1 real fd, 1 null skipped)",
+			 *(unsigned int *)(fcBuf + 0x4), 1);
+		check_eq("CloseFileDescriptorsIfNecessary: pushed fd == 0xf00d0001",
+			 ((unsigned int *)fcRing)[0], 0xf00d0001u);
+
+		delete[] fcBuf;
 	}
 
 	printf("=====================================================\n");

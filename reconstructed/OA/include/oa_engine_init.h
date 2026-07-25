@@ -1436,9 +1436,60 @@ struct CSTGHDRMiniModel {
  * at a clean, nothing-else-interleaved 0xd4-byte stride (matching the
  * `TSTGArrayManager`-adjacent "clean array" pattern already established
  * elsewhere in this project) -- both give the same number.
+ *
+ * Batch 2026-07-25 adds 5 more confirmed real methods (see
+ * src/engine/streaming_event_manager.cpp for the full derivation):
+ * HandleErrorReading()/CloseFileDescriptorsIfNecessary() plus 3 fields
+ * newly named via those two methods' own disassembly:
+ *   +0x1c  fdCount        -- byte, number of valid entries in the fd
+ *          array below; loop bound for CloseFileDescriptorsIfNecessary().
+ *   +0x24  fds[]           -- packed-32-bit `CSTGFile*` handle array,
+ *          up to fdCount entries, 4 bytes each starting at this offset
+ *          (real per-slot upper bound not independently confirmed --
+ *          every real caller so far uses a small fdCount).
+ *   +0x40  circBuf         -- an EMBEDDED (not pointer) CSTGHDRCircularBuffer
+ *          sub-object (confirmed via the ctor's own `lea eax,[this+0x40];
+ *          call CSTGHDRCircularBuffer::CSTGHDRCircularBuffer()`), used
+ *          directly by ProcessCommandFilledBytes() (managers.cpp).
+ *   +0x70  voice           -- packed-32-bit `CSTGVoice*`, read only by
+ *          HandleErrorReading() (forwarded to
+ *          `CSTGVoiceAllocator::StealVoice()`, deliberately deferred).
+ *   +0x94  fdsEnabled      -- dword flag, gates whether
+ *          CloseFileDescriptorsIfNecessary() actually pushes each fd
+ *          entry (re-read every loop iteration, a real quirk: a caller
+ *          could in principle flip it mid-loop, though no confirmed real
+ *          caller does).
+ *   +0xb8/+0xc4  a confirmed real dword pair compared (unsigned) by
+ *          ProcessCommandFilledBytes() (managers.cpp) to gate the
+ *          `CSTGDiskCostManager::UpdateDiskThroughputBytesRead()` call --
+ *          real high-level semantics (position vs. limit?) not
+ *          independently determined, every touch faithfully reproduced.
  */
 struct CSTGStreamingEvent {
 	CSTGStreamingEvent();
+	/*
+	 * HandleErrorReading() (`.text+0xd2070`, 22 bytes) confirmed real:
+	 * forwards `voice` (+0x70) to `CSTGVoiceAllocator::sInstance->
+	 * StealVoice()` (oa_engine.h, deliberately deferred -- genuine
+	 * voice-reallocation DSP logic, out of scope). Also the real target
+	 * resolved by `CSTGHDRFileReader`/`CSTGStreamingFileReader::
+	 * ProcessCommandError()`'s own vtable-slot-5 dispatch on a
+	 * `CSTGPlaybackEvent*`/`CSTGStreamingEvent*` respectively (confirmed
+	 * via readelf relocation resolution against
+	 * `.rodata._ZTV18CSTGStreamingEvent`/`.rodata._ZTV17CSTGPlaybackEvent`
+	 * -- CSTGPlaybackEvent's own override is a bare `ret`, already real).
+	 */
+	void HandleErrorReading();
+	/*
+	 * CloseFileDescriptorsIfNecessary() (`.text+0xd2330`, 86 bytes)
+	 * confirmed real: iterates `fds[0..fdCount)`, pushing each non-null,
+	 * fdsEnabled-gated entry as `{fd, 0}` onto `CSTGFileCloser::
+	 * sInstance`'s own first embedded ring (the SAME target/shape every
+	 * other file-daemon `ProcessCommands()` sibling already pushes into
+	 * -- see managers.cpp). Real caller: `CSTGStreamingEventManager::
+	 * ReturnFreeEvent()` (streaming_event_manager.cpp).
+	 */
+	void CloseFileDescriptorsIfNecessary();
 	unsigned char _unrecovered[0xd4];
 };
 /* The real vtable symbol (40 confirmed bytes via nm -CS, matching
@@ -1493,19 +1544,38 @@ struct CSTGStreamingEventManager {
 	 * (401, an unsigned short), ecx=0x10000 (65536, an unsigned long) --
 	 * matching the mangled `10InitializeEtm` signature exactly. */
 	void Initialize(unsigned short arg1, unsigned long arg2);
+	/*
+	 * ReturnFreeEvent(CSTGStreamingEvent*) (`.text+0xd1e10`, 320 bytes,
+	 * batch 2026-07-25) confirmed real -- see
+	 * src/engine/streaming_event_manager.cpp for the full derivation.
+	 * Reentrant-safe (nesting counted via `field14c38`): only the
+	 * OUTERMOST call (depth 0->1) acquires a global CLI-disabling lock
+	 * (`rtwrap_global_save_flags_and_cli()`/`rtwrap_global_restore_
+	 * flags()`, RTAI hal primitives genuinely defined INSIDE OA.ko
+	 * itself, not forwarded -- see bar2_stubs_c.cpp), but
+	 * `event->CloseFileDescriptorsIfNecessary()` itself is called
+	 * UNCONDITIONALLY on every call, nested or not; every call unlinks the
+	 * event from the `field14c24`/`field14c28`-headed doubly-linked
+	 * "sounding events" list (the same list `AddSoundingEvent()`, sec
+	 * 10.145, already threads through), decrements `field14c2c`, then
+	 * pushes the event onto the `freeListHead`/`freeListTail` free list
+	 * and increments `count` -- symmetric with `GetFreeEvent()`'s own
+	 * already-real pop-from-freelist logic.
+	 */
+	void ReturnFreeEvent(CSTGStreamingEvent *event);
 
 	unsigned char _unrecovered_head[4];		/* +0x000 */
 	CSTGStreamingEvent events[401];		/* +0x004..+0x14c18 */
 	unsigned int freeListHead;			/* +0x14c18 */
 	unsigned int freeListTail;			/* +0x14c1c */
 	unsigned int count;				/* +0x14c20 */
-	unsigned int field14c24;			/* +0x14c24 */
-	unsigned int field14c28;			/* +0x14c28 */
-	unsigned int field14c2c;			/* +0x14c2c */
+	unsigned int field14c24;	/* +0x14c24 -- "sounding events" list head, see AddSoundingEvent()/ReturnFreeEvent() */
+	unsigned int field14c28;	/* +0x14c28 -- "sounding events" list tail, same list */
+	unsigned int field14c2c;	/* +0x14c2c -- sounding-events count, decremented by ReturnFreeEvent() */
 	unsigned int mutexPtr32;			/* +0x14c30 */
-	unsigned int field14c34;			/* +0x14c34, confirmed gap */
-	unsigned int field14c38;			/* +0x14c38 */
-	unsigned int field14c3c;			/* +0x14c3c */
+	unsigned int field14c34;	/* +0x14c34 -- ReturnFreeEvent()'s own saved-flags token, valid while field14c38>0 */
+	unsigned int field14c38;	/* +0x14c38 -- ReturnFreeEvent() reentrancy/nesting depth counter */
+	unsigned int field14c3c;	/* +0x14c3c -- confirmed real, touched by both AddSoundingEvent()/ReturnFreeEvent(), exact semantics not fully determined */
 	unsigned int field14c40;			/* +0x14c40 */
 };
 

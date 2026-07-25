@@ -155,17 +155,19 @@ void CSTGMonitorMixer::RunMonitors() {}
  * CSTGHDRFileWriter::ProcessCommands() is real now too, same batch as
  * CSTGFileOpener/CSTGFileCloser above -- see managers.cpp.
  * CSTGHDRFileReader::ProcessCommands()/CSTGStreamingFileReader::
- * ProcessCommands() remain genuinely blocked -- re-disassembled fresh
- * this batch and confirmed DIFFERENT from their three now-real siblings:
- * both dispatch through `TSTGArrayManager<T>::sInstance->indexArray`, a
- * REAL per-command-type lookup table (indexed by a small integer decoded
- * from the record) whose own populated CONTENTS are not yet recovered --
- * a genuine not-yet-recovered function-pointer table, not just a fixed
- * vtable slot. Needs the table's real contents transcribed (same class
- * of future data-recovery push as CSTGParamDescriptor/sCCInfoTable)
- * before these two can be reconstructed for real. */
-void CSTGHDRFileReader::ProcessCommands() {}
-void CSTGStreamingFileReader::ProcessCommands() {}
+ * ProcessCommands() are real now too, batch 2026-07-25 -- see
+ * managers.cpp. This REVISES the older "both dispatch through an
+ * unrecovered `TSTGArrayManager<T>::indexArray` function-pointer table"
+ * blocking note: fresh disassembly (cross-checked against Initialize()'s
+ * own already-real field writes) found `indexArray` only ever holds
+ * `CSTGPlaybackEvent*`/data -- the SAME usage `playback_buffer_events.cpp`
+ * already established, never function pointers. The genuine per-command
+ * dispatch table for both classes is a SEPARATE, self-contained set of
+ * `{funcptr,adj}` pairs baked directly into each object's own instance
+ * data by its ctor/Initialize() (never virtual, `adj` always 0), and
+ * every one of the 9 resolved targets (6 for CSTGHDRFileReader, 3 for
+ * CSTGStreamingFileReader) is now a real, reconstructed sibling method --
+ * see oa_engine.h's own class comments for the full per-tag mapping. */
 /* USTGHDRUtils::ConvertWaveToSTGSamples() is real now, batch 26 -- see
  * src/engine/wave_sample_convert.cpp. Convert44100WaveToSTGSamples()
  * (its own 44100Hz-source-only sibling, see oa_engine.h's USTGHDRUtils
@@ -183,15 +185,15 @@ unsigned long USTGHDRUtils::Convert44100WaveToSTGSamples(float *, bool, bool, ch
  * CSTGHDRCircularBuffer, a brand-new fully-reconstructed class -- see
  * oa_engine.h). */
 /* CSTGSamplingDaemon::ProcessCommands() is real now, sec 10.160 -- see
- * managers.cpp (right after CSTGCDWorker::ProcessCommands()). Of its
- * former FIVE deferred siblings, THREE (CSTGFileOpener/CSTGFileCloser/
- * CSTGHDRFileWriter::ProcessCommands()) are real now too (batch 64ish,
- * 2026-07-25 -- see file_opener_events.cpp/managers.cpp) -- fresh
- * disassembly found a plain fixed-slot vtable dispatch, not the PTM
- * table this note used to assume. The remaining TWO (CSTGHDRFileReader/
- * CSTGStreamingFileReader::ProcessCommands()) really do dispatch through
- * a not-yet-recovered `TSTGArrayManager<T>::indexArray`-based per-command
- * lookup table and remain deliberately stubbed below. */
+ * managers.cpp (right after CSTGCDWorker::ProcessCommands()). All FIVE of
+ * its former deferred file-daemon siblings (CSTGFileOpener/CSTGFileCloser/
+ * CSTGHDRFileWriter/CSTGHDRFileReader/CSTGStreamingFileReader::
+ * ProcessCommands()) are real now (batch 64ish + batch 2026-07-25 -- see
+ * file_opener_events.cpp/managers.cpp) -- the whole cluster's old
+ * "unrecovered PTM table" blocking note is fully retired; every dispatch
+ * turned out to be either a fixed vtable slot on an untyped payload, or a
+ * per-instance `{funcptr,adj}` table baked into the object's own data by
+ * its ctor/Initialize(), never a genuinely unrecovered lookup table. */
 /* CSTGMidiPortManager::Initialize() is real now, sec 10.230/
  * MASTER_REFERENCE -- see src/engine/midi_port_manager.cpp (the root fix
  * for the CSTGMidiQueueWriter::Write() ringCtl-NULL crash).
@@ -735,6 +737,12 @@ void CSTGSlotVoiceData::RunVoiceModelStaticBack(unsigned int) {}
  * Steal is now real (sec 10.140). */
 void CSTGSlotVoiceData::GetTotalStaticCosts(unsigned long *, unsigned long *) const {}
 void CSTGVoiceAllocator::StealVoiceList(void *) {}
+/* CSTGVoiceAllocator::StealVoice(CSTGVoice*) -- confirmed real
+ * (`.text+0x52b50`, 945 bytes), deliberately deferred, same treatment as
+ * StealVoiceList above -- see oa_engine.h and
+ * src/engine/streaming_event_manager.cpp (its only real caller in this
+ * reconstruction, CSTGStreamingEvent::HandleErrorReading()). */
+void CSTGVoiceAllocator::StealVoice(CSTGVoice *) {}
 /* CSTGSmoother::CSTGSmoother() ctor is real now, batch 22 -- see
  * src/engine/smoother_ctor.cpp. Initialize() reconstructed for real, sec
  * 10.86 -- see src/engine/smoother_init.cpp. */

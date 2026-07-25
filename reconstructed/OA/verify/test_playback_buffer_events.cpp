@@ -102,6 +102,17 @@ unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
  * (a real "multiple definition" ld error the first time this was tried,
  * batch 24). */
 template<> TSTGArrayManager<CSTGPlaybackEvent> *TSTGArrayManager<CSTGPlaybackEvent>::sInstance = 0;
+/* Link-satisfying only, needed by managers.cpp's now-real
+ * CSTGHDRFileReader::ProcessCommands()/CSTGStreamingFileReader::
+ * ProcessCommands() (2026-07-25) -- this file's own tests never exercise
+ * either object's command ring. Every OTHER symbol those two functions
+ * need (CSTGPlaybackEvent::HandleErrorReading/CSTGPlaybackBuffer::
+ * HandleAdvanceCancelledEvent/EventBufferStartLocationUpdated/
+ * CSTGDiskCostManager::UpdateDiskThroughputBytesRead) is already real
+ * via this file's own existing link line. */
+CSTGStreamingEventManager *CSTGStreamingEventManager::sInstance = 0;
+void CSTGStreamingEventManager::ReturnFreeEvent(CSTGStreamingEvent *) {}
+void CSTGStreamingEvent::HandleErrorReading() {}
 static unsigned int g_onlineCpus = 2, g_khz = 1500000;
 extern "C" unsigned int stg_num_online_cpus(void) { return g_onlineCpus; }
 extern "C" unsigned int stg_get_cpu_khz(void) { return g_khz; }

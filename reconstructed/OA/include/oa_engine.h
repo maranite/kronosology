@@ -343,6 +343,7 @@ public:
 struct CSTGPlaybackEvent;	/* forward decl, real definition in oa_engine_init.h */
 struct CSTGAudioEvent;		/* forward decl, real definition in oa_engine_init.h */
 struct CSTGMidiQueue;		/* forward decl, real definition in oa_engine_init.h */
+struct CSTGStreamingEvent;	/* forward decl, real definition in oa_engine_init.h */
 
 /*
  * Real, fully-fleshed classes with many other confirmed methods
@@ -1116,8 +1117,37 @@ class CSTGHDRFileReader {
 public:
 	static CSTGHDRFileReader *sInstance;
 	CSTGHDRFileReader();
+	/*
+	 * ProcessCommands() (`.text+0x11c250`, 118 bytes) real now (batch
+	 * 2026-07-25, see managers.cpp): drains this object's own `+0x0`/
+	 * `+0x4`/`+0x8`/`+0xc` ring (same base/write/read/capacity shape as
+	 * every other file-daemon sibling), 8-byte records (word tag `+0x0`,
+	 * signed word elemIdx `+0x2`, dword "long" extra param `+0x4`).
+	 * `elemIdx` resolves to a real `CSTGPlaybackEvent*` via
+	 * `TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray[elemIdx]`
+	 * (the SAME real per-command lookup table `playback_buffer_events.cpp`
+	 * already uses -- this REVISES the older "ProcessCommands() dispatches
+	 * through an unrecovered indexArray function-pointer table" note:
+	 * `indexArray` only ever holds `CSTGPlaybackEvent*` data, never
+	 * function pointers). The genuine per-command dispatch table this
+	 * class's OWN ctor bakes in as 6 `{funcptr,adj}` pairs at
+	 * `+0x14..+0x44` (all `adj==0`, i.e. never virtual) resolves to 6
+	 * fixed, already-named sibling methods below -- reproduced as a
+	 * direct `switch(tag)` rather than a redundant runtime PTM read
+	 * (same precedent as `CSTGPlaybackBuffer::RemoveEvent`'s own vtable-
+	 * slot-7 resolution).
+	 */
 	void ProcessCommands();
 	void Initialize();	/* real now, sec 10.151 -- see managers.cpp */
+	/* The 6 real ProcessCommands() dispatch targets, tag 0..5 in order
+	 * (ctor's own `+0x14/+0x1c/+0x24/+0x2c/+0x34/+0x3c` write order) --
+	 * see managers.cpp for each one's own full derivation. */
+	void ProcessCommandComplete(CSTGPlaybackEvent *event, long param);
+	void ProcessCommandEventBufferStartLocationUpdated(CSTGPlaybackEvent *event, long param);
+	void ProcessCommandFilledSamples(CSTGPlaybackEvent *event, long param);
+	void ProcessCommandError(CSTGPlaybackEvent *event, long param);
+	void ProcessCommandCancelled(CSTGPlaybackEvent *event, long param);
+	void ProcessCommandHandleAdvanceCancelledEvent(CSTGPlaybackEvent *event, long param);
 	unsigned char _unrecovered[68];	/* confirmed size; ctor touches +0x00..+0x10 */
 };
 
@@ -1134,6 +1164,25 @@ class CSTGStreamingFileReader {
 public:
 	static CSTGStreamingFileReader *sInstance;
 	CSTGStreamingFileReader();
+	/*
+	 * ProcessCommands() (`.text+0x11b200`, 152 bytes) real now (batch
+	 * 2026-07-25, see managers.cpp): drains this object's own `+0x0`/
+	 * `+0x4`/`+0x8`/`+0xc` ring, but with 12-byte records (word tag
+	 * `+0x0`, signed word elemIdx `+0x2`, dword "long" extra param
+	 * `+0x4`, byte "continuation" flag `+0x8` -- a real, confirmed
+	 * quirk: entries with a nonzero continuation byte are drained
+	 * WITHOUT dispatch, and the loop keeps consuming ring entries until
+	 * one with continuation==0 is found, THEN dispatches once using that
+	 * entry's own tag/elemIdx/param). `elemIdx` resolves to a real
+	 * `CSTGStreamingEvent*` via `&CSTGStreamingEventManager::sInstance->
+	 * events[elemIdx]` (confirmed via address-arithmetic cross-check
+	 * against that struct's own already-established `events[401]` field
+	 * at manager+0x4). The genuine per-command dispatch table this
+	 * class's OWN Initialize() bakes in as 3 `{funcptr,adj}` pairs at
+	 * `+0x20..+0x34` (all `adj==0`) resolves to 3 fixed, already-named
+	 * sibling methods below -- same "direct switch(tag)" treatment as
+	 * `CSTGHDRFileReader::ProcessCommands()`.
+	 */
 	void ProcessCommands();
 	/* CORRECTED (sec 10.151): a prior pass, before ever disassembling the
 	 * real body, assumed the confirmed real call-site value 0x8000 was
@@ -1143,6 +1192,12 @@ public:
 	 * documentation, matching CSTGCDWorker_InitializeBuffer's own
 	 * established "confirmed real, but dead" precedent (sec 10.148). */
 	void Initialize(unsigned long bufferSize);
+	/* The 3 real ProcessCommands() dispatch targets, tag 0..2 in order
+	 * (Initialize()'s own `+0x20/+0x28/+0x30` write order) -- see
+	 * managers.cpp for each one's own full derivation. */
+	void ProcessCommandComplete(CSTGStreamingEvent *event, long param);
+	void ProcessCommandFilledBytes(CSTGStreamingEvent *event, long param);
+	void ProcessCommandError(CSTGStreamingEvent *event, long param);
 	unsigned char _unrecovered[56];	/* confirmed size; ctor touches +0x00..+0x1c */
 };
 
@@ -2480,6 +2535,17 @@ public:
 	 * EmergencyFreeVoiceList's own 84, out of scope for this batch).
 	 */
 	void StealVoiceList(void *list);
+
+	/*
+	 * StealVoice(CSTGVoice*) (`.text+0x52b50`, 945 bytes) -- confirmed
+	 * real (called by `CSTGStreamingEvent::HandleErrorReading()`,
+	 * streaming_event_manager.cpp), deliberately deferred extern: a
+	 * genuine voice-stealing/reallocation body, squarely audio-DSP
+	 * territory (out of scope per this project's own RTAI/DSP
+	 * virtualization policy), same "confirmed real, deferred" treatment
+	 * as `StealVoiceList` immediately above.
+	 */
+	void StealVoice(CSTGVoice *voice);
 
 	/*
 	 * FreeVoice(CSTGVoice*) (`.text+0x50cf0`) and DoPendingMoveVoices()

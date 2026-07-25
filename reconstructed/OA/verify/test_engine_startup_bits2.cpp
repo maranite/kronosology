@@ -53,6 +53,19 @@ extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(siz
 void CSTGHDRManager::ProcessPlaybackCommands() { }
 void CSTGHDRManager::ProcessRecordCommands() { }
 void CSTGHDRManager::ProcessSamplerCommands() { }
+/* Link-satisfying only, needed by managers.cpp's now-real
+ * CSTGHDRFileReader::ProcessCommands()/CSTGStreamingFileReader::
+ * ProcessCommands() (2026-07-25) -- this file's own tests never exercise
+ * either object's command ring. CSTGDiskCostManager::
+ * UpdateDiskThroughputBytesRead() is NOT mocked here -- it's already
+ * real (this file links engine_startup_bits2.cpp directly). */
+template<> TSTGArrayManager<CSTGPlaybackEvent> *TSTGArrayManager<CSTGPlaybackEvent>::sInstance = 0;
+void CSTGPlaybackEvent::HandleErrorReading() {}
+void CSTGPlaybackBuffer::HandleAdvanceCancelledEvent(CSTGPlaybackEvent *) {}
+void CSTGPlaybackBuffer::EventBufferStartLocationUpdated(CSTGPlaybackEvent *, char *) {}
+CSTGStreamingEventManager *CSTGStreamingEventManager::sInstance = 0;
+void CSTGStreamingEventManager::ReturnFreeEvent(CSTGStreamingEvent *) {}
+void CSTGStreamingEvent::HandleErrorReading() {}
 static int g_mutexattrCalls;
 extern "C" void rtwrap_pthread_mutexattr_init(void *) { g_mutexattrCalls++; }
 extern "C" int  get_pthread_recursive_attr_constant(void) { return 1; }

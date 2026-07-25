@@ -2076,6 +2076,150 @@ void CSTGHDRFileReader::Initialize()
 }
 
 /*
+ * CSTGHDRFileReader::ProcessCommands() (`.text+0x11c250`, 118 bytes,
+ * batch 2026-07-25). Was long documented as blocked by "dispatches
+ * through an unrecovered `TSTGArrayManager<T>::indexArray` function-
+ * pointer table" -- fresh disassembly REVISES that: `indexArray` (used
+ * exactly as `playback_buffer_events.cpp` already established -- see
+ * `TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray[elemIdx]`)
+ * only ever holds `CSTGPlaybackEvent*` DATA, never function pointers. The
+ * genuine per-command dispatch table is a SEPARATE thing entirely: 6
+ * `{funcptr,adj}` (Itanium PTM-shaped) pairs baked directly into THIS
+ * object's own `+0x14..+0x44` span by the ctor above, `adj` always 0
+ * (never virtual) -- reproduced here as a direct `switch(tag)` onto the 6
+ * already-named sibling methods below, rather than a redundant runtime
+ * PTM/vtable read (matches this project's established
+ * `CSTGPlaybackBuffer::RemoveEvent`-style precedent).
+ *
+ * Drains this object's own `+0x0`/`+0x4`/`+0x8`/`+0xc` ring (base/write/
+ * read/capacity). 8-byte records: word tag `+0x0`, signed word elemIdx
+ * `+0x2`, dword "long" extra param `+0x4`. Any tag outside 0..5: real,
+ * faithfully-preserved no-op (entry still consumed).
+ */
+void CSTGHDRFileReader::ProcessCommands()
+{
+	unsigned char *self = (unsigned char *)this;
+	unsigned int writeIdx = *(unsigned int *)(self + 0x4);
+	unsigned int readIdx = *(unsigned int *)(self + 0x8);
+
+	while (writeIdx != readIdx) {
+		unsigned char *record = FromU32(*(unsigned int *)self) + readIdx * 8;
+		unsigned int capacity = *(unsigned int *)(self + 0xc);
+		readIdx = (readIdx + 1) % capacity;
+		*(unsigned int *)(self + 0x8) = readIdx;
+
+		unsigned short tag = *(unsigned short *)(record + 0);
+		short elemIdx = *(short *)(record + 2);
+		long param = (long)*(int *)(record + 4);
+
+		unsigned int *indexArray =
+			(unsigned int *)FromU32(TSTGArrayManager<CSTGPlaybackEvent>::sInstance->indexArray);
+		CSTGPlaybackEvent *event = (CSTGPlaybackEvent *)FromU32(indexArray[elemIdx]);
+
+		switch (tag) {
+		case 0: ProcessCommandComplete(event, param); break;
+		case 1: ProcessCommandEventBufferStartLocationUpdated(event, param); break;
+		case 2: ProcessCommandFilledSamples(event, param); break;
+		case 3: ProcessCommandError(event, param); break;
+		case 4: ProcessCommandCancelled(event, param); break;
+		case 5: ProcessCommandHandleAdvanceCancelledEvent(event, param); break;
+		default: break;
+		}
+
+		writeIdx = *(unsigned int *)(self + 0x4);
+		readIdx = *(unsigned int *)(self + 0x8);
+	}
+}
+
+/* Shared push idiom -- `{event, 0}` onto `CSTGFileCloser::sInstance`'s
+ * own first embedded ring, the SAME target/shape every other file-daemon
+ * `ProcessCommands()` sibling already pushes into (see
+ * `file_opener_events.cpp`/above in this file). Factored out since 3 of
+ * the 6 handlers below share it byte-for-byte. */
+static void PushToFileCloser(void *payload)
+{
+	unsigned char *fc = (unsigned char *)CSTGFileCloser::sInstance;
+	unsigned int fcCursor = *(unsigned int *)(fc + 0x4);
+	unsigned char *fcEntry = FromU32(*(unsigned int *)(fc + 0x0)) + fcCursor * 8;
+	*(unsigned int *)(fcEntry + 0) = ToU32(payload);
+	*(unsigned int *)(fcEntry + 4) = 0;
+	*(unsigned int *)(fc + 0x4) = (fcCursor + 1) % *(unsigned int *)(fc + 0xc);
+}
+
+/* tag==0 (`.text+0x11b920`, 45 bytes): `event->fieldAt(0xc) = 3`, push
+ * onto CSTGFileCloser. */
+void CSTGHDRFileReader::ProcessCommandComplete(CSTGPlaybackEvent *event, long)
+{
+	*(unsigned int *)((unsigned char *)event + 0xc) = 3;
+	PushToFileCloser(event);
+}
+
+/* tag==3 (`.text+0x11b950`, 80 bytes): `event->fieldAt(0x10) = 1`
+ * (confirmed real new field, semantics not independently determined),
+ * `event->HandleErrorReading()` (real, bare `ret` -- playback_event_
+ * methods.cpp), then the same fieldAt(0xc)=3 + push as Complete above. */
+void CSTGHDRFileReader::ProcessCommandError(CSTGPlaybackEvent *event, long)
+{
+	unsigned char *ev = (unsigned char *)event;
+	*(unsigned int *)(ev + 0x10) = 1;
+	event->HandleErrorReading();
+	*(unsigned int *)(ev + 0xc) = 3;
+	PushToFileCloser(event);
+}
+
+/* tag==4 (`.text+0x11b9a0`, 45 bytes): byte-identical shape to
+ * ProcessCommandComplete (`fieldAt(0xc)=3`, push) -- a real, confirmed
+ * twin, not simplified into a shared body since ground truth keeps them
+ * as two distinct compiled functions (same "faithfully reproduce genuine
+ * duplication" precedent as CSTGHDRFileWriter::Initialize()'s own
+ * twin above). */
+void CSTGHDRFileReader::ProcessCommandCancelled(CSTGPlaybackEvent *event, long)
+{
+	*(unsigned int *)((unsigned char *)event + 0xc) = 3;
+	PushToFileCloser(event);
+}
+
+/* tag==5 (`.text+0x11b9d0`, 33 bytes): `this` for the call is
+ * `event->ownerBuffer` (+0x30, playback_event_methods.cpp), `event`
+ * itself passed straight through as the argument. */
+void CSTGHDRFileReader::ProcessCommandHandleAdvanceCancelledEvent(CSTGPlaybackEvent *event, long)
+{
+	unsigned char *ev = (unsigned char *)event;
+	CSTGPlaybackBuffer *buf = (CSTGPlaybackBuffer *)FromU32(*(unsigned int *)(ev + 0x30));
+	buf->HandleAdvanceCancelledEvent(event);
+}
+
+/* tag==2 (`.text+0x11b9f0`, 68 bytes): accumulates into `event->
+ * windowThreshold` (+0x44), then unconditionally calls BOTH
+ * `((CSTGHDRCircularBuffer*)event->ownerBuffer)->IncrementAvailableReadBytes()`
+ * (the SAME `+0x30` embedding CSTGPlaybackBuffer already establishes --
+ * `(CSTGHDRCircularBuffer*)this` is a valid reinterpretation of a
+ * `CSTGPlaybackBuffer*`, oa_engine.h) and
+ * `CSTGDiskCostManager::sInstance->UpdateDiskThroughputBytesRead()`, both
+ * with `byteCount = event->fieldAt(0x1d) * param` (the same per-frame
+ * byte-size multiplier already named in playback_event_methods.cpp). */
+void CSTGHDRFileReader::ProcessCommandFilledSamples(CSTGPlaybackEvent *event, long param)
+{
+	unsigned char *ev = (unsigned char *)event;
+	*(unsigned int *)(ev + 0x44) += (unsigned int)param;
+
+	unsigned int byteCount = (unsigned int)ev[0x1d] * (unsigned int)param;
+
+	CSTGHDRCircularBuffer *circBuf = (CSTGHDRCircularBuffer *)FromU32(*(unsigned int *)(ev + 0x30));
+	circBuf->IncrementAvailableReadBytes(byteCount);
+	CSTGDiskCostManager::sInstance->UpdateDiskThroughputBytesRead((long)byteCount);
+}
+
+/* tag==1 (`.text+0x11ba40`, 17 bytes): `this` for the call is
+ * `event->ownerBuffer` (+0x30); `event`/`param` passed straight through
+ * unchanged as `(CSTGPlaybackEvent*, char*)`. */
+void CSTGHDRFileReader::ProcessCommandEventBufferStartLocationUpdated(CSTGPlaybackEvent *event, long param)
+{
+	CSTGPlaybackBuffer *buf = (CSTGPlaybackBuffer *)FromU32(*(unsigned int *)((unsigned char *)event + 0x30));
+	buf->EventBufferStartLocationUpdated(event, (char *)param);
+}
+
+/*
  * CSTGStreamingFileReader::Initialize(unsigned long) (`.text+0x11aa10`,
  * 120 bytes, sec 10.151) confirmed: `fieldAt(0x10)=0x10000`,
  * `fieldAt(0x14)=0x8000`, `fieldAt(0x18)=AllocAligned(0x10000,0x10)`,
@@ -2106,6 +2250,101 @@ void CSTGStreamingFileReader::Initialize(unsigned long /* confirmed real: never 
 	*(unsigned int *)(base + 0x2c) = 0;
 	*(unsigned int *)(base + 0x30) = 0;
 	*(unsigned int *)(base + 0x34) = 0;
+}
+
+/*
+ * CSTGStreamingFileReader::ProcessCommands() (`.text+0x11b200`, 152
+ * bytes, batch 2026-07-25). Same REVISION as CSTGHDRFileReader::
+ * ProcessCommands() above: `TSTGArrayManager<T>::indexArray` was never
+ * the real per-command dispatch table here either -- the genuine table
+ * is 3 `{funcptr,adj}` pairs (`adj` always 0) baked into THIS object's
+ * own `+0x20..+0x34` span by Initialize() above, reproduced as a direct
+ * `switch(tag)`.
+ *
+ * Drains this object's own `+0x0`/`+0x4`/`+0x8`/`+0xc` ring, but with
+ * 12-byte records (word tag `+0x0`, signed word elemIdx `+0x2`, dword
+ * "long" extra param `+0x4`, byte "continuation" flag `+0x8`) -- a real,
+ * confirmed quirk: entries with a nonzero continuation byte are drained
+ * WITHOUT dispatch; the inner loop keeps consuming ring entries until one
+ * with continuation==0 is found, THEN dispatches once using THAT entry's
+ * own tag/elemIdx/param. `elemIdx` resolves to a real `CSTGStreamingEvent*`
+ * via `&CSTGStreamingEventManager::sInstance->events[elemIdx]` (confirmed
+ * via address-arithmetic cross-check against that struct's own
+ * already-established `events[401]` field at manager+0x4 --
+ * streaming_event_manager.cpp).
+ */
+void CSTGStreamingFileReader::ProcessCommands()
+{
+	unsigned char *self = (unsigned char *)this;
+	unsigned int readIdx = *(unsigned int *)(self + 0x8);
+	unsigned int writeIdx = *(unsigned int *)(self + 0x4);
+
+	while (readIdx != writeIdx) {
+		unsigned short tag;
+		short elemIdx;
+		long param;
+		unsigned char continueFlag;
+
+		do {
+			unsigned char *record = FromU32(*(unsigned int *)self) + readIdx * 12;
+			tag = *(unsigned short *)(record + 0);
+			elemIdx = *(short *)(record + 2);
+			param = (long)*(int *)(record + 4);
+			continueFlag = record[8];
+
+			readIdx = (readIdx + 1) % *(unsigned int *)(self + 0xc);
+			*(unsigned int *)(self + 0x8) = readIdx;
+		} while (continueFlag != 0);
+
+		CSTGStreamingEvent *event = (CSTGStreamingEvent *)((unsigned char *)CSTGStreamingEventManager::sInstance
+								    + 4 + (int)elemIdx * 0xd4);
+		switch (tag) {
+		case 0: ProcessCommandComplete(event, param); break;
+		case 1: ProcessCommandFilledBytes(event, param); break;
+		case 2: ProcessCommandError(event, param); break;
+		default: break;
+		}
+
+		writeIdx = *(unsigned int *)(self + 0x4);
+		readIdx = *(unsigned int *)(self + 0x8);
+	}
+}
+
+/* tag==0 (`.text+0x11a9b0`, 20 bytes): `CSTGStreamingEventManager::
+ * sInstance->ReturnFreeEvent(event)` (streaming_event_manager.cpp). */
+void CSTGStreamingFileReader::ProcessCommandComplete(CSTGStreamingEvent *event, long)
+{
+	CSTGStreamingEventManager::sInstance->ReturnFreeEvent(event);
+}
+
+/* tag==1 (`.text+0x11a960`, 69 bytes): `((CSTGHDRCircularBuffer*)
+ * (event+0x40))->IncrementAvailableReadBytes(param)` -- `event`'s own
+ * EMBEDDED (not pointer) CSTGHDRCircularBuffer sub-object (confirmed via
+ * the ctor's own `lea eax,[this+0x40]; call CSTGHDRCircularBuffer::
+ * CSTGHDRCircularBuffer()`, streaming_event_manager.cpp). Then, only if
+ * `event->fieldAt(0xb8) < event->fieldAt(0xc4)` (unsigned compare, both
+ * confirmed real, exact semantics not independently determined):
+ * `CSTGDiskCostManager::sInstance->UpdateDiskThroughputBytesRead(param)`. */
+void CSTGStreamingFileReader::ProcessCommandFilledBytes(CSTGStreamingEvent *event, long param)
+{
+	unsigned char *ev = (unsigned char *)event;
+	CSTGHDRCircularBuffer *circBuf = (CSTGHDRCircularBuffer *)(ev + 0x40);
+	circBuf->IncrementAvailableReadBytes((unsigned long)param);
+
+	if (*(unsigned int *)(ev + 0xb8) < *(unsigned int *)(ev + 0xc4))
+		CSTGDiskCostManager::sInstance->UpdateDiskThroughputBytesRead(param);
+}
+
+/* tag==2 (`.text+0x11a940`, 24 bytes): `event->fieldAt(0x10) = 1`
+ * (same confirmed-real field HDRFileReader's own ProcessCommandError()
+ * sets), then `event->HandleErrorReading()` (real now,
+ * streaming_event_manager.cpp -- forwards to `CSTGVoiceAllocator::
+ * StealVoice()`, deliberately deferred). */
+void CSTGStreamingFileReader::ProcessCommandError(CSTGStreamingEvent *event, long)
+{
+	unsigned char *ev = (unsigned char *)event;
+	*(unsigned int *)(ev + 0x10) = 1;
+	event->HandleErrorReading();
 }
 
 /*

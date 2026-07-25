@@ -65,6 +65,19 @@ extern "C" void rtwrap_pthread_mutexattr_destroy(void *) { }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_cond(void) { return 24; }
 extern "C" void rtwrap_pthread_cond_init(void *, void *) { }
 void CSTGToneAdjustDescriptor::InitializeCommonToneAdjustDescriptors() { }
+/* Link-satisfying only, needed by managers.cpp's now-real
+ * CSTGHDRFileReader::ProcessCommands()/CSTGStreamingFileReader::
+ * ProcessCommands() (2026-07-25) -- this file's own tests never exercise
+ * either object's command ring, so none of these are ever actually
+ * called/dereferenced at runtime here. */
+template<> TSTGArrayManager<CSTGPlaybackEvent> *TSTGArrayManager<CSTGPlaybackEvent>::sInstance = 0;
+void CSTGPlaybackEvent::HandleErrorReading() {}
+void CSTGPlaybackBuffer::HandleAdvanceCancelledEvent(CSTGPlaybackEvent *) {}
+void CSTGPlaybackBuffer::EventBufferStartLocationUpdated(CSTGPlaybackEvent *, char *) {}
+void CSTGDiskCostManager::UpdateDiskThroughputBytesRead(long) {}
+CSTGStreamingEventManager *CSTGStreamingEventManager::sInstance = 0;
+void CSTGStreamingEventManager::ReturnFreeEvent(CSTGStreamingEvent *) {}
+void CSTGStreamingEvent::HandleErrorReading() {}
 /* CSTGAudioManager::~CSTGAudioManager() is now real (managers.cpp,
  * linked directly by this test, sec 10.225 -- no longer virtual, no
  * mock needed here any more). */

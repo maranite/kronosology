@@ -1115,3 +1115,67 @@ from a service menu) and watch `chip_sniff_ring.bin`-style USB traffic
 while pressing front-panel buttons/touching the touch panel/moving the
 joystick, to confirm the type-byte dispatch table and byte-order
 theories above against real captured packets.
+
+---
+
+## CSTGHDRFileReader/CSTGStreamingFileReader::ProcessCommands() cluster (batch, 2026-07-25)
+
+Reconstructed (`managers.cpp`): both classes' `ProcessCommands()` plus
+all 9 real per-tag dispatch handlers, plus their shared dependency
+`CSTGStreamingEventManager::ReturnFreeEvent()`/`CSTGStreamingEvent::
+CloseFileDescriptorsIfNecessary()`/`HandleErrorReading()`
+(`streaming_event_manager.cpp`). This REVISES a long-standing "blocked
+by an unrecovered `TSTGArrayManager<T>::indexArray` function-pointer
+table" verdict (batch 28 onward) -- the real per-command dispatch
+tables turned out to be per-instance `{funcptr,adj}` pairs baked
+directly into each object's own data by its ctor/`Initialize()`,
+fully disassembly-recoverable, not a genuinely-missing data table.
+
+Uncertain:
+
+1. **`rtwrap_global_save_flags_and_cli()`/`rtwrap_global_restore_flags()`
+   (`bar2_stubs_c.cpp`) are a FUNCTIONAL substitute for RTAI's real
+   global ticket-spinlock-plus-per-CPU-bitmap algorithm, not a literal
+   opcode-for-opcode reproduction** -- the real algorithm (RTAI's
+   `rt_global_cli()`/`rt_global_sti()`) is reproduced via GCC atomic
+   builtins operating on the same real `rtai_cpu_lock`/
+   `per_cpu__cpu_number` externs at the same confirmed byte offsets,
+   including the two "should-never-happen" defensive branches ground
+   truth's own `restore_flags()` carries -- but genuine multi-CPU RTAI
+   contention behavior (cache-line bouncing, real scheduling
+   interaction with `rtai_sched.ko`) has never been exercised, only a
+   single-threaded host KAT. This is squarely in-scope for this
+   project's own RTAI-substitution policy, but real-hardware SMP
+   testing under actual file-daemon load would be the only way to
+   confirm the substitute behaves identically to the real primitive
+   under contention.
+2. **`CSTGStreamingEventManager::field14c3c`'s real high-level purpose
+   is not independently determined** -- confirmed real via disassembly
+   (touched by both `AddSoundingEvent()` and `ReturnFreeEvent()`,
+   compared against the event pointer being added/returned, reset to 0
+   on a match), faithfully reproduced, but its semantic role (a
+   "pending wake signal for this specific event", by analogy with
+   `AddSoundingEvent()`'s own `signal_daemon()` call, is a plausible
+   but unconfirmed guess) is unclear.
+3. **`CSTGStreamingEvent+0xb8`/`+0xc4`'s real semantics are
+   undetermined** beyond "an unsigned dword pair `ProcessCommandFilled
+   Bytes()` compares to gate the `CSTGDiskCostManager::
+   UpdateDiskThroughputBytesRead()` call" -- plausibly a
+   position/limit or read-count/total-size pair, no independent
+   cross-reference confirms which.
+4. **The underlying vtable-dispatched disk-I/O calls this whole
+   cluster ultimately feeds (`CSTGFileCloser`'s own vtable-slot
+   dispatch, already flagged in the batch 64ish log entry above) remain
+   unreconstructed** -- this pass adds two more real producers into
+   that same not-yet-reconstructed sink, so it still can't say anything
+   about real SSD/flash timing vs. this project's own ring-capacity
+   assumptions.
+
+Real-HW test that would help: trigger real HDR streaming playback
+(long sample/multisample-stream voice) and record-then-read-back audio
+on a real Kronos while watching for file-daemon-related dmesg/timing
+anomalies, particularly under heavy multi-voice load where
+`CSTGStreamingEventManager`'s free-list/sounding-list churn and the
+`rtwrap_global_*` lock would see genuine contention across the SMP
+Atom's 4 logical CPUs -- something a single-CPU VM sandbox can't
+exercise.
