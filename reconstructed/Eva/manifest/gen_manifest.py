@@ -220,6 +220,31 @@ RECONSTRUCTED = {
     "08916270",  # CSTGUnsolMsgHandler::KLMMsgHandler (confirmed-empty, static)
     "0824cc30",  # CEditor::CPanelIfcTask::GetMargin (real companion to SetMargin, added while re-touching this header)
 
+    # --- CSTGUnsolMsgHandler batch 2 follow-up (2026-07-25, commit 72a2909) -- 5 of
+    # batch 6's 12 remaining Tier-B handlers made real (CStorage guard + EditApi
+    # scope-id/set-param vtable dispatch + a real .rodata byte table each). This
+    # entry backfills gen_manifest.py's own literal address set for that commit,
+    # which updated manifest/eva_functions.csv directly via a one-off script and
+    # never touched this file -- see include/stg_unsol_msg_handler.h for the
+    # per-handler writeup.
+    "08916d90",  # CSTGUnsolMsgHandler::PatchMsgHandler
+    "08916600",  # CSTGUnsolMsgHandler::EffectMgrMsgHandler
+    "08916840",  # CSTGUnsolMsgHandler::EffectMsgHandler
+    "08917ad0",  # CSTGUnsolMsgHandler::HDRTrackMsgHandler
+    "08916b00",  # CSTGUnsolMsgHandler::SetListMsgHandler
+
+    # --- CSTGUnsolMsgHandler batch 3 (2026-07-25) -- EffectSlotMsgHandler, the one
+    # handler batch 2 deferred for a different reason (intricate goto/switch + a
+    # reused stack buffer, not deep subsystem reach). Fully resolved by tracing every
+    # buffer write against its call site's own `len` argument (see header comment):
+    # each write is a single, fully-determined byte, and every call transmitting it
+    # uses len==1, so the buffer's other 3 bytes -- which Ghidra's decompile carries
+    # forward via `_1_3_`/CONCAT31 idioms -- are never actually read by the real
+    # callee. Switch/jump-table structure (15 entries, real .rodata 0x08f1bb1c) and
+    # both real byte tables (HandleEffectSlotMsg's own s_akbyAP + CSWTCH_231)
+    # cross-checked instruction-by-instruction against the decompile.
+    "08917cd0",  # CSTGUnsolMsgHandler::EffectSlotMsgHandler
+
     # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
     # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()
     # genuinely IS called in ground truth (CEditor::CPanelIfcTask's and CPoller's own

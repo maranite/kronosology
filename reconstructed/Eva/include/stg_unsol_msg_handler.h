@@ -114,19 +114,42 @@
  * (2487B, CStorage::GetInstance()'s own algorithm-database vtable dispatch,
  * CSTGMultisampleBankUUIDBase, an Api-vtable assertion call, `SetWithoutUpdatingSTG()`).
  *
- * EffectSlotMsgHandler (1796B) is ALSO left Tier B, but for a different, worth-
- * distinguishing reason than the six above: it reaches no new subsystem (same
- * EditApi/CStorage/local-byte-table shape as the five just promoted), but its real
- * body is a genuinely intricate goto/switch tangle with a reused 28-byte stack buffer
- * (`local_2c`) written and read at three different widths (whole int / low byte /
- * `._1_3_` upper-3-bytes-of-a-partially-written-int) across different branches --
- * including at least one spot the real compiler itself left as an uninitialized-
- * stack-garbage read (matching the `SEncoderEvt` padding precedent already documented
- * above, but here feeding directly into an outgoing STG message rather than a
- * discarded struct field). Faithfully untangling that buffer's real per-branch
- * lifetime with confidence was judged disproportionate for one 1796-byte function
- * given this pass's remaining scope -- a good candidate for a future dedicated pass,
- * not a hard blocker.
+ * EffectSlotMsgHandler (real 1856B, .text 0x08917cd0..0x08918410 -- Ghidra's own
+ * "size=1796" label undercounts by ~60 bytes of trailing out-of-line branch targets,
+ * confirmed by disassembling straight through to the next function's own entry with
+ * no gap) -- promoted to Tier A (2026-07-25, follow-up batch). Previously deferred
+ * for a different reason than the six above: same EditApi/CStorage/local-byte-table
+ * shape as the five already promoted, but a 15-way switch on the message's own +0x18
+ * "sub-index" nested inside the outer scope/kind resolution, plus a reused stack
+ * buffer (Ghidra's `local_2c`) whose several partial-width writes (`_0_1_`/
+ * `_1_3_<<8`/CONCAT31 idioms) originally read as a possible genuine uninitialized-
+ * stack-garbage hazard. **That concern is RESOLVED, not routed around**: byte-by-byte
+ * disassembly of every one of local_2c's write sites (not just the decompile) shows
+ * each one writes only byte 0 to a fully-determined value (0, 1, or a message-field
+ * byte), and every one of those call sites ALSO passes `len=1` to EditApi's own
+ * +0x30 "set param" call -- the real callee never reads local_2c's other 3 bytes at
+ * any of those sites, so Ghidra's "upper 3 bytes carried forward from before" framing
+ * is just how its SSA view expresses "byte 0 written, rest untouched", not evidence
+ * of a live hazard. Reconstructed below as a plain byte scalar per message, not a
+ * 4-byte buffer -- no behavioral loss versus the real binary. The one case (idx==3)
+ * that copies a real 4-byte message field into the buffer is a normal, fully-defined
+ * int copy with no garbage involved. Full switch/jump-table structure (15 entries at
+ * real .rodata 0x08f1bb1c) cross-checked instruction-by-instruction against the
+ * decompile, including confirming case 9 and case 10/11/12 are genuinely different
+ * jump targets (0x08918080 vs 0x08918070) despite superficially similar decompiled
+ * bodies -- an initial raw table read of this pass's own miscounted the file offset
+ * and had to be corrected by an independent `objdump -s` cross-check.
+ *
+ * All three of idx==2 (default-group special case), idx==0xb, and idx==3 use the
+ * exact same `EditApiSendParamMsg` shape already established (flag always 1,
+ * lastEditMessage always 0x500c) -- reuse the shared helper. Only the true "default"
+ * tail (every other idx, via a `CSWTCH_231`-int[9]-table flag lookup keyed on the
+ * message's own +2 `eSTGMidiSource` field, real bytes `{4,1,2,1,1,3,1,4,2}` at
+ * 0x08f1c460) diverges from the shared helper's shape: its `flag` argument is
+ * variable (not always 1) and `CEditor::lastEditMessage` is `(flag==3) + 0x500c`,
+ * not unconditionally `0x500c` -- written inline in this one method rather than
+ * bent into the shared helper, same "don't generalize a helper for one outlier"
+ * precedent EndHandling() already set.
  *
  * Reference-vs-pointer parameter shape for every method below is taken from
  * symbols.csv's own demangled names, not functions.csv's ABI-level (pointer-only)
@@ -272,10 +295,6 @@ public:
 	void ProgramSlotMsgHandler(STGMessage &msg);
 	void ProgramMsgHandler(STGMessage &msg);
 	void VoiceModelMsgHandler(STGMessage &msg);
-	/* Tier B, different reason (intricate goto/switch + reused partial-width
-	 * stack buffer) -- see header comment.
-	 */
-	void EffectSlotMsgHandler(STGMessage &msg);
 
 	/* Tier A, batch 2 (2026-07-25) -- real bodies, see header comment. */
 	void PatchMsgHandler(STGMessage &msg);
@@ -283,6 +302,10 @@ public:
 	void EffectMsgHandler(STGMessage &msg);
 	void HDRTrackMsgHandler(STGMessage &msg);
 	void SetListMsgHandler(STGMessage &msg);
+	/* Tier A, batch 3 (2026-07-25) -- real body, see header comment (formerly
+	 * deferred for goto/switch complexity + a buffer-reuse concern now resolved).
+	 */
+	void EffectSlotMsgHandler(STGMessage &msg);
 
 	/* Real layout is {code* fn; int32 adj} per HandleMessage()'s own decompile --
 	 * kept public/raw (not a real C++ pointer-to-member) so the ctor and

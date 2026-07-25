@@ -192,11 +192,21 @@ static const unsigned char kCSWTCH_290[24] = {
  * also happens to name "CSWTCH_231" inside GlobalMsgHandler (a different,
  * unrelated table at a different real address -- confirmed by disassembling both
  * sites separately; Ghidra's CSWTCH_NNN names are a per-decompile-run counter,
- * not a real shared symbol). Not used by any handler implemented in this batch
- * (EffectSlotMsgHandler stays Tier B, see header) -- recorded here only as a
- * fact for whoever picks that one up next: real bytes are { 4,1,2,1,1,3,1,4,2 }
- * (int, little-endian, 9 entries, 36 bytes).
+ * not a real shared symbol). Used by EffectSlotMsgHandler below, keyed by the
+ * message's own +2 `eSTGMidiSource` field (0..8, else default flag 1).
  */
+static const int kCSWTCH_231[9] = { 4, 1, 2, 1, 1, 3, 1, 4, 2 };
+
+/* HandleEffectSlotMsg(STGEffectSlotMsg*,eSTGMidiSource)::s_akbyAP, 0x08f1bd1e,
+ * 30 bytes (15 {code,value} byte pairs) -- real bytes read directly from
+ * .rodata, span confirmed bounded by the next mangled symbol in symbols.csv
+ * (HandleEffectLFOParam(STGEffectSlotMsg*)::s_akbyAP @ 0x08f1bd3c). Indices 0
+ * and 13 are the real 0xff sentinel ("unused sub-index", handler returns).
+ */
+static const unsigned char kHandleEffectSlotMsg_s_akbyAP[30] = {
+	0xff,0xff, 0x01,0x00, 0x01,0x08, 0x01,0x03, 0x01,0x04, 0x01,0x05, 0x01,0x02,
+	0x01,0x06, 0x01,0x07, 0x0e,0x02, 0x0d,0x02, 0x0d,0x00, 0x12,0x00, 0xff,0xff, 0x01,0x0a,
+};
 
 /* --- ABI-level helpers to fill the raw {code*, adj} dispatch table -----------------
  *
@@ -507,10 +517,6 @@ void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .
 void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08918410, 1792 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919fd0, 3114 bytes. */ }
 void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
-/* Tier B, different reason (intricate goto/switch + reused partial-width stack
- * buffer) -- see header comment.
- */
-void CSTGUnsolMsgHandler::EffectSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917cd0, 1796 bytes. */ }
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
  *
@@ -724,4 +730,169 @@ void CSTGUnsolMsgHandler::SetListMsgHandler(STGMessage &msg)
 	}
 
 	EditApiSendParamMsg(scope, code, value, p + 0x18, 4, 1);
+}
+
+/* CSTGUnsolMsgHandler::EffectSlotMsgHandler(STGMessage&), .text+0x08917cd0, real
+ * 1856 bytes (0x08917cd0..0x08918410). Promoted from Tier B, see header comment for
+ * the full reasoning (switch/jump-table cross-check, local_2c buffer-reuse
+ * resolution). idx==2/idx==0xb/idx==3 all match EditApiSendParamMsg's shape exactly
+ * (flag always 1, lastEditMessage always 0x500c); only the generic tail (every other
+ * idx) diverges and is written out by hand below.
+ */
+void CSTGUnsolMsgHandler::EffectSlotMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 0)
+		return;
+
+	int kind = *(int *)(p + 0x20);
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	unsigned int objId, objSub;
+
+	if (kind == 1)      { objId = (unsigned int)CStorage::sm_ucCurrentProg;  objSub = (unsigned int)DAT_0af30549; }
+	else if (kind == 2) { objSub = (unsigned int)CStorage::sm_usCurrentSong; objId = 0; }
+	else if (kind == 0) { objId = (unsigned int)CStorage::sm_ucCurrentCombi; objSub = (unsigned int)DAT_0af3054b; }
+	else                { objId = 0; objSub = 0; }
+
+	if ((*(unsigned int *)(p + 0xc) != objId || target != objSub) && target != 0xfffe && target != 0xffff)
+		return;
+
+	/* Real field @+2: eSTGMidiSource, per HandleEffectSlotMsg's own mangled name --
+	 * only ever used below as a 0..8 index into kCSWTCH_231.
+	 */
+	unsigned short midiSource = *(unsigned short *)(p + 2);
+	int iVar3 = *(int *)(p + 0x14);
+	int idx   = *(int *)(p + 0x18);
+
+	unsigned char bVar1 = kHandleEffectSlotMsg_s_akbyAP[idx * 2];
+	unsigned char cVar5 = kHandleEffectSlotMsg_s_akbyAP[idx * 2 + 1];
+	if (bVar1 == 0xff)
+		return;
+
+	unsigned char scope;
+	unsigned int code;
+
+	if (kind == 1) {
+		if (target == 0xfffe && s_bIsInGlobalObjectEdit == 0) { scope = EditApiGetScopeId("ESSampling"); code = bVar1 + 3; }
+		else                                                  { scope = EditApiGetScopeId("ESProg");     code = bVar1 + 2; }
+	} else if (kind == 0) {
+		scope = EditApiGetScopeId("ESCombi");
+		code = bVar1;
+	} else {
+		if (kind != 2)
+			return;
+		scope = EditApiGetScopeId("ESSong");
+		code = bVar1;
+	}
+
+	/* Real switch on idx (0..14, jump table at 0x08f1bb1c), computing a signed
+	 * byte adjustment (cVar4) added to `code` below -- except the "default" group
+	 * (idx 0/2/3/4/5/6/7/8/13, or idx>14), which instead adds the message's own
+	 * `iVar3` (+2) sub-value directly and skips the cVar4 step entirely (real: a
+	 * `goto` past it, confirmed in disassembly). idx==2 within that default group
+	 * is further special-cased and returns before reaching any of the idx==0xb/
+	 * idx==3/generic tail code below.
+	 */
+	char cVar4 = (char)iVar3;
+	bool skipCVar4Add = false;
+
+	switch (idx) {
+	default:
+		code = code + (unsigned int)iVar3;
+		skipCVar4Add = true;
+		if (idx == 2) {
+			unsigned char payload;
+			if (*(int *)(p + 0x1c) == 0x19) {
+				payload = 0;
+				EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+			} else {
+				payload = 1;
+				EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+				payload = (unsigned char)((char)*(int *)(p + 0x1c) - 1);
+				cVar5 = cVar5 + 1;
+				EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+			}
+			return;
+		}
+		break;
+	case 1:
+		if (iVar3 > 0xb)
+			cVar4 = cVar4 + 1;
+		break;
+	case 9:
+		cVar4 = cVar4 - 0xc;
+		break;
+	case 10:
+	case 11:
+	case 12:
+		cVar4 = 0;
+		break;
+	case 14:
+		if (iVar3 != 0xb) {
+			if ((unsigned int)(iVar3 - 0xc) < 2)
+				cVar5 = 3;
+			else if ((unsigned int)(iVar3 - 0xe) < 2)
+				cVar5 = 2;
+			if (iVar3 > 0xb)
+				cVar4 = cVar4 + 1;
+		} else {
+			cVar5 = 8;
+			cVar4 = 0xb;
+		}
+		break;
+	}
+
+	if (!skipCVar4Add)
+		code = (unsigned char)((char)code + cVar4);
+
+	if (idx == 0xb) {
+		unsigned char payload;
+		if (*(int *)(p + 0x1c) == 0) {
+			payload = 0;
+			EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+		} else {
+			payload = 1;
+			EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+			payload = (unsigned char)(*(int *)(p + 0x1c) & 0xff);
+			cVar5 = cVar5 + 1;
+			EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &payload, 1, 1);
+		}
+	} else if (idx == 3) {
+		int32_t val = *(int *)(p + 0x1c);
+		if (val > 0xc)
+			val -= 0xc;
+		EditApiSendParamMsg(scope, (unsigned char)code, cVar5, &val, 4, 1);
+	} else {
+		/* Generic tail (every idx other than 2/0xb/3): flag comes from
+		 * kCSWTCH_231[midiSource] (default 1 if out of range), payload is the
+		 * message's own +0x1c field directly (4 bytes, real, no local copy), and
+		 * -- the one real divergence from EditApiSendParamMsg's shape --
+		 * CEditor::lastEditMessage is `(flag==3) + 0x500c`, not unconditionally
+		 * 0x500c. Written out by hand rather than folded into the shared helper.
+		 */
+		int flag = 1;
+		if (midiSource < 9)
+			flag = kCSWTCH_231[midiSource];
+
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl0 = *(void **)EditApi;
+			EditApiVoidSelfFn beginRestore = *(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c);
+			beginRestore(EditApi);
+		}
+
+		void *vtbl = *(void **)EditApi;
+		EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+
+		USTGUserAPI::mNowStopMessaging = 1;
+		CEditor::lastEditMessage = (uint16_t)((flag == 3 ? 1 : 0) + 0x500c);
+		setParam(EditApi, scope, (unsigned char)code, cVar5, p + 0x1c, 4, flag);
+		USTGUserAPI::mNowStopMessaging = 0;
+
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl2 = *(void **)EditApi;
+			EditApiVoidSelfFn endRestore = *(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38);
+			endRestore(EditApi);
+		}
+	}
 }

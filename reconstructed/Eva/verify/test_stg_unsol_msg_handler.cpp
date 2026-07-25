@@ -342,6 +342,176 @@ int main()
 			check("SetListMsgHandler (case 3): payload == 0x99aabbcc", cap.payload == 0x99aabbcc);
 		}
 
+		/* --- Stage 6 batch 3 (2026-07-25): EffectSlotMsgHandler, promoted from
+		 * Tier B -- reuses this same fake-EditApi harness (its "generic" tail
+		 * dispatches through the exact same +0x28/+0x30 vtable slots, plus +0x3c/
+		 * +0x38 which stay unreached here since s_eNowRestoreSeqParameters is 0,
+		 * same as the five siblings above).
+		 */
+		printf("[7] EffectSlotMsgHandler (Stage 6 batch 3, real EditApi dispatch)\n");
+		{
+			/* idx==0 -> table sentinel (0xff,0xff): must return without dispatching. */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 1;               /* kind == prog */
+				*(unsigned int *)(buf + 0x10) = 0xffff; /* wildcard target */
+				*(int *)(buf + 0x18) = 0;                /* idx 0 -> (0xff,0xff) sentinel */
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+				check("EffectSlotMsgHandler: idx==0 sentinel returns without dispatch", !cap.called);
+			}
+
+			/* Guard mismatch: kind==1 (prog), target neither matches CStorage's
+			 * current selection nor 0xfffe/0xffff -> must return without dispatch.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 1;
+				*(unsigned int *)(buf + 0xc) = 5;
+				*(unsigned int *)(buf + 0x10) = 6;   /* mismatched, not a wildcard */
+				*(int *)(buf + 0x18) = 4;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+				check("EffectSlotMsgHandler: guard mismatch returns without dispatch", !cap.called);
+			}
+
+			/* Generic tail (idx==4, kind==1/ESProg, midiSource==0 -> CSWTCH_231[0]==4):
+			 * bVar1=1,cVar5=4 (table idx4); code = (bVar1+2) + iVar3 = 3+10 = 13.
+			 * Payload is the message's own +0x1c field directly (4 bytes, no local
+			 * copy), lastEditMessage stays 0x500c since flag(4) != 3.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 1;                 /* kind == prog */
+				*(unsigned int *)(buf + 0x10) = 0xffff;   /* wildcard target */
+				*(unsigned short *)(buf + 2) = 0;          /* midiSource 0 -> CSWTCH_231[0]==4 */
+				*(int *)(buf + 0x14) = 10;                 /* iVar3 */
+				*(int *)(buf + 0x18) = 4;                  /* idx 4 -> table (1,4) */
+				*(unsigned int *)(buf + 0x1c) = 0xdeadcafe;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (generic idx4): dispatched", cap.called);
+				check("EffectSlotMsgHandler (generic idx4): scope name == \"ESProg\"", cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+				check("EffectSlotMsgHandler (generic idx4): code == 13 (1+2+10)", cap.code == 13);
+				check("EffectSlotMsgHandler (generic idx4): value == 4 (table[9])", cap.value == 4);
+				check("EffectSlotMsgHandler (generic idx4): payload == 0xdeadcafe (raw +0x1c, no local copy)", cap.payload == 0xdeadcafe);
+				check("EffectSlotMsgHandler (generic idx4): len == 4, flag == 4 (CSWTCH_231[0])", cap.len == 4 && cap.flag == 4);
+			}
+
+			/* idx==0xb (case 10/11/12 group, cVar4==0), kind==0/ESCombi,
+			 * field(+0x1c)==0 branch -> single call, payload byte 0.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 0;                 /* kind == combi */
+				*(unsigned int *)(buf + 0x10) = 0xffff;   /* wildcard target */
+				*(int *)(buf + 0x18) = 0xb;                /* idx 11 -> table (0xd,0x0) */
+				*(unsigned int *)(buf + 0x1c) = 0;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (idx==0xb, field==0): dispatched", cap.called);
+				check("EffectSlotMsgHandler (idx==0xb, field==0): scope name == \"ESCombi\"", cap.scopeName && strcmp(cap.scopeName, "ESCombi") == 0);
+				check("EffectSlotMsgHandler (idx==0xb, field==0): code == 13 (0xd+0 cVar4)", cap.code == 13);
+				check("EffectSlotMsgHandler (idx==0xb, field==0): value == 0", cap.value == 0);
+				check("EffectSlotMsgHandler (idx==0xb, field==0): payload == 0, len == 1", cap.payload == 0 && cap.len == 1);
+			}
+
+			/* idx==0xb, field(+0x1c)!=0 branch -> two calls; only the second
+			 * (final) is directly observable via the shared Capture -- matches
+			 * this file's existing single-observation convention.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 0;
+				*(unsigned int *)(buf + 0x10) = 0xffff;
+				*(int *)(buf + 0x18) = 0xb;
+				*(unsigned int *)(buf + 0x1c) = 0x77;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (idx==0xb, field!=0): dispatched", cap.called);
+				check("EffectSlotMsgHandler (idx==0xb, field!=0): 2nd-call value == 1 (0+1)", cap.value == 1);
+				check("EffectSlotMsgHandler (idx==0xb, field!=0): 2nd-call payload == 0x77 (raw field byte)", cap.payload == 0x77);
+				check("EffectSlotMsgHandler (idx==0xb, field!=0): len == 1, flag == 1", cap.len == 1 && cap.flag == 1);
+			}
+
+			/* idx==3 (default-group, non-idx2), kind==2/ESSong: code = bVar1(1) +
+			 * iVar3(5) = 6; field(+0x1c)==20 (>0xc) clamps to 20-12=8, len==4.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 2;                 /* kind == song */
+				*(unsigned int *)(buf + 0x10) = 0xffff;   /* wildcard target */
+				*(int *)(buf + 0x14) = 5;                  /* iVar3 */
+				*(int *)(buf + 0x18) = 3;                  /* idx 3 -> table (1,3) */
+				*(int *)(buf + 0x1c) = 20;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (idx==3): dispatched", cap.called);
+				check("EffectSlotMsgHandler (idx==3): scope name == \"ESSong\"", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+				check("EffectSlotMsgHandler (idx==3): code == 6 (1+5)", cap.code == 6);
+				check("EffectSlotMsgHandler (idx==3): value == 3 (table[7], unchanged)", cap.value == 3);
+				check("EffectSlotMsgHandler (idx==3): payload == 8 (20-12 clamp), len == 4", cap.payload == 8 && cap.len == 4);
+			}
+
+			/* idx==2 (default-group special case), kind==2/ESSong, field(+0x1c)==
+			 * 0x19 branch -> single call, payload byte 0.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 2;
+				*(unsigned int *)(buf + 0x10) = 0xffff;
+				*(int *)(buf + 0x14) = 7;                  /* iVar3 */
+				*(int *)(buf + 0x18) = 2;                  /* idx 2 -> table (1,8) */
+				*(int *)(buf + 0x1c) = 0x19;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (idx==2, field==0x19): dispatched", cap.called);
+				check("EffectSlotMsgHandler (idx==2, field==0x19): code == 8 (1+7)", cap.code == 8);
+				check("EffectSlotMsgHandler (idx==2, field==0x19): value == 8 (table[5], unchanged)", cap.value == 8);
+				check("EffectSlotMsgHandler (idx==2, field==0x19): payload == 0, len == 1", cap.payload == 0 && cap.len == 1);
+			}
+
+			/* idx==2, field(+0x1c)!=0x19 branch -> two calls; final (2nd) call
+			 * observable: value == 9 (8+1), payload == (0x50-1) == 0x4f.
+			 */
+			{
+				memset(buf, 0, sizeof(buf));
+				*(int *)(buf + 0x20) = 2;
+				*(unsigned int *)(buf + 0x10) = 0xffff;
+				*(int *)(buf + 0x14) = 7;
+				*(int *)(buf + 0x18) = 2;
+				*(int *)(buf + 0x1c) = 0x50;
+
+				cap = Capture();
+				STGMessage &msg = *(STGMessage *)buf;
+				handler.EffectSlotMsgHandler(msg);
+
+				check("EffectSlotMsgHandler (idx==2, field!=0x19): dispatched", cap.called);
+				check("EffectSlotMsgHandler (idx==2, field!=0x19): 2nd-call value == 9 (8+1)", cap.value == 9);
+				check("EffectSlotMsgHandler (idx==2, field!=0x19): 2nd-call payload == 0x4f (0x50-1)", cap.payload == 0x4f);
+				check("EffectSlotMsgHandler (idx==2, field!=0x19): len == 1, flag == 1", cap.len == 1 && cap.flag == 1);
+			}
+		}
+
 		EditApi = realEditApi;
 	}
 
