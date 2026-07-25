@@ -212,6 +212,28 @@ int main()
 	check_eq("gated HandleKeyOff sets CPowerOffTimer flag", powerOffTimerBuf[0], 1);
 	check_eq("gated HandleKeyOff sends no MIDI message", g_writeCalls, 0);
 
+	printf("== Beep/SetLED16Bits ==\n");
+
+	printf("[10] Beep() ignores `this`, always sends the fixed 0x04000000 command\n");
+	g_writeCommandCalls = 0;
+	fp->Beep();
+	check_eq("Beep() calls WriteCommand once", g_writeCommandCalls, 1);
+	check_eq("Beep() command word", g_lastCommand, 0x04000000);
+
+	printf("[11] SetLED16Bits(m) drops byte1 (bits 8-15), rearranges byte0/byte2/byte3\n");
+	g_writeCommandCalls = 0;
+	fp->SetLED16Bits(0x12345678u);
+	/* byte0=0x78 byte1=0x56(dropped) byte2=0x34 byte3=0x12
+	 * cmd = 0x05000000 | (0x78<<16) | (0x34<<8) | 0x12 */
+	check_eq("SetLED16Bits calls WriteCommand once", g_writeCommandCalls, 1);
+	check_eq("SetLED16Bits(0x12345678) command word", g_lastCommand,
+		 (long)(0x05000000 | (0x78 << 16) | (0x34 << 8) | 0x12));
+
+	g_writeCommandCalls = 0;
+	fp->SetLED16Bits(0x0000ffffu); /* plain 16-bit mask, byte0=0xff byte1=0xff(dropped) */
+	check_eq("SetLED16Bits(0xffff) command word", g_lastCommand,
+		 (long)(0x05000000 | (0xff << 16)));
+
 	if (g_fail) {
 		printf("\n%d check(s) FAILED\n", g_fail);
 		return 1;

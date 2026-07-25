@@ -413,6 +413,21 @@ void CSTGFrontPanel::ResetLED(unsigned int code)
 	OmapNKS4OutputFifo_WriteCommand((int)(packed | 0x1520000u));
 }
 
+void CSTGFrontPanel::SetLED16Bits(unsigned long m)
+{
+	unsigned int cmd = 0x05000000u;
+	cmd |= (m & 0xffu) << 16;	/* byte0 -> bits 16-23 */
+	cmd |= (m >> 8) & 0xff00u;	/* byte2 -> bits 8-15 (unchanged) */
+	cmd |= (m >> 24) & 0xffu;	/* byte3 -> bits 0-7 */
+	/* byte1 (m bits 8-15) is dropped -- confirmed real, see header. */
+	OmapNKS4OutputFifo_WriteCommand((int)cmd);
+}
+
+void CSTGFrontPanel::Beep()
+{
+	OmapNKS4OutputFifo_WriteCommand((int)0x04000000u);
+}
+
 void CSTGFrontPanel::HandleKeyOn(unsigned char keyNum, unsigned char velocity)
 {
 	unsigned char *self = (unsigned char *)this;

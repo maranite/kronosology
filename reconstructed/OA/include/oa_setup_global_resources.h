@@ -420,6 +420,27 @@ struct CSTGFrontPanel {
 	void ResetLED(unsigned int code);
 
 	/*
+	 * SetLED16Bits(unsigned long)/Beep() (`.text+0xbe90`/`0xbec0`, 44/20
+	 * bytes, confirmed via objdump -dr against OA.ko_Decomp/OA.ko).
+	 * `this` unused by both (same "eax clobbered by the very first
+	 * instruction" pattern as SetLED/SetLEDBlinking/ResetLED above).
+	 *
+	 * Beep() is trivial: `OmapNKS4OutputFifo_WriteCommand(0x04000000)`.
+	 *
+	 * SetLED16Bits(m) rebuilds a command word out of 3 of the 4 bytes of
+	 * `m` (byte1, bits 8-15, is genuinely dropped by the real code --
+	 * verified instruction-by-instruction, not a transcription gap):
+	 *   cmd = 0x05000000 | ((m & 0xff) << 16) | ((m >> 8) & 0xff00)
+	 *         | ((m >> 24) & 0xff)
+	 * i.e. byte0 of `m` moves to bits 16-23, byte2 of `m` stays at bits
+	 * 8-15, byte3 of `m` moves to bits 0-7, and the result is OR'd with
+	 * the `0x05` LED-command opcode base (same opcode family as
+	 * SetLED/SetLEDBlinking/ResetLED's `0x15xxxxx` bases above).
+	 */
+	void SetLED16Bits(unsigned long m);
+	void Beep();
+
+	/*
 	 * HandleKeyOn(unsigned char keyNum, unsigned char velocity)/
 	 * HandleKeyOff(unsigned char keyNum, unsigned char velocity)
 	 * (`.text+0xbf00`/`0xc070`, 367/126 bytes, confirmed via objdump -dr)
