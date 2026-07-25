@@ -433,26 +433,62 @@ audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
   draining the ring on a ~4-jiffy cadence afterward rather than only
   reacting to further explicit `ScheduleFromRTAI()`/`ScheduleFromLinux()`
   calls.
-- **`CSTGMidiInPort::Activate(CSTGMidiQueue*)`/`Deactivate()`
-  (.text+0xf5830/0xf5820) are declared but deliberately NOT implemented**
-  this batch (disproportionate separate MIDI-IN queue-wiring cluster,
-  parallel to but independent from the already-real
-  `CSTGMidiOutPort::Activate()`) -- `CSTGMidiInPortKorgUsb::Activate()`/
-  `Deactivate()` call them as real, confirmed direct call targets, but
-  their own bodies are no-op stubs in production code
-  (`bar2_stubs.cpp`). This means on real hardware, activating the
-  KorgUsb MIDI-IN port would currently do LESS than the real firmware
-  (no queue wiring at all) even once the companion-module ABI mismatch
-  above is fixed. A real-HW test is not meaningful until this gap is
-  closed; flagged here purely so it isn't mistaken for "fully wired."
-- **The embedded `CSTGExtMIDIClockSync` sub-object at `CSTGMidiInPort`
-  +0x108** (discovered this batch via the newly-reconstructed
-  `CSTGMidiInPort::CSTGMidiInPort()` ctor's own vtable-pointer write,
-  `&_ZTV20CSTGExtMIDIClockSync+8`) is a genuinely new structural finding
-  -- a third MIDI-clock-sync-family object, parallel to the
-  already-reconstructed `CSTGIntMIDIClockSync` (oa_engine_init.h) --
-  not reproduced by this batch's minimal ctor (writes 0 there instead;
-  see midi_in_port_serial.cpp's own comment). Nothing in this project
-  currently depends on it being correctly initialized, but any future
-  session reconstructing MIDI-clock-sync-from-an-external-source
-  behavior should start here rather than re-discovering it.
+- **UPDATE (2026-07-25 batch): `CSTGMidiInPort::Activate(CSTGMidiQueue*)`/
+  `Deactivate()` are now REAL** (src/engine/midi_in_port_serial.cpp),
+  and the companion-module ABI mismatch flagged above is now FIXED
+  (`reconstructed/KorgUsbAudioVirtualDriver/korgusbaudio_stub.h/.cpp`).
+  Both prior caveats in this entry are resolved. What's still open: the
+  fix has ONLY been host-KAT-verified (mocked heap/CPU-info/queue-init
+  dependencies, see test_midi_korgusb_port.cpp's own header comment) --
+  a real-HW test still needs an actual USB-MIDI-capable KorgUsb
+  companion connected to confirm the fixed ABI actually round-trips
+  correctly end-to-end (idx values, buffer sizes, userdata pointer) once
+  a real (not stubbed) `KorgUsbAudioDriver.ko`-equivalent is present.
+- **UPDATE (2026-07-25 batch): the embedded `CSTGExtMIDIClockSync`
+  sub-object at `CSTGMidiInPort`+0x108 is now largely REAL** (10 of 13
+  confirmed methods, oa_engine_init.h/midi_clock_sync.cpp) -- the vtable
+  IS now installed by the ctor. Still open, deliberately deferred (NOT a
+  guess -- each was fully disassembled and found genuinely disproportionate
+  to reconstruct by hand this batch):
+  - `ProcessClock()` (`.text+0x68650`, 174 bytes) reads an 8-entry,
+    12-byte-stride incoming-clock timestamp ring at fieldAt(0x40) whose
+    OWN producer is not yet identified anywhere in this project (the
+    ctor's own `*(byte*)(this+0x148)=1` write -- fieldAt(0x40)'s first
+    byte -- is also still unreproduced, see midi_in_port_serial.cpp's
+    ctor comment).
+  - `MeasureJitter()` (`.text+0x68480`, 460 bytes) is a genuine x87
+    `fucomi`/`fcmovbe`/`fcmovnbe` median-of-3 conditional-move sort over
+    a 32-entry float ring -- high transcription risk without a way to
+    KAT-verify against real x87 stack behavior bit-for-bit.
+  - `EstimateTempoAndPredictNextClock()` (`.text+0x68130`, 737 bytes,
+    the largest method in the class) was not examined in detail at all.
+  None of the three (nor `ProcessClock()`'s own ring producer) are
+  reachable from anything this project currently reconstructs -- a
+  real-HW test isn't meaningful until whatever drives
+  `CSTGMIDIClockSync`'s own external-vs-internal dispatch is itself
+  reconstructed (not yet touched anywhere in this project).
+- **`CSTGExtMIDIClockSync::Initialize()`'s CPU-frequency-dependent
+  statics** (`kSecondsToTimeStamp`/`kTimeStampToSeconds`, from
+  `CSTGCPUInfo::sInstance->khz`) are only host-KAT-verified with a
+  synthetic `khz=1000000` -- never cross-checked against the REAL D510/
+  D525/D2550 `stg_get_cpu_khz()` value this field is populated from at
+  real boot (`engine_startup_bits.cpp`). The `unsigned int` (not the
+  real code's full 64-bit-safe) conversion is provably exact for any
+  real Atom-class khz value (see Initialize()'s own header comment),
+  but this hasn't been confirmed against an actual captured `khz` read
+  on real hardware.
+- **The generic USB-MIDI-class accessory hierarchy** (`CSTGMidiInPortUSB`/
+  `CSTGMidiOutPortUSB`/`CSTGUSBMidiAccessoryMidiInPort`, survey's own
+  "hierarchy 2") was investigated for real this batch (previously only
+  surveyed): genuinely large and disproportionate, NOT a size-based
+  guess -- `CSTGMidiInPortUSB::ReceivePacket()` alone is 1287 bytes
+  (`.text+0xf7500`), `CSTGMidiOutPortUSB::ProcessRegularMessage()` is
+  394 bytes, and the cluster also pulls in an entirely separate
+  744-byte global-ctor-keyed static singleton
+  (`sUSBMidiAccessoryMidiInPort`) plus a drum-pad-client notification
+  hierarchy (`CSTGDrumPadClient::ReceiveNotification()`, 1065 bytes,
+  `CUSBMidiAccessory_DrumPadClient`/`CUSBMidiAccessory_MidiInClient`
+  vtables). Only `CSTGMidiInPortUSB::ReceivePacket()` is
+  forward-declared (type-checking only). Deliberately NOT pursued this
+  batch -- a whole separate future session's worth of work, bigger than
+  the KorgUsb transport cluster already reconstructed.
