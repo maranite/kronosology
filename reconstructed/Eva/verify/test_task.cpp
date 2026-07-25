@@ -99,16 +99,38 @@ extern "C" void FakeNotifyModuleFn(void *, CModule *m)
 
 extern "C" void FakeApiNoOp() {}
 
-static void *g_fakeApiVtbl[80];
+static int g_notifyDestroyCalls;
+static CTask *g_lastDestroyedTask;
+extern "C" void FakeNotifyDestroyFn(void *, CTask *t)
+{
+	g_notifyDestroyCalls++;
+	g_lastDestroyedTask = t;
+}
+
+static int g_notifyOutLinkCalls;
+extern "C" void FakeNotifyOutLinkFn(void *, void *)
+{
+	g_notifyOutLinkCalls++;
+}
+
+/* Sized to cover slot 0x140/4 == 80 (CTask::~CTask()'s own entry notification,
+ * task.h/system_api.h) -- 80 would be exactly out of bounds of the OLD 80-entry
+ * array (valid indices 0..79); every CTask object in this file's own tests now gets
+ * genuinely destructed at scope exit (CTask::~CTask() is real, Stage 6 SetMask/~CTask
+ * batch), so this bound is load-bearing, not defensive padding.
+ */
+static void *g_fakeApiVtbl[96];
 struct FakeApiObj { void *vtbl; } g_fakeApiObj;
 
 static void setup_fake_api()
 {
-	for (int i = 0; i < 80; i++)
+	for (int i = 0; i < 96; i++)
 		g_fakeApiVtbl[i] = (void *)FakeApiNoOp;
 	g_fakeApiVtbl[0x3c / 4] = (void *)FakeScopeIdFn;
 	g_fakeApiVtbl[0x134 / 4] = (void *)FakeNotifyTaskFn;
 	g_fakeApiVtbl[0x12c / 4] = (void *)FakeNotifyModuleFn;
+	g_fakeApiVtbl[0x140 / 4] = (void *)FakeNotifyDestroyFn;
+	g_fakeApiVtbl[0x58 / 4] = (void *)FakeNotifyOutLinkFn;
 	g_fakeApiObj.vtbl = g_fakeApiVtbl;
 	Api = (CSystemApi *)&g_fakeApiObj;
 }
@@ -243,6 +265,40 @@ int main(void)
 		 * real, faithful behavior, not a weaker check.)
 		 */
 	}
+
+	printf("[5] CTask::SetMask()/~CTask() (Stage 6 SetMask/~CTask batch, "
+	       "2026-07-25)\n");
+	{
+		CModule m("SetMaskModule");
+		CTask t(m, "SetMaskTask", 0, 0, 0x804b);
+
+		unsigned char before = TaskTestHooks::Mask(t);
+		t.SetMask(1);
+		check("SetMask(1) sets bit 0x01", (TaskTestHooks::Mask(t) & 0x01) != 0);
+		check("SetMask(1) leaves the other bits untouched",
+		      (TaskTestHooks::Mask(t) & ~0x01) == (before & ~0x01));
+
+		t.SetMask(0);
+		check("SetMask(0) clears bit 0x01", (TaskTestHooks::Mask(t) & 0x01) == 0);
+
+		g_notifyDestroyCalls = 0;
+		g_lastDestroyedTask = 0;
+		g_notifyOutLinkCalls = 0;
+		{
+			CTask dying(m, "DyingTask", 0, 0, 0x804b);
+			CTask *dyingAddr = &dying;
+			(void)dyingAddr;
+		} /* ~CTask() runs here */
+		check("~CTask() fired exactly one +0x140 (destroy) notification",
+		      g_notifyDestroyCalls == 1);
+		check("~CTask() fired zero +0x58 (outlink) notifications "
+		      "(mOutLinks stays empty -- nothing populates it in this "
+		      "reconstruction, CTask::Add(COutLink*) not reconstructed)",
+		      g_notifyOutLinkCalls == 0);
+	}
+	printf("(no crash / no leak under a plain run -- CTask objects in every "
+	       "earlier check above were also genuinely destructed at scope exit "
+	       "by the same real ~CTask(), not just this last block's `dying`)\n");
 
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail != 0;

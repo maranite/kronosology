@@ -1,11 +1,12 @@
 /*
  * test_sysex_msg_task_base.cpp  -  host-side known-answer test for
  * CSysExMsgTaskBase's Tier-A methods (src/ipc/sysex_msg_task_base.cpp, Stage 6
- * breadth sweep, 2026-07-25).
+ * breadth sweep, 2026-07-25; extended in the SetMask/~CTask follow-up batch,
+ * 2026-07-25, to cover the ctor/SetTimeout()/Exec()/dtor now promoted to Tier A).
  *
- * Exec(CMessage&) is the one non-trivial Tier-A method: pure argument-unpack +
- * redispatch through this object's own vtable slot +0x14. Builds a raw
- * CMessage-shaped buffer and a fake single-slot-14 vtable to confirm the real
+ * Exec(CMessage&) is the one non-trivial Tier-A method from the first pass: pure
+ * argument-unpack + redispatch through this object's own vtable slot +0x14. Builds a
+ * raw CMessage-shaped buffer and a fake single-slot-14 vtable to confirm the real
  * argument mapping (tag/length/payload-pointer-plus-one) and the inverted
  * return-value convention (handler 0 -> Exec returns -1, handler nonzero ->
  * Exec returns 0).
@@ -16,6 +17,7 @@
 
 #include "sysex_msg_task_base.h"
 #include "module.h"
+#include "system_api.h"
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -55,6 +57,25 @@ extern "C" int FakeHandlerSlot14(void *thisPtr, unsigned char firstByte, unsigne
 	g_capturedLen = len;
 	return g_handlerReturn;
 }
+
+/* --- ctor/SetTimeout()/Exec()/dtor test scaffolding (promoted from Tier B this
+ * batch) -- must live at file scope, not inside main(), since C++ doesn't allow
+ * nested function definitions.
+ */
+struct TaskTestHooks {
+	static unsigned char Mask(const CTask &t)
+	{
+		return *(reinterpret_cast<const unsigned char *>(&t) + 0x4c);
+	}
+};
+
+static int g_destroyCalls;
+extern "C" void FakeNotifyDestroy(void *, CTask *) { g_destroyCalls++; }
+extern "C" int FakeScopeId2(void *) { return 0; }
+extern "C" void FakeApiNoOp2() {}
+static void *g_fakeApiVtbl2[96];
+struct FakeApiObj2 { void *vtbl; } g_fakeApiObj2;
+extern CSystemApi *Api;
 
 int main()
 {
@@ -110,6 +131,62 @@ int main()
 	check("OnReceiveMessage() returns 0", obj->OnReceiveMessage(1, 2, payload, 3) == 0);
 	obj->OnTimeout();
 	check("OnTimeout() is callable (empty body)", true);
+
+	/* --- ctor/SetTimeout()/Exec()/dtor, promoted from Tier B this batch -------- */
+
+	for (int i = 0; i < 96; i++)
+		g_fakeApiVtbl2[i] = (void *)FakeApiNoOp2;
+	g_fakeApiVtbl2[0x3c / 4] = (void *)FakeScopeId2;
+	g_fakeApiVtbl2[0x140 / 4] = (void *)FakeNotifyDestroy;
+	g_fakeApiObj2.vtbl = g_fakeApiVtbl2;
+	Api = (CSystemApi *)&g_fakeApiObj2;
+
+	printf("[ctor] CSysExMsgTaskBase(owner, canTransmit=0, needsTimeout=0) -- real "
+	       "base CTask::CTask() + real vtable-pair install + real 'mMask & 0x08' "
+	       "check\n");
+	{
+		CModule owner("SysExOwnerModule");
+		CSysExMsgTaskBase task(owner, 0, 0);
+
+		/* Base CTask ctor: scheduleFlag = (needsTimeout==1) = false = 0 ->
+		 * base mask 0x04, +2 (owner mState==0 < 4, fresh module) -> 0x06.
+		 * 0x06 & 0x08 == 0, so the ctor's own SetMask(1) branch must NOT fire.
+		 */
+		check("mMask == 0x06 (base 0x04 +2, bit 0x08 clear -> ctor's SetMask(1) "
+		      "branch not taken)",
+		      TaskTestHooks::Mask(task) == 0x06);
+
+		printf("[SetTimeout] real fixed-point period computation + tail "
+		       "SetMask(0)\n");
+		task.SetTimeout(100);
+		/* HAL_GetScheduleInterval() stub == 1 -> ticks == 100;
+		 * period == (100 * 0xcccd) >> 19 == 9 (nonzero).
+		 */
+		check("SetTimeout(100): mMask bit 0x01 cleared (tail SetMask(0))",
+		      (TaskTestHooks::Mask(task) & 0x01) == 0);
+
+		printf("[Exec 0-arg] not-yet-elapsed branch: no SetMask/dispatch\n");
+		unsigned char before = TaskTestHooks::Mask(task);
+		task.Exec();
+		check("Exec(): mMask unchanged while timeout hasn't elapsed "
+		      "(HAL_GetSystemTime() stub == 0, mTimeoutStart == 0, "
+		      "mTimeoutTicks == 100)",
+		      TaskTestHooks::Mask(task) == before);
+
+		printf("[Exec 0-arg] elapsed branch: SetMask(1) + slot 0x1c redispatch "
+		       "(no crash, EvaVTableStub)\n");
+		/* Poke mTimeoutTicks (+0x80) to 0 directly -- same raw-offset license
+		 * the ctor/SetTimeout() themselves use, bypassing the need for a
+		 * friend declaration.
+		 */
+		*reinterpret_cast<unsigned int *>(reinterpret_cast<char *>(&task) + 0x80) = 0;
+		task.Exec();
+		check("Exec(): mMask bit 0x01 set once elapsed (real SetMask(1) call)",
+		      (TaskTestHooks::Mask(task) & 0x01) != 0);
+	} /* ~CSysExMsgTaskBase() -> ~CTask() runs here */
+	check("~CSysExMsgTaskBase() ran without crashing and fired the base "
+	      "~CTask()'s own +0x140 destroy notification exactly once",
+	      g_destroyCalls == 1);
 
 	printf(g_fail ? "%d check(s) FAILED\n" : "all checks passed\n", g_fail);
 	return g_fail ? 1 : 0;

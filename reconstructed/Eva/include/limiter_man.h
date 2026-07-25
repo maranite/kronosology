@@ -14,18 +14,26 @@
  *   +0x10  mEnd        TVector end pointer, ctor zeroes
  *   +0x14  mCap        TVector capacity-end pointer, ctor zeroes
  *
- * Only the constructor is reconstructed here -- ~CLimiterMan() (.text+0x0807bbc0, a
- * real per-element vtable-slot+4 "release" walk over the TVector plus a free() of its
- * backing array) is NOT reconstructed: nothing in this reconstruction's own call graph
- * ever invokes ~CTask() (no destruction path traced from any boot-path caller), so
- * there is nothing to exercise it against yet -- same "construct, don't destruct"
- * scope already established for every other embedded sub-object in this project
- * (COmegaPtrArray's own RemoveAll()/SetAtIndex(), CTaskBuffer's producer side, etc.).
- * Not declared as a real C++ base/member of CTask for the same reason CModule's own
- * mTasks stays a raw byte buffer (module.h) -- CTask doesn't declare a dtor either, so
- * a real C++ member here would silently generate one Ghidra's own binary never had a
- * caller for. CTask constructs this via placement-new into a raw byte buffer instead
- * (task.cpp), matching the project's established manual-sub-object-construction idiom.
+ * ~CLimiterMan() (.text+0x0807bbc0, 97 bytes, the D1 complete-object destructor) is
+ * NOW reconstructed too (Stage 6 SetMask/~CTask batch, 2026-07-25 -- CTask::~CTask()'s
+ * own real caller, task.cpp, needed it). Real body: installs CLimiterMan's own vtable,
+ * walks the embedded TVector<CLimiterBase*,1> range [mBegin, mEnd), and for each
+ * non-null element calls a virtual method THROUGH THE ELEMENT'S OWN vtable at slot+4
+ * (`(*(code**)(*elem+4))(elem)`, presumably a `Release()`-shaped method on a
+ * not-reconstructed `CLimiterBase` -- opaque, same license as every other "virtual
+ * call through an unreconstructed class's own vtable" already in this project),
+ * reinstalls the TVector's own vtable (0x8e81f78, same value, matching the
+ * "re-assert own identity right before the inherited-from-COmegaPtrArray-shaped-cleanup
+ * one" idiom every other destructor in this project reconstructs the same way), frees
+ * the backing array, then installs the FINAL identity 0x8e81d80 -- confirmed via nm to
+ * be `vtable for CIfcUnknown` + 8, i.e. CLimiterMan's own further base is CIfcUnknown
+ * (omega_vtables.h), matching CTask::CTask()'s own
+ * `RegisterIfc(reinterpret_cast<CIfcUnknown*>(mLimiterMan))` call byte-for-byte.
+ *
+ * Still NOT declared as a real C++ base/member of CTask for the same reason CModule's
+ * own mTasks stays a raw byte buffer (module.h) -- CTask constructs AND destroys this
+ * via placement-new/explicit dtor call into a raw byte buffer instead (task.cpp),
+ * matching the project's established manual-sub-object-construction idiom.
  */
 
 #ifndef LIMITER_MAN_H
@@ -37,6 +45,14 @@ class CLimiterMan {
 public:
 	/* .text+0x0807bd10, 46 bytes (symbols.csv: _ZN11CLimiterManC1ER5CTask). */
 	CLimiterMan(CTask *owner);
+
+	/* .text+0x0807bbc0, 97 bytes (D1 complete-object destructor). See header
+	 * comment. mBegin==mEnd always in this reconstruction (nothing calls
+	 * RegisterLimiter(), not reconstructed -- out of scope), so the per-element
+	 * release loop never actually fires here; only the free()+vtbl-teardown tail
+	 * is exercised.
+	 */
+	~CLimiterMan();
 
 private:
 	void *mVtbl;

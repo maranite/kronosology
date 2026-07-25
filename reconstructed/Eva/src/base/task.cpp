@@ -2,12 +2,16 @@
  * task.cpp  -  see include/task.h.
  *
  * CTask::CTask(...) transcribed from CTask@0807ee80.c (330 bytes). Tier A.
+ * CTask::~CTask() transcribed from CTask@0807e350.c (800 bytes, D1). Tier A.
+ * CTask::SetMask(int) transcribed from CTask@0807e840.c (40 bytes). Tier A.
  * CTask::RegisterIfc(CIfcUnknown*) is Tier B -- see task.h header comment.
  *
- * Exception-unwind paths the real ctor's own try/catch regions cover (malloc/
- * COmegaPtrArray-ctor failure cleanup) are omitted, same "happy path only" license
- * already used for every other ctor reconstructed in this project (e.g.
- * CTaskBuffer, CModule -- neither models its own unwind path either).
+ * Exception-unwind paths the real ctor's/dtor's own try/catch regions cover (malloc/
+ * COmegaPtrArray-ctor failure cleanup, and the dtor's own 2 real
+ * TNamedPtrArray<COutLink>::~TNamedPtrArray() unwind-path calls) are omitted, same
+ * "happy path only" license already used for every other ctor/dtor reconstructed in
+ * this project (e.g. CTaskBuffer, CModule -- neither models its own unwind path
+ * either).
  */
 
 #include "task.h"
@@ -95,4 +99,82 @@ void CTask::RegisterIfc(CIfcUnknown *)
 	 * interface's own vtable+8 call) then TVector::MakeCapacity()-driven append --
 	 * see task.h header comment for why this stays out of scope.
 	 */
+}
+
+void CTask::SetMask(int mask)
+{
+	if (mask == 0)
+		mMask &= ~0x01;
+	else
+		mMask |= 0x01;
+}
+
+CTask::~CTask()
+{
+	mVtbl = (void *)PTR__CTask_08e82128;
+
+	/* (1) Entry notification to Api -- vtbl slot+0x140, arg = this. See
+	 * system_api.h.
+	 */
+	typedef void (*NotifyTaskFn)(void *, CTask *);
+	void *apiVtbl = *(void **)Api;
+	NotifyTaskFn notifyDestroy = *(NotifyTaskFn *)((char *)apiVtbl + 0x140);
+	notifyDestroy(Api, this);
+
+	/* (2) Fully drain mOutLinks front-to-back. Real: GCC's own 8-way Duff's-device
+	 * unrolling of this exact loop -- collapsed here, same license as
+	 * omega_ptr_array.cpp's own 5 methods.
+	 */
+	typedef void (*NotifyOutLinkFn)(void *, void *);
+	NotifyOutLinkFn notifyOutLink = *(NotifyOutLinkFn *)((char *)apiVtbl + 0x58);
+	COmegaPtrArray *outLinks = reinterpret_cast<COmegaPtrArray *>(mOutLinks);
+	while (*(int *)(mOutLinks + 0xc) != 0) {
+		void *first = *(void **)(*(void **)(mOutLinks + 0x14));
+		notifyOutLink(Api, first);
+		outLinks->RemoveAtIndex(0, 1);
+	}
+
+	/* (3) Destroy the embedded CLimiterMan sub-object. */
+	reinterpret_cast<CLimiterMan *>(mLimiterMan)->~CLimiterMan();
+
+	/* (4) Inlined ~TVector<CTask::SRegisteredIfc,1>(): free the backing array if
+	 * non-null. Real, separate symbol only actually called from the unwind path
+	 * (not modeled) -- ground truth inlines its trivial body here instead.
+	 */
+	*(void **)mRegisteredIfcs = (void *)PTR__TVector_08e82188;
+	void *regBegin = *(void **)(mRegisteredIfcs + 4);
+	if (regBegin)
+		free(regBegin);
+
+	/* (5) Destroy mIfcArray then mOutLinks -- each via the shared
+	 * TNamedPtrArray<COutLink> identity, COmegaPtrArray::Destroy(), then downgrade
+	 * to the base COmegaPtrArray identity. Real, separate
+	 * TNamedPtrArray<COutLink>::~TNamedPtrArray() symbol likewise only called from
+	 * the unwind path -- inlined here in the normal path, same as (4).
+	 */
+	*(void **)mIfcArray = (void *)PTR__TNamedPtrArray_08e82198;
+	reinterpret_cast<COmegaPtrArray *>(mIfcArray)->Destroy();
+	*(void **)mIfcArray = (void *)PTR__COmegaPtrArray_08e80be0;
+
+	*(void **)mOutLinks = (void *)PTR__TNamedPtrArray_08e82198;
+	outLinks->Destroy();
+	*(void **)mOutLinks = (void *)PTR__COmegaPtrArray_08e80be0;
+
+	/* (6) CTask's own +0x08 field (mIfcThunk) -- a secondary, this-adjusted vtable
+	 * slot, not generic opaque data (see task.h/omega_vtables.h). Final identity
+	 * install before peeling to the base classes.
+	 */
+	mIfcThunk = (void *)PTR__CMessageInput_08e80c68;
+
+	/* (7) CNamedObjectBase's own inlined dtor body: install its vtable, free mName
+	 * if non-null.
+	 */
+	mVtbl = (void *)PTR__CNamedObjectBase_08e81378;
+	if (mName)
+		free(mName);
+
+	/* (8) Ultimate root base identity -- CObjectBase, RTTI-only, 0 own virtual
+	 * function slots. Final act before returning.
+	 */
+	mVtbl = (void *)PTR__CObjectBase_08e79d68;
 }

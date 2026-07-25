@@ -176,6 +176,46 @@ extern void *PTR__TVector_08e82188[2];
 extern void *PTR__CLimiterMan_08e81ee8[4];
 extern void *PTR__TVector_08e81f78[2];
 extern int   EvaDataPlaceholder_08e82144;
+
+/* Added for CTask::~CTask()/CLimiterMan::~CLimiterMan() (Stage 6, 2026-07-25). All
+ * three identified by reading `vtable for X` / `typeinfo for X` symbols directly out
+ * of .rodata via nm -C (the object's own real vptr value is always vtable-symbol+8,
+ * standard Itanium ABI layout: [offset-to-top][typeinfo-ptr][vfunc0]...) -- none are
+ * ever dispatched through by any reconstructed code, only ever INSTALLED as the final
+ * mVtbl identity once destruction reaches that level, so a 1-slot array is enough:
+ *
+ *   CObjectBase   (08e79d60 = vtable for CObjectBase, +8 = 08e79d68) -- the ultimate
+ *     root base beneath CNamedObjectBase (task.h/module.h's own base), confirmed via
+ *     its typeinfo string "11CObjectBase"; genuinely 0 own virtual function slots
+ *     (RTTI-only root).
+ *   CIfcUnknown   (08e81d78 = vtable for CIfcUnknown, +8 = 08e81d80) -- CLimiterMan's
+ *     own further base (limiter_man.h); confirms CLimiterMan IS-A CIfcUnknown, matching
+ *     CTask::CTask()'s own `RegisterIfc(reinterpret_cast<CIfcUnknown*>(mLimiterMan))`
+ *     call (task.cpp).
+ *   CMessageInput (08e80c60 = vtable for CMessageInput, +8 = 08e80c68) -- the real
+ *     identity CTask::~CTask() installs into CTask's own +0x08 field (task.h's
+ *     "mIfcThunk") right before finishing -- i.e. mIfcThunk is genuinely a secondary
+ *     (multiple-inheritance, this-adjusted) vtable slot for a CMessageInput-derived
+ *     interface CTask itself implements, not generic opaque data. CMessageInput itself
+ *     is not reconstructed (out of scope, unrelated subsystem -- CDummyMsgInput/
+ *     CMessageInput cluster, see this header's own slot-count survey above), so this
+ *     stays a raw identity marker like the other two.
+ */
+extern void *PTR__CObjectBase_08e79d68[1];
+extern void *PTR__CIfcUnknown_08e81d80[1];
+extern void *PTR__CMessageInput_08e80c68[1];
+
+/* CSysExMsgTaskBase's own real vtable pair (Stage 6 SetMask/~CTask batch,
+ * 2026-07-25, sysex_msg_task_base.h) -- primary at 08e84c20+8=08e84c28 (13 slots,
+ * boundary = own typeinfo-name symbol 08e84c5c per this file's established
+ * methodology), secondary (the CTask+0x8-equivalent, this-adjusted, multiple-
+ * inheritance slot -- same shape as CTask's own EvaDataPlaceholder_08e82144) at
+ * 08e84c50, treated as an opaque scalar placeholder like CTask's own secondary vtable
+ * already is, not a named array -- never dispatched through by any reconstructed
+ * code.
+ */
+extern void *PTR__CSysExMsgTaskBase_08e84c28[13];
+extern int   EvaDataPlaceholder_08e84c50;
 }
 
 #endif /* OMEGA_VTABLES_H */

@@ -25,14 +25,16 @@
  * RegisterMessageClient()` virtual dispatch -> `CClientCommServer::CClientCommServer`).
  *
  * REAL LAYOUT (base CTask, task.h, 0x7c bytes, THEN):
- *   +0x7c (this class's own +0x00, i.e. right after CTask)... actually the real ctor
- *   writes CTask's OWN mPeriod/mCountdown fields (task.h +0x78/+0x7a) directly by raw
- *   offset in SetTimeout() -- not this class's own fields. This class's own additional
- *   fields, confirmed from CSysExMsgTaskBase@080a65e0.c / SetTimeout@080a67c0.c:
  *     +0x78/+0x7a  (== CTask's own mPeriod/mCountdown, task.h)   -- written by
  *                  SetTimeout(), not this class's own storage
- *     +0x7c        (== CTask's own trailing fields)              -- not touched here
- *     +0x80  mTimeoutTicks  uint, SetTimeout()'s own raw millisecond value
+ *     +0x7c  mTimeoutStart  uint, SetTimeout()'s own `HAL_GetSystemTime()` snapshot,
+ *                  read back by Exec() -- this IS this class's own first added field
+ *                  (a prior pass's "observed gap: ctor writes this class's own first
+ *                  new field at +0x80, 4 bytes past CTask's documented 0x7c-byte size,
+ *                  not explained" is now resolved: SetTimeout(), not the ctor, is what
+ *                  populates +0x7c, so there never was a gap)
+ *     +0x80  mTimeoutTicks  uint, SetTimeout()'s own raw millisecond value, read back
+ *                  by Exec()
  *     +0x84  mCommId        byte, the comm/sysex-id this task answers to; ctor sets
  *                            0xff ("uninitialized") unconditionally
  *     +0x88  mOutLink       COutLink* -- real ctor conditionally constructs a
@@ -43,35 +45,47 @@
  *                            ECanTransmit requests it; this pass always stores 0 here
  *                            instead (documented deviation, see sysex_msg_task_base.cpp)
  *
- * Real vtable (PTR__CSysExMsgTaskBase_08e84c28, 13 ground-truth-counted slots,
- * symbols.csv) is never dispatched through by any reconstructed code except this
- * class's OWN `Exec(CMessage&)`, which dispatches through the DERIVED class's own
- * override at slot +0x14 (0x14/4 = slot 5) -- meaningless without a real derived class
- * (CDumpTask) actually constructed, so this pass's placeholder vtable is never
- * exercised end-to-end (same "genuinely reachable in ground truth, dead in this
- * reconstruction's own current call graph" category as task.h's own CTask note).
+ * Real vtable (PTR__CSysExMsgTaskBase_08e84c28 primary + a secondary at +0x8e84c50,
+ * both installed by the ctor/dtor now that they're reconstructed -- omega_vtables.h)
+ * is never dispatched through by any reconstructed code except this class's OWN
+ * `Exec(CMessage&)` (raw slot+0x14) and `Exec()` (raw slot+0x1c, see .cpp) --
+ * meaningless without a real derived class (CDumpTask) actually constructed, so this
+ * pass's placeholder vtable is never exercised end-to-end (same "genuinely reachable
+ * in ground truth, dead in this reconstruction's own current call graph" category as
+ * task.h's own CTask note).
  *
- * Tier A (5 of 14 real ground-truth entries -- the rest genuinely blocked, not
- * fabricated, see .cpp):
+ * Tier A (11 of 14 real ground-truth entries -- Stage 6 SetMask/~CTask batch,
+ * 2026-07-25, promotes 6 of these from Tier B now that `CTask::SetMask()`/
+ * `CTask::~CTask()` exist, task.h):
  *   Exec(CMessage&), OnSexLinkError(), OnReceiveMessage(uchar,uchar,uchar const*,uchar),
- *   OnTimeout() -- all self-contained (3 of the 4 are real empty `return;` bodies in
- *   the shipped binary, confirmed by reading each decompile; Exec(CMessage&) is a pure
- *   argument-unpacking virtual redispatch, no CTask/COutLink touch).
+ *   OnTimeout() -- unchanged from the prior pass (self-contained, no SetMask/~CTask
+ *   dependency).
+ *   CSysExMsgTaskBase() ctor -- NOW real for the `mMask & 0x08` -> `SetMask(1)` branch
+ *     and the vtable-pair install; the ECanTransmit==1 branch (malloc a
+ *     CSysExMsgClientOutLink, call `CTask::Add(COutLink*)`) is STILL not modeled --
+ *     unrelated dependency, see Tier B below.
+ *   SetTimeout(ushort) -- NOW real, including the real fixed-point period computation
+ *     and both SetMask() tail-calls (see .cpp); 2 real Api diagnostic-only calls
+ *     (vtbl+0x94) are not modeled, matching Exec(CMessage&)'s own established
+ *     precedent for that same undecoded slot -- they don't affect control flow.
+ *   Exec() -- NOW real, including the real timeout-elapsed check and the raw
+ *     slot+0x1c redispatch (see .cpp).
+ *   ~CSysExMsgTaskBase() -- NOW real: reinstalls both own vtable identities, then
+ *     calls the now-real `CTask::~CTask()`.
  *
  * Tier B (blocked on CURRENTLY-OUT-OF-SCOPE real dependencies, not guessed):
- *   CSysExMsgTaskBase() ctor, SetTimeout(ushort), Exec() -- all three call a real
- *     `CTask::SetMask()`/`SetMask(int)` overload pair task.h explicitly documents as
- *     "NOT-yet-reconstructed" (CTask/CModule family is a CONCURRENT agent's territory
- *     this session -- deliberately not added here to avoid a merge conflict on task.h).
- *   SendMsg(uchar const*,uchar), EventToMessage(...), MessageToEvent(...) -- all three
- *     terminate in `CSysExMsgClientOutLink`/`CSexServiceTask`, which themselves sit on
- *     top of `CSysExMsgOutLink`/`COutLinkMono`/`COutLink` -- a genuinely separate,
+ *   CSysExMsgTaskBase()'s ECanTransmit==1 branch, SendMsg(uchar const*,uchar),
+ *     EventToMessage(...), MessageToEvent(...) -- all terminate in
+ *     `CSysExMsgClientOutLink`/`CSexServiceTask`, which themselves sit on top of
+ *     `CSysExMsgOutLink`/`COutLinkMono`/`COutLink` -- a genuinely separate,
  *     un-reconstructed output-link subsystem shared broadly across Eva's message
  *     routing, matching the same "pulls in a further out-of-scope subsystem, defer"
  *     bar task.h's own RegisterIfc()/CPoller precedent already set for this project.
- *   ~CSysExMsgTaskBase() (2 real thunks + 1 real body) -- calls `CTask::~CTask()`,
- *     which task.h explicitly says is NOT reconstructed ("nothing... destroys a
- *     CTask").
+ *     Unrelated to SetMask/~CTask -- promoting those didn't unblock this branch.
+ *   `HAL_GetSystemTime()`/`HAL_GetScheduleInterval()` (SetTimeout()/Exec()'s own real
+ *     dependencies) stay file-local Tier-B stubs (sysex_msg_task_base.cpp), matching
+ *     ckernel.cpp's own established per-file HAL-stub convention -- neither is
+ *     reconstructed anywhere in this project yet.
  */
 
 #ifndef SYSEX_MSG_TASK_BASE_H
@@ -92,16 +106,14 @@ public:
 	enum ECanTransmit { eCanTransmit = 1 };
 	enum ENeedsTimeout { eNeedsTimeout = 1 };
 
-	/* .text+0x080a65e0, 268 bytes. Tier B -- see header comment. Still calls the
-	 * real base CTask::CTask() and sets the one dependency-free field (mCommId);
-	 * the ECanTransmit==1 branch (CSysExMsgClientOutLink construction + CTask::Add)
-	 * is NOT modeled, see .cpp.
+	/* .text+0x080a65e0, 268 bytes. Tier A for the vtable-pair install and the
+	 * `mMask & 0x08` -> `SetMask(1)` branch; the ECanTransmit==1 branch
+	 * (CSysExMsgClientOutLink construction + CTask::Add) is still NOT modeled,
+	 * see header comment / .cpp.
 	 */
 	CSysExMsgTaskBase(const CModule &owner, int canTransmit, int needsTimeout);
 
-	/* .text+0x080a67c0, 247 bytes. Tier B -- needs CTask::SetMask(), see header
-	 * comment.
-	 */
+	/* .text+0x080a67c0, 247 bytes. Tier A -- see header comment / .cpp. */
 	void SetTimeout(unsigned short milliseconds);
 
 	/* .text+0x080a64f0, 171 bytes. Tier A -- pure argument redispatch through this
@@ -111,9 +123,7 @@ public:
 	 */
 	int Exec(CMessage &msg);
 
-	/* .text+0x080a65a0, 57 bytes. Tier B -- needs CTask::SetMask(), see header
-	 * comment.
-	 */
+	/* .text+0x080a65a0, 57 bytes. Tier A -- see header comment / .cpp. */
 	void Exec();
 
 	/* .text+0x080a6730, 133 bytes. Tier B -- needs CSysExMsgClientOutLink::
@@ -148,14 +158,18 @@ public:
 	                      unsigned char d);
 	void OnTimeout();
 
-	/* .text+0x08184ef0 (+2 non-virtual thunks). Tier B -- needs CTask::~CTask(),
-	 * see header comment.
+	/* .text+0x08184ef0 (+2 non-virtual thunks). Tier A -- see header comment /
+	 * .cpp.
 	 */
 	~CSysExMsgTaskBase();
 
 private:
-	unsigned int  mTimeoutTicks; /* +0x80, SetTimeout()'s own raw value; unused --
-	                               * SetTimeout() itself is Tier B */
+	unsigned int  mTimeoutStart; /* +0x7c, SetTimeout()'s own HAL_GetSystemTime()
+	                               * snapshot, read back by Exec() -- see header
+	                               * comment (this class's own real first field,
+	                               * not a gap) */
+	unsigned int  mTimeoutTicks; /* +0x80, SetTimeout()'s own raw value, read back
+	                               * by Exec() */
 	unsigned char mCommId;       /* +0x84 */
 	void         *mOutLink;      /* +0x88, always 0 this pass -- see header comment */
 };

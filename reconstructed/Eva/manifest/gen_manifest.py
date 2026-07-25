@@ -306,6 +306,29 @@ RECONSTRUCTED = {
     "0816ba80",  # BPM::SetLowerLimit(unsigned int)
     "0816bb10",  # BPM::SetUpperLimit(unsigned int)
     "0816bc00",  # BPM::_GLOBAL__I_sm_LowerLimit (static ctor -> MPQN defaults)
+
+    # --- Stage 6: SetMask/~CTask batch (2026-07-25). CTask::SetMask(EMask) and
+    # CTask::~CTask() reconstructed (task.h/task.cpp) -- both were the two real,
+    # currently-unavailable dependencies the prior batch's own CSysExMsgTaskBase
+    # writeup named as blocking 6 of its 14 manifest rows (ctor, SetTimeout, Exec(),
+    # dtor + its own 2 non-virtual thunks). CLimiterMan::~CLimiterMan()
+    # (limiter_man.h/.cpp) reconstructed too -- CTask::~CTask()'s own real
+    # dependency (destroys the embedded CLimiterMan sub-object). All 6 of the
+    # previously-blocked CSysExMsgTaskBase rows below are now promoted to Tier A
+    # (sysex_msg_task_base.h/.cpp) -- the ctor's ECanTransmit==1 branch and
+    # SendMsg/EventToMessage/MessageToEvent stay Tier B, a DIFFERENT, unrelated
+    # blocker (the CSysExMsgClientOutLink/CSexServiceTask output-link subsystem).
+    "0807bbc0",  # CLimiterMan::~CLimiterMan (D1)
+    "0807e350",  # CTask::~CTask (D1)
+    "0807e670",  # non-virtual thunk to CTask::~CTask (D1)
+    "0807e6c0",  # non-virtual thunk to CTask::~CTask (D0)
+    "0807e840",  # CTask::SetMask(EMask)
+    "080a65e0",  # CSysExMsgTaskBase::CSysExMsgTaskBase (ctor)
+    "080a67c0",  # CSysExMsgTaskBase::SetTimeout(ushort)
+    "080a65a0",  # CSysExMsgTaskBase::Exec() (0-arg)
+    "08184ef0",  # CSysExMsgTaskBase::~CSysExMsgTaskBase (D1)
+    "08184f10",  # non-virtual thunk to CSysExMsgTaskBase::~CSysExMsgTaskBase (D1)
+    "08184f70",  # non-virtual thunk to CSysExMsgTaskBase::~CSysExMsgTaskBase (D0)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
@@ -313,9 +336,12 @@ RECONSTRUCTED = {
 # TVector<SRegisteredIfc,1>::MakeCapacity()-driven append, a TVector<T,1> growth
 # routine this project has never generalized anywhere it appears (ckernel.h's own
 # note). CPoller (29 methods, .text+0x089ef740 ctor) surveyed but NOT pursued --
-# genuinely deeper (~1900-byte ctor, pulls in a new not-yet-reconstructed
-# CTask::SetMask(EMask) dependency) than any Tier-A candidate this batch, correctly
-# out of scope. CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) also stays out of
+# genuinely deeper (~1900-byte ctor) than any Tier-A candidate so far, correctly
+# out of scope (its own CTask::SetMask(EMask) dependency is no longer a blocker as
+# of the Stage 6 SetMask/~CTask batch above -- SetMask() itself is now reconstructed,
+# but CPoller's ctor is still deep for other reasons: 2 large fixed-size handle-table
+# fills plus an Api vtable slot +0xac lookup, task.h/limiter_man.h).
+# CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) also stays out of
 # scope -- its post-CTask::CTask() tail is real multiple-inheritance work
 # (COutLinkMono sub-object + adjustment thunk) that is Peg/UI-editor-toolkit depth,
 # not CModule/CTask/CLevelManagerArray/CPoller family depth; see task.h/

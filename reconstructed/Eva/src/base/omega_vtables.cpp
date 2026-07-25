@@ -200,4 +200,21 @@ void *PTR__TVector_08e81f78[2] = {
  * header comment. Any addressable object is a safe stand-in.
  */
 int EvaDataPlaceholder_08e82144 = 0;
+
+/* CTask::~CTask()/CLimiterMan::~CLimiterMan() teardown identities -- see
+ * omega_vtables.h's own header comment for what each really is in ground truth. Never
+ * dispatched through, so a single EvaVTableStub slot each is enough.
+ */
+void *PTR__CObjectBase_08e79d68[1]   = { (void *)EvaVTableStub };
+void *PTR__CIfcUnknown_08e81d80[1]   = { (void *)EvaVTableStub };
+void *PTR__CMessageInput_08e80c68[1] = { (void *)EvaVTableStub };
+
+/* CSysExMsgTaskBase's own vtable pair -- see header comment. */
+void *PTR__CSysExMsgTaskBase_08e84c28[13] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+int EvaDataPlaceholder_08e84c50 = 0;
 }

@@ -7,32 +7,52 @@
  * OnReceiveMessage@08184ec0, OnTimeout@08184ee0, _CSysExMsgTaskBase@08184ef0}.c.
  *
  * Tier split rationale is in the header comment. Short version: everything gated on
- * `CTask::SetMask()` (ctor's ECanTransmit==1 branch aside, ctor/SetTimeout/Exec()) or on
- * the CSysExMsgClientOutLink/CSysExApiInstance/CSexServiceTask output-link chain
- * (ctor's other branch, SendMsg/EventToMessage/MessageToEvent) or on `CTask::~CTask()`
- * (dtor) is Tier B this pass -- all three are real, currently-unavailable dependencies
- * owned by a concurrent agent's pass (CTask/CModule family) or a genuinely separate,
- * un-reconstructed link-abstraction subsystem, not guesses.
+ * `CTask::SetMask()`/`CTask::~CTask()` (ctor, SetTimeout, Exec(), dtor) is NOW Tier A
+ * (Stage 6 SetMask/~CTask batch, 2026-07-25 -- both now exist, task.h). Still Tier B:
+ * the ctor's ECanTransmit==1 branch and SendMsg/EventToMessage/MessageToEvent, all
+ * gated on the genuinely separate, un-reconstructed CSysExMsgClientOutLink/
+ * CSysExApiInstance/CSexServiceTask output-link chain -- unrelated to SetMask/~CTask.
  */
 
 #include "sysex_msg_task_base.h"
+#include "omega_vtables.h"
 
 #include <cstddef>
 
-/* Observed gap: the real ctor writes this class's own first new field at `this+0x80`,
- * 4 bytes past CTask's own documented 0x7c-byte size (task.h). Not explained (possibly
- * an alignment pad task.h's own field list doesn't capture, possibly one more CTask
- * field this pass hasn't traced) -- immaterial here since every Tier-A method in this
- * file is offset-independent (Exec(CMessage&) touches only its CMessage argument and
- * this object's own vtable slot; the trivial OnXxx overrides touch nothing). Left as a
- * flagged discrepancy rather than silently "fixed" by picking a byte count that makes
- * the arithmetic reconcile.
+/* Real, currently-unreconstructed HAL dependencies -- file-local Tier-B stubs, same
+ * established per-file convention as ckernel.cpp's own `HAL_GetSystemTime()` stub.
+ * HAL_GetScheduleInterval()'s return value is used as a divisor in SetTimeout() below,
+ * so it must stay non-zero -- 1 is a safe "no scaling" placeholder.
  */
+namespace {
+unsigned HAL_GetSystemTime() { return 0; }
+unsigned HAL_GetScheduleInterval() { return 1; }
+} // namespace
 
 CSysExMsgTaskBase::CSysExMsgTaskBase(const CModule &owner, int canTransmit, int needsTimeout)
 	: CTask(owner, "SysExMsgClient", 2, needsTimeout == 1, 0x8007),
 	  mTimeoutTicks(0), mCommId(0xff), mOutLink(0)
 {
+	/* Real: reads CTask's own mMask (+0x4c) BEFORE overwriting the vtable fields
+	 * below -- raw offset access (not a named-member read), matching this whole
+	 * project's established "treat objects as raw blobs across class boundaries"
+	 * idiom (module_manager.cpp/level_manager_array.h) rather than needing a
+	 * friend declaration into CTask's private section.
+	 */
+	unsigned char mask = *(reinterpret_cast<unsigned char *>(this) + 0x4c);
+
+	/* Real: install this class's own vtable pair (primary + the CTask+0x8-
+	 * equivalent secondary), same "derived ctor overwrites [this+0]/[this+8]
+	 * right after the base ctor returns" idiom CTask::CTask() itself uses for
+	 * its own base CNamedObjectBase (task.cpp).
+	 */
+	*reinterpret_cast<void **>(this) = (void *)PTR__CSysExMsgTaskBase_08e84c28;
+	*reinterpret_cast<void **>(reinterpret_cast<char *>(this) + 8) =
+		(void *)&EvaDataPlaceholder_08e84c50;
+
+	if (mask & 0x08)
+		SetMask(1);
+
 	/* Real ctor's ECanTransmit==1 branch additionally malloc's a
 	 * CSysExMsgClientOutLink(this) and calls the not-yet-reconstructed
 	 * `CTask::Add(COutLink*)` (a distinct overload from CModule::Add(CTask*),
@@ -41,18 +61,90 @@ CSysExMsgTaskBase::CSysExMsgTaskBase(const CModule &owner, int canTransmit, int 
 	 * canTransmit == eCanTransmit.
 	 */
 	(void)canTransmit;
-
-	/* Real ctor also does `if ((this->mMask & 8) != 0) CTask::SetMask(this, 1);`
-	 * right after the base CTask::CTask() call -- NOT modeled, see header comment
-	 * (CTask::SetMask() unavailable this pass).
-	 */
 }
 
-/* SetTimeout()/Exec() (zero-arg) -- Tier B, both need CTask::SetMask(). Empty bodies,
- * real signatures only.
+/* Tier A -- .text+0x080a67c0, 247 bytes. Real fixed-point period computation: divides
+ * the requested millisecond timeout by the real per-tick schedule interval, then
+ * rescales by GCC's classic multiply-shift replacement for a divide-by-10
+ * (0xcccd/2^19 == 0.100000381...) -- transcribed literally rather than re-derived,
+ * since the exact rounding behavior matters for byte-faithfulness and the intended
+ * semantic (period is apparently counted in "10-tick units") isn't otherwise
+ * documented anywhere in this project. 2 real Api diagnostic-only calls (vtbl slot
+ * +0x94, undecoded) are NOT modeled -- same established precedent as
+ * Exec(CMessage&)'s own header comment for this exact slot: they don't affect control
+ * flow, only logging.
  */
-void CSysExMsgTaskBase::SetTimeout(unsigned short /*milliseconds*/) {}
-void CSysExMsgTaskBase::Exec() {}
+void CSysExMsgTaskBase::SetTimeout(unsigned short milliseconds)
+{
+	unsigned char mask = *(reinterpret_cast<unsigned char *>(this) + 0x4c);
+	unsigned short *periodField =
+		reinterpret_cast<unsigned short *>(reinterpret_cast<char *>(this) + 0x78);
+	unsigned short *countdownField =
+		reinterpret_cast<unsigned short *>(reinterpret_cast<char *>(this) + 0x7a);
+
+	if (!(mask & 0x08)) {
+		/* Real: unconditional Api diagnostic call here (not modeled, see above).
+		 * If a nonzero timeout was requested anyway, ground truth still honors
+		 * it (falls into the same real-timeout path below); a zero timeout
+		 * instead just re-enables the task (SetMask(1)) and returns.
+		 */
+		if (milliseconds == 0) {
+			SetMask(1);
+			return;
+		}
+	} else if (milliseconds == 0) {
+		SetMask(1);
+		return;
+	}
+
+	if (milliseconds <= 9) {
+		/* Real: a SECOND Api diagnostic call here (not modeled, see above) --
+		 * a warning, not a hard error; ground truth falls through to the same
+		 * real-timeout path regardless.
+		 */
+	}
+
+	mTimeoutTicks = milliseconds;
+
+	unsigned scheduleInterval = HAL_GetScheduleInterval();
+	unsigned short ticks = (unsigned short)(milliseconds / scheduleInterval);
+	unsigned short period = (unsigned short)(((unsigned)ticks * 0xcccdu) >> 0x13);
+
+	if (period != 0) {
+		*periodField = period;
+		*countdownField = period;
+	} else {
+		*periodField = 1;
+		*countdownField = 1;
+	}
+
+	mTimeoutStart = HAL_GetSystemTime();
+
+	SetMask(0);
+}
+
+/* Tier A -- .text+0x080a65a0, 57 bytes. Real: if the timeout hasn't elapsed yet
+ * (HAL_GetSystemTime() - mTimeoutStart < mTimeoutTicks), do nothing; otherwise
+ * re-mask (SetMask(1)) and redispatch through this object's own installed vtable at
+ * slot+0x1c (index 7 -- one past CTask's own 7-slot primary vtable, i.e. one of this
+ * class's own ADDED virtual slots, matching its own 13-slot total; almost certainly
+ * OnTimeout(), but modeled as a raw vtable dispatch rather than a direct call to that
+ * named method, same "how ground truth's own compiled indirection actually works"
+ * reasoning as Exec(CMessage&)'s own raw slot+0x14 dispatch above -- a further-derived
+ * class could legitimately override this slot instead).
+ */
+void CSysExMsgTaskBase::Exec()
+{
+	if (HAL_GetSystemTime() - mTimeoutStart < mTimeoutTicks)
+		return;
+
+	SetMask(1);
+
+	typedef void (*TimeoutFn)(void *);
+	void **vt = *reinterpret_cast<void ***>(this);
+	TimeoutFn fn = reinterpret_cast<TimeoutFn>(vt[0x1c / 4]);
+	fn(this);
+}
 
 /* Tier A -- .text+0x080a64f0, 171 bytes. Pure argument-unpack + redispatch through this
  * object's own (derived-class-overridden) vtable slot +0x14 (index 5). CMessage's real
@@ -110,5 +202,17 @@ int CSysExMsgTaskBase::OnReceiveMessage(unsigned char /*a*/, unsigned char /*b*/
 
 void CSysExMsgTaskBase::OnTimeout() {}
 
-/* Tier B -- real body calls CTask::~CTask() (task.h: "NOT reconstructed"). Empty. */
-CSysExMsgTaskBase::~CSysExMsgTaskBase() {}
+/* Tier A -- .text+0x08184ef0 (+2 real non-virtual thunks, both `this`-adjust-by-8 then
+ * tail-jump here, not separately modeled -- a plain non-virtual C++ dtor call already
+ * reaches this same body regardless of which base subobject pointer the caller holds).
+ * Real body: reinstalls this class's own vtable pair (same identity the ctor installs,
+ * matching the "re-assert own identity right before the base dtor" idiom every other
+ * destructor in this project follows -- task.cpp/limiter_man.cpp), then calls the base
+ * `CTask::~CTask()` (now real, task.cpp).
+ */
+CSysExMsgTaskBase::~CSysExMsgTaskBase()
+{
+	*reinterpret_cast<void **>(this) = (void *)PTR__CSysExMsgTaskBase_08e84c28;
+	*reinterpret_cast<void **>(reinterpret_cast<char *>(this) + 8) =
+		(void *)&EvaDataPlaceholder_08e84c50;
+}

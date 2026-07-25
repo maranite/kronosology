@@ -106,10 +106,70 @@
  * typed as) is not reconstructed. Left Tier B rather than fabricating a growth routine
  * this project has consistently deferred everywhere else it appears.
  *
- * `~CTask()` and `CLimiterMan::~CLimiterMan()` are NOT reconstructed -- nothing in this
- * reconstruction's own call graph ever destroys a CTask (see limiter_man.h). Same
- * "construct, don't destruct" scope as everywhere else sub-object construction has
- * been added without a matching destruction path.
+ * `SetMask(EMask)` (.text+0x0807e840, 40 bytes) IS reconstructed (Stage 6 SetMask/
+ * ~CTask batch, 2026-07-25 -- CSysExMsgTaskBase's own real dependency, see
+ * sysex_msg_task_base.h). Trivial: reads/writes bit 0x01 of mMask (+0x4c) -- the
+ * OTHER low mask bit from `CModule::AdjustTaskMask()`'s own bit 0x02
+ * (module.h/module.cpp), confirmed by `CLevelManager::RunLevel()`'s own "either of
+ * its low 2 bits set = masked" check (level_manager_array.h). `EMask` itself isn't
+ * individually named in the decompile (only 0/nonzero are exercised: 0 clears the
+ * bit, nonzero sets it) -- opaque `int`, same convention as `ETaskLevel`/
+ * `EScheduleFlag` above.
+ *
+ * `~CTask()` (.text+0x0807e350, 800 bytes, the D1 complete-object destructor) IS ALSO
+ * reconstructed this same batch -- real, widely-exercised in ground truth (every
+ * derived CTask-family class's own destructor calls it as a base dtor; ~87 direct
+ * call sites found via a full `objdump -dr` sweep, e.g. CDumpTask/CSysExTaskBase/
+ * CChkBaseTask/CRTRouter and every Peg-adjacent CTask-derived class), even though
+ * nothing in THIS reconstruction's own wired call graph destroys a CTask yet -- same
+ * "ground-truth-reachable is the bar, not this reconstruction's own partial call
+ * graph" precedent this file's own CTask::CTask() note already established. Real
+ * body, in order: (1) a virtual notification to Api (vtbl slot+0x140,
+ * system_api.h) with `this`; (2) fully drains mOutLinks front-to-back -- for each
+ * element, ANOTHER Api notification (vtbl slot+0x58, system_api.h) with the element,
+ * then `COmegaPtrArray::RemoveAtIndex(0, true)` (already reconstructed,
+ * omega_ptr_array.h) -- GCC's real 8-way Duff's-device unrolling collapsed to a plain
+ * `while` loop, same license as every other unrolled loop in this project; (3)
+ * `CLimiterMan::~CLimiterMan()` on the embedded mLimiterMan (now reconstructed,
+ * limiter_man.h); (4) inlines `~TVector<SRegisteredIfc,1>()`'s own trivial body
+ * (free mRegisteredIfcs' backing array if non-null -- confirmed inlined here rather
+ * than called, since `TVector<CTask::SRegisteredIfc,1>::~TVector()` is a real,
+ * separate, weak (COMDAT) symbol per `nm -C`, only actually CALLED from this
+ * function's own (not modeled -- see below) exception-unwind path); (5) destroys
+ * mIfcArray then mOutLinks, in that order, each via the SAME "install the shared
+ * TNamedPtrArray<COutLink> vtable identity (0x8e82198, matching the ctor's own
+ * install), call the already-reconstructed `COmegaPtrArray::Destroy()`, then
+ * downgrade to the base COmegaPtrArray identity (0x8e80be0)" sequence -- confirmed
+ * inlining `~TNamedPtrArray<COutLink>()`'s own body the same way, for the same
+ * reason (its real, separate, weak symbol is likewise only called from the unwind
+ * path); (6) installs CTask's own +0x08 field (mIfcThunk) to a real identity
+ * (0x8e80c68, confirmed via nm to be `vtable for CMessageInput`+8 -- see
+ * omega_vtables.h) -- CMessageInput itself is not reconstructed (separate,
+ * unrelated subsystem), so this stays an opaque final-value install like the ctor's
+ * own +0x08 write; (7) installs CNamedObjectBase's own vtable (0x8e81378) and frees
+ * mName if non-null (CNamedObjectBase's own inlined dtor body -- confirmed against
+ * `CNamedObjectBase::~CNamedObjectBase()`'s own standalone disassembly, byte-for-byte
+ * identical shape, called from many OTHER classes' dtors instead of being inlined
+ * there -- GCC apparently inlines it here specifically); (8) installs the ultimate
+ * base identity CObjectBase (0x8e79d68, confirmed via nm/typeinfo-string
+ * "11CObjectBase" -- omega_vtables.h) as the final act before returning.
+ *
+ * Exception-unwind paths (the real function's own `_Unwind_Resume`/
+ * `__cxa_call_unexpected` cleanup landing pads, and the 2 real calls to
+ * `TNamedPtrArray<COutLink>::~TNamedPtrArray()` they contain) are NOT modeled -- same
+ * "happy path only" license already used for the ctor (task.cpp) and every other
+ * reconstructed ctor/dtor in this project.
+ *
+ * Every raw vtable-slot dispatch this destructor performs (the two Api notifications,
+ * CLimiterMan's own per-element release-through-the-element's-own-vtable call, and
+ * every COmegaPtrArray-family slot+8 "free element" callback) resolves to
+ * `EvaVTableStub` in this reconstruction's own placeholder tables (omega_vtables.cpp)
+ * -- functionally inert here (confirmed: none of these arrays hold live elements in
+ * any KAT this batch wrote, since nothing populates mOutLinks/mLimiterMan's own
+ * TVector -- `CTask::Add(COutLink*)`/`CLimiterMan::RegisterLimiter()` are both real
+ * ground-truth methods, neither reconstructed, out of scope), but the vtbl-swap
+ * sequence itself is transcribed byte-order-faithfully regardless, matching this
+ * project's general standard for every other reconstructed ctor/dtor.
  *
  * **CPoller surveyed, NOT pursued this batch** (batch 6 flagged it as "genuinely
  * tempting... directly in the CModule/CTask family", deliberately deferred for
@@ -150,6 +210,17 @@ public:
 	 */
 	CTask(const CModule &owner, const char *name, int level, int scheduleFlag,
 	      unsigned short lastArg);
+
+	/* .text+0x0807e350, 800 bytes (D1 complete-object destructor). See header
+	 * comment.
+	 */
+	~CTask();
+
+	/* .text+0x0807e840, 40 bytes (symbols.csv: _ZN5CTask7SetMaskENS_5EMaskE). See
+	 * header comment. `mask` is the real EMask argument, opaque int (only 0/
+	 * nonzero are exercised).
+	 */
+	void SetMask(int mask);
 
 	/* .text+0x0807ec90, 472 bytes. Tier B -- see header comment. */
 	void RegisterIfc(CIfcUnknown *ifc);

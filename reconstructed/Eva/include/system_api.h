@@ -18,6 +18,17 @@
  *          2026-07-25)
  *   +0x134 CModule::Add(CTask*)'s own first notification: `(Api, CTask*)` -- real
  *          meaning not decoded (module.cpp, same batch)
+ *   +0x140 CTask::~CTask()'s own entry notification: `(Api, CTask*)` -- fired once,
+ *          at the very start of destruction, before anything else is torn down;
+ *          real meaning not decoded (task.cpp, Stage 6 SetMask/~CTask batch,
+ *          2026-07-25)
+ *   +0x058 CTask::~CTask()'s own per-outlink notification: `(Api, COutLink*)` --
+ *          fired once for each element of mOutLinks (task.h) as it's drained, right
+ *          before that element's own COmegaPtrArray::RemoveAtIndex(0, true) call;
+ *          real meaning not decoded (task.cpp, same batch). A DIFFERENT slot from the
+ *          per-element "free element" callback COmegaPtrArray::RemoveAtIndex/Destroy
+ *          already dispatch on their own (omega_ptr_array.cpp's CallFreeElement) --
+ *          this is an ADDITIONAL, explicit notification straight to Api.
  */
 
 #ifndef SYSTEM_API_H
