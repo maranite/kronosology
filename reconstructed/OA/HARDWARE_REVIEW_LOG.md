@@ -1001,4 +1001,38 @@ throughput-peak diagnostic reads (if a UI control for them exists) and
 compare the reported percentage against a known synthetic CPU load, to
 validate the `*100` scale-and-truncate math in `ReadCPUUsagePeak`/
 `ReadFXUsagePeak`/`ReadDiskThroughputPeak`.
+
+---
+
+## TurnOnSeqLed / SKSTGGate_ / SPROutGate_ transport LEDs (batch, 2026-07-25)
+
+Reconstructed (`include/oa_seq_led.h`/`src/engine/seq_led.cpp`) --
+found while surveying for CSTGControlMsgHandler-adjacent candidates.
+
+Uncertain:
+
+1. **Ids 0/1 (Start/Stop-Red, Start/Stop-Green) are a confirmed real
+   no-op in `TurnOnSeqLed` itself** -- re-traced the real jump table
+   twice to be sure this isn't a transcription mistake. The real
+   Start/Stop transport LEDs must be driven through some OTHER path --
+   plausibly `CSTGTempoUtils::FlashStartStopLed`/`FlashTempoLed`
+   (`.text+0x27060`/`0x27090`, confirmed real via relocation, only the
+   constructor of that class is reconstructed elsewhere in this
+   project) -- deliberately NOT pursued this pass: both compute a
+   timed one-shot deadline via `CSTGAudioBusManager`'s real-time audio
+   clock scale (`fisttp` against a bus-manager-derived tick rate),
+   which drifts into real-time audio-tick scheduling/DSP territory
+   rather than plain hardware I/O, and was judged to need its own
+   dedicated scope judgment rather than a quick fold-in here.
+2. **`eSeqLEDId`'s real enum type/name is not independently confirmed**
+   -- modeled as a plain `int`, matching this project's established
+   convention for not-independently-defined enums.
+
+Real-HW test that would help: press Play/Stop/Rec/Pause/FF/Rew on a
+real unit and confirm all 4 (Rec/Pause/FF/Rew) LEDs light via this
+exact path; separately confirm the Start/Stop-Red/Green LEDs really do
+NOT light via any of the `SKSTGGate_TurnOnStartStopXxxLed`/
+`SPROutGate_TurnOnStartStopXxxLed` call sites (would confirm the
+no-op is real dead code on shipping firmware, not just unreachable in
+this project's current caller graph).
 Begin/EndLongProcess and the CSTGGlobal+0x6a8 gate).

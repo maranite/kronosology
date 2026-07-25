@@ -172,7 +172,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_korgusb_port.o \
            src/engine/vm_test_accessors.o \
            src/init/calibration_msg_handler.o \
-           src/init/control_msg_handler.o
+           src/init/control_msg_handler.o \
+           src/engine/seq_led.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -476,7 +477,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/init_performances.cpp \
        src/engine/sequence_combi_init.cpp \
        src/init/calibration_msg_handler.cpp \
-       src/init/control_msg_handler.cpp
+       src/init/control_msg_handler.cpp \
+       src/engine/seq_led.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -573,7 +575,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_calibration_msg_handler \
          verify/test_cuuid_convert \
          verify/test_multisample_bank_access \
-         verify/test_control_msg_handler
+         verify/test_control_msg_handler \
+         verify/test_seq_led
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -720,6 +723,9 @@ verify/test_calibration_msg_handler: verify/test_calibration_msg_handler.cpp src
 
 verify/test_control_msg_handler: verify/test_control_msg_handler.cpp src/init/control_msg_handler.cpp include/oa_control_msg_handler.h include/oa_global.h include/oa_engine.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_control_msg_handler.cpp src/init/control_msg_handler.cpp -o $@
+
+verify/test_seq_led: verify/test_seq_led.cpp src/engine/seq_led.cpp include/oa_seq_led.h include/oa_setup_global_resources.h include/oa_comport.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_seq_led.cpp src/engine/seq_led.cpp -o $@
 
 verify/test_cuuid_convert: verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp include/oa_types.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp -o $@
