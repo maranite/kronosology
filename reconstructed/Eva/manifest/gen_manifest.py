@@ -280,6 +280,28 @@ RECONSTRUCTED = {
     "08184ec0",  # CSysExMsgTaskBase::OnReceiveMessage (confirmed-empty)
     "08184ee0",  # CSysExMsgTaskBase::OnTimeout (confirmed-empty)
 
+    # --- Stage 6: breadth sweep, follow-up pass same day (2026-07-25) -- the
+    # CEvBuffersPool/CEvent subsystem the block above deferred is now real,
+    # reconstructed via direct objdump -dr -M intel transcription (no Ghidra
+    # decompile needed, small/mechanical enough). Unblocks CClientCommServer's own
+    # ctor/dtor + 5 more leaf methods (10/26 Tier A total now). See
+    # include/ev_buffers_pool.h/event.h/client_comm_server.h for the full writeup.
+    "0807f100",  # CEvBuffersPool::CEvBuffersPool (ctor)
+    "0807f0b0",  # CEvBuffersPool::~CEvBuffersPool (D1)
+    "0807f0d0",  # CEvBuffersPool::~CEvBuffersPool (D0)
+    "0807f400",  # CEvBuffersPool::Alloc
+    "0807f4b0",  # CEvBuffersPool::Free
+    "0807f660",  # CEvBuffersPool::Lock
+    "08182520",  # CEvent::~CEvent
+    "0816ecc0",  # CClientCommServer::CClientCommServer (ctor)
+    "0816f240",  # CClientCommServer::~CClientCommServer
+    "0816f2c0",  # CClientCommServer::SendMessageToClient
+    "0816f370",  # CClientCommServer::SendToSysExLink
+    "0816f3a0",  # CClientCommServer::RetryTXPacket
+    "0816f3d0",  # CClientCommServer::TXData
+    "08170010",  # CClientCommServer::OnProcessRetry
+    "0816ffd0",  # CClientCommServer::OnRxMsgWhenInWAIT
+
     # --- Stage 6: breadth sweep, batch 2026-07-25b (CConfigManager's remaining
     # CKernel::InitUserLayer() bring-up steps + BPM/MPQN). Broad nm -C sweep of the
     # ground-truth binary for unclaimed territory (explicitly avoiding CTask/CModule/

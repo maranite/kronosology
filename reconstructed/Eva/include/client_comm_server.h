@@ -1,7 +1,8 @@
 /*
  * client_comm_server.h  -  CClientCommServer, the per-client SysEx transport state
  * machine (IDLE/SENT/WAIT protocol handshake over a CSysExMsgOutLink) -- Stage 6
- * breadth sweep, 2026-07-25.
+ * breadth sweep, 2026-07-25 (follow-up pass same day: CEvBuffersPool/CEvent now real,
+ * see ev_buffers_pool.h/event.h -- promotes 8 more methods below to Tier A).
  *
  * GROUND TRUTH REACHABILITY (the actual point of this pass, correcting Stage 6 batch
  * 6's own "no confirmed caller found in a quick check, lower confidence" verdict on
@@ -38,31 +39,62 @@
  * reconstruction's own current call graph" principle task.h's own CTask writeup
  * already established this pass.
  *
- * SCOPE: this is a genuinely large class (26 real methods, ~7.6KB of real .text, a full
- * IDLE/SENT/WAIT handshake state machine layered on a CRC-checked packet framing
- * protocol) whose CONSTRUCTOR alone pulls in an entire un-reconstructed subsystem:
- * `CEvBuffersPool`/`CEvent` (a fixed-size, refcounted event-buffer pool allocator --
- * `CEvBuffersPool::Alloc()`/`Lock()`, 176/508 bytes, .text+0x0807f400/0x0807f660,
- * NOT reconstructed here) backs an embedded `CLinkedEvent`-shaped tagged buffer this
- * class uses as its own TX/RX scratch space. Almost every one of the 24 remaining
- * methods touches that embedded buffer (or the `CSysExMsgOutLink&`/`CSexServiceTask&`
- * it was constructed with), so only the TWO methods that are genuinely
- * self-contained protocol math get a real (Tier A) body this pass:
+ * SCOPE (updated, follow-up pass same day): this is a genuinely large class (26 real
+ * methods, ~7.6KB of real .text, a full IDLE/SENT/WAIT handshake state machine layered
+ * on a CRC-checked packet framing protocol). The original pass found its CONSTRUCTOR
+ * alone pulled in an entire un-reconstructed subsystem -- `CEvBuffersPool`/`CEvent`, a
+ * fixed-size refcounted slab allocator backing an embedded `CLinkedEvent`-shaped tagged
+ * buffer this class uses as its own TX scratch space. That subsystem is now real (see
+ * `ev_buffers_pool.h`/`event.h`, reconstructed from `CEvBuffersPool::
+ * {CEvBuffersPool,Alloc,Free,Lock}`/`CEvent::~CEvent`'s own disassembly), which unblocks
+ * the ctor/dtor and 6 more leaf methods -- 10/26 Tier A total now:
  *
- *   ComputeCRCByte(unsigned char)              -- .text+0x0816f610, reads this class's
- *     own embedded event-buffer tag/pointer fields directly (raw fields, no
- *     CEvBuffersPool method call needed to READ them), a running XOR checksum over a
- *     mod-256-indexed byte range.
- *   CheckIncomingSexCRCByte(unsigned char const*, unsigned char) -- .text+0x08173430,
- *     694 bytes, does not touch `this` AT ALL (confirmed by reading the decompile --
- *     every reference is to the two parameters) -- the incoming-wire-format twin of
- *     ComputeCRCByte, same XOR-fold algorithm over an explicit caller-supplied buffer.
+ *   ComputeCRCByte(unsigned char) / CheckIncomingSexCRCByte(unsigned char const*,
+ *     unsigned char) -- unchanged from the original pass, see below.
+ *   CClientCommServer(...) (ctor, .text+0x0816ecc0, 1343 bytes) / ~CClientCommServer()
+ *     (dtor, .text+0x0816f240, 125 bytes) -- now real: malloc's mTxBuf, then
+ *     Alloc()s+Lock()s the embedded event buffer (dtor mirrors CEvent::~CEvent()'s own
+ *     sign-of-mEvTag ownership check, inlined against the embedded fields rather than
+ *     a real CEvent member -- see field layout below). `CSexInputTask::
+ *     sm_uiMaxSexPropLen`'s real value is still not reconstructed (CSexInputTask itself
+ *     is a different, out-of-scope class) -- a placeholder constant
+ *     (`kMaxSexPropLenPlaceholder`, the real ctor's own assert upper bound, 0xff) feeds
+ *     both the malloc() size and the Alloc() size, same "real code, placeholder input"
+ *     category as `CConfigManager::sm_ptSysExModuleInfo`'s own zero-initialized table.
+ *   SendMessageToClient() (.text+0x0816f2c0, 169 bytes) -- real: calls
+ *     `COutLinkMono::OutMono(mOutLink, mEcb, mTxBuf, mUnknown1c)` unconditionally (a
+ *     real soft-assert on `mModeService`'s own bit 0x02 gates nothing -- both sides of
+ *     that branch converge on the same call, confirmed by reading both targets).
+ *   SendToSysExLink() / RetryTXPacket() (.text+0x0816f370/+0x0816f3a0, 39/46 bytes) --
+ *     both real, both just `mOwner->TransmitSysEx(&embedded-event-as-CLinkedEvent*,
+ *     mEcb)` (RetryTXPacket also sets `mUnknown04 = 1` first).
+ *   TXData() (.text+0x0816f3d0, 562 bytes) -- real: same TransmitSysEx() call, then
+ *     (since `mEvTag` is provably always the ctor's own negative
+ *     `0x8000000a`-shaped tag by construction, a real, non-collapsed conditional here
+ *     since a not-yet-reconstructed caller could in principle leave it non-negative)
+ *     re-acquires the embedded buffer via the SAME clear-lock-bit-then-Lock() sequence
+ *     the ctor uses.
+ *   OnProcessRetry(unsigned char) (.text+0x08170010, 124 bytes) -- real: if the state
+ *     byte doesn't match the expected value, or the retry counter already exceeds 4,
+ *     calls `Error(eErrNotifyReserved)` and returns (a real soft trace-log call, Api
+ *     vtable slot 0x90, omitted -- non-enforcing); otherwise increments the retry
+ *     counter and resends via `TransmitSysEx()`.
  *
- * The other 24 (ctor, dtor, and everything touching the IDLE/SENT/WAIT state machine,
- * packet framing, or the client/outlink references) are Tier B this pass: real
- * signatures (confirmed via `nm -C`/symbols.csv, not functions.csv's ABI-flattened
- * view), empty bodies -- matching this project's established "every symbol on the
- * unresolved list gets a real, even if trivial, definition" convention.
+ * `CSexServiceTask::TransmitSysEx(CLinkedEvent*, unsigned char)` itself is NOT
+ * reconstructed (out of scope, same class this header's own reachability writeup
+ * already deferred) -- forward-declared here with its real mangled signature so these
+ * 6 methods link against the real symbol name.
+ *
+ * The remaining 16 methods (everything touching the IDLE/SENT/WAIT dispatch proper --
+ * `OnReceiveMessage`/`OnRx*`/`PrepareMsgBuffer`/`UnprepareBuffer`/`EventToMessage`/
+ * `MessageToEvent`/`OnReceiveSysExBuffer`/`OnRxPacket`/`TransmitSexAnswer`/`Error`) are
+ * still Tier B this pass: real signatures (confirmed via `nm -C`/symbols.csv), empty
+ * bodies -- they need either the packet-escape-byte framing protocol
+ * (`PrepareMsgBuffer`/`UnprepareBuffer`/`EventToMessage`/`MessageToEvent`, not yet
+ * decoded) or pull in further out-of-scope classes (`CMessage`'s own internals,
+ * `CSysExMsgOutLink` methods) this pass didn't chase down -- a genuinely disproportionate
+ * sub-effort relative to this pass's own CEvBuffersPool/CEvent scope, left for a future
+ * batch.
  *
  * REAL LAYOUT (confirmed from CClientCommServer@0816ecc0.c, ComputeCRCByte@0816f610.c):
  *   +0x00  vtbl         &PTR_OnReceiveMessage_08e898c8 (this class's real, slot-0-named
@@ -70,30 +102,41 @@
  *                        virtual override; never dispatched through by any
  *                        reconstructed code, same "install-only" status as
  *                        omega_vtables.h's own catalogue)
- *   +0x04/+0x08  2 unknown dwords, ctor zeroes both, never read back by any
- *                reconstructed method
- *   +0x0c/+0x0d  2 state bytes, ctor zeroes both (protocol state machine's own
- *                current-state fields, presumably -- not decoded, Tier B methods
- *                would read/write these)
- *   +0x0e        byte, ctor sets 0xff ("no active retry"?, not decoded)
- *   +0x0f        byte, ctor sets `(byte)service | (byte)commMode` -- the combined
- *                mode/service tag this client registered under
+ *   +0x04/+0x08  2 unknown dwords (mUnknown04/mUnknown08), ctor zeroes both; TXData()
+ *                also re-zeroes both after every send (real, confirmed -- still not
+ *                decoded what they track); RetryTXPacket()/OnProcessRetry() both set
+ *                mUnknown04 = 1 right before resending, so it reads as some kind of
+ *                "a retry is in flight" flag, not fully confirmed
+ *   +0x0c/+0x0d  2 state bytes (mState0c/mState0d), ctor zeroes both (protocol state
+ *                machine's own current-state field + retry counter -- OnProcessRetry()
+ *                confirms mState0c is compared against an expected-state argument and
+ *                mState0d is a retry count capped at 4, both real now)
+ *   +0x0e        byte (mUnknown0e), ctor sets 0xff ("no active retry"?, not decoded);
+ *                TXData() resets it to 0xff after every send too
+ *   +0x0f        byte mModeService, ctor sets `(byte)service | (byte)commMode` -- the
+ *                combined mode/service tag this client registered under
  *   +0x10        CSysExMsgOutLink* mOutLink (ctor's own `outLink` argument, stored raw)
  *   +0x14        unsigned char mEcb (ctor's own `ecb` argument -- the comm/sysex-id
  *                byte this client answers to)
  *   +0x18        void* mTxBuf -- malloc'd scratch buffer, size = mMaxSexPropLen (below)
- *   +0x1c        byte, ctor zeroes (another state byte, not decoded)
+ *   +0x1c        byte mUnknown1c, ctor zeroes; TXData() re-zeroes it after every send
  *   +0x1d/+0x1e  byte mMaxSexPropLen (both copies of `CSexInputTask::
  *                sm_uiMaxSexPropLen`'s own low byte -- NOT reconstructed here, that
  *                static lives on a different, un-reconstructed class; ctor's own
- *                assert bounds-checks it against 0xff)
+ *                assert bounds-checks it against 0xff, reused here as a placeholder
+ *                value, see ctor comment in the .cpp)
  *   +0x20        int mEvTag -- embedded CEvBuffersPool-backed event's own packed tag
- *                word (high byte = payload length, per ComputeCRCByte's own
- *                `(uint)mEvTag >> 0x10` extraction -- matches this project's other
- *                CEvent-adjacent code's `& 0xff00 | 0x8000000a`-shaped tag literals)
- *   +0x24        void* mEvBuf -- the event's own payload buffer pointer (from
- *                `CEvBuffersPool::Alloc()`/`Lock()`, real ctor only -- Tier B here)
- *   +0x28        int, ctor zeroes (a second embedded-event field, not decoded)
+ *                word (bits 16-23 = payload length, per ComputeCRCByte's own
+ *                `(uint)mEvTag >> 0x10` extraction; bit 31 = "owns a pool buffer",
+ *                same convention as `CEvent`'s own tag, see event.h) laid out, together
+ *                with +0x24/+0x28 below, exactly as an embedded `CLinkedEvent` --
+ *                `SendToSysExLink()`/`TXData()`/`RetryTXPacket()`/`OnProcessRetry()`
+ *                all `reinterpret_cast<CLinkedEvent*>(&mEvTag)` this same address range
+ *                when calling `CSexServiceTask::TransmitSysEx()`.
+ *   +0x24        void* mEvBuf -- the event's own payload buffer pointer, now real
+ *                (`CEvBuffersPool::Alloc()`/`Lock()`, see ev_buffers_pool.h/event.h)
+ *   +0x28        int mUnknown28, ctor zeroes (the embedded CLinkedEvent's own `mNext`
+ *                slot -- always zero here since this event is never queued anywhere)
  *   +0x2c        CSexServiceTask* mOwner (ctor's own `owner` argument, stored raw)
  *   +0x30        CSysExMsgTaskBase* mClient (ctor's own `client` argument, stored raw
  *                -- THIS is the field that makes CSysExMsgTaskBase a real, load-bearing
@@ -103,11 +146,34 @@
 #ifndef CLIENT_COMM_SERVER_H
 #define CLIENT_COMM_SERVER_H
 
-class CSexServiceTask;
 class CSysExMsgTaskBase;
 class CSysExMsgOutLink;
 class CMessage;
 class CLinkedEvent;
+
+/* Forward-declared with only the one real method this class calls --
+ * CSexServiceTask itself is out of scope this pass (see header comment). Real mangled
+ * signature: `_ZN15CSexServiceTask13TransmitSysExEP12CLinkedEventh`. Return type is
+ * genuinely unresolved (functions.csv/symbols.csv both carry no return type for it) --
+ * every real caller's own `eax` after the call is either unused or copied into a
+ * value the caller's own declared-void signature then discards (same "eax not part of
+ * the real contract" pattern already established for `TXData()` itself), so `int` here
+ * is a safe placeholder that doesn't change any observable behavior.
+ */
+class CSexServiceTask {
+public:
+	int TransmitSysEx(CLinkedEvent *ev, unsigned char ecb);
+};
+
+/* Forward-declared the same way, for SendMessageToClient()'s own real call --
+ * `COutLinkMono::OutMono(unsigned short, void*, unsigned short)`
+ * (`_ZN12COutLinkMono7OutMonoEtPvt`), a direct (non-virtual) call in ground truth.
+ * Out of scope otherwise (a different, un-reconstructed link-transport class).
+ */
+class COutLinkMono {
+public:
+	int OutMono(unsigned short ecb, void *buf, unsigned short len);
+};
 
 class CClientCommServer {
 public:
@@ -119,13 +185,13 @@ public:
 	enum ESexMsgType { eSexMsgTypeReserved = 0 };
 	enum EErrNotifyMode { eErrNotifyReserved = 0 };
 
-	/* .text+0x0816ecc0, 1343 bytes. Tier B -- see header comment (CEvBuffersPool/
-	 * CEvent dependency).
+	/* .text+0x0816ecc0, 1343 bytes. Tier A -- see header comment (now real, using
+	 * CEvBuffersPool/CEvent).
 	 */
 	CClientCommServer(CSexServiceTask &owner, CSysExMsgTaskBase &client, unsigned char ecb,
 	                   ECommMode mode, EService service, CSysExMsgOutLink *outLink);
 
-	/* .text+0x0816f240 (+1 duplicate thunk), 125 bytes. Tier B. */
+	/* .text+0x0816f240 (+1 duplicate thunk), 125 bytes. Tier A. */
 	~CClientCommServer();
 
 	/* .text+0x08173430, 694 bytes. Tier A -- pure, does not touch `this` at all
@@ -147,15 +213,32 @@ public:
 	 */
 	unsigned char ComputeCRCByte(unsigned char startIndex) const;
 
-	/* Remaining 22 real methods -- Tier B, real signatures, empty bodies. See
-	 * header comment for why (touch the embedded CEvBuffersPool-backed event,
-	 * mOutLink, mOwner, or mClient, none of which a Tier-B ctor actually
-	 * populates).
+	/* .text+0x08170010, 124 bytes. Tier A -- see header comment. If mState0c
+	 * doesn't match `expectedState`, or the retry counter (mState0d) already
+	 * exceeds 4, logs (Api+0x90, omitted, soft) and calls Error(); otherwise
+	 * bumps the retry counter and resends via mOwner->TransmitSysEx().
+	 */
+	void OnProcessRetry(unsigned char expectedState);
+
+	/* .text+0x0816f3a0, 46 bytes. Tier A -- see header comment. */
+	void RetryTXPacket();
+
+	/* .text+0x0816f2c0, 169 bytes. Tier A -- see header comment. */
+	void SendMessageToClient();
+
+	/* .text+0x0816f370, 39 bytes. Tier A -- see header comment. */
+	void SendToSysExLink();
+
+	/* .text+0x0816f3d0, 562 bytes. Tier A -- see header comment. */
+	void TXData();
+
+	/* Remaining 16 real methods -- Tier B, real signatures, empty bodies. See
+	 * header comment for why (packet-escape-byte framing protocol not yet
+	 * decoded, or pull in further out-of-scope classes).
 	 */
 	void Error(EErrNotifyMode mode);
 	void EventToMessage(const CLinkedEvent *ev, unsigned char *out, unsigned char &outLen);
 	void MessageToEvent(const unsigned char *data, unsigned char len, CLinkedEvent *ev);
-	void OnProcessRetry(unsigned char x);
 	/* NOT declared C++ `virtual` -- see sysex_msg_task_base.h's own header comment
 	 * for why (this project's raw-`mVtbl`-pointer convention, not real C++
 	 * polymorphism). Real ground-truth vtable slot 0.
@@ -164,6 +247,12 @@ public:
 	void OnReceiveSysExBuffer(const unsigned char *data, unsigned char len, unsigned char x);
 	void OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len, unsigned char x);
 	void OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len, unsigned char x);
+	/* .text+0x0816ffd0, 59 bytes. Real return value is 1 (bool `true`) in ground
+	 * truth, but the committed real signature (functions.csv/symbols.csv, no
+	 * return type resolved) is `void` -- same "eax not part of the real
+	 * contract" category as TXData()'s own observed-but-discarded eax. Real
+	 * body: an unconditional log (Api+0x90, omitted, soft) then Error().
+	 */
 	void OnRxMsgWhenInWAIT(const unsigned char *data, unsigned char len, unsigned char x);
 	void OnRxPacket(const unsigned char *data, unsigned char len, unsigned char x);
 	void OnRxSexWhenInIDLE(ESexMsgType type, const unsigned char *data, unsigned char len,
@@ -174,10 +263,6 @@ public:
 	                        unsigned char x);
 	void PrepareMsgBuffer(unsigned char *buf, unsigned char &len, const unsigned char *data,
 	                       unsigned char dataLen);
-	void RetryTXPacket();
-	void SendMessageToClient();
-	void SendToSysExLink();
-	void TXData();
 	void TransmitSexAnswer(ESexMsgType type, unsigned char x);
 	void UnprepareBuffer(CLinkedEvent *ev, const unsigned char *data, unsigned char len,
 	                      unsigned char x);
