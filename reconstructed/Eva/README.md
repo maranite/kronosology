@@ -947,3 +947,282 @@ this is a ~38,000-function binary with 99 reconstructed — Stage 6 breadth-swee
 remains almost entirely ahead; pick candidates the same way this batch did (Tier-B stubs
 already sitting on an already-reconstructed real call path, not cold/unreferenced
 functions) rather than trying to move broadly at random.
+
+## Stage 6: breadth sweep, batch 2 — 2026-07-25
+
+Picked up exactly the "next candidates" this batch's own predecessor left open:
+`CModule`'s real vtable, a new `CTaskBuffer` class, and making
+`CLevelManager::RunLevel()` genuinely real using both.
+
+**Ground-truth correction, found while tracing `RunLevel()`'s own per-element field
+reads**: the prior batch's own comment claimed `CLevelManager`'s task queue holds
+`TNamedPtrArray<CModule>` and dispatches "Update" through **`CModule`'s** own vtable
+slot `+8`. Both halves of that claim were wrong. `RunLevel@0805ea10.c` dereferences
+`+0x4c` (mask/flags byte), `+0x78`/`+0x7a` (period/countdown) on each queue element —
+`CModule`'s own real ctor (`module.h`) never touches those offsets; its whole base
+object is only `0x2c` bytes. Those offsets instead match **`CTask`**'s own real ctor
+(`CTask@0807ee80.c`) byte-for-byte. The vtable slot dispatched is `CTask::Exec()` —
+confirmed via direct ground truth (`Exec@08180950.c` is a real, 3-byte `return 0;`) —
+entirely unrelated to `CModule`'s own vtable slot `+8` (`Setup`, dispatched by name in
+`module_manager.cpp`) despite the coincidental identical slot number. Corrected in
+`level_manager_array.h`'s own header comment.
+
+### `CModule`'s real vtable (`include/omega_vtables.h`/`.cpp`)
+
+Previously a bare `static void *PTR__CModule_08e81fe8 = 0;` local to `module.cpp` —
+upgraded to a proper ground-truth-sized array, matching this project's established
+per-class vtable-sizing convention (`omega_vtables.h`'s own methodology). Real slot
+count: **7**, derived from the real installed-pointer address
+(`PTR_~CModule_08e81fe8`, confirmed by direct inspection of `symbols.csv`'s own
+`08e81fe0..08e82020` region — the raw `vtable` label sits 8 bytes *before* the address
+actually written into objects, the classic Itanium 2-word RTTI-header offset) to the
+next real symbol of any kind, which for `CModule` is its own typeinfo object at
+`08e82004`: `(0x08e82004 - 0x08e81fe8) / 4 = 7`. Matches perfectly against the 5 already-
+confirmed dispatches (dtor pair, `Setup`@`+8`, `Config`@`+0xc`, `Start`@`+0x10`) plus 2
+further real named `CModule` methods this pass didn't individually trace
+(`Destroy`@`08181c10`, `GetErrorMsg`@`08181c20`) that exactly fill the remaining 2
+slots — not a coincidence. Filled with the shared `EvaVTableStub` no-op throughout
+(same as every other array in that file) since nothing in this reconstruction ever
+dispatches through this specific vtable (every real `MMainXxx(void)` caller in
+`mains.cpp` overwrites it with the derived module's own vtable immediately after
+construction, and `CModuleManager::Setup/Config/Start()` only ever iterate `mModules`
+— always empty, since `CModuleManager::AddModule()` stays a Tier-B stub).
+
+### `CTaskBuffer` (new: `include/task_buffer.h`, `src/base/task_buffer.cpp`)
+
+Tier A, both real methods this pass needed: `SendBuffer()` (`.text+0x08055f20`, 137
+bytes) and `~CTaskBuffer()` (`.text+0x08055ec0`, 57 bytes). Not polymorphic — confirmed
+directly from the decompile (`SendBuffer()` dereferences `*this` as a linked-list head
+pointer, never as a vtable). Real layout: `{mHead, mUnused04}`, 8 bytes, embedded in
+every `CLevelManager` at `+0x04` (already-known real span, `CScheduler::InsertLevel()`
+zeroes exactly these two ints).
+
+`SendBuffer()` pops and drains the whole pending-message list: for each node, dispatches
+a vtable call through the node's own stored "target" value, this-adjusted by a fixed
+`+8` offset (the classic multiple-inheritance interface-adjustment-thunk pattern —
+matches `CTask`'s own ctor registering itself via
+`RegisterIfc(this, (CIfcUnknown*)(this+0x60))`, itself not reconstructed, see below),
+passing the node's own embedded message sub-object as the argument; frees an optional
+extra payload if a flag bit is set; then returns the node to a **global** free-list
+pool (`sm_poPool`/`sm_wCount`) rather than calling `free()` on it directly. **Nothing in
+this reconstruction ever enqueues into a `CTaskBuffer`** (the producer side —
+`AddMessage`/`NewBufferMessage`/`PurgeMessages`/`FreeBufferMessage`/`ShrinkPool` — has no
+caller anywhere in this reconstruction's own call graph and is not reconstructed), so
+`mHead` is always null in practice and the drain loop's own vtable dispatch — whose
+target-object identity isn't fully decoded — is real but currently unreached, same
+license already established for `CScheduler::Exec()`'s own dead bail branches.
+`~CTaskBuffer()` is worth flagging as found: it walks the *global* `sm_poPool`, not
+`this`'s own `mHead` list — preserved exactly as found, not "fixed."
+
+### `CLevelManager::RunLevel()` made real (`.text+0x0805ea10`, 567 bytes)
+
+Now genuinely reconstructed in `scheduler.cpp` (moved out of the header, which now just
+declares it): calls `CTaskBuffer::SendBuffer()` on the level's own embedded buffer
+(`this+4`), then walks the level's own embedded `COmegaPtrArray`-shaped task queue
+(`this+0x20`, count/array at the usual relative `+0xc`/`+0x14` → absolute `+0x2c`/
+`+0x34`) — a Duff's-device-unrolled 4-way walk in the original, collapsed to a plain
+per-index loop, same license/verification method as every other unrolled walk in this
+project. Per element: skip entirely (countdown left untouched) if the task's own
+mask/flags byte (`+0x4c`) has either low bit set — the real code short-circuits
+*before* touching the countdown, confirmed via the `&&` chain in the decompile;
+otherwise decrement the countdown (`+0x7a`) and, once it reaches 0, reload it from the
+task's own period (`+0x78`) and dispatch `CTask`'s vtable slot `+8` (`Exec()`). The
+function's own tail unconditionally clears the level's missed-tick counter (`+0x1c`)
+regardless of what the loop did — already modeled by the prior batch, unchanged here.
+
+**`CTask` itself is deliberately not reconstructed as a constructible class.**
+`CTask::CTask()` (`.text+0x0807ee80`, 330 bytes) has zero callers anywhere in this
+reconstruction's own call graph — nothing on the traced boot path ever calls
+`new CTask(...)` — so implementing it would be adding dead code, the same "don't
+fabricate an uncalled function" license already established for `OmegaExitThread`
+(Stage 3). Its real field layout (confirmed from the ctor's own decompile) is
+documented in `level_manager_array.h`'s header comment purely so `RunLevel()`'s own
+per-tick reads have ground truth behind them: `+0x4c` mask byte, `+0x78`/`+0x7a`
+period/countdown, `+0x48` scope id (`Api` vtable `+0x3c`, same mechanism as `CModule`'s
+own `mScopeId`), `+0x60` embedded `CLimiterMan` (own real ctor is tiny — 46 bytes,
+`CLimiterMan@0807bd10.c` — but not wired here since nothing constructs a `CTask` to own
+one), and a call to `CTask::RegisterIfc()` (`0807ec90`, 472 bytes — a real, genuinely
+deep interface-registry duplicate-detection scan + growable-vector append, correctly
+out of scope even if `CTask::CTask()` were being implemented).
+
+### Verification
+
+Two new host-side KAT files, same synthetic-byte-buffer-overlay style as
+`test_level_manager_array.cpp`:
+
+- `verify/test_task_buffer.cpp` (8 checks) — drives `CTaskBuffer::SendBuffer()`
+  directly: empty-list no-op, single-node dispatch (confirms the `+8` this-adjustment
+  and the `node+4` message-argument passing land on the exact right addresses), and the
+  flag-bit extra-payload-free path.
+- `verify/test_run_level.cpp` (13 checks) — drives `CLevelManager::RunLevel()` against
+  synthetic `CLevelManager`/`CTask`-shaped byte buffers: countdown-reaches-zero fires
+  and reloads from period, countdown-not-yet-zero just decrements, both mask bits (0
+  and 1) independently suppress dispatch *and* leave the countdown untouched, a mixed
+  masked/unmasked queue dispatches exactly once, an empty queue no-ops safely, and the
+  missed-tick counter is unconditionally cleared regardless of task states.
+
+Both suites caught the same real bug during development: the fake "dispatch target"
+objects were built with an *inline* vtable array as the object's own first member,
+rather than a *pointer* to a separately-allocated vtable array — the real C++ object
+model (and this project's own manual-vtable-swap idiom everywhere else) always makes an
+object's first word a *pointer* to its vtable, never the vtable's own storage. Building
+it wrong meant `*(void**)obj` read the vtable's own first *slot* (zero-initialized, i.e.
+NULL) instead of a valid vtable address, producing a segfault at a highly suspicious
+"dereferenced 0x8" address — worth remembering for any future KAT that constructs a fake
+polymorphic object by hand.
+
+`make` (36/36 across all 4 `verify/test_*` binaries: 15 level-manager-array + 8
+task-buffer + 13 run-level, plus the pre-existing 20-check ustg_user_api suite, all still
+green) and `tools/build_lenny.sh` (`LINK OK`) both clean. Manifest 111 → 114
+reconstructed (`0805ea10`/`08055f20`/`08055ec0`).
+
+**Live `kronos_vm` boot test**: re-verified clean — see the note in the commit/session
+history for the exact recipe reused this time (fresh scratch VM, shifted port set to
+avoid a concurrent session's own VM on the shared sandbox). `CScheduler::Exec()` now
+calls a genuinely real `RunLevel()` every tick (still practically a no-op given the
+always-empty task queue, per the scoping above), with zero change in observed behavior
+— same clean `Start closing`/`End closing` shutdown, no new crash.
+
+**Next candidates for a future batch**: the natural next widening is giving `CTask` a
+real, callable constructor — but that requires first finding *some* real caller
+(a `MMainXxx`/`CModule`-adjacent function that actually calls `new CTask(...)` to
+register a task with a level) elsewhere in the ~37,700 still-`pending` functions, which
+this batch did not go looking for. `CModule::Add(CTask*)`/`Remove(CTask*)`
+(`.text+0x0807c410`/`0x0807c470`, 91/461 bytes — the real "attach a constructed task to
+its owning module" methods) are likely close companions to that same search once a
+`CTask`-constructing caller is found.
+
+## Stage 2: IPC substrate closed out — 2026-07-25
+
+Per this session's own `/goal` follow-on (survey IPC/message substrate + Peg toolkit
+substrate, per README's own "Stage 2 ... not started as its own stage" / "Stage 5 ...
+not yet known to be necessary" notes). **Note on scope**: a separate, concurrent agent
+was working `src/base/scheduler.cpp`/`module.cpp`/the new `task_buffer.cpp`/
+`include/level_manager_array.h` at the same time (CModule/CTaskBuffer/
+`CLevelManager::RunLevel()`) — this pass deliberately stayed out of that territory
+entirely; none of the files below overlap with it.
+
+### Survey A: IPC/message substrate
+
+`nm`/`symbols.csv` swept for every `USTGUserAPI`/`CSTGHandle`/`CComm*`/`*Fifo*` symbol
+not yet in `src/`. Two genuinely tractable, still-unreconstructed clusters found:
+
+- **`USTGUserAPI`'s own remaining send/receive/teardown methods** (8 of them):
+  `Disconnect`, `ConnectUnsolicitedFifo`, `ReadMessage`, `ReadMessageWithTimeout`,
+  `ReadUnsolicitedMessage`, `SendPanelMessage`, `GetProgress`/`IncrementProgress`/
+  `SetProgress` — together with the already-reconstructed `Connect`/
+  `SendSTGMessageWithSource`/`ConnectPanelFifo`, this is now the class's *complete* real
+  send/receive/teardown surface. All 8 are Tier A, transcribed instruction-by-instruction
+  from `Decomp/EVA_Decomp/eva_export/functions/`.
+- **`CSTGHandle`'s remaining 2 methods** (`GetSize`/`Release`) + `CSTGHandleCache::Cleanup`
+  — the rest of the shared-memory-handle class `Access()` (Stage 4) only partly covered.
+  All Tier A.
+
+The other ~150 `USTGAPIXxx::UpdateYyy()`-style classes found in the same sweep
+(`USTGAPIProgram`, `USTGAPISampling`, `USTGAPIControl`, `USTGAPIKLM`, `USTGAPIPCMBanks`,
+`USTGAPIMIDI`, ... — see the sweep's own full output, not reproduced here) are a
+different, much larger thing: per-subsystem parameter-update RPC shims, not IPC
+plumbing itself — genuinely Stage 5/6 breadth, not this pass's scope.
+`CSTGUnsolMsgHandler`'s ~20 `*MsgHandler` methods are similarly out of scope (real
+unsolicited-message *dispatch*, i.e. what happens after a message arrives, not the
+transport itself).
+
+**Real findings from reading all 12 decompiles:**
+
+- **`Disconnect()`/`ConnectUnsolicitedFifo()` have no caller anywhere in the 37,795-
+  function export** — same "real but currently unreachable" status this project has
+  already established for `OmegaExitThread` (Stage 3) and `CSTGHandleCache::Cleanup`
+  itself. Reconstructed anyway for IPC-surface completeness (Stage 2's whole point), not
+  because either is on the traced boot path.
+- **A 5th real device node**: `ConnectUnsolicitedFifo()` opens `/dev/rtf5` (`O_NONBLOCK`)
+  — the "unsolicited message" channel `ReadUnsolicitedMessage()` reads from. Together
+  with `/dev/rtf0`/`/dev/rtf1`/`/dev/dmsg0` (`Connect()`, Stage 1) and `/dev/rtf7`
+  (`ConnectPanelFifo()`, Stage 4), Eva's full known RTAI-FIFO/stg_direct device surface
+  is now 5 nodes.
+- **`GetProgress`/`IncrementProgress`/`SetProgress` are a wholly separate channel**:
+  a `/proc/OmapNKS4ProgressBar` text file, not the rtf/dmsg0 FIFO substrate at all.
+  `IncrementProgress()`'s 3-byte literal payload was confirmed by reading the real
+  binary's own `.rodata` at `DAT_08fd9367` directly (`readelf -l` to map VA→file offset,
+  then a raw byte read) rather than guessed — it's the literal ASCII string `"inc"`.
+- **`ReadMessageWithTimeout(NULL, ...)` is a real "just wait" mode**, not a bug: with a
+  NULL message pointer it does zero I/O and busy-loops purely on `gettimeofday()` until
+  the deadline passes, then returns 0 — transcribed faithfully.
+- **The whole `ReadMessage`/`ReadMessageWithTimeout`/`ReadUnsolicitedMessage` family
+  uses a real busy-poll-to-deadline design with no `select()`/`poll()`/sleep anywhere**,
+  which only makes sense at all if the real `/dev/rtf1`/`/dev/rtf5` RTAI-FIFO character
+  devices return immediately (short read) when empty rather than blocking — i.e. these
+  fds are presumed non-blocking-when-empty on real hardware, unlike a POSIX pipe. Noted
+  explicitly since it's an inference from the code's own shape, not independently
+  confirmed against the real RTAI FIFO driver's own semantics.
+- **`Disconnect()` calls `CSTGHandle::Release()` (both on `mSharedMem` and on a second,
+  synthesized `mode=1` stack handle standing in for `mFrontPanelStatusAddress`'s own
+  attachment) completely unconditionally, with no NULL check** — faithfully preserved,
+  not "fixed": if `Disconnect()` is ever called before `Connect()` has run (never
+  observed in this export, and given `Disconnect()` itself has no callers at all, this
+  is purely theoretical), this would NULL-deref inside `Release()`. `Release()`/`GetSize()`
+  themselves are real and correct against `Access()`'s own `CSTGHandleCache::
+  sCachedHandleInfo` layout (refcount decrement / `munmap()` on last release; cached-size
+  read with a lazy fresh `ioctl()` on first query) — resolved by direct decompile
+  cross-check, both call sites' pointer arithmetic (`psVar2+2`→`addr`, `psVar2+4`→`size`)
+  matches `Access()`'s own `CachedHandleEntry{refCount,pad,addr,size}` layout exactly.
+
+**Verification**: `verify/test_ustg_user_api.cpp` (new, 20/20 checks) drives the real
+`ReadMessage`/`ReadMessageWithTimeout`/`ReadUnsolicitedMessage`/`SendPanelMessage`/
+`Disconnect` bodies against real host pipes — a `UstgUserApiTestHooks` friend struct
+(declared in `ustg_user_api.h`, same spirit as `level_manager_array.h`'s own extraction
+for testability) points the class's private fd-cache statics at pipe fds instead of the
+real (host-nonexistent) `/dev/rtfN` device nodes, so the length-prefix wire-format
+parsing is genuinely exercised end-to-end (frame success, oversize-frame rejection,
+NULL-buffer, zero-length-send-is-a-no-op-success, timeout-deadline-reached), not just
+decompile-cross-checked — matching PLAN.md's own call-out that this specific wire-format
+code deserves the extra layer-C scrutiny. One real trap hit and fixed while writing this
+test: a plain POSIX pipe *blocks* on an empty read with the write end open, which hangs
+`ReadMessageWithTimeout`'s real busy-poll design forever unless the read end is marked
+`O_NONBLOCK` — matching the presumed real RTAI-FIFO semantics noted above; without it,
+the KAT process itself hangs (caught by running it under a bounded `timeout`, per this
+project's own established caution around exactly this class of hazard).
+
+Both `make objs`/`tools/build_lenny.sh` (`LINK OK`, real on-image-lib link) confirm no
+regression. A live `kronos_vm` boot-test (fresh scratch copy, `FAST_RTAI` flag,
+`systemd-run --collect` launch, same recipe as Stage 6 batch 1) confirmed the full chain
+still reaches a clean boot with this build — see this section's own closing note for the
+result once the boot-test run completed.
+
+### Survey B: Peg toolkit substrate — confirmed not needed, with actual survey evidence
+
+`PLAN.md`'s Stage 4 ("Peg toolkit substrate ... not assumed necessary yet") and the
+existing README Stage-5 note ("Confirmed not necessary ... per the 4c live boot") were
+both based on the boot path simply never calling anything Peg-named, inferred rather
+than exhaustively swept. This pass did the actual sweep:
+
+- **"Peg" is a real, large embedded GUI widget toolkit namespace** — 7,560 symbol rows,
+  149 distinct `Peg`-prefixed classes (`PegScreen`, `PegPresentationManager`,
+  `PegDialog`, `PegButton`, `PegMenu`, `PegSlider`, `PegNotebook`, `PegScroll`, ...) plus
+  the `CPegForm`/`CPegNotifier` wrapper classes every one of the ~150+ `CFormXxx` mode
+  UIs derives from. Consistent with "PEG" (Platinum Embedded Graphics, Swell Software) —
+  a real, well-known commercial embedded-GUI toolkit from this era, matching the
+  project's own prior guess.
+- **Zero real call sites from anything in `reconstructed/Eva/src/`+`include/` into any
+  Peg-prefixed class** — confirmed by `grep -rl Peg src/ include/` (only 2 hits, both
+  comments referencing this exact scope boundary, no actual code).
+- **Zero Peg-toolkit global/static constructors run before `main()`** — checked
+  specifically because the `XxxApiInstance` family (Api/EditApi/SeqApi/...) proved
+  Eva has real pre-`main()` static-constructor machinery that isn't obviously visible
+  from the boot-path trace alone (the 4b/4c crash chain). Swept
+  `global.constructors.keyed.to.*` in `symbols.csv` for anything Peg-related: the only
+  matches (`g_oAmpEG`/`g_oVpmAmpEG`) are a substring false-positive ("am**peg**"), not
+  real Peg-toolkit statics.
+- **Nothing in `Mains()`'s 17-member registration-shim family or `InitSystemLayer()`'s
+  9-member system-layer-init family constructs a Peg-derived object** — re-confirmed by
+  re-reading both families' own already-reconstructed bodies (`mains.cpp`): the 2
+  direct-construction shims are `CHIDDriver`/`CLinuxPanelDriver` (not Peg-derived), and
+  the 15+9 module-registration shims all vtable-swap onto per-module vtables named
+  `CXxxConstructor`/`CFileMan`/`CResMan`/etc — none Peg-prefixed.
+
+**Verdict, now with actual evidence rather than inference: Stage 4/5 (Peg toolkit) is
+confirmed genuinely unreached by anything between `main()` and the observed clean
+`Start closing`/`End closing` exit, and has no hidden static-constructor path into it
+either.** Not started, and per this survey, correctly so — this is a real, ~150-Peg-class,
+thousands-of-function UI toolkit that would only matter once actual `CFormXxx` mode UIs
+are in scope, which they explicitly aren't (PLAN.md's own "UI feature completeness is
+not in scope" boundary).

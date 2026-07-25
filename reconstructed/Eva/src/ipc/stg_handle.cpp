@@ -15,6 +15,10 @@
  * second call passes the *pointer value* Access() returned as if it were itself a
  * CSTGHandle (i.e. as a mode/id, since CSTGHandle's only field is that one int) --
  * faithfully preserved, not resolved further (see eva_types.h).
+ *
+ * GetSize()/Release() (.text+0x08e32090/0x08e31ff0) and CSTGHandleCache::Cleanup()
+ * (.text+0x08e321a0) added 2026-07-25 -- Stage 2 IPC substrate, same file since all
+ * three touch CSTGHandleCache::sCachedHandleInfo directly, same as Access().
  */
 
 #include "eva_types.h"
@@ -47,6 +51,20 @@ void CSTGHandleCache_Initialize()
 		return;
 	sCachedHandleInfo = malloc(1200000);
 	memset(sCachedHandleInfo, 0, 1200000);
+}
+
+/* CSTGHandleCache::Cleanup() -- real function, but not currently reachable from
+ * anywhere on this project's traced call graph (no caller found in the boot path
+ * or Stage-2 IPC methods); reconstructed anyway since it's trivial and shares
+ * this file's own static. Exposed as a free function rather than wired into any
+ * class since CSTGHandleCache itself has no other reconstructed members here.
+ */
+void CSTGHandleCache_Cleanup()
+{
+	if (sCachedHandleInfo != 0) {
+		free(sCachedHandleInfo);
+		sCachedHandleInfo = 0;
+	}
 }
 
 } // namespace
@@ -96,4 +114,45 @@ void *CSTGHandle::Access() const
 
 	close(fd);
 	return result;
+}
+
+int CSTGHandle::GetSize() const
+{
+	int id = (int)mode;
+	if (id == -1)
+		return 0;
+
+	if (sCachedHandleInfo == 0)
+		CSTGHandleCache_Initialize();
+
+	CachedHandleEntry *entry = (CachedHandleEntry *)((char *)sCachedHandleInfo + id * 0xc);
+	if (entry->refCount == 0) {
+		int fd = open("/proc/.shm", O_RDWR);
+		if (fd < 0) {
+			puts("failed to open /proc/.shm");
+			return 0;
+		}
+		int size = ioctl(fd, 0x65, id);
+		close(fd);
+		return size;
+	}
+	return entry->size;
+}
+
+void CSTGHandle::Release() const
+{
+	int id = (int)mode;
+	if (id == -1)
+		return;
+
+	CachedHandleEntry *entry = (CachedHandleEntry *)((char *)sCachedHandleInfo + id * 0xc);
+	if (entry->refCount == 1) {
+		entry->refCount = 0;
+		unsigned base = (unsigned)entry->addr & 0xfffff000u;
+		munmap((void *)base, (entry->size + (unsigned)entry->addr) - base);
+		entry->addr = 0;
+		entry->size = 0;
+	} else if (entry->refCount != 0) {
+		entry->refCount--;
+	}
 }
