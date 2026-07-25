@@ -322,6 +322,13 @@ CFLAGS_calibration_msg_handler.o := -mhard-float -msse2 -mfpmath=sse
 # sibling override above.
 CFLAGS_controller_info_analog_handler.o := -mhard-float -msse2 -mfpmath=sse
 
+# SCalibrationData::InitAll() (batch, 2026-07-25) writes literal float
+# calibration-curve scale factors directly into the panel blob -- same
+# reasoning as every sibling override above (would otherwise pull in
+# unresolvable libgcc soft-float helpers under the kernel's own
+# -msoft-float default).
+CFLAGS_calibration_data.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -874,7 +881,7 @@ verify/test_atmel_primitives: verify/test_atmel_primitives.cpp src/auth/atmel_pr
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_atmel_primitives.cpp src/auth/atmel_primitives.cpp -o $@
 
 verify/test_calibration_data: verify/test_calibration_data.cpp src/init/calibration_data.cpp
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_calibration_data.cpp src/init/calibration_data.cpp -o $@
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_calibration_data.cpp src/init/calibration_data.cpp -o $@
 
 verify/test_daemon_lifecycle: verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp include/oa_daemons.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_daemon_lifecycle.cpp src/init/daemon_lifecycle.cpp -o $@

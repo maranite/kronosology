@@ -602,7 +602,19 @@ char SCalibrationData_LoadCalibrationFile(unsigned char *panel);
  */
 void SetupNKS4Calibration(void *panel, int flag);
 void SetupKeybedCalibration(void *panel);
-void SCalibrationData_InitAll(void);
+/*
+ * SIGNATURE FIXED (batch, 2026-07-25): previously declared as a bare
+ * `void(void)` -- a leftover placeholder never given a real body
+ * anywhere in this project (only a no-op stub in
+ * verify/test_setup_global_resources.cpp). Real ground truth
+ * (`_ZN16SCalibrationData7InitAllEv`, .text+0x3f860, 175 bytes) is a
+ * genuine C++ method taking `this` in EAX (regparm), same convention
+ * as `SCalibrationData_LoadCalibrationFile` above -- confirmed via its
+ * one real caller, setup_global_resources() @.text+0x118707..0x118710
+ * (`mov eax,ebx; call ...; jmp 1185fa`), same `panel` pointer. See
+ * src/init/calibration_data.cpp for the full field-by-field derivation.
+ */
+void SCalibrationData_InitAll(unsigned char *panel);
 void IncProgressBar(void);
 
 int setup_global_resources(int param);

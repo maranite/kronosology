@@ -68,6 +68,7 @@ extern "C" int CSTGFile_Close(void *handle)
 }
 
 extern "C" char SCalibrationData_LoadCalibrationFile(unsigned char *panel);
+extern "C" void SCalibrationData_InitAll(unsigned char *panel);
 
 static void resetMocks()
 {
@@ -132,6 +133,55 @@ int main()
 	rc = SCalibrationData_LoadCalibrationFile(panel);
 	check_eq("returns false on checksum mismatch", rc, 0);
 	check_eq("Close still called", g_closeCalls, 1);
+
+	printf("[6] SCalibrationData_InitAll() -- spot-check field groups + bounds\n");
+	memset(panel, 0xcc, sizeof(panel));
+	SCalibrationData_InitAll(panel);
+	/* generic curve table (0x00-0x1f), overridden tail at 0x04/0x05 */
+	check_eq("curve[0x00]", panel[0x00], 0x03);
+	check_eq("curve[0x01]", panel[0x01], 0x74);
+	check_eq("curve[0x1e]", panel[0x1e], 0x06);
+	check_eq("curve[0x1f]", panel[0x1f], 0x5b);
+	check_eq("final override [0x04]", panel[0x04], 0x01);
+	check_eq("final override [0x05]", panel[0x05], 0x02);
+	/* JoystickX */
+	check_eq("JSX xMin [0x20]", *(short *)(panel + 0x20), 0x0075);
+	check_eq("JSX xMax [0x26]", *(short *)(panel + 0x26), 0x0387);
+	{
+		int bits;
+		memcpy(&bits, panel + 0x28, 4);
+		check_eq("JSX scaleLo [0x28] (bit pattern)", bits, (int)0x3fb48a3a);
+	}
+	/* JoystickY */
+	check_eq("JSY yMin [0x34]", *(short *)(panel + 0x34), 0x00a0);
+	/* Ribbon (default/non-drum branch) */
+	check_eq("Ribbon xMinRaw [0x48]", *(short *)(panel + 0x48), 0x0050);
+	check_eq("Ribbon extra [0x98]", *(unsigned short *)(panel + 0x98), 0x0190);
+	/* Vector joystick shares one float between X and Y */
+	{
+		int bx, by;
+		memcpy(&bx, panel + 0x64, 4);
+		memcpy(&by, panel + 0x78, 4);
+		check_eq("VectorJS scaleLoX==scaleLoY [0x64 vs 0x78]", bx, by);
+	}
+	/* Half-damper */
+	check_eq("Damper xMin [0x84]", *(short *)(panel + 0x84), 0x01fe);
+	/* Touch screen */
+	check_eq("TouchScreen [0x9c]", *(unsigned short *)(panel + 0x9c), 0x0008);
+	check_eq("TouchScreen [0xb6]", *(unsigned short *)(panel + 0xb6), 0x000a);
+	/* LCD control: default gain 1.0f + trailing enable flags */
+	check_eq("LCD gain [0xc8] (bit pattern)", *(int *)(panel + 0xc8), (int)0x3f800000);
+	check_eq("LCD range [0xce]", *(unsigned short *)(panel + 0xce), 0xffff);
+	check_eq("LCD enable [0xe6]", panel[0xe6], 0x01);
+	check_eq("LCD enable [0xe7]", panel[0xe7], 0x01);
+	/* Aftertouch */
+	check_eq("Aftertouch xMin [0xe8]", *(short *)(panel + 0xe8), 0x00d4);
+	check_eq("Aftertouch xMax [0xee]", *(short *)(panel + 0xee), 0x029c);
+	/* Highest write is the dword at 0xf4 (0xf4-0xf7) -- confirm 0xf8
+	 * onward (the trailing bytes of the same 0xfc-byte blob, plus the
+	 * canary well past it) are untouched. */
+	check_eq("canary [0xf8] untouched", panel[0xf8], 0xcc);
+	check_eq("canary [0xff] untouched", panel[0xff], 0xcc);
 
 	if (g_fail) {
 		printf("FAILED: %d check(s)\n", g_fail);

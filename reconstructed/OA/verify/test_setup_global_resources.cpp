@@ -216,7 +216,8 @@ extern "C" int COmapNKS4Driver_Is88Key(void) { return 1; }
 extern "C" char SCalibrationData_LoadCalibrationFile(unsigned char *) { return 0; } /* skip the 3-way branch for this smoke test; the real body now lives in src/init/calibration_data.cpp + its own dedicated verify/test_calibration_data.cpp (batch 38) */
 extern "C" void SetupNKS4Calibration(void *, int) {}
 extern "C" void SetupKeybedCalibration(void *) {}
-extern "C" void SCalibrationData_InitAll(void) {}
+static int g_calibrationInitAllCalls;
+extern "C" void SCalibrationData_InitAll(unsigned char *) { g_calibrationInitAllCalls++; }
 static int g_incProgressBarCalls;
 extern "C" void IncProgressBar(void) { g_incProgressBarCalls++; }
 extern "C" void rt_printk(const char *, ...) {}
@@ -277,6 +278,7 @@ int main(void)
 	g_sampleRateMonitorInitCalls = g_askInitCalls = 0;
 	g_incProgressBarCalls = 0;
 	g_costProfileVtableTargetCalled = 0;
+	g_calibrationInitAllCalls = 0;
 	/*
 	 * Poison the tail of g_bigRegionBuf (the real `heapBase` this test
 	 * resolves to, see that buffer's own declaration comment above) past
@@ -309,6 +311,8 @@ int main(void)
 	check_eq("CCostProfile vtable slot 2 dispatched", (long)g_costProfileVtableTargetCalled, 1);
 	check_eq("CSTGCPUInfo::Update received CCostProfile's +4 field", (long)(g_updateArg * 10), 25);
 	check_eq("IncProgressBar called (hwVersion==3 skips one call)", (long)g_incProgressBarCalls, 2);
+	check_eq("SCalibrationData::InitAll called (LoadCalibrationFile stub always fails, batch 2026-07-25 fix)",
+		 (long)g_calibrationInitAllCalls, 1);
 
 	printf("\n[2b] Step 7 heap-arena `this` regression check (2026-07-23 fix):\n");
 	/*

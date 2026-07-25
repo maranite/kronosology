@@ -319,6 +319,32 @@ int setup_global_resources(int param)
 	 * guarded the same way, so this guard is this file's own
 	 * established defensive convention, not a new departure. */
 	char calLoaded = panel ? SCalibrationData_LoadCalibrationFile(panel) : 0;
+	/*
+	 * MISSING CALL ADDED (batch, 2026-07-25): real ground truth
+	 * (.text+0x1185f4 `je 118707`) calls `SCalibrationData::InitAll()`
+	 * right here whenever LoadCalibrationFile() failed (missing/
+	 * corrupt Calibration.img), then REJOINS the very same kind-branch/
+	 * SetupNKS4Calibration code below (`jmp 1185fa`, landing at the
+	 * exact instruction the `if (calLoaded)` block below starts from)
+	 * -- i.e. in ground truth that whole block runs on BOTH the
+	 * loaded and not-loaded paths, gated only by `panel` being
+	 * non-null, not by `calLoaded`. This project's existing `if
+	 * (calLoaded)` wrapper around that block (kind-branch/
+	 * SetupNKS4Calibration/eventual IncProgressBar) is therefore a
+	 * KNOWN, still-open structural discrepancy from ground truth,
+	 * deliberately NOT touched in this batch -- restructuring it
+	 * risks the already live-boot-verified control flow through this
+	 * function (see agent-memory) and deserves its own dedicated,
+	 * carefully re-verified pass. What IS fixed here is the
+	 * previously-total-no-op default-fill itself: before this change,
+	 * a missing/corrupt Calibration.img left every calibratable
+	 * control (joysticks, ribbon, vector joystick, damper,
+	 * aftertouch, touch screen, LCD contrast/brightness) at raw heap
+	 * garbage instead of the compiled-in defaults real hardware
+	 * would use.
+	 */
+	if (!calLoaded && panel)
+		SCalibrationData_InitAll(panel);
 	if (calLoaded) {
 		/* Real 3-way branch on `(panel[4] & 0xc) >> 2`: case 1 writes
 		 * panel_detected=1,type=0x1c,subtype=0x49 (matching the same
