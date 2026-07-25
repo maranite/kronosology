@@ -1036,3 +1036,82 @@ NOT light via any of the `SKSTGGate_TurnOnStartStopXxxLed`/
 no-op is real dead code on shipping firmware, not just unreachable in
 this project's current caller graph).
 Begin/EndLongProcess and the CSTGGlobal+0x6a8 gate).
+
+---
+
+## CSTGFrontPanelMsgHandler / CSTGFrontPanel::Beep/SetLED16Bits (batch, 2026-07-25)
+
+Reconstructed (`include/oa_front_panel_msg_handler.h`/
+`src/init/front_panel_msg_handler.cpp`, plus two new `CSTGFrontPanel`
+methods in `front_panel_handlers.cpp`) -- found via a class-level
+`nm -C` sweep, wholly unclaimed before this pass.
+
+Uncertain:
+
+1. **`SetLED16Bits` genuinely drops one byte (bits 8-15) of its 32-bit
+   input entirely** when repacking the OMAP NKS4 command word -- traced
+   instruction-by-instruction twice to rule out a transcription
+   mistake (`shr edx,0x8; and edx,0xff00` only ever exposes the
+   ORIGINAL bits 16-23, never bits 8-15, and nothing else in the
+   function reads that byte). Plausible real explanation: the "16
+   bits" of LED state are packed by the caller into bits 0-7 and 24-31
+   of the dword (not a contiguous 16-bit field), making the dropped
+   byte genuinely unused padding -- but no caller of `SetLED16Bits`
+   itself is reconstructed in this project to cross-check that theory.
+2. **`Beep()`'s fixed `0x04000000` command word's real effect is
+   unconfirmed** beyond "writes to the OMAP NKS4 output FIFO" -- no
+   independent cross-reference (e.g. a documented beep-duration/pitch
+   parameter elsewhere) to confirm this single opcode is a complete,
+   parameterless "beep" rather than one half of a larger protocol.
+
+Real-HW test that would help: trigger a front-panel beep (if a UI
+control or SysEx command reaches this path) and listen for the
+physical piezo/speaker; for `SetLED16Bits`, would need a live capture
+of an actual caller's `m` argument value to confirm the byte-1-is-
+padding theory (or find the real caller function to reconstruct and
+settle it definitively).
+
+---
+
+## CSTGOmapNKSMsgHandler::ProcessNextNKSEvent (batch, 2026-07-25)
+
+Reconstructed (`include/oa_omap_nks_msg_handler.h`/
+`src/init/omap_nks_msg_handler.cpp`) -- the real USB-NKS4-panel event
+pump, found via the same sweep as CSTGFrontPanelMsgHandler above; ties
+together four already-real `CSTGFrontPanel::Handle*` dispatch targets
+that had no reconstructed caller before this pass.
+
+Uncertain:
+
+1. **Byte-order asymmetry between sibling event types is real, not a
+   transcription slip** -- re-verified against the raw disassembly
+   multiple times: the rotary-delta and touch-panel-coord branches both
+   build their 16-bit value as `(b1<<8)|b0`, while the raw-analog-test-
+   capture (type 0x61) and its 0x62 companion both build theirs as
+   `(b0<<8)|b1` -- byte roles genuinely swapped between the two
+   families. Plausible (different firmware authors/eras for the
+   "normal" vs "diagnostic" event paths) but not independently
+   confirmed against any other source.
+2. **Real semantics of the fixed 16-byte `subtype 0x2a` message (event
+   type 0x08) are not confirmed** beyond "always sends `value=0`,
+   unconditionally, once per occurrence of this event type" --
+   plausibly a keybed-ready/panel-connect ping, no independent
+   cross-reference.
+3. **The second, front-panel-specific `CSTGKeybedKeyDebounceFilter`
+   instance's real static storage address (`.bss+0x2367e0` in ground
+   truth) and its relationship (if any) to the keybed's own embedded
+   instance are not independently cross-checked** -- this handler is
+   currently the ONLY reconstructed caller that touches it.
+4. **`ShortInvertNkS4RawAnalogValue`'s two output-pointer roles are
+   NOT symmetric with its sibling `ShortInvertNkS4AnalogValue`'s own
+   (outHi, outLo) naming convention** (see the header comment) --
+   reproduced exactly as disassembled, but the naming mismatch between
+   the two sibling functions is itself unconfirmed as intentional
+   (could reflect two independently-written functions rather than a
+   single deliberate convention).
+
+Real-HW test that would help: enable NKS4 panel test mode (if reachable
+from a service menu) and watch `chip_sniff_ring.bin`-style USB traffic
+while pressing front-panel buttons/touching the touch panel/moving the
+joystick, to confirm the type-byte dispatch table and byte-order
+theories above against real captured packets.
