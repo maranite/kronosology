@@ -132,4 +132,17 @@ void *PTR__TNamedPtrArray_08e811c0[8] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+/* CModule's own real vtable -- see header comment (7 slots: dtor pair, Setup(+8),
+ * Config(+0xc), Start(+0x10), Destroy(+0x14), GetErrorMsg(+0x18)). Never actually
+ * dispatched through by any code in this reconstruction (every real MMainXxx(void)
+ * caller in mains.cpp overwrites `this+0` with the derived module's own vtable
+ * immediately after CModule::CModule() runs, and CModuleManager::Setup/Config/Start()
+ * only ever iterate mModules -- always empty, since CModuleManager::AddModule() is a
+ * Tier-B stub) -- same "install-only, real slot count" status as this file's other
+ * entries.
+ */
+void *PTR__CModule_08e81fe8[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

@@ -55,6 +55,23 @@
  *     see sysapi_instance.h's corrected +4/+0x1c field mapping. Install-only, like
  *     the TPtrArray<CGlobalObjectBase> entry above.)
  *
+ * Added in the Stage 6 breadth-sweep pass (2026-07-25), CModule/CTaskBuffer/RunLevel
+ * batch. **Correction to this file's own stated methodology**: the boundary used for
+ * slot-count arithmetic is each class's own installed vtable POINTER address (the
+ * `PTR_~ClassName_<addr>` label Ghidra emits 8 bytes into most classes' raw vtable
+ * object, past the 2-word offset-to-top/typeinfo-ptr Itanium-ABI header -- e.g.
+ * CModule's raw `vtable` label sits at 08e81fe0, but the address every ctor actually
+ * writes into `this+0` is `PTR__CModule_08e81fe8`, +8 later) to the NEXT symbol of any
+ * kind (matches this file's original wording "next class's vtable header or... the
+ * first typeinfo object" -- for CModule specifically, that next symbol is CModule's
+ * OWN typeinfo, not another class's vtable, since nothing else sits between):
+ *
+ *   CModule  08e81fe8 -> 08e82004 (CModule's own typeinfo) = 7 slots. Confirmed against
+ *     5 known dispatches (0/4=dtor pair, +8=Setup, +0xc=Config, +0x10=Start -- see
+ *     module_manager.cpp) plus 2 further real named methods this pass didn't trace
+ *     individually (`Destroy`@08181c10, `GetErrorMsg`@08181c20) that exactly fill the
+ *     remaining 2 slots (+0x14/+0x18) -- a clean match, not a coincidence.
+ *
  * Every slot points at the same no-op stub (EvaVTableStub, cdecl, zero declared
  * parameters) -- safe under the real cdecl calling convention regardless of how many
  * args/regs a caller's own Fn-typedef pushes, since cdecl callees never pop caller-
@@ -88,6 +105,7 @@ extern void *PTR__TPtrArray_08e80bc8[4];
 extern void *PTR__CSysApiInstance_08e81008[94];
 extern void *PTR__TNamedPtrArray_08e811a8[4];
 extern void *PTR__TNamedPtrArray_08e811c0[8];
+extern void *PTR__CModule_08e81fe8[7];
 }
 
 #endif /* OMEGA_VTABLES_H */

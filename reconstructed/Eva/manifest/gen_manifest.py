@@ -143,12 +143,25 @@ RECONSTRUCTED = {
     "080623e0",  # CScheduler::Exec
     "0805ec70",  # CLevelManagerArray::Add
     "0805ee90",  # CLevelManagerArray::Find
+    # --- Stage 6: breadth sweep, batch 2 (2026-07-25) -- CModule's real vtable
+    # (ground-truth 7-slot sizing, omega_vtables.h/.cpp), CTaskBuffer (new class), and
+    # CLevelManager::RunLevel() made genuinely real using them. See README.md's
+    # "Stage 6: breadth sweep, batch 2" section.
+    "0805ea10",  # CLevelManager::RunLevel
+    "08055f20",  # CTaskBuffer::SendBuffer
+    "08055ec0",  # CTaskBuffer::~CTaskBuffer
 }
 
-# CLevelManager::RunLevel (0805ea10) is NOT in RECONSTRUCTED -- stays Tier-B (its own
-# real body depends on CTaskBuffer, a wholly unintroduced class, and dispatches through
-# every queued CModule's own vtable slot +8; only its trivial, real tail effect --
-# clearing the level's own missed-tick counter -- is modeled, see scheduler.cpp).
+# CTask itself is NOT in RECONSTRUCTED (no ctor implemented) -- CTask::CTask()
+# (0807ee80) has zero callers anywhere in this reconstruction's own call graph (nothing
+# on the traced path ever calls `new CTask(...)`), so implementing it would be
+# unreachable code; only its real per-instance field layout (+0x4c mask, +0x78/+0x7a
+# period/countdown, vtable slot+8 Exec()) is modeled, in level_manager_array.h's own
+# header comment, sufficient for CLevelManager::RunLevel()'s real per-tick walk. Same
+# "don't fabricate an uncalled function" license already established for
+# OmegaExitThread below. CTask::RegisterIfc (0807ec90, 472 bytes) and CLimiterMan
+# (0807bd10) are real CTask-ctor dependencies, also not reconstructed for the same
+# reason -- both genuinely out of scope while CTask::CTask() itself isn't implemented.
 
 # COmegaInterface::ExitRequested is declared but its body is a no-op stand-in (the real
 # vtable-slot-0x7c indirect call isn't resolved) -- deliberately NOT in RECONSTRUCTED.

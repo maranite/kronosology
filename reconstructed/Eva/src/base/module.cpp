@@ -4,6 +4,13 @@
  * CModule::CModule(const char*) transcribed from CModule@0807c330.c (156 bytes).
  * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) is a Tier-B link-stub, not
  * reconstructed -- see module.h.
+ *
+ * CModule's own real vtable (PTR__CModule_08e81fe8, 7 ground-truth-counted slots) now
+ * lives in omega_vtables.h/omega_vtables.cpp, matching this project's established
+ * per-class vtable-sizing convention (Stage 6, 2026-07-25) -- previously a bare
+ * `void* = 0` here, upgraded now that its real slot count is confirmed. Still never
+ * dispatched through by any reconstructed code -- see omega_vtables.cpp's own comment
+ * on this array for why.
  */
 
 #include "module.h"
@@ -21,15 +28,6 @@
  */
 extern CSystemApi *Api;
 
-/* CModule's own real vtable (.data+0x08e81fe8) -- never dispatched through by any
- * reconstructed code (CModuleManager's own methods treat CModule* as a raw offset
- * blob, not through its vtable; every real MMainXxx(void) caller overwrites this
- * field again immediately after construction with the derived module's own vtable --
- * see mains.cpp). Opaque placeholder, same "install but never dispatch" treatment as
- * the 15 ModuleConstructor vtables in mains.cpp.
- */
-static void *PTR__CModule_08e81fe8 = 0;
-
 CModule::CModule(const char *name)
 {
 	mVtbl = (void *)PTR__CNamedObjectBase_08e81378;
@@ -40,7 +38,7 @@ CModule::CModule(const char *name)
 	mName = dup;
 	strcpy(dup, name);
 
-	mVtbl = PTR__CModule_08e81fe8;
+	mVtbl = (void *)PTR__CModule_08e81fe8;
 
 	new (mTasks) COmegaPtrArray();
 	*(void **)mTasks = (void *)PTR__TNamedPtrArray_08e80ea8;

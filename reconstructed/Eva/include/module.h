@@ -31,8 +31,20 @@
  * extra fields -- none of those derived fields are reconstructed (see mains.cpp).
  *
  * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) is a Tier-B link-stub here --
- * real per-module task-mask recompute, genuinely out of scope for this pass (needs
- * CTask/task-mask substrate not otherwise touched by the boot path).
+ * real per-module task-mask recompute, genuinely out of scope for this pass (needs a
+ * real CTask-instantiation path, which nothing in this reconstruction's own call graph
+ * exercises -- see task_buffer.h / level_manager_array.h's CLevelManager::RunLevel()
+ * comment for the CTask layout this would need).
+ *
+ * CModule's own real vtable (PTR__CModule_08e81fe8) is a ground-truth-counted 7-slot
+ * array (omega_vtables.h/.cpp, Stage 6, 2026-07-25): dtor pair (0/4), Setup(+8),
+ * Config(+0xc), Start(+0x10) -- all 3 dispatched by name in module_manager.cpp -- plus
+ * 2 further real named methods this pass didn't individually trace (`Destroy`,
+ * `GetErrorMsg`) that exactly account for the remaining 2 slots. Never actually
+ * dispatched through by any reconstructed code: every real MMainXxx(void) caller
+ * (mains.cpp) overwrites this field with the derived module's own vtable immediately
+ * after construction, and CModuleManager::Setup/Config/Start() only ever iterate
+ * mModules -- always empty, since CModuleManager::AddModule() stays a Tier-B stub.
  */
 
 #ifndef MODULE_H

@@ -51,6 +51,10 @@
  * occurrence of that pair in this project (ckernel.cpp/omega_interface.cpp): a
  * kernel-side critical-section shim, not a real userspace primitive, and this
  * reconstruction's own Exec()/RunLevel() calls are never actually reentrant.
+ *
+ * CLevelManager::RunLevel() (.text+0x0805ea10, 567 bytes) is now reconstructed too
+ * (Stage 6, 2026-07-25) -- see level_manager_array.h's own header comment for the full
+ * field-offset writeup and the correction of a prior pass's CModule/CTask mislabeling.
  */
 
 #include "scheduler.h"
@@ -58,9 +62,25 @@
 #include "omega_ptr_array.h"
 #include "omega_vtables.h"
 #include "sysapi_instance.h"
+#include "task_buffer.h"
 
 #include <cstdlib>
 #include <new>
+
+namespace {
+/* Same zero-argument vtable-dispatch idiom already used independently in
+ * module_manager.cpp -- not shared across translation units, matching this
+ * project's established per-file convention for this trivial helper.
+ */
+typedef void (*VCallFn)(void *);
+
+inline void CallVSlot(void *obj, int byteOffset)
+{
+	void *vtbl = *(void **)obj;
+	VCallFn fn = *(VCallFn *)((char *)vtbl + byteOffset);
+	fn(obj);
+}
+} // namespace
 
 /* CLevelManagerArray/CLevelManager themselves now live in level_manager_array.h (their
  * own header, so verify/test_level_manager_array.cpp can drive Add()/Find() directly) --
@@ -224,4 +244,47 @@ void CScheduler::Exec()
 void CScheduler::EnableUpdate(int /*enable*/)
 {
 	/* Tier-B link-stub -- .text+0x080631c0, not measured. See scheduler.h. */
+}
+
+void CLevelManager::RunLevel(void *this_)
+{
+	unsigned char *self = (unsigned char *)this_;
+
+	/* Real: `CTaskBuffer::SendBuffer(this+4)` -- drains any buffered messages
+	 * queued for tasks in this level. Always a no-op in practice given this
+	 * reconstruction's own data (nothing enqueues into a CTaskBuffer) -- see
+	 * task_buffer.h.
+	 */
+	((CTaskBuffer *)(self + 4))->SendBuffer();
+
+	/* The level's own embedded COmegaPtrArray-shaped task queue (base at +0x20,
+	 * count/array at the usual relative +0xc/+0x14 -> absolute +0x2c/+0x34) --
+	 * see level_manager_array.h's header comment for the CModule->CTask
+	 * correction. Always empty in practice (nothing constructs a CTask on this
+	 * reconstruction's own call path), so this loop body is real but currently
+	 * unreached, same license as CScheduler::Exec()'s own dead bail branches.
+	 */
+	int count = *(int *)(self + 0x2c);
+	void **arr = *(void ***)(self + 0x34);
+
+	for (int i = 0; i < count; i++) {
+		unsigned char *task = (unsigned char *)arr[i];
+
+		/* Real: short-circuits BEFORE touching the countdown at all if either of
+		 * the task's own low 2 mask/flag bits (+0x4c) is set -- a masked task's
+		 * countdown stays frozen, not decremented.
+		 */
+		if ((*(task + 0x4c) & 3) != 0)
+			continue;
+
+		short *countdown = (short *)(task + 0x7a);
+		*countdown = (short)(*countdown - 1);
+		if (*countdown != 0)
+			continue;
+
+		*countdown = *(short *)(task + 0x78);
+		CallVSlot(task, 8); /* CTask::Exec() -- real base body: `return 0;` (Exec@08180950) */
+	}
+
+	*(int *)(self + 0x1c) = 0;
 }
