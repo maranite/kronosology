@@ -598,8 +598,8 @@ RECONSTRUCTED = {
     # Stage 6 breadth sweep, 2026-07-25 -- small-derived-module follow-up batch
     # (edit_man.h/chunk_man.h/seq_timer.h/message_port.h): CEditMan/CMainTask,
     # CChunkMan/CChkBaseTask/CChkCmd, CSeqTimer, CMessagePort. CTimerEngine/
-    # CChkCmdBG's own real ctors stay Tier-B stubs (NOT listed here) -- only the
-    # nearest real base (CTask/CChkBaseTask) they chain into is real.
+    # CChkCmdBG were Tier-B stubs at the time (NOT listed here) -- both are now
+    # fully real, see the dedicated CHeap/CTimerEngine batch entries further down.
     "080d2810",  # CEditMan::CEditMan()
     "080d2790",  # CEditMan::Setup()
     "080d2640",  # CEditMan::Config()
@@ -638,6 +638,26 @@ RECONSTRUCTED = {
     "0814b6c0",  # CMessagePort::Setup()
     "0814b6d0",  # CMessagePort::Config()
     "0814b6e0",  # CMessagePort::Start()
+
+    # Stage 6 breadth sweep, 2026-07-25 follow-up batch (heap.h/chunk_man.h/
+    # timer_engine.h/seq_timer.h): CHeap (ctor/dtor only -- ~10 further Insert/
+    # RemoveHead/MoveUp/MoveDown/etc methods stay pending, no traced caller) ->
+    # CChkCmdBG promoted to real; CWheelsContainer/CExternalClock/CInternalClock
+    # (ctor/dtor only -- ~24 further CTimerEngine wheel/sync methods stay
+    # pending) -> CTimerEngine promoted to real.
+    "0809ccf0",  # CHeap::CHeap()
+    "0809cda0",  # CHeap::CHeap(int, int)
+    "0809cec0",  # CHeap::~CHeap()
+    "080c1380",  # CChkCmdBG::CChkCmdBG(CModule const&)
+    "080c11b0",  # CChkCmdBG::~CChkCmdBG() (non-deleting)
+    "0816ddd0",  # CWheelsContainer::CWheelsContainer()
+    "0816de20",  # CWheelsContainer::~CWheelsContainer()
+    "0816d070",  # CExternalClock::CExternalClock()
+    "08195d30",  # CExternalClock::~CExternalClock() (non-deleting)
+    "0816ec60",  # CInternalClock::CInternalClock()
+    "08195e30",  # CInternalClock::~CInternalClock() (non-deleting)
+    "0816bf40",  # CTimerEngine::CTimerEngine(CModule const&)
+    "0816be00",  # CTimerEngine::~CTimerEngine() (non-deleting)
 
     # CFileMan/CResMan ctor batch (Stage 6 breadth sweep, 2026-07-25 -- the "What's
     # still open" CFileMan/CResMan ctor batch, file_man.h/res_man.h/
