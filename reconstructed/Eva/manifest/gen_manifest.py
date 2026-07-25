@@ -143,6 +143,23 @@ RECONSTRUCTED = {
     "080623e0",  # CScheduler::Exec
     "0805ec70",  # CLevelManagerArray::Add
     "0805ee90",  # CLevelManagerArray::Find
+
+    # --- Stage 2 IPC substrate, closed out (2026-07-25) -- USTGUserAPI's remaining
+    # real send/receive/teardown methods + CSTGHandle's remaining 2 methods, all
+    # Tier A. See README.md's "Stage 2: IPC substrate closed out" section.
+    "08e27f90",  # USTGUserAPI::Disconnect
+    "08e28070",  # USTGUserAPI::ConnectUnsolicitedFifo
+    "08e282d0",  # USTGUserAPI::ReadMessage
+    "08e28350",  # USTGUserAPI::ReadMessageWithTimeout
+    "08e28470",  # USTGUserAPI::ReadUnsolicitedMessage
+    "08e28220",  # USTGUserAPI::SendPanelMessage
+    "08e285c0",  # USTGUserAPI::GetProgress
+    "08e28560",  # USTGUserAPI::IncrementProgress
+    "08e284f0",  # USTGUserAPI::SetProgress
+    "08e31ff0",  # CSTGHandle::Release
+    "08e32090",  # CSTGHandle::GetSize
+    "08e321a0",  # CSTGHandleCache::Cleanup
+
     # --- Stage 6: breadth sweep, batch 2 (2026-07-25) -- CModule's real vtable
     # (ground-truth 7-slot sizing, omega_vtables.h/.cpp), CTaskBuffer (new class), and
     # CLevelManager::RunLevel() made genuinely real using them. See README.md's
