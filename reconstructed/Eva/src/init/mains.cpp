@@ -525,17 +525,14 @@ void MMainESDisk(CSystemApi *api)
  * ===========================================================================
  */
 
-/* Real per-module vtables (opaque -- never dispatched through by any reconstructed
- * code; every derived module class itself is out of scope, see file header above).
+/* Real per-module vtables -- the derived module class behind each is still out of
+ * scope (see file header above), but as of the Stage 6 AddModule()/EnableUpdate()
+ * batch these are genuinely dispatched through (CModuleManager::Setup/Config/Start()
+ * walk a now-really-populated mModules), so they're real EvaVTableStub-backed slot
+ * arrays declared in omega_vtables.h/.cpp -- NOT the bare always-NULL scalar globals
+ * this file used to declare locally (that shape was only safe while AddModule() was
+ * still a Tier-B no-op; see omega_vtables.h for the full explanation).
  */
-extern "C" {
-void *PTR__CEditMan_08e85ea8;
-void *PTR__CMessagePort_08e88468;
-void *PTR__CSeqTimer_08e892a8;
-void *PTR__CSysEx_08e899e8;
-void *PTR__CChunkMan_08e85968;
-void *PTR__CDumpManMod_08e85ca8;
-}
 
 /* Real name-string constants registered against Api's vtable slot +0xa4 --
  * CORRECTED 2026-07-23: these are NOT undecoded integers. Ground-truth confirmed two
@@ -815,15 +812,34 @@ extern "C" const char *CChunkMan_SysName = "ChunkMan";
  * MMainResMan callers below. Tier-B link-stubs: real derived-class constructors,
  * genuinely too deep for this pass (each is its own large subsystem, matching
  * PLAN.md's "UI/CForm/Peg-scale breadth is out of scope" boundary).
+ *
+ * SAFETY FIX (Stage 6, 2026-07-25, AddModule()/EnableUpdate() batch): both classes
+ * must derive from CModule, not stand alone. Both real ctors are called with NO name
+ * argument (functions.csv: `CFileMan::CFileMan()`/`CResMan::CResMan()`, no params),
+ * which only makes sense if each really does what every other MMainXxx module does --
+ * chain up into CModule's own base ctor with a hardcoded name literal -- since
+ * CModuleManager::AddModule() (now Tier A) unconditionally reads a name pointer at
+ * `this+4` on every registered module for its by-name dedup scan. Left as plain,
+ * unrelated stub classes (as this file previously had them), `new (raw) CFileMan()`
+ * would leave the malloc'd buffer's +4 slot as uninitialized garbage -- AddModule()'s
+ * real scan runs before either of these registers (EditMan/Viewer/SeqTimer already
+ * added), so that garbage pointer gets fed straight into strcmp(), a near-certain
+ * crash (guaranteed if the fresh page happens to come back zeroed, since strcmp(NULL,
+ * ...) dereferences NULL). Chaining into CModule("FileMan")/CModule("ResMan") gives
+ * both a real, valid mVtbl (CModule's own now-safe base vtable, matching the real
+ * binary's own behavior for any module whose specific derived vtable isn't
+ * reconstructed) and mName, at the cost of not asserting the real hardcoded name
+ * string content (not decoded) -- same "unfaithful placeholder name doesn't change
+ * this pass's own control flow" license already used for CEditMan_SysName etc. above.
  */
-class CFileMan {
+class CFileMan : public CModule {
 public:
-	CFileMan() {}
+	CFileMan() : CModule("FileMan") {}
 };
 
-class CResMan {
+class CResMan : public CModule {
 public:
-	CResMan() {}
+	CResMan() : CModule("ResMan") {}
 };
 
 /* CChkApiInstance::SetOwnerModule()/CRMApiInstance::SetResMan() -- Tier-B link-stubs. */
@@ -852,7 +868,7 @@ void MMainEditMan()
 
 	void *raw = malloc(0x30);
 	CModule *module = new (raw) CModule(CEditMan_SysName);
-	*(void **)module = PTR__CEditMan_08e85ea8;
+	*(void **)module = (void *)PTR__CEditMan_08e85ea8;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
 }
 
@@ -865,7 +881,7 @@ void MMainViewer()
 {
 	void *raw = malloc(0x34);
 	CModule *module = new (raw) CModule(CViewBase_SysName);
-	*(void **)module = PTR__CMessagePort_08e88468;
+	*(void **)module = (void *)PTR__CMessagePort_08e88468;
 	*(short *)((char *)module + 0x2c) = 0;
 	*(int *)((char *)module + 0x30) = 0;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
@@ -878,7 +894,7 @@ void MMainSeqTimer()
 
 	void *raw = malloc(0x30);
 	CModule *module = new (raw) CModule("SequenceTimer");
-	*(void **)module = PTR__CSeqTimer_08e892a8;
+	*(void **)module = (void *)PTR__CSeqTimer_08e892a8;
 	*(int *)((char *)module + 0x2c) = 0;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
 }
@@ -921,7 +937,7 @@ void MMainSysEx()
 
 	void *raw = malloc(0x2c);
 	CModule *module = new (raw) CModule("SysExModule");
-	*(void **)module = PTR__CSysEx_08e899e8;
+	*(void **)module = (void *)PTR__CSysEx_08e899e8;
 	*(void **)(g_oSysExApiInstance + 4) = module;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
 	*(void **)(g_oSysExApiInstance + 4) = module;
@@ -934,7 +950,7 @@ void MMainChunkMan()
 
 	void *raw = malloc(0x30);
 	CModule *module = new (raw) CModule(CChunkMan_SysName);
-	*(void **)module = PTR__CChunkMan_08e85968;
+	*(void **)module = (void *)PTR__CChunkMan_08e85968;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
 	CChkApiInstance::SetOwnerModule(ChkApiInstance, module);
 }
@@ -954,7 +970,7 @@ void MMainDumpMan()
 
 	void *raw = malloc(0x2c);
 	CModule *module = new (raw) CModule("DumpManager");
-	*(void **)module = PTR__CDumpManMod_08e85ca8;
+	*(void **)module = (void *)PTR__CDumpManMod_08e85ca8;
 	((CSysApiInstance *)SysApiInstance)->AddModule(module);
 }
 

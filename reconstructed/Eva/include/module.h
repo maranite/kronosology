@@ -43,8 +43,12 @@
  * `GetErrorMsg`) that exactly account for the remaining 2 slots. Never actually
  * dispatched through by any reconstructed code: every real MMainXxx(void) caller
  * (mains.cpp) overwrites this field with the derived module's own vtable immediately
- * after construction, and CModuleManager::Setup/Config/Start() only ever iterate
- * mModules -- always empty, since CModuleManager::AddModule() stays a Tier-B stub.
+ * after construction. CModuleManager::Setup/Config/Start() DO now iterate a genuinely
+ * populated mModules (CModuleManager::AddModule() upgraded to Tier A, 2026-07-25 --
+ * see module_manager.h) -- but every Setup/Config/Start dispatch still lands on
+ * CModule's own base vtable slots transcribed above, since the derived module's real
+ * vtable-swap target objects (CEditMan, CViewBase, CSeqTimer, ...) are themselves out
+ * of scope for this pass.
  */
 
 #ifndef MODULE_H

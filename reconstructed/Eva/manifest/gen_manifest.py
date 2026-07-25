@@ -87,6 +87,8 @@ RECONSTRUCTED = {
     "0805feb0",  # CModuleManager::Config
     "080600c0",  # CModuleManager::AdjustTaskMask
     "08060350",  # CModuleManager::Start
+    "0805efa0",  # CModuleManager::AddModule (Stage 6, 2026-07-25: upgraded Tier-B -> Tier A)
+    "08061ca0",  # CModuleManager::EnableUpdate (Stage 6, 2026-07-25: upgraded Tier-B -> Tier A)
     "0805add0",  # CErrorHandler::~CErrorHandler
     "0806ca50",  # CSysApiInstance::Cleanup
     "0806b550",  # CSysApiInstance::AddModule

@@ -72,6 +72,29 @@
  *     individually (`Destroy`@08181c10, `GetErrorMsg`@08181c20) that exactly fill the
  *     remaining 2 slots (+0x14/+0x18) -- a clean match, not a coincidence.
  *
+ * Added in the Stage 6 breadth-sweep pass (2026-07-25), AddModule()/EnableUpdate()
+ * batch. **Safety-critical fix, not just documentation**: mains.cpp's 6 real derived-
+ * module vtable placeholders (PTR__CEditMan_08e85ea8 and 5 siblings) were each a bare
+ * scalar `void *` (always NULL, since never assigned) rather than a slot array --
+ * harmless while CModuleManager::AddModule() was a Tier-B no-op (mModules stayed
+ * permanently empty, so CModuleManager::Setup/Config/Start() never actually dispatched
+ * through any module's vtable), but AddModule() is now Tier A (module_manager.h) and
+ * mModules is genuinely populated on the real boot path -- a NULL vtbl there would be
+ * a live NULL-pointer-call crash the first time InitSystemLayer()'s own
+ * Setup()/Config() run (ckernel.cpp calls MMainEditMan() then Setup()/Config()
+ * immediately after). Upgraded to real EvaVTableStub-backed arrays, same
+ * symbols.csv-boundary methodology as everything else in this file:
+ *
+ *   CEditMan      08e85ea8 -> 08e85ec4 (own typeinfo-name)        =  7 slots
+ *   CMessagePort  08e88468 -> 08e8849c (CReceiveFromModules typeinfo-name) = 13 slots
+ *     (real extra virtuals beyond CModule's own 7 -- CViewBase/CMessagePort is a
+ *     message-handling base with its own additional dispatch surface; not decoded
+ *     individually, just sized correctly so any in-range dispatch is safe)
+ *   CSeqTimer     08e892a8 -> 08e892c4 (own typeinfo-name)        =  7 slots
+ *   CSysEx        08e899e8 -> 08e89a04 (own typeinfo-name)        =  7 slots
+ *   CChunkMan     08e85968 -> 08e85984 (own typeinfo-name)        =  7 slots
+ *   CDumpManMod   08e85ca8 -> 08e85cc4 (own typeinfo-name)        =  7 slots
+ *
  * Every slot points at the same no-op stub (EvaVTableStub, cdecl, zero declared
  * parameters) -- safe under the real cdecl calling convention regardless of how many
  * args/regs a caller's own Fn-typedef pushes, since cdecl callees never pop caller-
@@ -106,6 +129,12 @@ extern void *PTR__CSysApiInstance_08e81008[94];
 extern void *PTR__TNamedPtrArray_08e811a8[4];
 extern void *PTR__TNamedPtrArray_08e811c0[8];
 extern void *PTR__CModule_08e81fe8[7];
+extern void *PTR__CEditMan_08e85ea8[7];
+extern void *PTR__CMessagePort_08e88468[13];
+extern void *PTR__CSeqTimer_08e892a8[7];
+extern void *PTR__CSysEx_08e899e8[7];
+extern void *PTR__CChunkMan_08e85968[7];
+extern void *PTR__CDumpManMod_08e85ca8[7];
 }
 
 #endif /* OMEGA_VTABLES_H */

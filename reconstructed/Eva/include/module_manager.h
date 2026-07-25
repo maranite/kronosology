@@ -25,10 +25,14 @@
  *                               running (its own real disassembly never actually sets
  *                               this to a distinct value, unlike the other 3 -- see
  *                               module_manager.cpp), reset to 0 when each phase finishes
- *   +0x3c        mStarted      set 1 by Start() at the very end, never read back here
- *   +0x40        mTopologyChanged  checked (never written) by Start()'s own final
- *                               WriteMessageToHost(3, 8) call -- real setter (probably
- *                               AddModule()/RemoveModule()) not traced
+ *   +0x3c        mStarted      set 1 by Start() at the very end; read back by
+ *                               AddModule()/EnableUpdate() as the gate on whether to
+ *                               notify the host of a post-start topology change
+ *   +0x40        mTopologyChanged  checked by Start()'s own final WriteMessageToHost(3, 8)
+ *                               call; real setter confirmed (2026-07-25) to be
+ *                               EnableUpdate(int) (unconditional, every call), NOT
+ *                               AddModule() -- AddModule() only ever reads it despite
+ *                               being the more obvious "topology changed" candidate
  */
 
 #ifndef MODULE_MANAGER_H
@@ -63,14 +67,31 @@ public:
 	 */
 	void Start();
 
-	/* .text+0x0805efa0, 869 bytes -- Tier-B link-stub, not reconstructed (real module
-	 * registration: array insert + task-level wiring, genuinely out of scope for this
-	 * pass). Real signature takes CModule& (reference); a pointer is used here to
-	 * keep the call sites simple, semantically identical for a non-null argument.
+	/* .text+0x0805efa0, 869 bytes -- Tier A (Stage 6 breadth sweep, 2026-07-25; was a
+	 * Tier-B link-stub through batch 2). Real body: linear by-name scan over mModules
+	 * for an existing module sharing the new module's mName (real code runs the same
+	 * scan twice in a row -- see module_manager.cpp for why that's collapsed to one);
+	 * if found, RemoveAtIndex()s the old entry first (using mModules' own mUnknown04
+	 * "own/free-on-remove" flag as RemoveAtIndex's callDtorCallback argument -- a
+	 * genuine re-registration-by-name mechanism, not dead code), then always
+	 * COmegaPtrArray::Add()s the new module, clears mBusy, and -- if mStarted and
+	 * mTopologyChanged are both set -- notifies the host (WriteMessageToHost(3, 8)).
+	 * Real signature takes CModule& (reference); a pointer is used here to keep the
+	 * call sites simple, semantically identical for a non-null argument. This is the
+	 * function that was leaving mModules permanently empty for every real boot-path
+	 * caller (mains.cpp's 8 MMainXxx registration shims, via
+	 * CSysApiInstance::AddModule()) -- same shape bug as batch 1's
+	 * CLevelManagerArray::Add()/Find().
 	 */
 	void AddModule(CModule *module);
 
-	/* .text+0x08061ca0, not measured -- Tier-B link-stub, not reconstructed. */
+	/* .text+0x08061ca0, 74 bytes -- Tier A (Stage 6 breadth sweep, 2026-07-25).
+	 * Confirmed real setter of mTopologyChanged (unconditionally sets it to 1 --
+	 * previously flagged above as "not traced"); if enable != 0, also clears mBusy
+	 * and, if mStarted is set, notifies the host (WriteMessageToHost(3, 8)). Real
+	 * boot-path caller: ckernel.cpp's InitSystemLayer() calls EnableUpdate(1)
+	 * directly after Start().
+	 */
 	void EnableUpdate(int enable);
 };
 
