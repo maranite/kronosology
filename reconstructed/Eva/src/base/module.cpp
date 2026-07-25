@@ -2,8 +2,9 @@
  * module.cpp  -  see include/module.h.
  *
  * CModule::CModule(const char*) transcribed from CModule@0807c330.c (156 bytes).
- * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) is a Tier-B link-stub, not
- * reconstructed -- see module.h.
+ * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) transcribed from
+ * AdjustTaskMask@0807c640.c -- Tier A, Stage 6 breadth sweep 2026-07-25, see
+ * module.h's header comment for the full behavior writeup.
  *
  * CModule's own real vtable (PTR__CModule_08e81fe8, 7 ground-truth-counted slots) now
  * lives in omega_vtables.h/omega_vtables.cpp, matching this project's established
@@ -57,5 +58,32 @@ CModule::CModule(const char *name)
 
 void CModule::AdjustTaskMask()
 {
-	/* Tier-B link-stub -- .text+0x0807c640, 458 bytes. See module.h. */
+	/* Real body -- see module.h's header comment. Reverse walk over mTasks
+	 * (this class's own absolute +0x14 = count, +0x1c = flat void* array),
+	 * clearing bit 0x02 of each task's own +0x4c mask/flags byte -- the un-mask
+	 * half of the same gate CLevelManager::RunLevel() checks (scheduler.cpp).
+	 *
+	 * The real disassembly re-reads mTasks' own count field on every iteration
+	 * rather than hoisting it once, and treats an out-of-range index as a NULL
+	 * task pointer -- then unconditionally dereferences it anyway (a literal
+	 * near-NULL write to fixed address 0x4c in the real binary). Preserved
+	 * faithfully: nothing in this reconstruction's own call graph mutates
+	 * mTasks during this call (no reconstructed AddTask()/RemoveTask() exists),
+	 * so the re-read always matches the original count and this branch is
+	 * never actually taken here -- same "faithful but currently-dead defensive
+	 * branch" shape as CModuleManager's own mPhase-never-set finding
+	 * (module_manager.h) and CTaskBuffer::SendBuffer()'s always-empty mHead
+	 * walk (task_buffer.h). The 8x loop unrolling itself is collapsed to a
+	 * plain reverse loop, same license used throughout this project.
+	 */
+	unsigned char *self = (unsigned char *)this;
+
+	int count = *(int *)(self + 0x14);
+	for (int i = count - 1; i >= 0; --i) {
+		int cur = *(int *)(self + 0x14);
+		unsigned char *task = 0;
+		if (i < cur)
+			task = *(unsigned char **)(*(int *)(self + 0x1c) + i * 4);
+		*(task + 0x4c) &= 0xfd;
+	}
 }

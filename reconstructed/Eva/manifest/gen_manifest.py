@@ -181,6 +181,15 @@ RECONSTRUCTED = {
     "08e4f310",  # CCommDriver::setupfifoname
     "0804cd30",  # Eva_IsSimulation
     "0804cd40",  # Eva_IsSimulationSVGA
+
+    # --- Stage 6: breadth sweep, batch 5 (2026-07-25) -- CModule::AdjustTaskMask()
+    # upgraded Tier-B -> Tier A. Genuinely boot-path-reachable now that
+    # CModuleManager::AddModule() (batch 3) populates mModules: called once per
+    # registered module by CModuleManager::AdjustTaskMask() from
+    # CKernel::InitSystemLayer()/InitUserLayer(). Real body clears bit 0x02 of each
+    # of the module's own tasks' +0x4c mask byte -- the same gate byte/bit
+    # CLevelManager::RunLevel() (batch 2) checks. See module.h/module.cpp.
+    "0807c640",  # CModule::AdjustTaskMask
 }
 
 # CTask itself is NOT in RECONSTRUCTED (no ctor implemented) -- CTask::CTask()

@@ -30,11 +30,22 @@
  * more than that (0x30/0x34/0x2c/0xa5c/0x21a0 depending on the module) for its own
  * extra fields -- none of those derived fields are reconstructed (see mains.cpp).
  *
- * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) is a Tier-B link-stub here --
- * real per-module task-mask recompute, genuinely out of scope for this pass (needs a
- * real CTask-instantiation path, which nothing in this reconstruction's own call graph
- * exercises -- see task_buffer.h / level_manager_array.h's CLevelManager::RunLevel()
- * comment for the CTask layout this would need).
+ * CModule::AdjustTaskMask() (.text+0x0807c640, 458 bytes) is Tier A (Stage 6 breadth
+ * sweep, 2026-07-25 -- upgraded from a Tier-B link-stub). Real body: a compiler-
+ * unrolled (8x, Duff's-device-shaped) reverse walk over mTasks (this class's own
+ * embedded COmegaPtrArray, count/array at the usual relative +0xc/+0x14, landing at
+ * this class's absolute +0x14/+0x1c since mTasks itself starts at +0x08 -- same
+ * derivation module_manager.h's header comment already used for CModuleManager's own
+ * embedded arrays), clearing bit 0x02 of each task's own mask/flags byte at +0x4c.
+ * That is the SAME byte/bit `CLevelManager::RunLevel()` (level_manager_array.h /
+ * scheduler.cpp) reads as one of its own "masked, don't run" gate bits -- confirming
+ * AdjustTaskMask()'s real purpose: re-enable (un-mask) every one of this module's own
+ * tasks for scheduling. Genuinely boot-path-reachable now: called by
+ * `CModuleManager::AdjustTaskMask()` (module_manager.cpp) once per registered module,
+ * from `CKernel::InitSystemLayer()`/`InitUserLayer()` (ckernel.cpp) -- dead in a prior
+ * batch (mModules was permanently empty before `CModuleManager::AddModule()` itself
+ * went Tier A, Stage 6 batch 3), now genuinely exercised. See module.cpp for the real
+ * body and a preserved-but-dead near-NULL-deref quirk in the original disassembly.
  *
  * CModule's own real vtable (PTR__CModule_08e81fe8) is a ground-truth-counted 7-slot
  * array (omega_vtables.h/.cpp, Stage 6, 2026-07-25): dtor pair (0/4), Setup(+8),
@@ -58,7 +69,7 @@ class CModule {
 public:
 	CModule(const char *name);
 
-	void AdjustTaskMask(); /* Tier-B link-stub, see header comment */
+	void AdjustTaskMask(); /* Tier A, see header comment + module.cpp */
 
 private:
 	void *mVtbl;
@@ -67,6 +78,11 @@ private:
 	int   mUnknown20;
 	int   mState;
 	int   mScopeId;
+
+	/* Friend accessor for verify/test_module_adjust_task_mask.cpp -- same
+	 * extraction pattern already used by comm_driver.h/level_manager_array.h.
+	 */
+	friend struct ModuleTestHooks;
 };
 
 #endif /* MODULE_H */
