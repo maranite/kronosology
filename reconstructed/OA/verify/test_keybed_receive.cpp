@@ -33,6 +33,7 @@
 #include "oa_comport.h"
 #include "oa_keybed_init.h"
 #include "oa_setup_global_resources.h"
+#include "oa_engine.h" /* CSTGMessageProcessor::sInstance */
 
 static int g_fail;
 static void check_eq(const char *label, long got, long want)
@@ -47,9 +48,26 @@ static void check_eq(const char *label, long got, long want)
 
 static unsigned char g_keybedInstance[KEYBED_SINSTANCE_SIZE];
 static unsigned char g_frontPanel[STGAPI_FRONTPANEL_SIZE];
+static unsigned char g_msgProcessorRaw[0x1040];
 
 extern "C" unsigned char *CSTGKeybedInterface_sInstance(void) { return g_keybedInstance; }
 unsigned char *STGAPIFrontPanelStatus::sInstance = g_frontPanel;
+CSTGMessageProcessor *CSTGMessageProcessor::sInstance =
+	reinterpret_cast<CSTGMessageProcessor *>(g_msgProcessorRaw);
+
+/*
+ * ReceiveMessage's own state==2 dispatch (batch 64) now links
+ * keybed_interface.cpp -- CSTGKeybedKeyDebounceFilter_Initialize/
+ * ApplyKeybedCalibration are only reachable through MemberStartup/
+ * FilterAnalogController, neither of which THIS test exercises, but
+ * both symbols must still resolve at link time.
+ */
+extern "C" {
+void CSTGKeybedKeyDebounceFilter_Initialize(unsigned char *) {}
+short ApplyKeybedCalibration(int, short) { return 0; }
+void __const_udelay(unsigned long) {}
+}
+char CSTGComPort::Initialize(eComPortId, eBaudRateCode, eReceiveFifoThresholdCode) { return 0; }
 
 /*
  * This test links src/init/comport.cpp purely to satisfy

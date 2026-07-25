@@ -20,6 +20,19 @@ void CSTGComPort::TransmitFifo::WriteByte(unsigned char value)
 	head++;
 }
 
+void CSTGComPort::TransmitFifo::WriteBytes(const void *buf, unsigned int len)
+{
+	unsigned char count = head - tail;
+	unsigned char freeSpace = capacity - count;
+	if (len > freeSpace)
+		return; /* confirmed real: entire message dropped, no partial write */
+	const unsigned char *src = static_cast<const unsigned char *>(buf);
+	unsigned char h = head;
+	for (unsigned int i = 0; i < len; i++)
+		buffer[(unsigned char)(h + i) & 0xf] = src[i];
+	head = h + (unsigned char)len;
+}
+
 int CSTGComPort::GetByteToTransmit()
 {
 	if (txFifo.head == txFifo.tail)

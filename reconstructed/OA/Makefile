@@ -128,6 +128,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/setup_global_resources.o \
            src/init/keybed_init.o \
            src/init/keybed_receive.o \
+           src/init/keybed_interface.o \
            src/init/comport.o \
            src/init/comport_init.o \
            src/init/audio_start.o \
@@ -380,6 +381,7 @@ SRC := src/auth/klm_manager.cpp \
        src/init/setup_global_resources.cpp \
        src/init/keybed_init.cpp \
        src/init/keybed_receive.cpp \
+       src/init/keybed_interface.cpp \
        src/init/comport.cpp \
        src/init/comport_init.cpp \
        src/init/audio_start.cpp \
@@ -490,7 +492,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_klm_authorize_builtins \
          verify/test_set_list_eq_init \
          verify/test_controller_info_send_unsolicited_ui_param \
-         verify/test_program_bank_init
+         verify/test_program_bank_init \
+         verify/test_keybed_interface
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -551,11 +554,14 @@ verify/test_pcmmodproc_init: verify/test_pcmmodproc_init.cpp src/auth/oa_cmd_pro
 verify/test_setup_global_resources: verify/test_setup_global_resources.cpp src/init/setup_global_resources.cpp src/mem/bank_memory.cpp src/mem/new_delete.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_setup_global_resources.cpp src/init/setup_global_resources.cpp src/mem/bank_memory.cpp src/mem/new_delete.cpp -o $@
 
-verify/test_keybed_init: verify/test_keybed_init.cpp src/init/keybed_init.cpp src/init/keybed_receive.cpp src/init/comport.cpp include/oa_keybed_init.h include/oa_comport.h include/oa_setup_global_resources.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_init.cpp src/init/keybed_init.cpp src/init/keybed_receive.cpp src/init/comport.cpp -o $@
+verify/test_keybed_init: verify/test_keybed_init.cpp src/init/keybed_init.cpp src/init/keybed_receive.cpp src/init/keybed_interface.cpp src/init/comport.cpp include/oa_keybed_init.h include/oa_comport.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_init.cpp src/init/keybed_init.cpp src/init/keybed_receive.cpp src/init/keybed_interface.cpp src/init/comport.cpp -o $@
 
-verify/test_keybed_receive: verify/test_keybed_receive.cpp src/init/keybed_receive.cpp src/init/comport.cpp include/oa_comport.h include/oa_keybed_init.h include/oa_setup_global_resources.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_receive.cpp src/init/keybed_receive.cpp src/init/comport.cpp -o $@
+verify/test_keybed_receive: verify/test_keybed_receive.cpp src/init/keybed_receive.cpp src/init/keybed_interface.cpp src/init/comport.cpp include/oa_comport.h include/oa_keybed_init.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_receive.cpp src/init/keybed_receive.cpp src/init/keybed_interface.cpp src/init/comport.cpp -o $@
+
+verify/test_keybed_interface: verify/test_keybed_interface.cpp src/init/keybed_interface.cpp src/init/keybed_receive.cpp src/init/comport.cpp include/oa_keybed_init.h include/oa_comport.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_keybed_interface.cpp src/init/keybed_interface.cpp src/init/keybed_receive.cpp src/init/comport.cpp -o $@
 
 verify/test_comport: verify/test_comport.cpp src/init/comport.cpp include/oa_comport.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_comport.cpp src/init/comport.cpp -o $@

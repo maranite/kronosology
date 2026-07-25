@@ -224,6 +224,19 @@ public:
 		TransmitFifo() : capacity(16), tail(0), head(0) {}
 
 		void WriteByte(unsigned char value);
+
+		/*
+		 * Confirmed real (`.text+0xa820`, CSTGKeybedInterface's own
+		 * command-sending methods -- SendCommand/StartCalibration/
+		 * SetLED/EnableUSBPort/etc, see keybed_interface.cpp -- are
+		 * its only confirmed callers). UNLIKE WriteByte, this is an
+		 * all-or-nothing multi-byte write: if `len` exceeds the
+		 * ring's current free space (`capacity - (head-tail)`), the
+		 * ENTIRE write is dropped (no partial write), confirmed via
+		 * the real `cmp ecx,eax; ja <return>` guard before any byte
+		 * is copied.
+		 */
+		void WriteBytes(const void *buf, unsigned int len);
 	};
 
 	TransmitFifo txFifo;		/* +0x04 */
@@ -334,6 +347,18 @@ public:
 	unsigned char msgCursor;	/* +0x2d */
 
 	void OnByteReceived(unsigned char receivedByte) override;
+
+	/*
+	 * Confirmed real (`.text+0x33e980`), a genuine separate callable
+	 * method -- NOT always inlined: `OnByteReceived` above has the same
+	 * `kNumBytesForMessageType[(byte&0x70)>>4]` lookup inlined directly
+	 * (confirmed via its own disassembly, no call instruction), but
+	 * `CSTGKeybedInterface::ReadMessageFromQueue` (batch 64,
+	 * keybed_interface.cpp) calls THIS method externally (confirmed via
+	 * a real `call` relocation) -- different codegen choices at each
+	 * call site for the same real function, both faithfully preserved.
+	 */
+	static unsigned char GetNumBytesForMessageType(unsigned char headerByte);
 };
 
 extern "C" {
@@ -355,18 +380,14 @@ extern "C" {
  * `movb $0x1, 0xb50(%eax)` immediately follows storing `(buf[1]<<8) |
  * buf[2]` into `STGAPIFrontPanelStatus::sInstance + 0x1084`).
  *
- * NOT reconstructed (a real, deliberately documented gap, matching this
- * project's own established scope-decision convention): the
- * `KEYBED_OFF_STATE == 2` ("fully running") dispatch, a large
- * (~350-byte) block handling several other message types via
- * `CSTGMessageProcessor::sInstance` (not yet modeled anywhere in this
- * project) and further `STGAPIFrontPanelStatus` writes
- * (`+0x1082/0x1083/0x1086-0x1089/0x108a/0x108d/0x29125`). This state is
- * PROVABLY unreachable during `init_module()`'s own boot sequence --
- * `CSTGKeybedInterface_Startup` only ever sets state to 2 on its own
- * final success return, strictly AFTER the handshake loop this ACK flag
- * feeds has already exited -- so this gap cannot affect the
- * `init_module()` return-value question this pass targets.
+ * The `KEYBED_OFF_STATE == 2` ("fully running") dispatch is now ALSO
+ * reconstructed (batch 64, see keybed_receive.cpp's own updated
+ * comment) -- 0xE0-0xEF ("heartbeat") headers dispatch through
+ * `CSTGKeybedInterface_HandleActiveSense`, everything else through the
+ * raw message ring buffer (`CSTGKeybedInterface_WriteMessageToQueue`),
+ * gated by `KEYBED_OFF_ENQUEUE_GATE1`/`KEYBED_OFF_DISPATCH_GATE2` and a
+ * single read of `CSTGMessageProcessor::sInstance[0x48]` (that class
+ * itself remains otherwise unmodeled -- see keybed_receive.cpp).
  */
 void CSTGKeybedInterface_ReceiveMessage(unsigned char *sInstance,
 					 const unsigned char *buf, unsigned int len);

@@ -222,6 +222,23 @@ extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
 						  * only that it's a raw 16-bit copy of
 						  * the ACK message's bytes 1-2. */
 
+/*
+ * Confirmed real (batch 64, `CSTGKeybedInterface::HandleActiveSense`/
+ * `ReceiveMessage`'s own `0xE0-0xEF`-header dispatch, keybed_interface.cpp):
+ * the idle heartbeat message's own 4 raw bytes, copied here VERBATIM on
+ * every heartbeat regardless of the low-nibble sub-type dispatch below --
+ * matches [[kronos_keybed_serial_protocol]]'s already-decoded "type 6, 4
+ * bytes, `0xEA 0x23 0x07 0x20`" idle heartbeat exactly (header byte's own
+ * low nibble, 0xA, is what selects `STGAPI_OFF_PANEL_DETECTED` below).
+ */
+#define STGAPI_OFF_KEYBED_RAW0          0x1086
+#define STGAPI_OFF_KEYBED_RAW1          0x1087
+#define STGAPI_OFF_KEYBED_RAW2          0x1088
+#define STGAPI_OFF_KEYBED_RAW3          0x1089
+/* Confirmed real (same dispatch, low-nibble-0xd sub-case): own semantic
+ * meaning not independently confirmed. */
+#define STGAPI_OFF_KEYBED_NIBBLE_D_FLAG 0x108d
+
 struct STGAPIFrontPanelStatus {
 	static unsigned char *sInstance;
 };
@@ -332,22 +349,20 @@ struct CMeteredDebugOutput {
 
 /*
  * CSTGKeybedInterface -- MINIMAL forward declaration, `SetLED()` only.
- * The real class is a whole ~20-method wire-protocol driver (batch-63's
- * own un-triaged candidate 1, oa_stub_sweep_workflow.md's "Front-panel
- * driver cluster" section) that this project has NOT reconstructed yet
- * -- its own storage is already modeled elsewhere (`oa_keybed_init.h`'s
- * `CSTGKeybedInterface_sInstance()`, a fixed byte blob; `sInstance`
- * itself is confirmed real STATIC OBJECT storage, not a pointer-to-heap
- * object, addressed directly by symbol address, never bracket-
- * dereferenced -- see that header's own comment). This declaration
- * exists ONLY so `CSTGFrontPanel::SetLED`/`SetLEDBlinking`/`ResetLED`
- * can call through to the real, confirmed (`.text+0x33d8c0`, 101 bytes)
- * `CSTGKeybedInterface::SetLED(eSTGLEDCode, eLEDAction)` -- given a
- * deliberately-empty stub body in bar2_stubs.cpp (same "confirmed real,
- * deliberately deferred" convention as `CSTGControllerInfo::
- * ButtonPressHandler`/`AnalogControllerHandler` there already). Real
- * enum types not modeled -- plain `unsigned int`, matching this file's
- * own established convention throughout.
+ * `SetLED` is kept as a real mangled-ABI class method (body now in
+ * src/init/keybed_interface.cpp, batch 64) purely so `CSTGFrontPanel::
+ * SetLED`/`SetLEDBlinking`/`ResetLED` (front_panel_handlers.cpp) can
+ * call through to it by its real name. The class's other ~19 confirmed
+ * real methods are reconstructed as plain free C-linkage functions
+ * instead (`oa_keybed_init.h`'s `CSTGKeybedInterface_*` family) --
+ * `sInstance` itself is confirmed real STATIC OBJECT storage, not a
+ * pointer-to-heap object, addressed directly by symbol address (see
+ * `oa_keybed_init.h`'s own file comment); `CSTGKeybedInterface_
+ * sInstance()` models that same blob. `ProcessNextKeybedEvent()` (the
+ * one remaining un-reconstructed method) is deliberately deferred --
+ * see keybed_interface.cpp's own file comment for why. Real enum types
+ * not modeled -- plain `unsigned int`, matching this file's own
+ * established convention throughout.
  */
 class CSTGKeybedInterface {
 public:

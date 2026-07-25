@@ -27,6 +27,7 @@
 
 #include <cstdio>
 #include "oa_keybed_init.h"
+#include "oa_engine.h" /* CSTGMessageProcessor::sInstance */
 #include "oa_setup_global_resources.h" /* STGAPIFrontPanelStatus::sInstance,
 					 * referenced by keybed_receive.cpp's
 					 * ACK-completion path (sec 10.237) --
@@ -38,6 +39,15 @@
 
 static unsigned char g_frontPanelStub[STGAPI_FRONTPANEL_SIZE];
 unsigned char *STGAPIFrontPanelStatus::sInstance = g_frontPanelStub;
+
+/* keybed_receive.cpp's own state==2 dispatch (batch 64) now links
+ * keybed_interface.cpp -- these two symbols are only reachable through
+ * paths this file doesn't exercise, but must still resolve at link
+ * time. */
+static unsigned char g_msgProcessorRawStub[0x1040];
+CSTGMessageProcessor *CSTGMessageProcessor::sInstance =
+	reinterpret_cast<CSTGMessageProcessor *>(g_msgProcessorRawStub);
+extern "C" short ApplyKeybedCalibration(int, short) { return 0; }
 
 static int g_fail;
 static void check_eq(const char *label, long got, long want)

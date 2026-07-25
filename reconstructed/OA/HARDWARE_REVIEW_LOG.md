@@ -107,24 +107,167 @@ sends the musically-expected (same pitch class) note.
 
 ---
 
-## CSTGFrontPanel::SetLED/SetLEDBlinking/ResetLED — CSTGKeybedInterface::SetLED left as a no-op stub
+## CSTGFrontPanel::SetLED/SetLEDBlinking/ResetLED — CSTGKeybedInterface::SetLED now real (batch 64)
 
-Not uncertain from the disassembly itself (the dispatch shape --
-2-value range check on `code`, forward to the real
-`CSTGKeybedInterface::SetLED(code, action)` for that narrow range,
-otherwise a packed command word via the already-real
-`OmapNKS4OutputFifo_WriteCommand()` -- is fully confirmed and KAT-
-covered). What's genuinely deferred is the CALLEE:
-`CSTGKeybedInterface::SetLED` itself (batch-63's own un-triaged
-candidate 1, the whole ~20-method keybed wire-protocol driver class) is
-still a no-op stub in `bar2_stubs.cpp`, so on a real Kronos this
-reconstruction would silently fail to light the two front-panel LEDs
-whose codes fall in the `0x49`/`0x4a` range (identity not independently
-determined -- `eSTGLEDCode` enum values not recovered). Every OTHER LED
-code (the vast majority) already goes out for real via
-`OmapNKS4OutputFifo_WriteCommand()`, unaffected by this gap. A real-HW
-test that would help: once `CSTGKeybedInterface::SetLED` gets its own
-real reconstruction pass, confirm which two physical LEDs
-`0x49`/`0x4a` correspond to (compare against the already-decoded keybed
-serial protocol, agent-memory `kronos_keybed_serial_protocol.md`) and
-that they light/blink/reset correctly through this path.
+UPDATE (batch 64): `CSTGKeybedInterface::SetLED` is no longer a no-op
+stub -- see `src/init/keybed_interface.cpp`. Confirmed real: gates on
+`KEYBED_OFF_STATE >= 2` (accepts states 2/3/4, unlike most of this
+class's other gated senders which require state==2 exactly), maps
+`code==0x49`->LED index 0 / `code==0x4a`->LED index 1, packs `action`
+into a command byte as `(action & 0x2f) | 0xd0`, and sends `{cmdByte,
+ledIndex}` over the same wire as every other command in this class.
+STILL not independently confirmed: which two PHYSICAL LEDs indices 0/1
+correspond to (`eSTGLEDCode` enum values themselves not recovered,
+matching this entry's original note). A real-HW test that would help:
+trigger `CSTGFrontPanel::SetLED(0x49, ...)`/`SetLED(0x4a, ...)` (or
+watch for it via a live front-panel LED interaction) and correlate
+against the already-decoded keybed serial protocol (agent-memory
+`kronos_keybed_serial_protocol.md`) to name the two indices for real.
+
+---
+
+## CSTGKeybedInterface::SetKeyChatterGateTime — bit-split command encoding, semantic meaning unconfirmed
+
+Not uncertain that the ENCODING is faithfully reproduced (the exact bit
+operations -- `byte1 = (ms>>1)&1`, `byte2 = ms>>2` for `ms<=61`,
+clamped to the fixed pair `{1, 0xf}` above that -- are a direct,
+disassembly-confirmed transcription, and the KAT in
+`test_keybed_interface.cpp` locks the exact byte values in). What's
+NOT confirmed is the real hardware-register MEANING of this odd 1-bit +
+4-bit split (as opposed to, say, a plain linear byte or a different bit
+width) -- no datasheet or further disassembly for the keybed board's own
+firmware was available to cross-check. A real-HW test that would help:
+call this with a few known millisecond values while watching real key-
+chatter-filter behavior (rapid on/off re-triggers on a single physical
+key) to confirm the encoded gate window's real-world duration actually
+tracks the `ms` argument the way this reconstruction assumes.
+
+---
+
+## CSTGKeybedInterface::ReceiveMessage (state==2) / WriteMessageToQueue — enqueue gate semantics unconfirmed
+
+Not uncertain that the GATING LOGIC ITSELF is faithfully reproduced
+(disassembly-confirmed instruction-for-instruction, including the
+asymmetry between the heartbeat class's gate1-only check and the
+non-heartbeat class's gate2-then-gate1 check -- see
+`keybed_receive.cpp`'s own comment and `test_keybed_interface.cpp`'s
+[12] for both). What's NOT confirmed is the real MEANING of
+`KEYBED_OFF_ENQUEUE_GATE1`/`KEYBED_OFF_DISPATCH_GATE2`/
+`CSTGMessageProcessor::sInstance`'s own `+0x48` byte (plausibly
+something like "raw passthrough enabled" / "message processor has
+claimed the port", but not independently confirmed) -- these bytes are
+never written anywhere in this project's own reconstructed code (no
+confirmed real setter found for either gate byte in the functions
+examined this batch), so in practice, with both defaulting to 0 (zeroed
+storage), every non-heartbeat message is currently dropped and every
+heartbeat is also dropped unless something else sets gate1. A real-HW
+test that would help: instrument a live Kronos (or the QEMU virtual
+keybed harness already used for the sec 10.237/comport work) to log
+raw keybed traffic reaching the ring buffer during normal operation,
+confirming these gates are set somewhere in a not-yet-reconstructed
+caller (plausibly `CSTGControlMsgHandler::TakeOverKeybedComm`, which
+also remains unreconstructed).
+
+---
+
+## CSTGKeybedInterface::FilterAnalogController — code 1/2 channel identity is a guess (joystick X/Y)
+
+Not uncertain about the CONTROL FLOW (the "first non-centered reading
+arms a flag and reports unchanged, second one filters for real" state
+machine for `code`==1/2, and the always-filter `code`==0 path, are all
+disassembly-confirmed and KAT-covered). The CHANNEL IDENTITY --
+`code`==1/2 are joystick X/Y and `code`==0 is aftertouch pressure -- is
+inferred only from `ApplyAftertouchTable`'s own confirmed 3-way
+dispatch using the SAME `code` values, not from any string or symbol
+name. A real-HW test that would help: move the physical joystick along
+just one axis while pressing/releasing aftertouch, and confirm which
+`code` value each physical control maps to (would also pin down whether
+`code`==1 is X or Y).
+
+---
+
+## CSTGKeybedInterface::HandleActiveSense — nibble 8/9/0xa/0xd sub-type meanings are guesses
+
+Not uncertain about the DISPATCH ITSELF (disassembly-confirmed exactly:
+nibble 8 and 9 both write `STGAPI_OFF_FOOTSWITCH0/1 = {0x24, 0x3d}`,
+nibble 9 additionally sets `STGAPI_OFF_NKS4_PANEL_KIND=1`, nibble 0xa
+sets `STGAPI_OFF_PANEL_DETECTED=1` AND arms the debounce filter's own
+`+0x0` byte, nibble 0xd sets `STGAPI_OFF_KEYBED_NIBBLE_D_FLAG=1`; the
+real production heartbeat byte `0xEA` observed live on hardware
+(agent-memory `kronos_keybed_serial_protocol.md`) has low nibble 0xA,
+matching the "panel detected" case exactly). What's NOT confirmed:
+whether nibble 8/9's fixed `{0x24, 0x3d}` pair is really a "footswitch
+capability" announcement (the existing `STGAPI_OFF_FOOTSWITCH0/1`
+naming, established by an earlier pass, is REUSED here rather than
+independently re-derived) or something else entirely, and what nibble
+0xd's flag actually gates. A real-HW test that would help: capture the
+keybed's own idle heartbeat stream through a full power-on cycle and
+watch for the header byte's low nibble to ever be something OTHER than
+0xA (a boot-time 0x28/0x29/0x2D-class heartbeat before settling into
+steady-state 0x2A/0xEA, e.g.) to see these other branches fire for
+real.
+
+---
+
+## CSTGKeybedInterface::ApplyKeybedCalibration — confirmed real, deliberately deferred (batch 64)
+
+Not a disassembly-uncertainty note but a scope-decision one, recorded
+here because `FilterAnalogController`/`ApplyCalibrationAndAfterTouchTable`
+both depend on it and this reconstruction's own correctness for THOSE
+two methods is only as good as this dependency's real behavior:
+`ApplyKeybedCalibration` (`.text+0x33edd0`) is confirmed real but NOT
+reconstructed -- it performs a genuine kernel-mode FPU context switch
+(`mov %cr0,%eax; clts; ...`) guarded by two `.bss` globals
+(`SetupKeybedCalibration`/`CleanupKeybedCalibration`, also confirmed
+real but out of `CSTGKeybedInterface`'s own scope), then an
+interpolation pass this project has not traced. Host KATs mock it with
+a deterministic stand-in (`test_keybed_interface.cpp`'s own
+`ApplyKeybedCalibration` returning a fixed value), which validates
+`FilterAnalogController`'s CALLING convention and control flow but says
+nothing about whether the real calibration MATH is faithfully modeled
+(it isn't modeled at all yet). A real-HW test that would help is
+downstream of first actually reconstructing this function -- listed
+here so a future pass doesn't have to re-discover the FPU-context-
+switch gap from scratch.
+
+---
+
+## CSTGKeybedInterface::ProcessNextKeybedEvent — entirely deferred (batch 64)
+
+Scope-decision note, not a disassembly uncertainty: this 1712-byte
+method (by far the largest in the class) is the real dispatcher that
+would turn decoded ring-buffer messages into actual keybed/joystick/
+aftertouch events (calling into the now-real `CSTGKeybedKeyDebounceFilter::
+ProcessKeyOn`/`ProcessKeyOff` and `CSTGFrontPanel::HandleAnalogController`),
+but depends on FIVE entirely unmodeled classes/functions
+(`PushUnsolicitedMessage`, `CSTGDelayedMsg`, `CSTGControllerInfoUnsolMsg::
+Send()`, `USTGKeyTouchTable::Convert9bitCountsTo8bitInterval()`,
+`CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult()`) on top of
+the already-deferred `ApplyKeybedCalibration` above. Genuinely out of
+proportion for a single method in this pass -- see
+`keybed_interface.cpp`'s own file comment for the full reasoning. This
+means the raw wire protocol IS now correctly framed/enqueued
+(`ReceiveMessage`/`ReadMessageFromQueue`) but nothing in this
+reconstruction yet DRAINS the queue and turns it into musical/UI
+events -- a real functional gap for anyone testing end-to-end keybed
+behavior against this reconstruction on real hardware.
+
+---
+
+## CSTGKeybedInterface::MemberStartup/MemberCleanup/TryComPort — no confirmed caller
+
+Not uncertain about the reconstruction itself (both are faithful,
+disassembly-confirmed transcriptions, matching the already-verified
+free-function `CSTGKeybedInterface_Startup`/`_Cleanup` boot-path pair's
+own algorithm shape closely enough that the same confidence applies).
+What's unconfirmed: NO caller of these member-function versions exists
+anywhere in this project yet (plausibly a manual "keybed rescan" UI
+action or `CSTGControlMsgHandler::TakeOverKeybedComm`, itself not
+reconstructed) -- so unlike the free pair (confirmed boot-reachable from
+`init_module()`), these three methods are currently dead code from this
+project's own reachability analysis, exercised only by
+`test_keybed_interface.cpp`'s own mocks, never by a live boot path. A
+real-HW/live-VM test that would help: once a caller is identified and
+reconstructed, confirm a "rescan port 0 only" keybed reconnect actually
+matches this member pair's own hardcoded-port-0 behavior rather than
+the free pair's 6-port scan.
