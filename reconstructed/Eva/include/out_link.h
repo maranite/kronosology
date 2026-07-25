@@ -106,6 +106,17 @@
  * client_comm_server.h's own `SendMessageToClient()` already established for this
  * exact method). This is `CSysExMsgTaskBase::SendMsg()`'s own real dependency,
  * unblocking it this same pass (sysex_msg_task_base.h/cpp).
+ *
+ * `COutLinkMono::OutMono(unsigned short, unsigned long)` (.text+0x0807d330, 132
+ * bytes, mangled `_ZN12COutLinkMono7OutMonoEtm`) -- a SECOND real overload, added
+ * for the CEditor::CPanelIfcTask dedicated pass (2026-07-25, panel_ifc_task.h/cpp,
+ * its own only caller so far). Same empty-`mLinks`/error-5 gate and CLink+0x24
+ * receiver dispatch as the pointer overload above, but embeds `value` directly
+ * into CLink+0x20 (as a raw ulong, not a pointer) and sets the CLink+0x18 flags
+ * word's mode bit to 0x100 instead of 0x200 (confirmed via direct `objdump -dr`
+ * comparison of the two functions' own flag-computation instructions) -- the
+ * real ground-truth distinction between "pointer-to-buffer" and "inline scalar"
+ * IPC payload modes.
  */
 
 #ifndef OUT_LINK_H
@@ -163,6 +174,11 @@ public:
 	 * CSysExMsgClientOutLink::SendMessage()) is direct/non-virtual anyway.
 	 */
 	int OutMono(unsigned short ecb, void *buf, unsigned short len);
+
+	/* .text+0x0807d330, 132 bytes. Tier A -- see header comment. Same real
+	 * "not declared C++ virtual" convention as the pointer overload above.
+	 */
+	int OutMono(unsigned short ecb, unsigned long value);
 
 protected:
 	CLink *mLink; /* +0x34, always 0 from any ctor in this family -- see header

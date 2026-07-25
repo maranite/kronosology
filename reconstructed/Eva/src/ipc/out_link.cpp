@@ -92,6 +92,30 @@ int COutLinkMono::OutMono(unsigned short ecb, void *buf, unsigned short len)
 	return TestResult(result, mLink);
 }
 
+int COutLinkMono::OutMono(unsigned short ecb, unsigned long value)
+{
+	if (*reinterpret_cast<int *>(mLinks + 0xc) == 0)
+		return 5;
+
+	unsigned char *link = reinterpret_cast<unsigned char *>(mLink);
+
+	*reinterpret_cast<unsigned long *>(link + 0x20) = value;
+	unsigned short *flags = reinterpret_cast<unsigned short *>(link + 0x18);
+	*flags = static_cast<unsigned short>((*flags & 0xf000) | 0x100 | (ecb & 0xff));
+
+	/* Real: same genuinely data-driven indirect call as the pointer overload
+	 * above -- see that overload's own header-comment writeup.
+	 */
+	void *receiver = *reinterpret_cast<void **>(link + 0x24);
+	void *receiverVtbl = *reinterpret_cast<void **>(receiver);
+	typedef int (*RecvFn)(void *, void *);
+	RecvFn recv = *reinterpret_cast<RecvFn *>(reinterpret_cast<char *>(receiverVtbl) + 8);
+	int result = recv(receiver, link + 0x10);
+	*reinterpret_cast<int *>(link + 8) = result;
+
+	return TestResult(result, mLink);
+}
+
 CSysExMsgOutLink::CSysExMsgOutLink(const CTask &owner, const char *name)
 	: COutLinkMono(owner, name, 0, 0x8007)
 {

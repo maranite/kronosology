@@ -687,11 +687,11 @@ RECONSTRUCTED = {
     # CEditor's own 15 direct methods + ctor/dtor, all real (own control flow
     # faithfully reconstructed even where a callee is itself a Tier-B stub, same
     # convention as CModule::Add()'s own Api-vtable-slot calls elsewhere in this
-    # list). CEditor::CMainTask's ctor (0824ad90) and CEditor::CPanelIfcTask's ctor
-    # (0824b7e0) stay OUT of this list -- both only partially reconstructed (their
-    # real CTask::CTask() base-construction statement, not the rest of the real
-    # body), same "stays pending, Tier B" treatment as every other partial-ctor
-    # case in this file (see 0824b7e0's own pre-existing note below).
+    # list). CEditor::CMainTask's ctor (0824ad90) stays OUT of this list -- only
+    # partially reconstructed (its real CTask::CTask() base-construction statement,
+    # not the Peg/CDesktop tail). CEditor::CPanelIfcTask's own ctor (0824b7e0) is
+    # now FULLY reconstructed (see the dedicated CPanelIfcTask batch below) --
+    # promoted out of this "stays pending" note.
     "08249cd0",  # CEditor::CEditor(char const*, char const*)
     "082498f0",  # CEditor::~CEditor() [D1]
     "082498a0",  # CEditor::Config()
@@ -734,6 +734,32 @@ RECONSTRUCTED = {
     "0806e320",  # CEditable::AddDescriptorsMap(CObjectBase*, SDescriptor*, bool)
     "08245e10",  # CAlphaKeybIfcTask::CAlphaKeybIfcTask(CEditor const&)
     "08245d40",  # CAlphaKeybIfcTask::~CAlphaKeybIfcTask() [D1]
+
+    # CEditor::CPanelIfcTask dedicated batch (Stage 6, 2026-07-25 --
+    # panel_ifc_task.h/.cpp), following the CEditor batch's own "finding for a
+    # future dedicated pass" note above. Full ctor (was a partial CTask::CTask()-
+    # only link-stub) + every instance method that routes through the now-2-overload
+    # COutLinkMono::OutMono() or the (Peg-toolkit-gap, inert-stand-in)
+    # PegMessageQueue::Push(). Verified via verify/test_panel_ifc_task.cpp (43
+    # checks). CPanelCfg (out_link.h-adjacent, panel_ifc_task.h) is a real,
+    # nm-C-confirmed class name -- its own ctor has no separate symbol (inlined
+    # into CPanelIfcTask's own ctor by GCC), only its D1 dtor is separately
+    # addressable.
+    "0824b7e0",  # CEditor::CPanelIfcTask::CPanelIfcTask(CEditor const&, PegScreen*)
+    "0824b3b0",  # CEditor::CPanelIfcTask::~CPanelIfcTask() [D1]
+    "0824c270",  # CEditor::CPanelIfcTask::SetLEDStatus(ELedCode, CPanelCfg::ELedState)
+    "0824c2c0",  # CEditor::CPanelIfcTask::SetLEDStatus(int, unsigned short, unsigned short)
+    "0824c310",  # CEditor::CPanelIfcTask::SetLEDStatus(CPanelCfg::ELedState)
+    "0824c860",  # CEditor::CPanelIfcTask::ShortBeep()
+    "0824c890",  # CEditor::CPanelIfcTask::EnterDiagnostics(int)
+    "0824b980",  # CEditor::CPanelIfcTask::SetupPanelInterface()
+    "0824c8d0",  # CEditor::CPanelIfcTask::SetAllLED(int)
+    "0824ba20",  # CEditor::CPanelIfcTask::OnTouchPanelEvent(CPanelOut::STouchPanelEvt const*)
+    "0824bbd0",  # CEditor::CPanelIfcTask::OnButtonEvent(CPanelOut::SButtonEvt const*)
+    "0824b440",  # CEditor::CPanelIfcTask::Exec() [0-arg override, real vtable slot 2]
+    "0824c000",  # CEditor::CPanelIfcTask::Exec(CMessage&) [1-arg override, real vtable slot 3]
+    "0807d330",  # COutLinkMono::OutMono(unsigned short, unsigned long) -- 2nd real overload
+    "0898fbb0",  # CPanelCfg::~CPanelCfg() [D1/D2, comdat-merged]
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -757,11 +783,12 @@ RECONSTRUCTED = {
 # of the Stage 6 SetMask/~CTask batch above -- SetMask() itself is now reconstructed,
 # but CPoller's ctor is still deep for other reasons: 2 large fixed-size handle-table
 # fills plus an Api vtable slot +0xac lookup, task.h/limiter_man.h).
-# CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) also stays out of
-# scope -- its post-CTask::CTask() tail is real multiple-inheritance work
-# (COutLinkMono sub-object + adjustment thunk) that is Peg/UI-editor-toolkit depth,
-# not CModule/CTask/CLevelManagerArray/CPoller family depth; see task.h/
-# panel_ifc_task.h. CScheduler::InsertTask(CTask const&) (.text+0x08062d80) -- the
+# CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) is now FULLY reconstructed
+# (Stage 6 dedicated CPanelIfcTask batch, 2026-07-25, see RECONSTRUCTED above) --
+# this note is stale/superseded, kept only for its own historical context (the
+# multiple-inheritance COutLinkMono sub-object + adjustment thunk work it once
+# flagged as deferred is now transcribed, panel_ifc_task.h/.cpp).
+# CScheduler::InsertTask(CTask const&) (.text+0x08062d80) -- the
 # obvious ground-truth candidate for populating CLevelManager's own SEPARATE
 # per-level task array (distinct from CModule::mTasks) -- exists but has ZERO
 # confirmed direct callers found this batch; left as an open lead

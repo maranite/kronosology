@@ -170,12 +170,14 @@ int CEditor::Start()
 		mMainTask->InitDesktop();
 	/* Real ground truth calls `CPanelIfcTask::SetupPanelInterface()`
 	 * unconditionally here (no null-check, matching EnterDiagnostics()'s own
-	 * unchecked-pointer shape below) -- SetupPanelInterface() itself is a
-	 * Tier-B stub (panel_ifc_task.h/.cpp, deferred), so there's nothing real
-	 * to call yet; guarded here only to stay safe against mPanelIfcTask's own
-	 * documented possibly-uninitialized state (see ctor comment) rather than
-	 * matching ground truth's own unchecked dereference.
+	 * unchecked-pointer shape below). SetupPanelInterface() is now real
+	 * (panel_ifc_task.h/.cpp, Stage 6 dedicated CPanelIfcTask batch,
+	 * 2026-07-25) -- guarded here only to stay safe against mPanelIfcTask's
+	 * own documented possibly-uninitialized state (see ctor comment) rather
+	 * than matching ground truth's own unchecked dereference.
 	 */
+	if (mPanelIfcTask != 0)
+		mPanelIfcTask->SetupPanelInterface();
 	if (mAlphaKeybIfcTask != 0) {
 		/* Real ground truth: a bare static/tail-call `CAlphaKeybIfcTask::Setup()`
 		 * with no arguments (confirmed via objdump, same tail-jump shape as
@@ -233,39 +235,26 @@ int CEditor::Setup()
 
 void CEditor::SetLEDStatus(int ledCode, int ledState)
 {
-	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0) {
-		/* CPanelIfcTask::SetLEDStatus(ELedCode, ELedState) -- Tier-B stub,
-		 * see panel_ifc_task.h. Not yet callable (not declared there this
-		 * pass, kept minimal per that class's own deferred-scope note).
-		 */
-		(void)ledCode;
-		(void)ledState;
-	}
+	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0)
+		sm_poTheEditor->mPanelIfcTask->SetLEDStatus(ledCode, ledState);
 }
 
 void CEditor::SetLEDStatus(int deviceIndex, unsigned short onMask, unsigned short offMask)
 {
-	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0) {
-		(void)deviceIndex;
-		(void)onMask;
-		(void)offMask;
-	}
+	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0)
+		sm_poTheEditor->mPanelIfcTask->SetLEDStatus(deviceIndex, onMask, offMask);
 }
 
 void CEditor::SetLEDStatus(int ledState)
 {
-	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0) {
-		(void)ledState;
-	}
+	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0)
+		sm_poTheEditor->mPanelIfcTask->SetLEDStatus(ledState);
 }
 
 void CEditor::ShortBeep()
 {
-	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0) {
-		/* CPanelIfcTask::ShortBeep() -- Tier-B stub, not yet callable here
-		 * either (same reason as SetLEDStatus above).
-		 */
-	}
+	if (sm_poTheEditor != 0 && sm_poTheEditor->mPanelIfcTask != 0)
+		sm_poTheEditor->mPanelIfcTask->ShortBeep();
 }
 
 void CEditor::ShortBeepPolite()
@@ -276,14 +265,14 @@ void CEditor::ShortBeepPolite()
 	 */
 }
 
-void CEditor::EnterDiagnostics(int)
+void CEditor::EnterDiagnostics(int flag)
 {
 	/* Real ground truth has NO null-check on sm_poTheEditor's panel task
-	 * pointer here (unlike SetLEDStatus/ShortBeep above) -- but
-	 * CPanelIfcTask::EnterDiagnostics() itself is a Tier-B stub not yet
-	 * callable from here either way, so there is nothing to (safely or
-	 * unsafely) call yet.
+	 * pointer here (unlike SetLEDStatus/ShortBeep above) -- transcribed as
+	 * found now that CPanelIfcTask::EnterDiagnostics() is real
+	 * (panel_ifc_task.h/.cpp).
 	 */
+	sm_poTheEditor->mPanelIfcTask->EnterDiagnostics(flag);
 }
 
 bool CEditor::IsSwitchPressed(unsigned int buttonCode)

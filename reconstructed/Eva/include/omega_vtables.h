@@ -545,6 +545,31 @@ extern void *PTR__TVector_08e88ba8[2];
 extern void *PTR__CEditor_08f29b88[7];
 extern void *PTR__CEditor_08f29bac[3];
 extern void *PTR__CEditor_08f29bc0[5];
+
+/* CEditor::CPanelIfcTask + CPanelCfg (Stage 6 dedicated CPanelIfcTask batch,
+ * 2026-07-25 -- panel_ifc_task.h/.cpp). Both confirmed byte-exact via direct
+ * `.rodata` dword read (not inferred), cross-checked against the next real
+ * symbol's own address (typeinfo-name strings in both cases):
+ *   CPanelIfcTask primary   08f29ce0 -> 08f29d10 (typeinfo name)   = 7 slots
+ *     (5 real function slots -- D1/D0 dtor, Exec() 0-arg override, Exec
+ *     (CMessage&) override, ExecMsg(CMessage&) copied through unchanged from
+ *     CTask's own vtable -- plus 2 header/this+8-install slots, same
+ *     5-real+2-header bucketing convention as CTask's own
+ *     PTR__CTask_08e82128[7] above)
+ *   CPanelCfg               08f29d40 -> 08f29d60 (typeinfo)        = 6 slots
+ *     (CPanelCfg overrides only its own D1/D0 dtor; CheckDestinationFamily/
+ *     OnCreateLink/OnConnect/OnDisconnect are copied through from
+ *     COutLinkMono's own vtable unchanged -- confirmed via direct byte
+ *     comparison against PTR__COutLinkMono_08e82048 above)
+ * `EvaDataPlaceholder_08f29d04` is CPanelIfcTask's own this+8 install target
+ * (real address &DAT_08f29d04, i.e. exactly one past the primary array's own
+ * end) -- never dereferenced by any reconstructed code, same status as
+ * CTask's own EvaDataPlaceholder_08e82144. Both vtables install-only
+ * (EvaVTableStub-backed), same convention as every other entry in this file.
+ */
+extern void *PTR__CPanelIfcTask_08f29ce8[7];
+extern void *PTR__CPanelCfg_08f29d48[6];
+extern int   EvaDataPlaceholder_08f29d04;
 }
 
 #endif /* OMEGA_VTABLES_H */

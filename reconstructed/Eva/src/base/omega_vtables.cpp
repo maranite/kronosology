@@ -389,4 +389,18 @@ void *PTR__CAlphaKeybIfcTask_08f25b1c[4] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub,
 };
+
+/* CEditor::CPanelIfcTask + CPanelCfg -- see omega_vtables.h's own header
+ * comment for the full byte-read derivation.
+ */
+void *PTR__CPanelIfcTask_08f29ce8[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__CPanelCfg_08f29d48[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+int EvaDataPlaceholder_08f29d04 = 0;
 }
