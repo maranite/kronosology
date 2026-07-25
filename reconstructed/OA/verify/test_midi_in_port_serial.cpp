@@ -19,6 +19,7 @@
 #include "oa_global.h"
 #include "oa_engine.h"
 #include "oa_engine_init.h"
+#include "oa_heapmanager.h"
 
 static void *mmap32(unsigned long size)
 {
@@ -75,6 +76,24 @@ static int g_startSysExCalls;
 static int g_receiveSysExDataCalls;
 void CSTGMidiInPort::StartSysEx() { g_startSysExCalls++; }
 void CSTGMidiInPort::ReceiveSysExData(unsigned char) { g_receiveSysExDataCalls++; }
+
+/* CSTGMidiInPort::Activate()/Deactivate() are now real (this pass, same
+ * file this test links) -- their own bodies ODR-use CSTGHeapManager::
+ * sInstance/CSTGAudioBusManager::sInstance, CSTGMidiQueue::Initialize()/
+ * SetDesc(), and CSTGExtMIDIClockSync::Initialize()/its own vtable, so
+ * linking this TU now requires all of them to resolve EVEN THOUGH this
+ * test (a byte-parser KAT, never constructs a real port or calls
+ * Activate()) never actually calls any of them -- same "unresolved
+ * symbol from dead code in a linked TU" situation already documented
+ * above for the ctor's own RegisterMidiInPort() dependency. Minimal
+ * link-satisfying stand-ins, not exercised by any check in this file. */
+CSTGHeapManager *CSTGHeapManager::sInstance;
+CSTGAudioBusManager *CSTGAudioBusManager::sInstance;
+extern "C" unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+void CSTGMidiQueue::Initialize(unsigned int, unsigned int) { }
+void CSTGMidiQueue::SetDesc(const char *, ...) { }
+void CSTGExtMIDIClockSync::Initialize() { }
 
 /* Layout mirrors oa_engine.h's CSTGMidiInPort exactly enough for this
  * test: scratch[0x20] @+0x4, sysExScratchLen @+0x24, portType @+0x25,

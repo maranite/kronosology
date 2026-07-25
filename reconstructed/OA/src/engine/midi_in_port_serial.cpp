@@ -81,6 +81,7 @@
 #include "oa_global.h"
 #include "oa_engine.h"
 #include "oa_engine_init.h"	/* CSTGMidiQueueWriter::Write(), CSTGMidiQueue::GetNumWritableBytes() */
+#include "oa_heapmanager.h"	/* CSTGHeapManager::sInstance, for Activate()'s resolve_heap_handle() */
 
 namespace {
 
@@ -386,19 +387,17 @@ void CSTGMidiInPortSerial::ReceiveBytes(const unsigned char *data, unsigned char
  * cleared; finally calls the already-real
  * `CSTGMidiPortManager::RegisterMidiInPort(this)`.
  *
- * DELIBERATELY NOT reproduced: two more real writes inside this same
- * ctor body, `*(byte*)(this+0x148) = 1` and a vtable-pointer write at
- * `this+0x108` (`&_ZTV20CSTGExtMIDIClockSync + 8`) -- the latter proves
- * `CSTGMidiInPort` embeds a THIRD clock-sync-family object (parallel to
- * `CSTGMIDIClockSync`'s own use of the already-reconstructed
- * `CSTGIntMIDIClockSync`, oa_engine_init.h) somewhere in the existing,
- * already-documented `_unrecovered108[0x1d8]` gap -- a genuinely new
- * discovery, but reconstructing a whole THIRD MIDI-clock-sync class
- * hierarchy (own vtable, own methods, its own ctor call chain) is a
- * disproportionate expansion for this batch, matching this project's
- * established "confirmed real, deliberately deferred, characterized for
- * a future session" convention. Nothing this batch's own KATs touch
- * depends on either omitted write.
+ * UPDATE (this pass -- Activate()/Deactivate() batch): the embedded
+ * `CSTGExtMIDIClockSync` sub-object at `this+0x108` flagged above is now
+ * reconstructed for real (oa_engine_init.h/midi_clock_sync.cpp), and its
+ * vtable-pointer write (`&_ZTV20CSTGExtMIDIClockSync + 8`) is reproduced
+ * below, matching `CSTGMIDIClockSync`'s own established "&_ZTVxxx + 8"
+ * install convention. STILL deliberately NOT reproduced: `*(byte*)
+ * (this+0x148) = 1` -- `this+0x148` is `CSTGExtMIDIClockSync`-relative
+ * `+0x40`, the first byte of that class's own still-unresolved
+ * `ProcessClock()` input-timestamp ring (see oa_engine_init.h's
+ * `CSTGExtMIDIClockSync` class comment) -- part of the SAME deliberately
+ * deferred sub-cluster, not independently understood by this pass.
  */
 CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
 {
@@ -418,5 +417,118 @@ CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
 	*(unsigned int *)(self + 0x104) = 0;
 	self[0x2e0] = 0;
 
+	extern unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+	*(unsigned int *)(self + 0x108) =
+		(unsigned int)(unsigned long)(_ZTV20CSTGExtMIDIClockSync + 8);
+
 	CSTGMidiPortManager::RegisterMidiInPort(this);
+}
+
+int CSTGMidiInPort::sActiveSensingThresholdTicks;
+
+/*
+ * resolve_heap_handle()/resolve_queue_buffer() -- the SAME real
+ * region-resolution formula as midi_out_port_serial.cpp's own identically
+ * named helpers (`CSTGMidiOutPort::Activate()`'s real disassembly),
+ * confirmed byte-for-byte identical opcodes here in
+ * `CSTGMidiInPort::Activate()`'s own 3 handle lookups. Re-derived locally
+ * per this file's own established per-TU convention (see file header
+ * comment) rather than sharing a declaration across translation units.
+ */
+static unsigned char *resolve_heap_handle(unsigned int handle)
+{
+	unsigned char *heap = (unsigned char *)CSTGHeapManager::sInstance;
+	if (handle >= 100000)
+		return 0;
+	unsigned int entryOff = handle * 0x14;
+	if (heap + 0x18 + entryOff == 0) /* always-true pointer check, preserved for fidelity */
+		return 0;
+	unsigned int offset = *(unsigned int *)(heap + 0x24 + entryOff);
+	unsigned int heapBase = *(unsigned int *)(heap + 0x1e8498);
+	return (unsigned char *)(unsigned long)(offset + heapBase);
+}
+
+static unsigned char *resolve_queue_buffer(CSTGMidiQueue *queue)
+{
+	unsigned int handle = *(unsigned int *)queue; /* CSTGMidiQueue::allocHandle, +0x0 */
+	return resolve_heap_handle(handle);
+}
+
+/*
+ * Activate(CSTGMidiQueue *q3arg) -- CONFIRMED real
+ * (`_ZN14CSTGMidiInPort8ActivateEP13CSTGMidiQueue`, `.text+0xf5830`, 358
+ * bytes, regparm(3): this=EAX, q3arg=EDX), full `objdump -dr`
+ * transcription. Unlike `CSTGMidiOutPort::Activate()`'s manager-shared
+ * queues, MIDI-IN owns its two primary queues directly as embedded
+ * `CSTGMidiQueue` objects at `this+0x28` (1024 bytes, real desc string
+ * `"CSTGMidiInPort #%u mRegularKGQueue"`, `.rodata.str1.4+0x544`) and
+ * `this+0x8c` (256 bytes, `"CSTGMidiInPort #%u mPriorityKGQueue"`,
+ * `+0x568`) -- wired to `writerPrimaryRingCtl`/`writerPrimaryBufBase`
+ * (+0xf0/+0xf4) and `writerRealTimeRingCtl`/`writerRealTimeBufBase`
+ * (+0xf8/+0xfc) respectively (the SAME `W_PRIMARY`/`W_REALTIME` writer
+ * slots `ReceiveByte()`/`ReceiveBytes()` already use). The third slot,
+ * `writerKGRingCtl`/`writerKGBufBase` (+0x100/+0x104), is ONLY wired from
+ * the caller-supplied `q3arg` when `flags & 1` is already set (matches
+ * `ReceiveBytes()`'s own `W_KG`-bypass gate on that exact same bit) --
+ * left untouched (whatever the ctor zeroed it to, or a prior Activate()
+ * call set it to) when the bit is clear, a real, confirmed asymmetry, NOT
+ * a transcription gap.
+ *
+ * `sActiveSensingThresholdTicks` (own function-local-static-guarded
+ * class-static, real `.bss` symbol) is computed once, ever, as
+ * `(int)(0.33f * CSTGAudioBusManager::sInstance->busGainScale)` -- a
+ * plain SSE3 `fisttp` truncation (no CW manipulation), so a plain C
+ * `(int)` cast is exact here (confirmed real `.rodata.cst4` float
+ * `0.33f`, byte-exact match: `c3f5a83e`).
+ *
+ * Finally: calls the newly-real `CSTGExtMIDIClockSync::Initialize()` on
+ * the embedded sub-object at `this+0x108` (direct, non-virtual call, same
+ * as the ctor's own vtable-install convention), clears
+ * `activeSensingSeen`/`sysExState`/`sysExScratchLen` (+0x2e3/+0x2e0/
+ * +0x24) and the unnamed `+0x2e4` dword, and sets `flags |= 2`
+ * (active/live).
+ */
+void CSTGMidiInPort::Activate(CSTGMidiQueue *q3arg)
+{
+	unsigned char *self = (unsigned char *)this;
+
+	if (sActiveSensingThresholdTicks == 0) {
+		CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+		sActiveSensingThresholdTicks = (int)(0.33f * bus->busGainScale);
+	}
+
+	CSTGMidiQueue *q1 = (CSTGMidiQueue *)(self + 0x28);
+	q1->Initialize(0, 0x400);
+	CSTGMidiQueue *q2 = (CSTGMidiQueue *)(self + 0x8c);
+	q2->Initialize(0, 0x100);
+
+	q1->SetDesc("CSTGMidiInPort #%u mRegularKGQueue", (int)(signed char)self[0x25]);
+	q2->SetDesc("CSTGMidiInPort #%u mPriorityKGQueue", (int)(signed char)self[0x25]);
+
+	*(unsigned int *)(self + 0xf0) = (unsigned int)(unsigned long)q1;
+	*(unsigned int *)(self + 0xf4) = (unsigned int)(unsigned long)resolve_queue_buffer(q1);
+	*(unsigned int *)(self + 0xf8) = (unsigned int)(unsigned long)q2;
+	*(unsigned int *)(self + 0xfc) = (unsigned int)(unsigned long)resolve_queue_buffer(q2);
+
+	if ((self[0x26] & 0x1) != 0) {
+		*(unsigned int *)(self + 0x100) = (unsigned int)(unsigned long)q3arg;
+		*(unsigned int *)(self + 0x104) =
+			(unsigned int)(unsigned long)resolve_queue_buffer(q3arg);
+	}
+
+	((CSTGExtMIDIClockSync *)(self + 0x108))->Initialize();
+
+	self[0x2e3] = 0;
+	self[0x2e0] = 0;
+	self[0x24] = 0;
+	*(unsigned int *)(self + 0x2e4) = 0;
+
+	self[0x26] |= 0x2;
+}
+
+/* Deactivate() -- CONFIRMED real (`_ZN14CSTGMidiInPort10DeactivateEv`,
+ * `.text+0xf5820`, 5 bytes): clears `flags` bit1. */
+void CSTGMidiInPort::Deactivate()
+{
+	((unsigned char *)this)[0x26] &= 0xfd;
 }

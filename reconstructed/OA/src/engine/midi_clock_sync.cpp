@@ -45,11 +45,56 @@
  */
 
 #include "oa_engine_init.h"
+#include "oa_setup_global_resources.h"	/* CSTGCPUInfo::sInstance, for
+					 * CSTGExtMIDIClockSync::Initialize() */
 
 extern "C" unsigned char _ZTV20CSTGIntMIDIClockSync[40];
 
 int CSTGMIDIClockSyncBase::kClockTimeOutTicks;
 float CSTGMIDIClockSyncBase::kMaxNormalizedTempo;
+
+double CSTGExtMIDIClockSync::kSecondsToTimeStamp;
+double CSTGExtMIDIClockSync::kTimeStampToSeconds;
+float CSTGExtMIDIClockSync::kClockEarlyThresholdTicks;
+
+namespace {
+
+/* Portable (no-libm) truncate-based ceil/floor -- see
+ * CSTGExtMIDIClockSync::Initialize()'s own header comment for why this
+ * class, unlike every prior CSTGMIDIClockSyncBase/CSTGIntMIDIClockSync
+ * rounding site in this file, has a real CW-rounding-mode-dependent
+ * result that a plain `(int)` truncating cast would get WRONG (e.g.
+ * `floor(-0.6) = -1 != (int)(-0.6) = 0`). Exact for any finite float. */
+int CeilToInt(float x)
+{
+	int t = (int)x;
+	if ((float)t < x)
+		t += 1;
+	return t;
+}
+
+int FloorToInt(float x)
+{
+	int t = (int)x;
+	if ((float)t > x)
+		t -= 1;
+	return t;
+}
+
+/* Round-half-away-from-zero, no libm. Used only by UpdateFilteredTempo()
+ * (the sole site in this class whose real `fistp` is NOT preceded by any
+ * CW override, so it runs under the ambient x87 control word -- default
+ * round-to-nearest-ties-to-even on this target). Genuine tie-break cases
+ * (exact `.5` boundary) would round differently here than real x87
+ * ties-to-even; considered immaterial for this function's real input
+ * domain (a tempo-derived BPM*busGainScale*2.5 product), matching this
+ * project's established tolerance for confirmed-improbable edge cases. */
+int RoundToInt(float x)
+{
+	return (x >= 0.0f) ? (int)(x + 0.5f) : (int)(x - 0.5f);
+}
+
+} /* anonymous namespace */
 
 /*
  * CSTGMIDIClockSyncBase::Initialize() -- see oa_engine_init.h for the
@@ -227,4 +272,169 @@ CSTGMIDIClockSync::CSTGMIDIClockSync()
 	*(unsigned int *)(base + 0x60) = 0;
 	*(unsigned int *)(base + 0x64) = 0;
 	*(int *)(base + 0xc8) = -1;
+}
+
+/*
+ * CSTGExtMIDIClockSync -- see oa_engine_init.h for the full confirmed
+ * field-by-field breakdown of each method below.
+ */
+
+/* GetEventCount() const -- see oa_engine_init.h. */
+unsigned int CSTGExtMIDIClockSync::GetEventCount() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	return *(const unsigned int *)(base + 0xa4) -
+	       *(const unsigned int *)(base + 0xa8);
+}
+
+/* GetEventStatusByte() const -- see oa_engine_init.h. */
+unsigned char CSTGExtMIDIClockSync::GetEventStatusByte() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	unsigned int idx = *(const unsigned int *)(base + 0xa8) & 7;
+	return base[0x40 + idx * 0xc + 0x4];
+}
+
+/* ConsumeEvent() -- see oa_engine_init.h. */
+void CSTGExtMIDIClockSync::ConsumeEvent()
+{
+	unsigned char *base = (unsigned char *)this;
+	*(unsigned int *)(base + 0xa8) += 1;
+}
+
+/* PrepareForNextTick() -- confirmed real no-op override, see
+ * oa_engine_init.h. */
+void CSTGExtMIDIClockSync::PrepareForNextTick()
+{
+}
+
+/* GetClockEarlyThresholdTicks() const -- see oa_engine_init.h: the
+ * static, computed once in Initialize(). */
+float CSTGExtMIDIClockSync::GetClockEarlyThresholdTicks() const
+{
+	return kClockEarlyThresholdTicks;
+}
+
+/* GetClockLateThresholdTicks() const -- see oa_engine_init.h: the
+ * dynamic per-instance field UpdateDynamicThresholds()/NotifySyncDetected()/
+ * Initialize() all write. */
+float CSTGExtMIDIClockSync::GetClockLateThresholdTicks() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	return *(const float *)(base + 0x1d4);
+}
+
+/*
+ * Shared tail for Initialize()/NotifySyncDetected()/
+ * UpdateDynamicThresholds() (confirmed byte-for-byte identical opcodes at
+ * all three real call sites): fieldAt(0x1d4) = ceil(0.001f * busGainScale).
+ */
+static void SetDefaultLateThreshold(unsigned char *base)
+{
+	CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+	*(float *)(base + 0x1d4) = (float)CeilToInt(0.001f * bus->busGainScale);
+}
+
+/*
+ * Initialize() -- see oa_engine_init.h for the full confirmed shape.
+ */
+void CSTGExtMIDIClockSync::Initialize()
+{
+	unsigned char *base = (unsigned char *)this;
+
+	((CSTGMIDIClockSyncBase *)this)->Initialize();
+
+	static bool s_initialized;
+	if (!s_initialized) {
+		s_initialized = true;
+
+		CSTGCPUInfo *cpu = CSTGCPUInfo::sInstance;
+		/* See class comment: plain `unsigned int` product, not the
+		 * real code's full unsigned-64-bit-safe conversion -- exact
+		 * for every real CPU frequency this target runs at, and
+		 * avoids a genuine `__floatundidf`/libgcc dependency this
+		 * Kbuild target cannot resolve. */
+		unsigned int freqHz = 1000u * cpu->khz;
+
+		kSecondsToTimeStamp = (double)freqHz;
+		kTimeStampToSeconds = 1.0 / kSecondsToTimeStamp;
+
+		CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+		/* Confirmed real FLOOR rounding -- see class comment. */
+		kClockEarlyThresholdTicks =
+			(float)FloorToInt(-0.0004f * bus->busGainScale);
+	}
+
+	*(unsigned int *)(base + 0xa4) = 0;
+	*(unsigned int *)(base + 0xa8) = 0;
+	*(float *)(base + 0x1bc) = 0.0f;
+	SetDefaultLateThreshold(base);
+	*(int *)(base + 0x1c4) = 0x78;
+}
+
+/*
+ * NotifySyncDetected() -- see oa_engine_init.h for the full confirmed
+ * shape.
+ */
+void CSTGExtMIDIClockSync::NotifySyncDetected()
+{
+	unsigned char *base = (unsigned char *)this;
+
+	*(int *)(base + 0xb4) = 0;
+	*(int *)(base + 0xb8) = -1;
+	*(int *)(base + 0x1c0) = 0;
+
+	for (unsigned int i = 0; i < 0x80; i++)
+		base[0xbc + i] = 0;
+	for (unsigned int i = 0; i < 0x80; i++)
+		base[0x13c + i] = 0;
+
+	SetDefaultLateThreshold(base);
+}
+
+/*
+ * UpdateFilteredTempo(double) -- see oa_engine_init.h for the full
+ * confirmed shape.
+ */
+void CSTGExtMIDIClockSync::UpdateFilteredTempo(double bpm)
+{
+	unsigned char *base = (unsigned char *)this;
+	CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+
+	/* 2.5f -- confirmed real .rodata.cst4 float, the SAME constant
+	 * CSTGMIDIClockSync::GetFilteredTempoBPM() uses for the inverse
+	 * conversion (busGainScale * smoothedInterval * 2.5). Real `fistp`
+	 * here runs under the ambient (round-to-nearest) CW -- see
+	 * RoundToInt()'s own comment. */
+	int predicted = RoundToInt((float)(bus->busGainScale * bpm * 2.5));
+
+	int *target = (int *)(base + 0x1c4);
+	int *debounce = (int *)(base + 0x1c8);
+
+	if (predicted != *target) {
+		if ((unsigned int)*debounce <= 0x1f) {
+			*debounce += 1;
+			return;
+		}
+		*target = predicted;
+	}
+	*debounce = 0;
+}
+
+/*
+ * UpdateDynamicThresholds() -- see oa_engine_init.h for the full
+ * confirmed shape.
+ */
+void CSTGExtMIDIClockSync::UpdateDynamicThresholds()
+{
+	unsigned char *base = (unsigned char *)this;
+	float jitter = *(float *)(base + 0x1bc);
+
+	if (jitter < 0.001f)
+		jitter = 0.001f;
+	else if (jitter > 0.008f)
+		jitter = 0.008f;
+
+	CSTGAudioBusManager *bus = CSTGAudioBusManager::sInstance;
+	*(float *)(base + 0x1d4) = (float)CeilToInt(jitter * bus->busGainScale);
 }

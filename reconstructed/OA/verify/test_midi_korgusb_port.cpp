@@ -16,16 +16,23 @@
  * Links src/engine/midi_korgusb_port.cpp, midi_out_port_serial.cpp (for
  * the real base CSTGMidiOutPort ctor/Activate/Deactivate/
  * ReadNextMessage this file's classes build on), midi_in_port_serial.cpp
- * (for the real base CSTGMidiInPort ctor), and midi_queue.cpp/
+ * (for the real base CSTGMidiInPort ctor AND, as of the batch that made
+ * them real, Activate()/Deactivate() too), and midi_queue.cpp/
  * midi_queue_writer.cpp/midi_queue_writer_byte.cpp (transitive
  * CSTGMidiQueueWriter::Write() dependency of midi_in_port_serial.cpp's
  * OWN other methods, even though this test never calls them). Provides
  * its own minimal stand-ins for CSTGMidiPortManager::sMidiInPorts/
  * sMidiOutPorts/RegisterMidiInPort()/RegisterMidiOutPort(),
- * CSTGMidiQueue::AllocReader(), and CSTGMidiInPort::Activate()/
- * Deactivate() (deliberately-deferred real methods, see oa_engine.h),
- * matching test_midi_out_port_serial.cpp's/test_midi_in_port_serial.cpp's
- * own established conventions.
+ * CSTGMidiQueue::AllocReader(), and (NOT linking midi_queue_init.cpp/
+ * midi_clock_sync.cpp) CSTGMidiQueue::Initialize()/SetDesc() and
+ * CSTGExtMIDIClockSync::Initialize() -- all three real, but their OWN
+ * internals are out of THIS test's scope (own dedicated coverage:
+ * test_midi_port_manager.cpp/test_midi_queue.cpp for the former,
+ * test_midi_clock_sync.cpp for the latter) and pulling in either's real
+ * dependency chain (CSTGHeapManager::Alloc()'s full capture-workaround
+ * machinery / CSTGCPUInfo::sInstance + sk_stg_gate.cpp) would be
+ * disproportionate here -- matches test_midi_out_port_serial.cpp's/
+ * test_midi_in_port_serial.cpp's own established conventions.
  */
 
 #include <cstdio>
@@ -95,11 +102,36 @@ unsigned char CSTGMidiQueue::AllocReader()
 	return old;
 }
 
-/* CSTGMidiInPort::Activate()/Deactivate() -- deliberately deferred real
- * methods (oa_engine.h); test supplies call-counting stand-ins. */
-static int g_inActivateCalls, g_inDeactivateCalls;
-void CSTGMidiInPort::Activate(CSTGMidiQueue *) { g_inActivateCalls++; }
-void CSTGMidiInPort::Deactivate() { g_inDeactivateCalls++; }
+/* CSTGMidiQueue::Initialize()/SetDesc() -- real methods
+ * (midi_queue_init.cpp), NOT linked into this test -- see file header
+ * comment. Local stand-in: assigns a fixed heap handle (slot 6,
+ * pre-populated in main() below) so the now-real
+ * CSTGMidiInPort::Activate()'s own real resolve_queue_buffer()/
+ * resolve_heap_handle() calls (midi_in_port_serial.cpp, linked) still
+ * exercise real handle->pointer resolution against this test's existing
+ * heap layout. */
+void CSTGMidiQueue::Initialize(unsigned int, unsigned int)
+{
+	*(unsigned int *)this = 6; /* allocHandle */
+}
+void CSTGMidiQueue::SetDesc(const char *, ...)
+{
+}
+
+/* CSTGExtMIDIClockSync::Initialize() -- real method (midi_clock_sync.cpp),
+ * NOT linked -- see file header comment. Local call-counting stand-in. */
+static int g_extClockInitCalls;
+void CSTGExtMIDIClockSync::Initialize()
+{
+	g_extClockInitCalls++;
+}
+
+/* _ZTV20CSTGExtMIDIClockSync -- the now-real CSTGMidiInPort ctor
+ * (midi_in_port_serial.cpp, linked) installs this on its own embedded
+ * sub-object; storage not otherwise linked into this test. */
+extern "C" unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+
 void CSTGMidiInPort::StartSysEx() { }
 void CSTGMidiInPort::ReceiveSysExData(unsigned char) { }
 
@@ -247,6 +279,11 @@ int main(void)
 	*(unsigned int *)(heap + 0x24 + 3 * 0x14) = (unsigned int)(unsigned long)buf2;
 	*(unsigned int *)(heap + 0x24 + 4 * 0x14) = (unsigned int)(unsigned long)buf3a;
 	*(unsigned int *)(heap + 0x24 + 5 * 0x14) = (unsigned int)(unsigned long)buf3b;
+	/* Slot 6 -- CSTGMidiInPort::Activate()'s own embedded q1/q2 queues
+	 * both resolve to this SAME slot via the local Initialize() mock
+	 * above (this test never distinguishes them). */
+	unsigned char *buf6 = (unsigned char *)mmap32(64);
+	*(unsigned int *)(heap + 0x24 + 6 * 0x14) = (unsigned int)(unsigned long)buf6;
 
 	unsigned char *mgr = (unsigned char *)mmap32(0x200);
 	CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)mgr;
@@ -439,17 +476,44 @@ int main(void)
 		check_eq("STGMidiOutPortKorgUsb_Initialized() == false after Done()", STGMidiOutPortKorgUsb_Initialized(), 0);
 	}
 
-	printf("[11] CSTGMidiInPortKorgUsb::Activate()/Deactivate() -- base (deferred stand-in) + Connect/Disconnect\n");
+	printf("[11] CSTGMidiInPortKorgUsb::Activate()/Deactivate() -- now-real base + Connect/Disconnect\n");
 	{
 		CSTGMidiInPortKorgUsb *in1 = CKorgUsbAudioDriverMidiPorts::sInstance.InPort(1);
 		int initBefore = g_korgInitializeCalls;
+		int extClockBefore = g_extClockInitCalls;
 		in1->Activate((CSTGMidiQueue *)q3objB);
-		check_eq("base CSTGMidiInPort::Activate() stand-in was called", g_inActivateCalls, 1);
+
+		/* NOTE: raw offset reads, NOT named-member access
+		 * (in1->flags/writerPrimaryRingCtl/...) -- CSTGMidiInPort's own
+		 * literal C++ sizeof is 4 bytes short of the real layout (no
+		 * explicit vtable field), so the COMPILER places every named
+		 * member 4 bytes EARLIER than its own real absolute offset (see
+		 * oa_engine.h's class comment). Activate() itself correctly uses
+		 * raw offsets internally; a first pass of THIS test used named
+		 * access here and got a byte-exact 4-byte-shifted mismatch on
+		 * every one of these checks -- confirms the class comment's own
+		 * warning empirically. */
+		unsigned char *in1raw = (unsigned char *)in1;
+		check_eq("real base CSTGMidiInPort::Activate() set flags bit1 (active)",
+			 (in1raw[0x26] >> 1) & 1, 1);
+		check_eq("q1 (writerPrimaryRingCtl, real +0xf0) wired to embedded queue at +0x28",
+			 *(unsigned int *)(in1raw + 0xf0), (unsigned int)(unsigned long)(in1raw + 0x28));
+		check_eq("q1 buffer (real +0xf4) resolved via real resolve_heap_handle() (slot 6)",
+			 *(unsigned int *)(in1raw + 0xf4), (unsigned int)(unsigned long)buf6);
+		check_eq("q2 (writerRealTimeRingCtl, real +0xf8) wired to embedded queue at +0x8c",
+			 *(unsigned int *)(in1raw + 0xf8), (unsigned int)(unsigned long)(in1raw + 0x8c));
+		check_eq("q2 buffer (real +0xfc) ALSO resolved to slot 6 (same mock Initialize())",
+			 *(unsigned int *)(in1raw + 0xfc), (unsigned int)(unsigned long)buf6);
+		check_eq("sActiveSensingThresholdTicks == (int)(0.33f*1500.0f) == 495",
+			 CSTGMidiInPort::sActiveSensingThresholdTicks, 495);
+		check_eq("embedded CSTGExtMIDIClockSync::Initialize() was called",
+			 g_extClockInitCalls, extClockBefore + 1);
 		check_eq("KorgUsbMidiInitialize() called for port 1", g_korgInitializeCalls, initBefore + 1);
 		check_eq("KorgUsbMidiInitialize() idx == 1", g_korgInitializeLastIdx, 1);
 
 		in1->Deactivate();
-		check_eq("base CSTGMidiInPort::Deactivate() stand-in was called", g_inDeactivateCalls, 1);
+		check_eq("real base CSTGMidiInPort::Deactivate() cleared flags bit1",
+			 (in1raw[0x26] >> 1) & 1, 0);
 	}
 
 	printf("[12] ShouldActivate() -- real but unreachable, always true\n");

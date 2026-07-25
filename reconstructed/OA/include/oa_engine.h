@@ -1356,9 +1356,9 @@ public:
 	 * 144 bytes). Added when `midi_korgusb_port.cpp` needed it as a
 	 * genuine construction-time dependency -- see its own definition,
 	 * src/engine/midi_in_port_serial.cpp, for the full derivation
-	 * (including a genuinely new discovery -- an embedded, still-
-	 * unreconstructed `CSTGExtMIDIClockSync` sub-object at +0x108 --
-	 * deliberately NOT reproduced by this minimal ctor). Body accesses
+	 * (including a genuinely new discovery -- an embedded
+	 * `CSTGExtMIDIClockSync` sub-object at +0x108, now reconstructed for
+	 * real, oa_engine_init.h). Body accesses
 	 * fields via raw `self[<real offset>]`, NOT the named members above
 	 * (this class's own literal C++ `sizeof` is 4 bytes short of the
 	 * real 0x2e8 -- no explicit `vtable` field -- so named-member access
@@ -1395,17 +1395,21 @@ public:
 	 * 358 bytes; `_ZN14CSTGMidiInPort10DeactivateEv`, `.text+0xf5820`,
 	 * 5 bytes), CONFIRMED direct call targets of
 	 * `CSTGMidiInPortKorgUsb::Activate()`/`Deactivate()`
-	 * (midi_korgusb_port.cpp). NOT implemented in this pass -- a
-	 * substantial separate cluster (queue-wiring semantics for the
-	 * MIDI-IN side, parallel to but independent from the already-real
-	 * `CSTGMidiOutPort::Activate()`) disproportionate to the KorgUsb
-	 * transport candidate this batch reconstructs, matching this
-	 * project's established "confirmed real, deliberately deferred"
-	 * convention (e.g. `ReceiveSysEx` just above). This project's own
-	 * host KATs supply their own minimal stand-in definitions.
+	 * (midi_korgusb_port.cpp). Now implemented for real
+	 * (src/engine/midi_in_port_serial.cpp) -- the earlier
+	 * "disproportionate separate cluster" judgment turned out to be a
+	 * size-based guess, not backed by disassembly; the real body needed
+	 * no new dependency beyond the already-real
+	 * `CSTGMidiQueue::Initialize()`/`SetDesc()` and the newly-real
+	 * `CSTGExtMIDIClockSync::Initialize()` (oa_engine_init.h).
 	 */
 	void Activate(CSTGMidiQueue *q);
 	void Deactivate();
+
+	/* Own function-local-static-guarded class-static (real `.bss`
+	 * symbol), computed once by Activate(): `(int)(0.33f *
+	 * CSTGAudioBusManager::sInstance->busGainScale)`. */
+	static int sActiveSensingThresholdTicks;
 };
 
 /*

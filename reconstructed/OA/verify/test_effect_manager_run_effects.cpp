@@ -48,6 +48,21 @@ static void check_float(const char *label, double got, double want)
 }
 
 CSTGAudioBusManager *CSTGAudioBusManager::sInstance;
+
+/* CSTGCPUInfo::sInstance -- needed only for LINKING now that this test's
+ * own linked midi_clock_sync.cpp contains the newly-real
+ * CSTGExtMIDIClockSync::Initialize() (not called by anything in this
+ * test, but its symbol reference to CSTGCPUInfo::sInstance must still
+ * resolve). Local minimal stand-in rather than
+ * `#include "oa_setup_global_resources.h"` directly, matching
+ * test_midi_clock_sync.cpp's own established precedent (that header's
+ * placement-`operator new(oa_size_t, void*)` conflicts with this file's
+ * own `#include <new>`). */
+struct CSTGCPUInfo {
+	static CSTGCPUInfo *sInstance;
+	unsigned int cpuCount, khz;
+};
+CSTGCPUInfo *CSTGCPUInfo::sInstance;
 CSTGAudioBusManager::CSTGAudioBusManager() {}
 
 /* Real storage lives in lfo_stepseq_quad.cpp (not linked here) -- local

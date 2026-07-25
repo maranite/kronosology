@@ -1794,6 +1794,200 @@ public:
 	float GetClockEarlyThresholdTicks() const;
 };
 
+/*
+ * CSTGExtMIDIClockSync : public CSTGMIDIClockSyncBase -- the EXTERNAL
+ * (incoming-clock-following) sibling of CSTGIntMIDIClockSync, discovered
+ * embedded at `CSTGMidiInPort+0x108` (batch: KorgUsb MIDI transport,
+ * midi_korgusb_port.cpp/midi_in_port_serial.cpp) filling that class's own
+ * previously-`_unrecovered108[0x1d8]` gap EXACTLY (0x108..0x2e0, 0x1d8
+ * bytes -- confirmed by this class's own highest touched field,
+ * fieldAt(0x1d4), landing 4 bytes short of that gap's full size). Unlike
+ * CSTGIntMIDIClockSync (embedded via a `+0x4` sub-object offset inside
+ * CSTGMIDIClockSync), this class inherits `CSTGMIDIClockSyncBase`
+ * directly at offset 0 -- confirmed via `Initialize()`'s own call to
+ * `CSTGMIDIClockSyncBase::Initialize()` passing `this` completely
+ * unmodified (no `lea eax,[eax+0x4]` the way CSTGMIDIClockSync's own ctor
+ * does for its Int sub-object).
+ *
+ * Real vtable (`_ZTV20CSTGExtMIDIClockSync`, readelf-confirmed 0x28/40
+ * bytes, 8 slots, same slot layout as CSTGMIDIClockSyncBase/
+ * CSTGIntMIDIClockSync above): 0x08 GetEventCount, 0x0c NotifySyncDetected,
+ * 0x10 GetEventStatusByte, 0x14 ProcessClock, 0x18 ConsumeEvent, 0x1c
+ * GetClockEarlyThresholdTicks, 0x20 GetClockLateThresholdTicks, 0x24
+ * PrepareForNextTick.
+ *
+ * ALL 13 methods below are confirmed real (`nm -CS`/full `objdump -dr`),
+ * but only 10 are reconstructed by this pass -- ProcessClock()/
+ * MeasureJitter()/EstimateTempoAndPredictNextClock() are declared but
+ * DELIBERATELY DEFERRED (no-op stubs in bar2_stubs.cpp), matching this
+ * project's established convention. Unlike most prior deferrals, this one
+ * is backed by full disassembly, not a size-based guess (this class was
+ * originally flagged "disproportionate" without being examined at all --
+ * this pass genuinely investigated it): ProcessClock() (`.text+0x68650`,
+ * 174 bytes) reads a 4-slot/12-byte-stride incoming-clock timestamp ring
+ * at fieldAt(0x40) (indexed by `fieldAt(0xa8) & 7`, i.e. the SAME
+ * read-index GetEventStatusByte()/ConsumeEvent() advance -- so this ring
+ * is fed by whatever writes fieldAt(0xa4)/status-ring entries, not yet
+ * identified) and calls EstimateTempoAndPredictNextClock() then
+ * MeasureJitter(); MeasureJitter() (`.text+0x68480`, 460 bytes) is a
+ * genuine median-of-3 smoothing filter over 3 samples from a 32-entry
+ * float ring at fieldAt(0xbc) (indexed `fieldAt(0xb8) & 0x1f`), expressed
+ * via x87 `fucomi`/`fcmovbe`/`fcmovnbe` conditional-move sorting -- high
+ * transcription risk, genuinely disproportionate to reproduce by hand
+ * without a way to KAT-verify against real x87 stack behavior;
+ * EstimateTempoAndPredictNextClock() (`.text+0x68130`, 737 bytes, NOT
+ * examined in detail this pass) is by far the largest method in the
+ * class. None of the 3 deferred methods, nor ProcessClock()'s own
+ * still-unidentified ring producer, are reachable from anything this
+ * project currently reconstructs -- the sole confirmed real caller
+ * anywhere in this codebase is `CSTGMidiInPort::Activate()`'s direct call
+ * to `Initialize()` (midi_in_port_serial.cpp), which this pass DOES
+ * implement for real, along with the small always-correct accessor
+ * methods below. A future session reconstructing whatever drives
+ * `CSTGMIDIClockSync`'s own external-vs-internal dispatch (not yet
+ * touched anywhere in this project) is the natural point to revisit the
+ * deferred trio.
+ */
+class CSTGExtMIDIClockSync : public CSTGMIDIClockSyncBase {
+public:
+	/*
+	 * Initialize() (`.text+0x68010`, 283 bytes) confirmed real. Calls
+	 * the base `CSTGMIDIClockSyncBase::Initialize()` directly on `this`
+	 * (see class comment). Then, guarded by its OWN function-local
+	 * static byte (separate from the base's own guard):
+	 *   - `kSecondsToTimeStampE` (double) = `(double)(1000u *
+	 *     CSTGCPUInfo::sInstance->khz)` -- CPU clock rate in Hz. Real
+	 *     code does a full unsigned-64-bit-safe conversion (mul,
+	 *     64-bit fild + 2^64 correction if the high dword's sign bit is
+	 *     set); reproduced here as a plain `unsigned int` conversion,
+	 *     which is behaviorally identical for every real CPU frequency
+	 *     this target ever runs at (khz well under 4,294,967, the
+	 *     point the 32-bit product would even reach the correction
+	 *     branch) -- also sidesteps a real 32-bit-kernel-module hazard:
+	 *     a genuine `unsigned long long -> double` cast needs
+	 *     `__floatundidf` from libgcc, unavailable in this Kbuild
+	 *     target (same class of problem documented in the STGGmp.ko
+	 *     build, project docs).
+	 *   - `kTimeStampToSecondsE` (double) = `1.0 / kSecondsToTimeStampE`.
+	 *   - `kClockEarlyThresholdTicksE` (float) = `floor(-0.0004f *
+	 *     CSTGAudioBusManager::sInstance->busGainScale)` -- confirmed
+	 *     real FLOOR rounding (x87 CW round-toward-`-inf`, `0x0400`),
+	 *     genuinely different from every other rounding in this class
+	 *     (all CEIL) -- NOT reproducible as a plain truncating cast
+	 *     (input is negative and non-integer at the real busGainScale
+	 *     default: `floor(-0.6) = -1 != (int)(-0.6) = 0`). Uses this
+	 *     file's local `FloorToInt()`/`CeilToInt()` helpers.
+	 * Unconditionally (every call, matching the base's own "every call"
+	 * tail): `fieldAt(0xa4)` = 0, `fieldAt(0xa8)` = 0, `fieldAt(0x1bc)`
+	 * (jitter estimate) = 0.0f, `fieldAt(0x1d4)` (dynamic late-threshold,
+	 * see `GetClockLateThresholdTicks()`) = `ceil(0.001f *
+	 * CSTGAudioBusManager::sInstance->busGainScale)` (CEIL, `0x0800`,
+	 * SAME formula/rounding as `NotifySyncDetected()`/
+	 * `UpdateDynamicThresholds()` below -- cross-checked, all three
+	 * confirmed identical opcodes), `fieldAt(0x1c4)` (target tempo) =
+	 * `0x78` (120, a default BPM-ish sentinel).
+	 */
+	void Initialize();
+
+	/* GetEventCount() const (`.text+0x67f40`, 15 bytes): return
+	 * fieldAt(0xa4) - fieldAt(0xa8) -- SAME shape as
+	 * CSTGIntMIDIClockSync::GetEventCount(), different offsets. */
+	unsigned int GetEventCount() const;
+
+	/* GetEventStatusByte() const (`.text+0x67f50`, 21 bytes): return the
+	 * ring byte at fieldAt(0x40 + (fieldAt(0xa8) & 7) * 0xc + 0x4) -- an
+	 * 8-entry, 12-byte-stride ring anchored at +0x40 (the SAME ring
+	 * ProcessClock() reads, see class comment), indexed by the
+	 * read-counter mod 8. Real disasm: `lea edx,[edx+edx*2]` (index*3)
+	 * then `lea eax,[eax+edx*4+0x40]` (index*3*4 = index*0xc), then
+	 * `movzx eax,[eax+0x4]`. */
+	unsigned char GetEventStatusByte() const;
+
+	/* ConsumeEvent() (`.text+0x67f70`, 8 bytes): fieldAt(0xa8) += 1. */
+	void ConsumeEvent();
+
+	/*
+	 * NotifySyncDetected() (`.text+0x67f80`, 144 bytes) confirmed real:
+	 * zeroes fieldAt(0xb4)/fieldAt(0x1c0) (int), sets fieldAt(0xb8) =
+	 * -1 (int), zero-fills the two 0x80-byte (32 x float) ring buffers
+	 * at fieldAt(0xbc) and fieldAt(0x13c) (`rep stosb`), then sets
+	 * fieldAt(0x1d4) = `ceil(0.001f *
+	 * CSTGAudioBusManager::sInstance->busGainScale)` -- see
+	 * `Initialize()`'s own comment for the cross-check.
+	 */
+	void NotifySyncDetected();
+
+	/*
+	 * ProcessClock() (`.text+0x68650`, 174 bytes) -- CONFIRMED REAL,
+	 * examined but DELIBERATELY DEFERRED. See class comment.
+	 */
+	void ProcessClock();
+
+	/*
+	 * MeasureJitter() (`.text+0x68480`, 460 bytes) -- CONFIRMED REAL,
+	 * examined but DELIBERATELY DEFERRED. See class comment.
+	 */
+	void MeasureJitter();
+
+	/*
+	 * EstimateTempoAndPredictNextClock() (`.text+0x68130`, 737 bytes) --
+	 * CONFIRMED REAL, NOT examined in detail, DELIBERATELY DEFERRED.
+	 * See class comment.
+	 */
+	void EstimateTempoAndPredictNextClock();
+
+	/*
+	 * UpdateFilteredTempo(double) (`.text+0x68420`, 91 bytes) confirmed
+	 * real: `predicted = (int)(CSTGAudioBusManager::sInstance->
+	 * busGainScale * arg * kConst_0x1b0)` (kConst_0x1b0 a confirmed
+	 * `.rodata.cst4` float, plain `fistp`-truncated, NOT rounded --
+	 * genuinely different from every fieldAt(0x1d4)-style CEIL
+	 * computation above). If `predicted != fieldAt(0x1c4)` (the current
+	 * target tempo): a debounce counter at fieldAt(0x1c8) is compared
+	 * against `0x1f` (31) -- `<= 31`: just increment the counter and
+	 * return (predicted value NOT yet adopted); `> 31`: adopt
+	 * `fieldAt(0x1c4) = predicted` AND reset the counter to 0. If
+	 * `predicted == fieldAt(0x1c4)` already: reset the counter to 0
+	 * directly (no adoption needed, already current).
+	 */
+	void UpdateFilteredTempo(double bpm);
+
+	/*
+	 * UpdateDynamicThresholds() (`.text+0x68700`, 100 bytes) confirmed
+	 * real: `clampedJitter = clamp(fieldAt(0x1bc), 0.001f, 0.008f)`
+	 * (both confirmed `.rodata.cst4` floats, via `fucomi`/`fcmovnbe`
+	 * conditional moves); `fieldAt(0x1d4) = ceil(clampedJitter *
+	 * CSTGAudioBusManager::sInstance->busGainScale)` (CEIL, `0x0800` --
+	 * BYTE-FOR-BYTE IDENTICAL tail to `MeasureJitter()`'s own last ~40
+	 * bytes, confirmed via opcode comparison -- this project's
+	 * established "shared identical tail -> one helper" convention
+	 * applies, expressed as `ClampAndStoreLateThreshold()` below, though
+	 * `MeasureJitter()` itself stays deferred).
+	 */
+	void UpdateDynamicThresholds();
+
+	/* GetClockLateThresholdTicks() const (`.text+0x68660` section, 6
+	 * bytes: `fld [eax+0x1d4]; ret`) confirmed real: returns the
+	 * DYNAMIC per-instance fieldAt(0x1d4) -- genuinely different from
+	 * CSTGIntMIDIClockSync's own trivial constant-1.0f override. */
+	float GetClockLateThresholdTicks() const;
+
+	/* GetClockEarlyThresholdTicks() const (`.text+0x68650` section, 6
+	 * bytes: `fld kClockEarlyThresholdTicksE; ret`) confirmed real:
+	 * returns the STATIC `kClockEarlyThresholdTicksE` computed once in
+	 * `Initialize()`. */
+	float GetClockEarlyThresholdTicks() const;
+
+	/* PrepareForNextTick() (`.text+0x68660` section, 1 byte: bare `ret`)
+	 * confirmed real no-op override -- genuinely different from
+	 * CSTGIntMIDIClockSync's own real (non-trivial) override. */
+	void PrepareForNextTick();
+
+	static double kSecondsToTimeStamp;
+	static double kTimeStampToSeconds;
+	static float kClockEarlyThresholdTicks;
+};
+
 struct CSTGMIDIClockSync {
 	/*
 	 * CSTGMIDIClockSync() (batch 21, `.text+0x67410`, 250 bytes)

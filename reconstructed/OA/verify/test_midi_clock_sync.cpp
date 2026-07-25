@@ -2,8 +2,9 @@
 /*
  * test_midi_clock_sync.cpp  -  host-side known-answer test for batch 21:
  * CSTGMIDIClockSync::CSTGMIDIClockSync(), CSTGMIDIClockSyncBase::
- * Initialize(), and the complete CSTGIntMIDIClockSync class (see
- * ../src/engine/midi_clock_sync.cpp).
+ * Initialize(), and the complete CSTGIntMIDIClockSync class, PLUS (later
+ * pass) the 10 real (of 13 total) CSTGExtMIDIClockSync methods -- see
+ * ../src/engine/midi_clock_sync.cpp.
  *
  * Links sk_stg_gate.cpp directly (its SKSTGGate_ShouldSyncExternalClock()/
  * SKSTGGate_GetInternalTempo() are real dependencies of
@@ -22,6 +23,22 @@
 #include <new>
 #include <sys/mman.h>
 #include "oa_engine_init.h"
+
+/* Local minimal CSTGCPUInfo stand-in (matching test_midi_port_manager.cpp's
+ * own established precedent for the exact same situation) rather than
+ * `#include "oa_setup_global_resources.h"` directly -- that header pulls
+ * in oa_internal.h's placement-`operator new(oa_size_t, void*)`, which
+ * conflicts with this file's own `#include <new>` (both define the same
+ * placement-new overload, a hard redefinition error). This test only
+ * needs `sInstance`/`khz`, never calls the real ctor. */
+struct CSTGCPUInfo {
+	static CSTGCPUInfo *sInstance;
+	unsigned int cpuCount, khz;
+	float field8;
+	int fieldC;
+	float field10, field14, field18, field1c;
+	int field20;
+};
 
 /* Matches this project's established `mmap(..., MAP_32BIT, ...)` fix
  * (test_global.cpp et al) -- fieldAt(0x60) is a packed 32-bit pointer on
@@ -68,6 +85,18 @@ CSTGMIDIClockSync *CSTGMIDIClockSync::sInstance;
  * project's own verify/ suite (sec 10.158). */
 extern "C" unsigned char _ZTV20CSTGIntMIDIClockSync[40];
 unsigned char _ZTV20CSTGIntMIDIClockSync[40];
+
+/* Same "_ZTVxxx" per-isolated-test convention, for the newly-real
+ * CSTGExtMIDIClockSync (this pass) -- real storage lives in
+ * bar2_stubs.cpp (not linked here). */
+extern "C" unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+
+/* CSTGCPUInfo::sInstance -- real storage lives in engine_startup_bits.cpp
+ * (not linked here); this test only needs `khz` set directly, matching
+ * this file's own established "mock ctor" precedent for
+ * CSTGAudioBusManager above. */
+CSTGCPUInfo *CSTGCPUInfo::sInstance;
 
 /* Static storage matching test_sk_stg_gate.cpp's own established shape
  * (the real +0x97c750 offset needs a just-under-9.9MB stand-in). */
@@ -318,6 +347,134 @@ int main(void)
 		munmap(extObj, 0x200);
 		*(unsigned int *)(buf + 0x60) = 0; /* restore for cleanliness */
 		(void)mcs;
+	}
+
+	printf("\n[8] CSTGExtMIDIClockSync -- newly-real cluster (see oa_engine_init.h)\n");
+	{
+		CSTGCPUInfo cpu;
+		memset(&cpu, 0, sizeof(cpu));
+		cpu.khz = 1000000; /* 1000 * 1000000 = 1e9 Hz, exact */
+		CSTGCPUInfo::sInstance = &cpu;
+
+		unsigned char buf[0x200];
+		memset(buf, 0, sizeof(buf));
+		CSTGExtMIDIClockSync *o = (CSTGExtMIDIClockSync *)buf;
+
+		o->Initialize();
+		check_float("kSecondsToTimeStamp == 1e9 (1000*khz, exact)",
+			    CSTGExtMIDIClockSync::kSecondsToTimeStamp, 1.0e9);
+		check_float("kTimeStampToSeconds == 1/1e9",
+			    CSTGExtMIDIClockSync::kTimeStampToSeconds, 1.0 / 1.0e9);
+		check_float("kClockEarlyThresholdTicks == floor(-0.0004*1500) == -1",
+			    CSTGExtMIDIClockSync::kClockEarlyThresholdTicks, -1.0f);
+		check_eq("fieldAt(0xa4) zeroed", *(int *)(buf + 0xa4), 0);
+		check_eq("fieldAt(0xa8) zeroed", *(int *)(buf + 0xa8), 0);
+		check_float("fieldAt(0x1bc) (jitter) zeroed", *(float *)(buf + 0x1bc), 0.0f);
+		check_float("fieldAt(0x1d4) == ceil(0.001*1500) == 2",
+			    *(float *)(buf + 0x1d4), 2.0f);
+		check_eq("fieldAt(0x1c4) (target tempo) == 0x78 (120)",
+			 *(int *)(buf + 0x1c4), 0x78);
+
+		printf("  -- second call (different object): static guard held, statics "
+		       "unchanged even with a poisoned khz --\n");
+		unsigned int savedKhz = cpu.khz;
+		cpu.khz = 999;
+		unsigned char buf2[0x200];
+		memset(buf2, 0, sizeof(buf2));
+		((CSTGExtMIDIClockSync *)buf2)->Initialize();
+		check_float("kSecondsToTimeStamp unchanged on 2nd Initialize() (guard held)",
+			    CSTGExtMIDIClockSync::kSecondsToTimeStamp, 1.0e9);
+		cpu.khz = savedKhz;
+
+		printf("  -- GetEventCount/GetEventStatusByte/ConsumeEvent (8-entry ring @ +0x40)\n");
+		*(unsigned int *)(buf + 0xa4) = 5; /* write index */
+		*(unsigned int *)(buf + 0xa8) = 2; /* read index */
+		for (unsigned int i = 0; i < 8; i++)
+			buf[0x40 + i * 0xc + 0x4] = (unsigned char)(0x90 + i);
+		check_eq("GetEventCount == writeIdx - readIdx", o->GetEventCount(), 3);
+		check_eq("GetEventStatusByte == ring[readIdx & 7]", o->GetEventStatusByte(), 0x90 + 2);
+		o->ConsumeEvent();
+		check_eq("ConsumeEvent advances read index", *(unsigned int *)(buf + 0xa8), 3);
+		check_eq("GetEventStatusByte after consume", o->GetEventStatusByte(), 0x90 + 3);
+		*(unsigned int *)(buf + 0xa8) = 9; /* wraparound: 9 & 7 == 1 */
+		check_eq("GetEventStatusByte wraps mod 8", o->GetEventStatusByte(), 0x90 + 1);
+
+		printf("  -- PrepareForNextTick() -- confirmed real no-op (genuinely "
+		       "different from CSTGIntMIDIClockSync's own real override)\n");
+		unsigned char before[0x200];
+		memcpy(before, buf, sizeof(buf));
+		o->PrepareForNextTick();
+		check_eq("PrepareForNextTick() touched nothing", memcmp(before, buf, sizeof(buf)), 0);
+
+		printf("  -- NotifySyncDetected() -- zero 2 ring buffers, reset counters, "
+		       "recompute fieldAt(0x1d4)\n");
+		*(int *)(buf + 0xb4) = 777;
+		*(int *)(buf + 0xb8) = 777;
+		*(int *)(buf + 0x1c0) = 777;
+		memset(buf + 0xbc, 0xcc, 0x80);
+		memset(buf + 0x13c, 0xcc, 0x80);
+		o->NotifySyncDetected();
+		check_eq("fieldAt(0xb4) zeroed", *(int *)(buf + 0xb4), 0);
+		check_eq("fieldAt(0xb8) == -1", *(int *)(buf + 0xb8), -1);
+		check_eq("fieldAt(0x1c0) zeroed", *(int *)(buf + 0x1c0), 0);
+		bool ringsZero = true;
+		for (unsigned int i = 0; i < 0x80; i++)
+			if (buf[0xbc + i] != 0 || buf[0x13c + i] != 0)
+				ringsZero = false;
+		check_eq("both 0x80-byte float rings zeroed", ringsZero ? 1 : 0, 1);
+		check_float("fieldAt(0x1d4) recomputed == ceil(0.001*1500) == 2",
+			    *(float *)(buf + 0x1d4), 2.0f);
+
+		printf("  -- GetClockLateThresholdTicks (dynamic)/GetClockEarlyThresholdTicks "
+		       "(static)\n");
+		*(float *)(buf + 0x1d4) = 42.0f;
+		check_float("GetClockLateThresholdTicks == fieldAt(0x1d4) (dynamic, NOT a "
+			    "constant, unlike CSTGIntMIDIClockSync)",
+			    o->GetClockLateThresholdTicks(), 42.0f);
+		check_float("GetClockEarlyThresholdTicks == static kClockEarlyThresholdTicks",
+			    o->GetClockEarlyThresholdTicks(), -1.0f);
+
+		printf("  -- UpdateFilteredTempo(double): debounce -- 32 misses, then adopt "
+		       "on the 33rd\n");
+		*(int *)(buf + 0x1c4) = 120; /* target */
+		*(int *)(buf + 0x1c8) = 0;   /* debounce counter */
+		for (int i = 1; i <= 32; i++) {
+			o->UpdateFilteredTempo(40.0); /* predicted = 1500*40*2.5 = 150000, exact */
+			check_eq("target unchanged during debounce window",
+				 *(int *)(buf + 0x1c4), 120);
+		}
+		check_eq("debounce counter reached 32 after 32 misses", *(int *)(buf + 0x1c8), 32);
+		o->UpdateFilteredTempo(40.0); /* 33rd call: 32 > 31 -> adopt */
+		check_eq("target adopted on 33rd call", *(int *)(buf + 0x1c4), 150000);
+		check_eq("debounce counter reset to 0 on adopt", *(int *)(buf + 0x1c8), 0);
+
+		printf("  -- UpdateFilteredTempo(double): predicted == current target -> "
+		       "immediate debounce reset, no re-adoption needed\n");
+		*(int *)(buf + 0x1c8) = 17; /* poke a nonzero debounce count */
+		o->UpdateFilteredTempo(40.0); /* SAME predicted (150000) == current target */
+		check_eq("target still 150000 (already current)", *(int *)(buf + 0x1c4), 150000);
+		check_eq("debounce counter reset to 0 immediately", *(int *)(buf + 0x1c8), 0);
+
+		printf("  -- UpdateDynamicThresholds(): clamp(jitter, 0.001, 0.008) * "
+		       "busGainScale, ceil\n");
+		*(float *)(buf + 0x1bc) = 0.0005f; /* below min -> clamped to 0.001 */
+		o->UpdateDynamicThresholds();
+		check_float("clamped to min: ceil(0.001*1500) == 2", *(float *)(buf + 0x1d4), 2.0f);
+
+		*(float *)(buf + 0x1bc) = 0.01f; /* above max -> clamped to 0.008 */
+		o->UpdateDynamicThresholds();
+		/* NOT 12: float32 0.008f's real bit pattern is
+		 * 0.00800000037997961, so 0.008f*1500.0f == 12.00000057 (just
+		 * over the integer boundary) -> ceil == 13, not the naively
+		 * expected exact 12. */
+		check_float("clamped to max: ceil(0.008f*1500.0f) == 13 (float32 0.008f is "
+			    "slightly > 0.008, confirmed real)",
+			    *(float *)(buf + 0x1d4), 13.0f);
+
+		*(float *)(buf + 0x1bc) = 0.003f; /* within range, unclamped */
+		o->UpdateDynamicThresholds();
+		check_float("unclamped: ceil(0.003*1500) == ceil(4.5) == 5",
+			    *(float *)(buf + 0x1d4), 5.0f);
 	}
 
 	printf("=========================================================\n");

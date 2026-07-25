@@ -275,6 +275,17 @@ CFLAGS_keybed_debounce.o := -mhard-float -msse2 -mfpmath=sse
 # the real x87 extended-precision sequence is not a fidelity concern here.
 CFLAGS_midi_out_port_serial.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: CSTGMidiInPort::Activate() (this pass) does the
+# same shape of one-time plain-C float multiply chain (busGainScale *
+# 0.33f) to lazily cache sActiveSensingThresholdTicks -- would otherwise
+# pull in unresolvable libgcc soft-float helpers under the kernel's own
+# -msoft-float default. Real `fisttp` truncates with no CW override, so a
+# plain C `(int)` cast is exact; result comfortably clears the 495
+# integer boundary (495.00002 @ busGainScale=1500.0f) for this confirmed
+# real constant, so SSE2 vs the real x87 extended-precision sequence is
+# not a fidelity concern here.
+CFLAGS_midi_in_port_serial.o := -mhard-float -msse2 -mfpmath=sse
+
 # Same reasoning again: CSTGMidiPortManager::Initialize()'s (sec 10.230/
 # MASTER_REFERENCE) confirmed real CPU-speed-scaled timing-constant tail
 # (0.04f/0.2f * CSTGCPUInfo::sInstance->field8) does genuine plain-C

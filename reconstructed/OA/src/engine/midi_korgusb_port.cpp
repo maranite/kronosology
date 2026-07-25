@@ -246,14 +246,14 @@ void CKorgUsbAudioDriverMidiPorts::ProcessOutput()
 void CSTGMidiInPortKorgUsb::Deactivate()
 {
 	CKorgUsbAudioDriverMidiPorts::Disconnect((unsigned char *)this - 8);
-	((CSTGMidiInPort *)this)->Deactivate(); /* declared-only, deliberately deferred base method -- see oa_engine.h */
+	((CSTGMidiInPort *)this)->Deactivate(); /* now real -- see midi_in_port_serial.cpp */
 }
 
 /* Activate(CSTGMidiQueue*) -- CONFIRMED real: base Activate() first,
  * THEN the companion-module connection. */
 void CSTGMidiInPortKorgUsb::Activate(CSTGMidiQueue *q)
 {
-	((CSTGMidiInPort *)this)->Activate(q); /* declared-only, deliberately deferred base method -- see oa_engine.h */
+	((CSTGMidiInPort *)this)->Activate(q); /* now real -- see midi_in_port_serial.cpp */
 	CKorgUsbAudioDriverMidiPorts::Connect((unsigned char *)this - 8);
 }
 

@@ -837,6 +837,21 @@ unsigned char _ZTV18CSTGStreamingEvent[40];
 extern "C" unsigned char _ZTV20CSTGIntMIDIClockSync[40];
 unsigned char _ZTV20CSTGIntMIDIClockSync[40];
 
+/* _ZTV20CSTGExtMIDIClockSync -- needed now that
+ * CSTGMidiInPort::CSTGMidiInPort() installs it directly on its own
+ * embedded CSTGExtMIDIClockSync sub-object (this pass, +0x108). Real
+ * confirmed 40-byte size (readelf), 8 real slots -- SAME "install vs
+ * dispatch" rule as _ZTV20CSTGIntMIDIClockSync above: 10 of the 8+2
+ * (13 total, incl. the 2 non-virtual UpdateFilteredTempo/
+ * UpdateDynamicThresholds) real methods behind it are reconstructed for
+ * real in midi_clock_sync.cpp, but nothing in this project dispatches
+ * through this vtable yet, so it stays a safe zero-filled placeholder.
+ * See midi_clock_sync.cpp/oa_engine_init.h for the real slot -> method
+ * mapping and the 3 still-deferred slot targets (ProcessClock/
+ * MeasureJitter/EstimateTempoAndPredictNextClock, stubbed below). */
+extern "C" unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+unsigned char _ZTV20CSTGExtMIDIClockSync[40];
+
 /* STGAPIFrontPanelStatus::sInstance -- confirmed real static pointer,
  * already set by setup_global_resources.cpp; definition (storage) not
  * yet homed anywhere. */
@@ -857,17 +872,30 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
 void CSTGMidiInPort::StartSysEx() { }
 void CSTGMidiInPort::ReceiveSysExData(unsigned char) { }
 
-/* CSTGMidiInPort::Activate(CSTGMidiQueue*)/Deactivate() -- confirmed
- * real OA.ko-internal symbols (.text+0xf5830/0xf5820, 358/5 bytes),
- * confirmed real call targets from the new
- * CSTGMidiInPortKorgUsb::Activate()/Deactivate() (KorgUsb MIDI transport
- * batch, src/engine/midi_korgusb_port.cpp). Own body is a substantial,
- * separate MIDI-IN queue-wiring cluster (parallel to but independent
- * from the already-real CSTGMidiOutPort::Activate()) -- deliberately
- * deferred no-op stubs, same convention as StartSysEx()/
- * ReceiveSysExData() just above. Safe as a no-op here: this batch's own
- * KATs exercise CSTGMidiOutPortKorgUsb's transmit-side logic (the
- * actual reconstruction target), which does not depend on the InPort
- * side's own queue-wiring effects. */
-void CSTGMidiInPort::Activate(CSTGMidiQueue *) { }
-void CSTGMidiInPort::Deactivate() { }
+/* CSTGMidiInPort::Activate(CSTGMidiQueue*)/Deactivate() are now REAL --
+ * see src/engine/midi_in_port_serial.cpp (this pass). The prior no-op
+ * stubs here (`disproportionate separate cluster`) turned out tractable
+ * once actually disassembled: 358/5 bytes, no new dependency beyond the
+ * already-real CSTGMidiQueue::Initialize()/SetDesc() and the newly-real
+ * CSTGExtMIDIClockSync::Initialize() above.
+ *
+ * CSTGExtMIDIClockSync::ProcessClock()/MeasureJitter()/
+ * EstimateTempoAndPredictNextClock() -- CONFIRMED real OA.ko-internal
+ * symbols (.text+0x68650/0x68480/0x68130, 174/460/737 bytes), examined
+ * in full (ProcessClock/MeasureJitter) or by size only
+ * (EstimateTempoAndPredictNextClock) this pass. Deliberately deferred:
+ * MeasureJitter() is a genuine x87 `fucomi`/`fcmovbe`/`fcmovnbe`
+ * median-of-3 conditional-move sort over a 32-entry float ring, high
+ * transcription risk; EstimateTempoAndPredictNextClock() is the largest
+ * method in the class and was not examined in detail;
+ * ProcessClock()'s own producer (an 8-entry incoming-clock timestamp
+ * ring at fieldAt(0x40), fed by something not yet identified anywhere
+ * in this project) is itself unresolved. None of the 3 are reachable
+ * from anything this project currently reconstructs -- see
+ * oa_engine_init.h's class comment for the full writeup. Safe as
+ * no-ops here: nothing dispatches into this vtable yet (see its own
+ * comment above), and Activate()'s own real body calls ONLY
+ * Initialize() (already real), never these three. */
+void CSTGExtMIDIClockSync::ProcessClock() { }
+void CSTGExtMIDIClockSync::MeasureJitter() { }
+void CSTGExtMIDIClockSync::EstimateTempoAndPredictNextClock() { }
