@@ -56,6 +56,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/global_ctor.o \
            src/engine/engine_startup_bits.o \
            src/engine/engine_startup_bits2.o \
+           src/engine/power_off_timer.o \
            src/engine/engine_init.o \
            src/engine/voice_models.o \
            src/engine/managers.o \
@@ -329,6 +330,12 @@ CFLAGS_controller_info_analog_handler.o := -mhard-float -msse2 -mfpmath=sse
 # -msoft-float default).
 CFLAGS_calibration_data.o := -mhard-float -msse2 -mfpmath=sse
 
+# CPowerOffTimer's remaining 7 methods (batch, 2026-07-25) do genuine
+# plain-C float multiply/divide against CSTGAudioBusManager::
+# busGainScale to convert seconds<->ticks -- same reasoning as every
+# sibling override above.
+CFLAGS_power_off_timer.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -369,6 +376,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/global_ctor.cpp \
        src/engine/engine_startup_bits.cpp \
        src/engine/engine_startup_bits2.cpp \
+       src/engine/power_off_timer.cpp \
        src/engine/engine_init.cpp \
        src/engine/voice_models.cpp \
        src/engine/managers.cpp \
@@ -488,6 +496,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_cpu_affinity verify/test_comport verify/test_comport_init \
          verify/test_global_ctor verify/test_engine_startup_bits \
          verify/test_engine_init verify/test_heap_manager verify/test_engine_startup_bits2 \
+         verify/test_power_off_timer \
          verify/test_cost_profile verify/test_lfo_stepseq_quad verify/test_wave_seq_manager \
          verify/test_midi_dispatcher verify/test_vector_manager verify/test_vector_manager_init \
          verify/test_vector_eg_ctors verify/test_midi_queue_writer \
@@ -651,6 +660,9 @@ verify/test_heap_manager: verify/test_heap_manager.cpp src/mem/heap_manager.cpp 
 
 verify/test_engine_startup_bits2: verify/test_engine_startup_bits2.cpp src/engine/engine_startup_bits2.cpp src/engine/engine_startup_bits.cpp src/engine/managers.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_engine_init.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_engine_startup_bits2.cpp src/engine/engine_startup_bits2.cpp src/engine/engine_startup_bits.cpp src/engine/managers.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_power_off_timer: verify/test_power_off_timer.cpp src/engine/power_off_timer.cpp include/oa_engine.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_power_off_timer.cpp src/engine/power_off_timer.cpp -o $@
 
 verify/test_cost_profile: verify/test_cost_profile.cpp src/engine/cost_profile.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_cost_profile.cpp src/engine/cost_profile.cpp -o $@

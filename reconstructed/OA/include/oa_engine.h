@@ -1724,11 +1724,40 @@ public:
  * exactly the end) with no gap at all: this class's last field is the
  * mutex pointer itself.
  */
+/*
+ * Field layout (all 7 methods below confirmed real via objdump -dr,
+ * batch 2026-07-25 -- see src/engine/power_off_timer.cpp for the full
+ * derivation): this is the Kronos "Auto Power Off" inactivity timer.
+ *   +0x00 u8   activity flag -- set to 1 by every front-panel input
+ *              handler (CSTGFrontPanel::HandleSwitchEvent/
+ *              HandleAnalogController/HandleRotary/etc., already real
+ *              in front_panel_handlers.cpp); atomically test-and-
+ *              cleared once per DoTimerTick() call, and treated as
+ *              "user was active this tick -> reset the countdown".
+ *   +0x04 u32  ticksRemaining (countdown, decremented once per tick)
+ *   +0x08 u32  ticksTotal (reload value; 0xffffffff = disabled)
+ *   +0x0c u32  warningThresholdTicks ("lead time" before expiry at
+ *              which the UI warning fires)
+ *   +0x10 u32  longProcessCount (mutex-guarded nesting counter --
+ *              Begin/EndLongProcess bracket operations, e.g. a long
+ *              save/load, that must suppress the timer)
+ *   +0x14 u32  state: 0=disabled, 1=counting down, 2=warning shown,
+ *              3=countdown expired ("critical"), 4=prep-complete
+ *              (hardware power-off command already sent)
+ *   +0x18 ptr  mutex (rtwrap_pthread_mutex, guards +0x10 only)
+ */
 class CPowerOffTimer {
 public:
 	static CPowerOffTimer *sInstance;
 	CPowerOffTimer();
-	void Initialize();	/* confirmed real, body not reconstructed, sec 10.58 */
+	void Initialize();		/* confirmed real, src/engine/engine_startup_bits2.cpp */
+	void ReloadTimer();		/* confirmed real, src/engine/power_off_timer.cpp */
+	void UpdateTimeoutValue(unsigned int timeoutSeconds);	/* ditto */
+	void UpdateWarningThreshold(unsigned int thresholdSeconds);	/* ditto */
+	void PowerOffPrepComplete();	/* ditto */
+	void DoTimerTick();		/* ditto -- the periodic driver, not yet wired to a real timer source */
+	void BeginLongProcess();	/* ditto */
+	void EndLongProcess();		/* ditto */
 	unsigned char _unrecovered[28];
 };
 

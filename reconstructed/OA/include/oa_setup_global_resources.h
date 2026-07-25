@@ -578,6 +578,15 @@ int COmapNKS4Driver_Is88Key(void);
  * COmapNKS4Driver_SetTestMode(int on) { ... (on != 0) ... }`). */
 void COmapNKS4Driver_SetTestMode(int testMode);
 /*
+ * Confirmed real (relocation from CPowerOffTimer::DoTimerTick(),
+ * src/engine/power_off_timer.cpp, batch 2026-07-25): a real symbol in
+ * OA_real.ko already exported by OmapNKS4Module the same way as its
+ * SetTestMode sibling above; the auto-power-off timer skips a tick
+ * entirely while NKS4 test mode is active. No args, return in EAX
+ * (regparm), matches SetTestMode's own confirmed calling convention.
+ */
+int COmapNKS4Driver_GetTestMode(void);
+/*
  * SIGNATURE FIXED (batch 38): this project's earlier no-arg guess
  * didn't match ground truth -- the real ground-truth symbol is the
  * mangled C++ method `_ZN16SCalibrationData19LoadCalibrationFileEv`
