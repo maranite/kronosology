@@ -655,6 +655,13 @@ RECONSTRUCTED = {
     "0814d080",  # CChunkOnDemand::CChunkOnDemand()
     "080be680",  # CZ::StrCmpIgnoreCase(char const*, char const*)
     "080a7080",  # COmegaPtrArray::RemoveAll(int)
+
+    # CSysApiInstance::RegisterApi() batch (Stage 6 breadth sweep, 2026-07-25) --
+    # promoted from an empty Tier-B link-stub to a real, disassembly-verified body.
+    # Confirmed boot-path-reachable: 7 real mains.cpp call sites (MMainEditMan/
+    # MMainSeqTimer/MMainSysEx/MMainChunkMan/MMainRTRouter/MMainDumpMan/MMainResMan),
+    # and the real target of Api's own vtable slot +0xa4. See sysapi_instance.h.
+    "0806bab0",  # CSysApiInstance::RegisterApi(char const*, CApiBase*)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

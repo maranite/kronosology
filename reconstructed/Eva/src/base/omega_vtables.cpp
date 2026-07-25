@@ -120,6 +120,9 @@ void *PTR__CDummyMsgInput_08e80c80[3] = {
 void *PTR__CNamedObjectBase_08e81378[2] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+void *PTR__CApiDescriptor_08e81368[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 void *PTR__CTracer_08e81468[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };

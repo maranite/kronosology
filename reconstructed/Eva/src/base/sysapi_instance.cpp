@@ -2,13 +2,18 @@
  * sysapi_instance.cpp  -  see include/sysapi_instance.h.
  *
  * Cleanup()/AddModule() transcribed from Cleanup@0806ca50.c (497 bytes) and
- * AddModule@0806b550.c (22 bytes). EnableMultiTask()/WriteMessageToHost()/RegisterApi()
- * are Tier-B link-stubs (see sysapi_instance.h).
+ * AddModule@0806b550.c (22 bytes). EnableMultiTask()/WriteMessageToHost() are Tier-B
+ * link-stubs (see sysapi_instance.h). RegisterApi() -- Tier A, see below and the
+ * header's own file comment.
  *
  * ConstructSysApiInstance() (new, 2026-07-23) transcribes
  * global.constructors.keyed.to.SysApiInstance@0806cc50.c (123 bytes) -- the real static
  * constructor that sets `Api = SysApiInstance;` before main(), fixing the
  * MMainEditMan() NULL-Api crash. See global_object_base.h for the full mechanism.
+ *
+ * RegisterApi() (promoted to Tier A, Stage 6 breadth sweep, 2026-07-25) transcribed
+ * from RegisterApi@0806bab0.c (1099 bytes) -- see sysapi_instance.h for the full
+ * per-branch accounting.
  */
 
 #include "sysapi_instance.h"
@@ -19,6 +24,8 @@
 #include "system_api.h"
 
 #include <new>
+#include <cstring>
+#include <cstdlib>
 
 unsigned char SysApiInstance[0x34] = {};
 
@@ -122,7 +129,81 @@ void CSysApiInstance::AddConstructor(CModuleConstructor *ctor)
 	((CModuleManager *)g_poModuleManager)->AddConstructor(ctor);
 }
 
-void CSysApiInstance::RegisterApi(const char * /*name*/, CApiBase * /*api*/)
+namespace {
+typedef void (*ApiWarn1Fn)(void *, const char *, const char *);
+
+/* Real Api+0x90 "soft log" call, one %s argument -- same slot/shape already
+ * established in config_manager.cpp's own ApiWarn1() (each translation unit keeps
+ * its own tiny local copy, matching this project's established per-file convention
+ * rather than a shared header for a 2-line helper).
+ */
+inline void ApiWarn1(const char *fmt, const char *arg)
 {
-	/* Tier-B link-stub -- .text+0x0806bab0, 1099 bytes. See sysapi_instance.h. */
+	void *vtbl = *(void **)Api;
+	ApiWarn1Fn fn = *(ApiWarn1Fn *)((char *)vtbl + 0x90);
+	fn(Api, fmt, arg);
+}
+} // namespace
+
+int CSysApiInstance::RegisterApi(const char *name, CApiBase *api)
+{
+	char *self = (char *)this;
+
+	/* mApis embedded at +0x04 (see header's own corrected field-mapping comment):
+	 * own +0xc/+0x14 land at absolute +0x10 (count) / +0x18 (array), own +4
+	 * ("call dtor on remove" flag) lands at absolute +0x08.
+	 */
+	int count = *(int *)(self + 0x10);
+	void **array = *(void ***)(self + 0x18);
+
+	int foundIndex = -1;
+	for (int i = 0; i < count; i++) {
+		void **entry = (void **)array[i];
+		if (strcmp(name, (const char *)entry[1]) == 0) {
+			foundIndex = i;
+			break;
+		}
+	}
+
+	if (foundIndex >= 0) {
+		void **entry = (void **)array[foundIndex];
+
+		if (entry[2] == (void *)api) {
+			ApiWarn1("API <%s> already registered!", name);
+			return 1;
+		}
+
+		/* Replacing an already-registered name under a different API pointer --
+		 * real, but never exercised by this pass's own 7 boot-path callers
+		 * (each registers a distinct, never-repeated name). Removes the old
+		 * descriptor (dispatching TNamedPtrArray<CApiDescriptor>'s own "delete
+		 * element" callback if mApis' own +0x04 flag says to -- EvaVTableStub-
+		 * backed, see omega_vtables.h), then falls through to build a fresh one
+		 * below, exactly like the not-found case.
+		 */
+		ApiWarn1("Replacing API <%s>!", name);
+		int callDtor = *(int *)(self + 0x08);
+		COmegaPtrArray *apis = (COmegaPtrArray *)(self + 4);
+		apis->RemoveAtIndex((unsigned)foundIndex, callDtor);
+	}
+
+	/* Build a fresh 3-word {vtbl, name, api} descriptor -- identical shape to
+	 * mains.cpp's own RegisterModuleDescriptor() helper, just installing
+	 * CApiDescriptor's own vtable (PTR__CApiDescriptor_08e81368) at the end
+	 * instead of a per-module one.
+	 */
+	void **descriptor = (void **)malloc(0xc);
+	descriptor[0] = PTR__CNamedObjectBase_08e81378;
+	descriptor[1] = 0;
+
+	char *nameBuf = (char *)malloc(strlen(name) + 1);
+	strcpy(nameBuf, name);
+	descriptor[1] = nameBuf;
+
+	descriptor[2] = api;
+	descriptor[0] = PTR__CApiDescriptor_08e81368;
+
+	COmegaPtrArray *apis = (COmegaPtrArray *)(self + 4);
+	apis->Add(descriptor);
+	return 1;
 }

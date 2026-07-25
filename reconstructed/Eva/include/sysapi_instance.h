@@ -36,18 +36,44 @@
  * straight to CModuleManager::AddModule() (module_manager.h), which is itself the
  * Tier-B link-stub end of this particular chain.
  *
- * RegisterApi(const char*, CApiBase*) is a Tier-B link-stub body (genuinely deep named-
- * API registry, out of scope) but its SIGNATURE and CALL SITES are now Tier A: direct
- * raw-byte read of the real binary (.rodata+08e81008+0xa4) confirms this is exactly
- * what sits at Api's own vtable slot +0xa4 -- the slot mains.cpp's 8-member
+ * RegisterApi(const char*, CApiBase*) -- .text+0x0806bab0, 1099 bytes -- PROMOTED TO
+ * TIER A (Stage 6 breadth sweep, 2026-07-25). Real body: linear-scans the embedded
+ * mApis descriptor array (own +0x10 count / +0x18 array, see field-mapping comment
+ * above) for an existing entry with the same name (a real 4-way Duff's-device unroll
+ * in the disassembly, collapsed to a plain loop here, same license as
+ * omega_ptr_array.cpp's own collapses):
+ *   - not found -> build a fresh 3-word {vtbl, name, api} descriptor object (identical
+ *     shape to mains.cpp's own RegisterModuleDescriptor() helper, just installing
+ *     CApiDescriptor's own vtable -- PTR__CApiDescriptor_08e81368, omega_vtables.h --
+ *     at the end instead of a per-module one) and COmegaPtrArray::Add() it.
+ *   - found, same api pointer -> logs "API <%s> already registered!" (Api+0x90) and
+ *     returns without touching the array.
+ *   - found, different api pointer -> logs "Replacing API <%s>!" (Api+0x90), removes
+ *     the old descriptor via COmegaPtrArray::RemoveAtIndex() (own +0x08 "call dtor"
+ *     flag), then builds+adds a fresh descriptor exactly as the not-found case (the
+ *     real disassembly duplicates this tail twice via two different entry points;
+ *     collapsed to one shared path here -- semantically identical, not a shortcut).
+ * The real disassembly's own extra defensive re-check (`if the matched array slot's
+ * raw pointer is NULL, treat as not-found`) is omitted as genuinely unreachable given
+ * how entries are only ever added non-null (same "soft assert never actually taken"
+ * convention already established elsewhere in this project, e.g. omega_ptr_array.cpp).
+ * Return type corrected from the placeholder `void` to `int` (real ABI: `undefined4`,
+ * always literal 1 on every path) -- safe, since every one of this pass's 7 real call
+ * sites (mains.cpp) already discards the return value as a bare statement.
+ *
+ * This is exactly the function that sits at Api's own vtable slot +0xa4 (confirmed via
+ * a direct raw-byte read of .rodata+08e81008+0xa4) -- the slot mains.cpp's 8-member
  * MMainXxx(void) family (ckernel.cpp's InitSystemLayer()) dispatches through to
  * register EditApiInstance/SeqApiInstance/ChkApiInstance/DumpApiInstance/RMApiInstance/
- * RTRouterApiInstance. Those 8 call sites now call RegisterApi() directly by name
- * (mains.cpp) instead of the raw `(**(code**)(*Api+0xa4))(...)` vtable dispatch they
- * used before this was confirmed -- matching MMainSysEx's own pre-existing, already-
- * direct RegisterApi() call (the "one real outlier" Stage 3's own README section
- * flagged; turns out not to be a different mechanism at all, just a different calling
- * style for the exact same function).
+ * RTRouterApiInstance. All 7 wired-up call sites now call RegisterApi() directly by
+ * name (mains.cpp) instead of the raw `(**(code**)(*Api+0xa4))(...)` vtable dispatch
+ * they used before this was confirmed -- matching MMainSysEx's own pre-existing,
+ * already-direct RegisterApi() call (the "one real outlier" Stage 3's own README
+ * section flagged; turns out not to be a different mechanism at all, just a different
+ * calling style for the exact same function). On this pass's own traced boot data
+ * every one of the 7 calls registers a distinct, never-repeated name, so only the
+ * "not found" path is genuinely exercised -- the "replacing" branch is real but
+ * currently dead code, same status as several other functions in this project.
  *
  * AddConstructor(CModuleConstructor*) -- .text+0x0806b530, 22 bytes -- ADDED (Stage 6
  * breadth sweep, 2026-07-25). Real forwarder to CModuleManager::AddConstructor()
@@ -101,10 +127,11 @@ public:
 	 */
 	void AddConstructor(CModuleConstructor *ctor);
 
-	/* .text+0x0806bab0, 1099 bytes -- Tier-B link-stub, not reconstructed (named-API
-	 * registry substrate, genuinely out of scope for this pass).
+	/* .text+0x0806bab0, 1099 bytes. Tier A -- see file comment above for the full
+	 * accounting. Real return type is `undefined4`, always literal 1 -- every one of
+	 * this project's own 7 call sites already discards it as a bare statement.
 	 */
-	void RegisterApi(const char *name, CApiBase *api);
+	int RegisterApi(const char *name, CApiBase *api);
 };
 
 /* Real global (CKernel::GetSysApi()'s own body: `return SysApiInstance;`). CORRECTED

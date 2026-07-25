@@ -134,6 +134,29 @@
  * are never decoded or dereferenced by any reconstructed code, only its address is
  * ever stored.
  *
+ * Added in the Stage 6 breadth-sweep pass (2026-07-25), CSysApiInstance::RegisterApi()
+ * batch -- direct raw-byte read (not the usual next-symbol heuristic, since a second
+ * class's own vtable header immediately follows, same trap already hit once for
+ * CResMan -- see the agent-memory writeup for that batch):
+ *
+ *   CApiDescriptor  08e81368 -> 08e81370 (own offset-to-top; this next word is
+ *     itself CNamedObjectBase's OWN vtable header, confirmed via a direct
+ *     `objdump -s -j .rodata` byte read of 08e81360..08e813a4: word0/word1 at
+ *     08e81360/08e81364 are CApiDescriptor's own offset-to-top(0)/typeinfo-ptr,
+ *     word2/word3 at 08e81368/08e8136c are its 2 real dtor slots (complete-object,
+ *     deleting), and word4 at 08e81370 is ALREADY the next class's offset-to-top(0)
+ *     -- so CApiDescriptor's own installed-vtable-pointer range is genuinely just
+ *     2 slots, not sized by proximity to CNamedObjectBase's install point
+ *     (08e81378, 2 words further still) the way a naive "next PTR__ label" grep
+ *     would suggest. This is the real vtable CSysApiInstance::RegisterApi()
+ *     (sysapi_instance.cpp) installs on every fresh API-descriptor object it
+ *     builds -- both slots are the real ~CApiDescriptor() dtor pair, neither
+ *     reconstructed (genuinely out of scope), so both stay EvaVTableStub-backed;
+ *     safe because RegisterApi()'s own real dtor-invoking path (replacing an
+ *     already-registered API under a different pointer) is never exercised by
+ *     this pass's own 7 real boot-path callers, each of which registers a
+ *     distinct, never-repeated name (mains.cpp).
+ *
  * Every slot points at the same no-op stub (EvaVTableStub, cdecl, zero declared
  * parameters) -- safe under the real cdecl calling convention regardless of how many
  * args/regs a caller's own Fn-typedef pushes, since cdecl callees never pop caller-
@@ -167,6 +190,7 @@ extern void *PTR__TPtrArray_08e80bc8[4];
 extern void *PTR__CSysApiInstance_08e81008[94];
 extern void *PTR__TNamedPtrArray_08e811a8[4];
 extern void *PTR__TNamedPtrArray_08e811c0[8];
+extern void *PTR__CApiDescriptor_08e81368[2];
 extern void *PTR__CModule_08e81fe8[7];
 extern void *PTR__CEditMan_08e85ea8[7];
 extern void *PTR__CMessagePort_08e88468[13];
@@ -315,11 +339,18 @@ extern int   EvaDataPlaceholder_08e85d74;
  *     (same 8-slot count as its own CChkBaseTask base -- CChkCmd adds no further
  *     new virtuals of its own)
  * All install-only (EvaVTableStub-backed), same status as every other entry in
- * this file. CChkCmdBG (the OTHER sibling task CChunkMan::Setup() constructs)
- * stays a Tier-B stub reusing CChkBaseTask's own real base -- see chunk_man.h --
- * so its own real vtable/opaque-blob pair (08e85768/08e85788) is NOT declared
- * here, matching CFileMan/CResMan's own precedent (mains.cpp) of not declaring a
- * vtable for a derived class whose own ctor is never really called.
+ * this file.
+ *
+ * CChkCmdBG (2026-07-25 follow-up, now fully reconstructed -- see chunk_man.h):
+ *   CChkCmdBG     08e85768 -> 08e85788 (own this-adjusted secondary vtable)  = 8 slots
+ *     (direct .rodata byte read confirms the 8-dword size exactly: 6 real
+ *     function slots -- non-deleting dtor, deleting dtor, Exec@08180950,
+ *     ExecMsg@0807e170, Exec(CMessage&)-shaped@080c6d50, AcceptDuplicate@08185d60,
+ *     all out of scope per chunk_man.h -- followed immediately by the
+ *     this-adjusted (-8) secondary vtable's own [offset_to_top][RTTI] preamble;
+ *     `08e85788` is thus the genuine start of that secondary vfunc array, not a
+ *     plain opaque data blob by coincidence -- still install-only/EvaVTableStub-
+ *     backed here since nothing dispatches through it on the traced boot path)
  */
 extern void *PTR__CMainTask_08e85ee8[7];
 extern void *PTR__TPtrArray_08e85f40[3];
@@ -329,6 +360,8 @@ extern void *PTR__TPtrArray_08e85698[3];
 extern int   EvaDataPlaceholder_08e85668;
 extern void *PTR__CChkCmd_08e85708[8];
 extern int   EvaDataPlaceholder_08e85728;
+extern void *PTR__CChkCmdBG_08e85768[8];
+extern int   EvaDataPlaceholder_08e85788;
 
 /* CFileMan/CResMan/CChunkOnDemand cluster (Stage 6 breadth sweep, 2026-07-25 --
  * file_man.h/res_man.h/chunk_on_demand.h, the "What's still open" CFileMan/CResMan
