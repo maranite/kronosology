@@ -353,7 +353,21 @@ void CBusChangeStateMachine::Reset(int busId, int busType)
  * `.text+0x68a80`, 342 bytes) confirmed -- see this method's own
  * declaration comment in oa_global.h for the full derivation.
  */
-void CSTGAudioInputMixerBase::Initialize(unsigned int count)
+/*
+ * WORKAROUND (2026-07-24): originally `void`, matching ground truth.
+ * Now returns the freshly-allocated `mixerArr` (still also stored into
+ * `mixerStateArray32` below, for structural fidelity) -- a live
+ * kronos_vm boot proved this object's own `mixerStateArray32` field
+ * doesn't reliably survive its ONE caller's immediate reread right
+ * after this call returns (hdr_manager_init.cpp's CSTGCDAudioPlay::
+ * Initialize(), BUG: kernel NULL pointer dereference, CR2=0x60 -- same
+ * "write not visible to a later read" symptom hit repeatedly elsewhere
+ * in this reconstruction, see heap_manager.cpp's own file comment for
+ * the running history). This function has exactly one caller in this
+ * whole project (confirmed via grep), so widening its signature to hand
+ * back the value directly, rather than requiring a reread, carries no
+ * wider risk. */
+unsigned char *CSTGAudioInputMixerBase::Initialize(unsigned int count)
 {
 	_gap4[0] = (unsigned char)count;
 
@@ -398,7 +412,7 @@ void CSTGAudioInputMixerBase::Initialize(unsigned int count)
 	}
 
 	if (count == 0)
-		return;
+		return mixerArr;
 
 	for (unsigned int i = 0; i < count; i++) {
 		unsigned char *entry = mixerArr + i * 0x90;
@@ -418,4 +432,5 @@ void CSTGAudioInputMixerBase::Initialize(unsigned int count)
 		unsigned char *bcsmBytes = (unsigned char *)bcsm;
 		bcsm->Reset((int)(unsigned char)bcsmBytes[0xa], (int)(signed char)bcsmBytes[0xb]);
 	}
+	return mixerArr;
 }

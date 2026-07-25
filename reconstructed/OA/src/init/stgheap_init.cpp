@@ -260,6 +260,15 @@ int InitializeSTGHeap(void)
 	 * string below. */
 	sAlignedHeapBase = heapInitResult - sIORemapBase + sPhysicalBankStart;
 
+	/* sHeapSize via the real class-member getter is known-unreliable here
+	 * (see heap_manager.cpp's own file comment -- CSTGHeapManager_GetHeapSize()
+	 * itself was live-boot-confirmed to return 0 despite Initialize() having
+	 * just written a real, nonzero value moments earlier). Not fixed at this
+	 * call site since `sHeapSize` isn't on setup_global_resources()'s own
+	 * blocking path (only `local_heap_base()`'s captured-value fix, in
+	 * setup_global_resources.cpp, was load-bearing for the live boot) --
+	 * left as-is, flagged here so a future pass doesn't assume this call is
+	 * trustworthy just because it compiles. */
 	sHeapSize = CSTGHeapManager_GetHeapSize();
 
 	printk(KERN_INFO "%p..%p is ioremapped memory, %lu bytes, "

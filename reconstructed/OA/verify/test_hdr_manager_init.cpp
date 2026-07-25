@@ -156,16 +156,24 @@ int main(void)
 		 * field (`recordTrack[i]+0x20+0x4` == `recordTrack[i]+0x24`,
 		 * see CSTGRecordTrack::Initialize()'s own header comment in
 		 * hdr_record_track.cpp) -- ONE shared buffer per track, not
-		 * two independent ones. This test exercises `Initialize()`
-		 * directly on a raw poisoned buffer (no ctor call), so it
-		 * needs an explicit valid backing buffer here regardless of
-		 * the ctor's own real behavior (batch 23; see managers.cpp). */
+		 * two independent ones.
+		 *
+		 * 2026-07-24: CSTGRecordTrack::Initialize()/
+		 * CSTGMonitorMixerChannel::Initialize() no longer read
+		 * `+0x24`/`+0x4` at all -- a live kronos_vm boot proved that
+		 * stored copy doesn't reliably survive the reread, so the
+		 * source now recomputes the same deterministic self-aligned
+		 * pointer directly: `(this+0x20+0x17) & ~0xF` relative to
+		 * each CSTGRecordTrack (see hdr_record_track.cpp's own
+		 * comment on those two call sites). `mmcTargets[i]` mirrors
+		 * that exact formula here instead of injecting a pointer
+		 * through `+0x24`, matching what the function now actually
+		 * dereferences -- no separate backing buffer needed any
+		 * more, it lands inside `buf` itself. */
 		unsigned char *mmcTargets[16];
 		for (int i = 0; i < 16; i++) {
-			mmcTargets[i] = mmap32(0x1000);
-			memset(mmcTargets[i], 0xcc, 0x1000);
 			unsigned char *rt = buf + 0x584 + i * 0xc0;
-			*(unsigned int *)(rt + 0x24) = ToU32(mmcTargets[i]);
+			mmcTargets[i] = (unsigned char *)(((unsigned long)(rt + 0x20) + 0x17) & ~0xFUL);
 		}
 
 		CSTGHDRManager *hdr = (CSTGHDRManager *)buf;

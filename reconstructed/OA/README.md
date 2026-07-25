@@ -51,6 +51,24 @@ not-yet-reconstructed pieces described below (real kernel/RTAI primitives
 and un-implemented class methods) - it links clean apart from those, and
 none of the unresolved symbols are unexplained.
 
+**screenremote-integration additions (2026-07-24)**: to let
+`KronosScreenRemoteDaemon` be tested against this reconstruction in
+`kronos_vm` instead of only real hardware, 4 more real function groups were
+added (transcribed from raw `objdump -dr` against the real `OA.ko`, cross-
+checked against the daemon's own already-ground-truthed real-hardware
+findings): `CSTGFrontPanel::Handle{SwitchEvent,TouchPanel,Rotary,
+AnalogController}` + `ShortInvertNkS4AnalogValue` (`src/engine/
+front_panel_handlers.cpp`), `RT_chord_trigger` (`src/engine/
+karma_chord_trigger.cpp`), MIDI IN (`CSTGMidiInPortGeneric::Receive`,
+`src/engine/midi_in_port.cpp`), and MIDI OUT (`CSTGMidiPortManager::
+RegisterMidiOutPort`/`CSTGMidiOutPort::Activate`, `src/engine/
+midi_out_port.cpp`), plus 3 VM-testing-only accessor exports
+(`src/engine/vm_test_accessors.cpp` - not real `OA_real.ko` symbols, never
+present on real hardware, purely so the daemon's kernel modules don't need
+to replicate real-hardware-binary-specific byte-offset/pattern tricks
+against this differently-compiled reconstruction). Full story in
+`KronosScreenRemoteDaemon/docs/vm_environment.md` section 0.
+
 ## Copy-protection and authorization (Stage 1)
 
 Recovered from the symbol table, string references, and disassembly, with

@@ -9,10 +9,101 @@
 
 CSTGHeapManager *CSTGHeapManager::sInstance;
 
+/*
+ * WORKAROUND (2026-07-24): a live kronos_vm boot proved `heapBase`/`heapSize`
+ * (the real class members, +0x1e8498/+0x1e84a0) read back as 0 by the time
+ * ANYTHING reads them again -- confirmed via real C++ member access
+ * (CSTGHeapManager_GetHeapSize(), a one-line `return sInstance->heapSize`
+ * already used elsewhere in this project, not raw pointer arithmetic), so
+ * this isn't an offset-formula bug. Also confirmed the values ARE genuinely
+ * correct immediately after the assignment below (printk-verified). Two
+ * different explicit-rewrite mitigations (a plain duplicate write, then a
+ * `volatile` write + compiler memory barrier at the end of this function)
+ * were tried and did NOT survive to the caller either -- ruling out simple
+ * dead-store elimination as the mechanism. The exact cause was not
+ * conclusively pinned down (a GDB hardware-watchpoint attempt hit its own
+ * practical wall: it never fired across a full boot, at ~100x normal
+ * runtime under gdbstub overhead). Rather than keep chasing the mechanism,
+ * this captures the known-good value into storage that is NOT part of the
+ * `CSTGHeapManager` object's own memory layout at all, at the one point
+ * it's proven correct -- so whatever corrupts the object's own field
+ * (compiler codegen quirk on this freestanding/regparm(3)/-O2 target, or a
+ * genuine runtime memory issue specific to this large vmalloc'd region
+ * under QEMU-TCG, neither confirmed) can't touch this copy.
+ */
+static unsigned long g_capturedHeapBase;
+static unsigned long g_capturedHeapSize;
+
+unsigned long CSTGHeapManager_GetCapturedHeapBase(void) { return g_capturedHeapBase; }
+unsigned long CSTGHeapManager_GetCapturedHeapSize(void) { return g_capturedHeapSize; }
+
+/*
+ * WORKAROUND, continued (2026-07-24): the unreliability above turned out
+ * not to be limited to heapBase/heapSize -- a live kronos_vm boot showed
+ * `Alloc()`'s own free-list/handle-table mechanism (freeListHead,
+ * sentinel.size/the bump-down cursor, activeListHead/Count, and each
+ * entry's own `offset` field) is ALSO not reliably readable by any
+ * caller other than the function that just wrote it: `freeListHead=0`
+ * AND `cursor=0` on EVERY SINGLE Alloc() call across a real boot, not
+ * occasionally. Patching individual fields (tried first) isn't viable
+ * once the unreliability turns out to cover the whole bookkeeping
+ * mechanism, not just two fields. `CSTGHeapManager::Alloc()` -- BOTH
+ * overloads, this file's real `Alloc(unsigned long)` and
+ * heap_manager_alloc_static.cpp's `Alloc(unsigned int)` stand-in
+ * (needed there to dodge a pre-existing CSTGGlobal ODR conflict, see
+ * that file's own header) -- now share this single, trivial monotonic
+ * bump allocator, built entirely on shadow state outside the
+ * CSTGHeapManager object, never reading the object's own bookkeeping
+ * fields at all. This project's own init-path call graph never frees
+ * anything through either Alloc() overload, so a bump allocator is a
+ * complete, faithful-enough substitute for what real callers need: N
+ * distinct, sufficiently large, non-overlapping regions within the heap
+ * arena. Both overloads sharing ONE cursor/slot-counter here (rather
+ * than each keeping its own) is what keeps their allocations from
+ * overlapping regardless of which overload a given caller happens to
+ * use.
+ */
+#define HM_CAPTURED_OFFSET_SLOTS 64
+static unsigned int g_capturedOffsets[HM_CAPTURED_OFFSET_SLOTS];
+static unsigned char g_capturedOffsetValid[HM_CAPTURED_OFFSET_SLOTS];
+static unsigned int g_bumpCursor;
+static unsigned int g_nextAllocSlot = 1; /* slot 0 reserved/unused, matching
+                                           * the real handle-numbering
+                                           * convention (see oa_heap.h). */
+
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot)
+{
+	if (slot >= HM_CAPTURED_OFFSET_SLOTS || !g_capturedOffsetValid[slot])
+		return 0;
+	return g_capturedOffsets[slot];
+}
+
+extern "C" unsigned int CSTGHeapManager_BumpAlloc(unsigned int size)
+{
+	unsigned int totalSize = (unsigned int)g_capturedHeapSize;
+	unsigned int alignedSize = (size + 3u) & ~3u;
+
+	if (totalSize == 0 || alignedSize > totalSize - g_bumpCursor)
+		return (unsigned int)-1;
+
+	unsigned int offset = g_bumpCursor;
+	g_bumpCursor += alignedSize;
+
+	unsigned int slot = g_nextAllocSlot++;
+	if (slot < HM_CAPTURED_OFFSET_SLOTS) {
+		g_capturedOffsets[slot] = offset;
+		g_capturedOffsetValid[slot] = 1;
+	}
+
+	return slot;
+}
+
 void CSTGHeapManager::Initialize(unsigned long base, unsigned long size)
 {
 	heapBase = base;
 	heapSize = size;
+	g_capturedHeapBase = base;
+	g_capturedHeapSize = size;
 
 	/*
 	 * FIX (root-caused via live-boot printk instrumentation,
@@ -49,6 +140,31 @@ void CSTGHeapManager::Initialize(unsigned long base, unsigned long size)
 	freeListHead = 0;
 	freeListTail = 0;
 	freeCount = 0;
+
+	/*
+	 * FIX (2026-07-23, found while chasing a live kronos_vm boot's
+	 * `local_heap_base()` resolving to NULL despite `CSTGHeapManager::
+	 * sInstance` itself being a confirmed-valid, live object): the fix
+	 * directly above this one (2026-07-12) explicitly zeroed
+	 * freeListHead/freeListTail/freeCount because they're read
+	 * within THIS function before any explicit write in THIS function's
+	 * own compiled body -- but it missed `activeListHead` (read by the
+	 * `if` immediately below) and `activeCount` (read-modify-written by
+	 * `activeCount++` further below), which have the IDENTICAL shape:
+	 * both are class members this function reads before ever writing
+	 * them itself, relying entirely on the external wrapper's/caller's
+	 * memset having already zeroed the object -- exactly the hazard the
+	 * 2026-07-12 fix's own comment describes and root-caused via live
+	 * printk instrumentation (that fix's own confirmed symptom list
+	 * explicitly includes "heapBase/heapSize reading back as 0 despite
+	 * being written two lines above", the same live symptom that led
+	 * back here). Same treatment, same reasoning, same behavior-
+	 * preserving no-op-on-the-real-path property -- this just closes
+	 * the gap the first fix left open for the other two members with
+	 * the same shape in this same function.
+	 */
+	activeListHead = 0;
+	activeCount = 0;
 
 	/* Insert the sentinel into the (empty) active list -- confirmed
 	 * real insert-or-init doubly-linked-list idiom (identical shape to
@@ -107,64 +223,34 @@ void CSTGHeapManager::Initialize(unsigned long base, unsigned long size)
 		freeListTail = entryAddr;
 		freeCount++;
 	}
+
+	/* See the WORKAROUND comment at the top of this file: heapBase/heapSize
+	 * (the real class members) are known to read back as 0 by the time
+	 * anything else observes them, via a mechanism that resisted precise
+	 * root-causing across several live-boot investigation rounds (ruled
+	 * out: offset-formula errors, simple dead-store elimination). The
+	 * `g_capturedHeapBase`/`g_capturedHeapSize` snapshot taken at the top
+	 * of this function is the reliable source of truth from here on;
+	 * callers needing this function's base/size should use
+	 * CSTGHeapManager_GetCapturedHeapBase()/GetCapturedHeapSize() rather
+	 * than the class members directly.
+	 */
 }
 
 unsigned int CSTGHeapManager::Alloc(unsigned long size)
 {
-	if (freeListHead == 0)
-		return (unsigned int)-1;
-
-	CSTGHeapHandleEntry *entry =
-		(CSTGHeapHandleEntry *)(unsigned long)freeListHead;
-
-	/* Pop from the head of the free list -- special-cases the
-	 * single-element case (freeListTail must also be cleared). */
-	if (freeListHead == freeListTail) {
-		freeListTail = 0;
-	}
-	freeListHead = entry->next;
-	if (entry->next != 0)
-		((CSTGHeapHandleEntry *)(unsigned long)entry->next)->prev = entry->prev;
-	if (entry->prev != 0)
-		((CSTGHeapHandleEntry *)(unsigned long)entry->prev)->next = entry->next;
-	entry->next = 0;
-	entry->prev = 0;
-	entry->owner = 0;
-	freeCount--;
-
-	/* CORRECTED: cursor lives at sentinel.size (+0x28), not a separate
-	 * field -- see Initialize()'s own comment above and
-	 * oa_heapmanager.h's file comment. Confirmed directly against
-	 * Alloc()'s real disassembly (.text+0x2e9c8-0x2e9e7). */
-	unsigned long available = sentinel.size - reservedSize;
-	if (size > available)
-		return (unsigned int)-1;
-
-	unsigned long newCursor = (sentinel.size - size) & ~3ul;
-	sentinel.size = (unsigned int)newCursor;
-	entry->offset = (unsigned int)newCursor;
-	entry->size = (unsigned int)size;
-
-	/* Push onto the active list, right after the sentinel (a classic
-	 * sentinel-anchored insert-at-front). */
-	unsigned int sentinelAddr = (unsigned int)(unsigned long)&sentinel;
-	entry->prev = sentinelAddr;
-	unsigned int oldNext = sentinel.next;
-	entry->next = oldNext;
-	if (oldNext != 0)
-		((CSTGHeapHandleEntry *)(unsigned long)oldNext)->prev =
-			(unsigned int)(unsigned long)entry;
-	sentinel.next = (unsigned int)(unsigned long)entry;
-	if (sentinelAddr == activeListTail)
-		activeListTail = (unsigned int)(unsigned long)entry;
-	entry->owner = (unsigned int)(unsigned long)this;
-	activeCount++;
-
-	/* Confirmed real handle-number formula: (entry - sentinel) / 20,
-	 * computed here directly rather than replicating the target's own
-	 * reciprocal-multiplication /20 optimization. */
-	unsigned long diff = (unsigned long)entry - (unsigned long)&sentinel;
-	return (unsigned int)(diff / sizeof(CSTGHeapHandleEntry));
+	/* See the WORKAROUND comment above (near g_bumpCursor): the real
+	 * free-list-pop/cursor-bump-down/active-list-push algorithm this
+	 * function used to implement directly is live-boot-confirmed
+	 * unreliable in this environment (freeListHead/cursor read back as 0
+	 * on every call). Delegates to the shared bump allocator instead --
+	 * see that function's own comment. The original algorithm's exact
+	 * sequence (pop free list, check capacity, bump cursor, push active
+	 * list, compute handle number) is preserved in git history if a
+	 * future session wants to revisit the exact root cause; not restated
+	 * here since it's no longer live code.
+	 */
+	return CSTGHeapManager_BumpAlloc((unsigned int)size);
 }
 
 unsigned long CSTGHeapManager_Initialize(unsigned long base, unsigned long size)

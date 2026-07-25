@@ -111,9 +111,13 @@ void CSTGCDAudioPlay::Initialize()
 	*(unsigned int *)(base + 0x9c) = ToU32(meterBuf);
 
 	CSTGAudioInputMixerBase *mixer = (CSTGAudioInputMixerBase *)(base + 0xa0);
-	mixer->Initialize(2);
-
-	unsigned char *mixerState = FromU32(mixer->mixerStateArray32);
+	/* WORKAROUND (2026-07-24): capture Initialize()'s own return value
+	 * directly instead of rereading mixer->mixerStateArray32 right
+	 * after -- a live kronos_vm boot proved that reread doesn't
+	 * reliably survive (BUG: kernel NULL pointer dereference, CR2=0x60
+	 * -- see audio_input_mixer.cpp's own comment on Initialize() for
+	 * the full story). */
+	unsigned char *mixerState = mixer->Initialize(2);
 	*(unsigned int *)(mixerState + 0x60) = ToU32(meterBuf);
 	*(unsigned int *)(mixerState + 0x90 + 0x60) = ToU32(meterBuf + 0x80);
 

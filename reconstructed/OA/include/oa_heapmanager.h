@@ -224,6 +224,27 @@ extern "C" {
 unsigned long CSTGHeapManager_Initialize(unsigned long base, unsigned long size);
 unsigned long CSTGHeapManager_GetHeapSize(void);
 
+/* NOT real OA_real.ko symbols -- this project's own 2026-07-24 workaround
+ * for heapBase/heapSize reading back as 0 through every tried access path
+ * (see heap_manager.cpp's own file-level comment for the full story).
+ * Returns a snapshot taken at CSTGHeapManager::Initialize() time, stored
+ * outside the CSTGHeapManager object's own memory layout. */
+unsigned long CSTGHeapManager_GetCapturedHeapBase(void);
+unsigned long CSTGHeapManager_GetCapturedHeapSize(void);
+
+/* Also part of the 2026-07-24 workaround: Alloc()'s own free-list/
+ * bump-down-cursor bookkeeping proved just as unreliable to read back
+ * as heapBase/heapSize above, so Alloc() itself was replaced with a
+ * trivial monotonic bump allocator built on this shadow state (see
+ * heap_manager.cpp's own file comment). GetCapturedOffset(slot) returns
+ * the byte offset (from the captured heap base) that handle `slot`'s
+ * allocation actually landed at; BumpAlloc(size) is the shared core
+ * both CSTGHeapManager::Alloc(unsigned long) (heap_manager.cpp) and its
+ * ODR-workaround twin CSTGHeapManager::Alloc(unsigned int)
+ * (heap_manager_alloc_static.cpp) now delegate to. */
+unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
+unsigned int CSTGHeapManager_BumpAlloc(unsigned int size);
+
 } /* extern "C" */
 
 #endif /* OA_HEAPMANAGER_H */

@@ -67,20 +67,41 @@ static void BuildArrayManager(TSTGArrayManager<T> *mgr, unsigned int count,
 			       unsigned int elemSize, unsigned int idOffset,
 			       void (*construct)(unsigned char *))
 {
-	mgr->modulus = count + 1;
-	mgr->bucketArray = ToU32(CSTGBankMemory::AllocAligned((count + 1) * 4, 0x10));
-	mgr->indexArray = ToU32(CSTGBankMemory::AllocAligned(count * 4, 0x10));
+	/* WORKAROUND (2026-07-24): `bucketArray`/`indexArray`/`modulus`/
+	 * `writeCursor` locals shadow `mgr`'s own same-named fields (still
+	 * written below for structural fidelity) -- a live kronos_vm boot
+	 * proved `mgr` (itself CSTGBankMemory::AllocAligned()-backed, same
+	 * suspect ioremap'd heap region already implicated in
+	 * CSTGHeapManager's statics, the ten voice models' vtable pointers,
+	 * CSTGVectorManager's embedded objects, and CSTGVoiceAllocator's
+	 * voicePtrs[] -- see this project's running documentation of that
+	 * pattern, e.g. heap_manager.cpp's own file comment and
+	 * managers.cpp's CSTGVoiceAllocator::Initialize() comment) doesn't
+	 * reliably survive a reread of `mgr->indexArray`/`mgr->bucketArray`
+	 * on every one of up to 4000 loop iterations below (BUG: kernel NULL
+	 * pointer dereference, CR2=0). `modulus`/`writeCursor` don't share
+	 * that exact crash symptom, but sit in the identical at-risk
+	 * per-iteration reread pattern, so shadowed here too rather than
+	 * left as a latent, silently-wrong-instead-of-crashing risk. */
+	unsigned int modulus = count + 1;
+	unsigned int bucketArray = ToU32(CSTGBankMemory::AllocAligned((count + 1) * 4, 0x10));
+	unsigned int indexArray = ToU32(CSTGBankMemory::AllocAligned(count * 4, 0x10));
+	unsigned int writeCursor = mgr->writeCursor;
+	mgr->modulus = modulus;
+	mgr->bucketArray = bucketArray;
+	mgr->indexArray = indexArray;
 
 	for (unsigned int i = 0; i < count; i++) {
 		unsigned char *elem = CSTGBankMemory::AllocAligned(elemSize, 0x10);
 		construct(elem);
 
-		((unsigned int *)FromU32(mgr->indexArray))[i] = ToU32(elem);
+		((unsigned int *)FromU32(indexArray))[i] = ToU32(elem);
 		*(unsigned short *)(elem + idOffset) = (unsigned short)i;
 
-		((unsigned int *)FromU32(mgr->bucketArray))[mgr->writeCursor] = ToU32(elem);
-		mgr->writeCursor = (mgr->writeCursor + 1) % mgr->modulus;
+		((unsigned int *)FromU32(bucketArray))[writeCursor] = ToU32(elem);
+		writeCursor = (writeCursor + 1) % modulus;
 	}
+	mgr->writeCursor = writeCursor;
 	mgr->count = count;
 }
 
@@ -364,20 +385,40 @@ void CSTGEngine::Initialize()
 	CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)midiPortMgr;
 	CSTGMidiPortManager::sInstance->Initialize();
 
-	/* Ten "Model" classes, each: allocate, construct, then dispatch a
-	 * real virtual call through the constructed object's own confirmed
-	 * vtable slot 2 (raw indirect, matching CCostProfile's established
-	 * treatment -- see oa_engine_init.h's own header note). */
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGOffModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPCMModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGAnalogSyncModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGOrganModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPluckedModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGMS20Model(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPolysixModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGVPMModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x508, 0x10)) CSTGPianoModel(), 2);
-	CallVtableSlot(new (CSTGBankMemory::AllocAligned(0x124, 0x10)) CSTGEPModel(), 2);
+	/* Ten "Model" classes, each: allocate, construct, then dispatch vtable
+	 * slot 2 (confirmed real slot == Initialize(), see oa_engine_init.h's
+	 * own header note).
+	 *
+	 * WORKAROUND (2026-07-24): originally a raw `CallVtableSlot(obj, 2)`
+	 * indirect dispatch, matching CCostProfile's own established
+	 * treatment -- but a live kronos_vm boot proved the freshly-
+	 * placement-new'd object's own vtable pointer (written by the ctor
+	 * literally the instruction before) reads back as NULL at the
+	 * dispatch site immediately afterward (BUG: kernel NULL pointer
+	 * dereference at 00000008, IP = this call site, CSTGOffModel the
+	 * first model hit). Note lines 336/337 above dispatch the SAME
+	 * CallVtableSlot() helper against audioDriver/audioManager -- two
+	 * PRE-EXISTING (not just-constructed-in-the-same-expression) objects
+	 * -- and those two calls do NOT exhibit this; the failure is
+	 * specific to a vtable pointer read immediately following its own
+	 * write in this environment, the same "write not visible to the
+	 * next read" symptom already root-workaround'd for CSTGHeapManager
+	 * (see heap_manager.cpp's own file comment) -- root cause not
+	 * re-litigated here, workaround follows the same precedent: don't
+	 * trust the reread. Each model's real vtable slot 2 target is
+	 * already a known, fixed function (OA_VoiceModel_*_Initialize,
+	 * declared in oa_engine_init.h) -- call it directly instead of
+	 * dispatching through the just-written pointer. */
+	OA_VoiceModel_Off_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGOffModel());
+	OA_VoiceModel_PCM_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPCMModel());
+	OA_VoiceModel_AnalogSync_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGAnalogSyncModel());
+	OA_VoiceModel_Organ_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGOrganModel());
+	OA_VoiceModel_Plucked_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPluckedModel());
+	OA_VoiceModel_MS20_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGMS20Model());
+	OA_VoiceModel_Polysix_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGPolysixModel());
+	OA_VoiceModel_VPM_Initialize(new (CSTGBankMemory::AllocAligned(0x108, 0x10)) CSTGVPMModel());
+	OA_VoiceModel_Piano_Initialize(new (CSTGBankMemory::AllocAligned(0x508, 0x10)) CSTGPianoModel());
+	OA_VoiceModel_EP_Initialize(new (CSTGBankMemory::AllocAligned(0x124, 0x10)) CSTGEPModel());
 
 	CSTGCommonLFO::Initialize();
 	CSTGCommonStepSeq::Initialize();

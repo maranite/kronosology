@@ -43,6 +43,18 @@ CSTGMidiDispatcher *CSTGMidiDispatcher::sInstance;
 struct CSTGHeapManager { static char *sInstance; };
 char *CSTGHeapManager::sInstance;
 
+/* Mocks for the 2026-07-24 captured-value workaround (see
+ * heap_manager.cpp's own file comment) -- midi_dispatcher.cpp now reads
+ * these instead of poking raw offsets into a fake CSTGHeapManager
+ * object directly. */
+static unsigned long g_mockCapturedHeapBase;
+static unsigned int g_mockCapturedOffsets[16];
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void) { return g_mockCapturedHeapBase; }
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot)
+{
+	return slot < 16 ? g_mockCapturedOffsets[slot] : 0;
+}
+
 static unsigned char g_readerArg[64];
 unsigned char CSTGMidiQueue::AllocReader()
 {
@@ -127,12 +139,11 @@ int main(void)
 	check_eq("+0xc == AllocReader's return value (0x42)", dispBuf[0xc], 0x42);
 	check_eq("+0xd == 0", dispBuf[0xd], 0);
 
-	printf("\n[3] Initialize() -- valid slot, real heap-resolution formula\n"
-	       "    (heap+0x18+slot*0x14, reading that entry's own +0xc field)\n");
+	printf("\n[3] Initialize() -- valid slot, resolved via the captured-value getters\n"
+	       "    (2026-07-24 workaround -- see heap_manager.cpp's own file comment)\n");
 	*(unsigned int *)(portMgrBuf + 0x1a4) = 5; /* a valid, in-range slot */
-	unsigned char *entry5 = heapBuf + 0x18 + 5 * 0x14;
-	*(unsigned int *)(entry5 + 0xc) = 0x1000; /* confirmed "offset" field */
-	*(unsigned int *)(heapBuf + 0x1e8498) = 0x2000; /* heapBase */
+	g_mockCapturedOffsets[5] = 0x1000; /* captured "offset" for slot 5 */
+	g_mockCapturedHeapBase = 0x2000;   /* captured heapBase */
 
 	disp->Initialize();
 	check_eq("+0x8 == heapBase + offset (0x3000)",

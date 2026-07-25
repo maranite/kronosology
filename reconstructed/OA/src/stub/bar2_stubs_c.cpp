@@ -402,6 +402,28 @@ extern "C" unsigned int stg_cpumask_of_cpu(unsigned int cpu) { return 1u << cpu;
  * src/auth/atmel_zone_io.cpp (also its sibling fFfFfFfFfFfF1C, aliased
  * cm_ReadUserZone right above). */
 
+/* CSTGSmootherMapping::DispatchSmoothedValue(float, float, bool) --
+ * confirmed real, deliberately deferred (own body not reconstructed):
+ * genuine audio-DSP "push this smoother's now-final value to its target
+ * parameter" dispatch, confirmed unreachable from any currently-real
+ * caller of CSTGSmoother::FinalizeSmoother() (batch 57,
+ * src/engine/smoother_finalize.cpp -- see that file's own header comment
+ * for the full derivation). Defined here rather than in that file so its
+ * own dedicated KAT can supply a call-counting mock instead. */
+extern "C" void CSTGSmootherMapping_DispatchSmoothedValue(void *, float, float, bool) {}
+
+/* Five confirmed-real, deliberately deferred siblings of
+ * CSTGControllerRTData::ResetSendKnobsJumpCatch() (batch 57,
+ * src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp -- see
+ * that file's own header comment for the full derivation). Defined here
+ * rather than in that file so its own dedicated KAT can supply
+ * call-counting mocks instead. */
+extern "C" void CSTGControllerRTData_UpdateJumpCatchWithPgmSendKnobValues(void *) {}
+extern "C" void CSTGControllerRTData_UpdateJumpCatchWithCombiSendKnobValues(void *) {}
+extern "C" void CSTGControllerRTData_UpdateJumpCatchWithAudioSendKnobValues(void *) {}
+extern "C" void CSTGControllerRTData_UpdateAudioTrackSendJumpCatch(void *, void *, unsigned int, unsigned int) {}
+extern "C" void CSTGControllerRTData_UpdateJumpCatchWithIFXSendKnobValues(void *, void *, int) {}
+
 /* ---- operator delete(void*, unsigned int) (sized deallocation
  * overload -- new_delete.cpp already defines the unsized form) ---- */
 void operator delete(void *ptr, unsigned int) { extern void operator delete(void *); operator delete(ptr); }

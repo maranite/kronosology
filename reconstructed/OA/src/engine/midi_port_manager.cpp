@@ -72,21 +72,38 @@ static void PortRegister(void *port, void *region)
 	((Fn)vtable[1])(port, region);
 }
 
+/* WORKAROUND (2026-07-24): these used to re-derive oa_heap_base()/
+ * oa_heap_region()'s own raw-offset formula locally (matching
+ * setup_global_resources.cpp's own pre-fix precedent) -- but a live
+ * kronos_vm boot proved that formula's underlying data (heapBase and
+ * each handle-table entry's own `offset` field) is not reliably
+ * readable by any caller other than CSTGHeapManager::Initialize()/
+ * Alloc() themselves. See heap_manager.cpp's own file comment for the
+ * full investigation. Now reads the same captured-value snapshots
+ * setup_global_resources.cpp uses instead of re-deriving the broken
+ * formula independently. */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void);
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
+
 static char *LocalHeapBase()
 {
 	char *heap = CSTGHeapManager::sInstance;
 	if (heap == (char *)(long)-44)		/* 0xFFFFFFD4 sentinel: heap not yet up */
 		return 0;
-	return (char *)(*(unsigned int *)(heap + 0x38) + *(unsigned int *)(heap + 0x1e8498));
+	/* Slot 1 (the very first CSTGHeapManager::Alloc() call of the whole
+	 * boot) is what oa_heap_base()'s own `*(heap+0x38)` term structurally
+	 * resolves to -- see setup_global_resources.cpp's own local_heap_base()
+	 * comment for the derivation. */
+	return (char *)(CSTGHeapManager_GetCapturedOffset(1) +
+			(unsigned int)CSTGHeapManager_GetCapturedHeapBase());
 }
 
 static char *LocalHeapRegion(unsigned int slot)
 {
-	char *heap = CSTGHeapManager::sInstance;
 	if (slot >= 100000)
 		return 0;
-	return (char *)(*(unsigned int *)(heap + 0x24 + slot * 0x14) +
-			*(unsigned int *)(heap + 0x1e8498));
+	return (char *)(CSTGHeapManager_GetCapturedOffset(slot) +
+			(unsigned int)CSTGHeapManager_GetCapturedHeapBase());
 }
 
 /*
@@ -266,4 +283,50 @@ void CSTGMidiPortManager::NotifyNKS4TestMode()
 	((CSTGMidiQueue *)(region + 0x64))->Reset();
 	((CSTGMidiQueue *)(region + 0xc8))->Reset();
 	((CSTGMidiQueue *)(region + 0x12c))->Reset();
+}
+
+/*
+ * ~CSTGMidiPortManager() (batch 57, .text+0xf5280, 264 bytes) -- confirmed
+ * real, disassembly-derived. Genuinely reached: engine.cpp's own
+ * `CSTGEngine::~CSTGEngine()` calls it directly
+ * (`if (sInstance) sInstance->~CSTGMidiPortManager();`), not merely a
+ * dead-code destructor. Operates ENTIRELY on the two static port-table
+ * arrays (matches this class's own oa_engine.h header comment: no
+ * per-instance state at all) -- confirmed via the real disassembly's own
+ * absolute `mov eax,ds:CONST`-style addressing of `sMidiInPorts`/
+ * `sMidiOutPorts`, never `[this+OFFSET]`.
+ *
+ * For each of the 4 slots, IN-PORT THEN OUT-PORT (confirmed real
+ * interleave order from the disassembly -- NOT "all 4 in-ports then all
+ * 4 out-ports"): if the slot is non-NULL AND its own "active" flag bit
+ * (bit1) is set, dispatches through vtable slot 2 on that port object --
+ * one slot further than PortQuery()/PortRegister() above, presumably each
+ * port's own virtual destructor (not independently confirmed beyond the
+ * call shape itself). The in-port check uses CSTGMidiInPort's own
+ * confirmed `flags` field (+0x26, oa_engine.h); the out-port check is
+ * this project's first confirmed real use of CSTGMidiOutPort's own +0x5
+ * byte (previously unconfirmed padding there -- now named `flags`,
+ * oa_engine_init.h, see that struct's own updated comment). Finally
+ * zeroes `sInstance` unconditionally, real or not.
+ */
+static void PortDestroy(void *port)
+{
+	typedef void (*Fn)(void *);
+	void **vtable = *(void ***)port;
+	((Fn)vtable[2])(port);
+}
+
+CSTGMidiPortManager::~CSTGMidiPortManager()
+{
+	for (int i = 0; i < 4; i++) {
+		CSTGMidiInPort *inPort = (CSTGMidiInPort *)sMidiInPorts[i];
+		if (inPort != 0 && (inPort->flags & 0x2))
+			PortDestroy(inPort);
+
+		CSTGMidiOutPort *outPort = (CSTGMidiOutPort *)sMidiOutPorts[i];
+		if (outPort != 0 && (outPort->flags & 0x2))
+			PortDestroy(outPort);
+	}
+
+	sInstance = 0;
 }

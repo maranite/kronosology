@@ -164,6 +164,20 @@ struct CSTGHeapManager {
 	static unsigned int Alloc(unsigned int size);
 };
 
+/* NOT real OA_real.ko symbols -- this project's own 2026-07-24 workaround
+ * for CSTGHeapManager::heapBase/heapSize reading back as 0 through every
+ * access path tried (raw offset, real C++ member access, all survived by
+ * a live kronos_vm boot -- see heap_manager.cpp's own file comment for the
+ * investigation). `local_heap_base()`/`local_heap_region()` below use
+ * these instead of reading heapBase out of the object directly. */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void);
+
+/* NOT a real OA_real.ko symbol either -- see heap_manager_alloc_static.cpp's
+ * own comment. Returns 0 for a slot Alloc() never captured (safe default,
+ * matches this file's own established "silently degrade to null/zero on
+ * an unresolved slot" convention rather than crashing). */
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
+
 /*
  * The confirmed hardware/calibration status struct this function builds
  * (STGAPIFrontPanelStatus::sInstance, a real singleton). Modeled as a
@@ -335,7 +349,40 @@ struct CSTGFrontPanel {
 	 * of the real enum's declared width).
 	 */
 	void RequestAnalogInputStatus(unsigned int deviceCode);
+
+	/*
+	 * HandleSwitchEvent/HandleTouchPanel/HandleRotary/
+	 * HandleAnalogController -- the real front-panel event dispatch
+	 * entry points a physical button/touch/rotary/knob press routes
+	 * through (`.text+0xc0f0`/`0xc1c0`/`0xc2e0`/`0xc320` respectively,
+	 * confirmed via objdump -dr against OA_real.ko, MD5
+	 * 955636c2b11a70a1dbecefaaa7bd4f80). See src/engine/
+	 * front_panel_handlers.cpp for the full confirmed control flow and
+	 * ground-truth notes. Real enum types (eSTGButtonCode,
+	 * eNKS4TouchPanelEventType, eSTGAnalogDeviceCode) not modeled --
+	 * plain `unsigned int`, matching this file's own established
+	 * convention for RequestAnalogInputStatus above (regparm passes
+	 * them in a register regardless of the real enum's declared width).
+	 */
+	void HandleSwitchEvent(unsigned int code, bool pressed);
+	void HandleTouchPanel(unsigned int eventType, int coord);
+	void HandleRotary(int delta);
+	void HandleAnalogController(unsigned int deviceCode, unsigned char param2, unsigned short param3);
 };
+
+/*
+ * ShortInvertNkS4AnalogValue(uchar, uchar, ushort*, ushort*) --
+ * `.text+0x2077f0`, 73 bytes, confirmed via objdump -dr. A plain
+ * (non-member) regparm(3) free function: EAX=byte0, EDX=byte1,
+ * ECX=&out_hi, [stack]=&out_lo. Called by HandleAnalogController's real
+ * caller (CSTGOmapNKSMsgHandler::ProcessNextNKSEvent, not itself part of
+ * this pass) to convert a raw 2-byte NKS4 analog-channel sample into the
+ * (param2, param3) pair HandleAnalogController expects -- see
+ * src/engine/front_panel_handlers.cpp for the confirmed bit-twiddling.
+ */
+extern "C" void ShortInvertNkS4AnalogValue(unsigned char byte0, unsigned char byte1,
+					    unsigned short *outHi, unsigned short *outLo)
+	__attribute__((regparm(3)));
 
 struct CSTGSampleRateMonitor {
 	/* CORRECTED (2026-07-10): real ground truth (nm -C OA.ko) has

@@ -157,8 +157,20 @@ unsigned long USTGHDRUtils::Convert44100WaveToSTGSamples(float *, bool, bool, ch
  * remain deliberately stubbed below. */
 /* CSTGMidiPortManager::Initialize() is real now, sec 10.230/
  * MASTER_REFERENCE -- see src/engine/midi_port_manager.cpp (the root fix
- * for the CSTGMidiQueueWriter::Write() ringCtl-NULL crash). */
-CSTGMidiPortManager::~CSTGMidiPortManager() {}
+ * for the CSTGMidiQueueWriter::Write() ringCtl-NULL crash).
+ * CSTGMidiPortManager::~CSTGMidiPortManager() is real now too, batch 57 --
+ * see the same file (also names CSTGMidiOutPort's own +0x5 `flags` byte
+ * for the first time, oa_engine_init.h). */
+/* CSTGMidiInPort::ReceiveSysEx(const unsigned char*, unsigned int) --
+ * confirmed real (.text+0xf63f0, 291 bytes), declared in oa_engine.h so
+ * callers link against its real mangled name, but deliberately not
+ * implemented there -- needed as a link target now that
+ * CSTGMidiInPortGeneric::Receive (src/engine/midi_in_port.cpp, 2026-07-24)
+ * calls it for real on incoming 0xF0/continuation SysEx bytes. Stubbed
+ * here as a no-op: with no physical MIDI hardware generating real SysEx
+ * traffic in a VM, this path is never exercised by kronos_vm boot-testing
+ * anyway. */
+void CSTGMidiInPort::ReceiveSysEx(const unsigned char *, unsigned int) {}
 /* CSTGMidiPortManager::WriteSTGMidiOutQueue()/NotifyNKS4TestMode() are
  * real now, batch 12 -- see src/engine/midi_port_manager.cpp (its own
  * dedicated TU, not linked by test_global.cpp/test_engine.cpp/
@@ -260,8 +272,19 @@ void CSTGParamsOwner::ValidateParamChange(CSTGMessageContext &, unsigned long, c
  * src/engine/global.cpp's CSTGGlobal::Initialize() for the real caller,
  * now reconstructed as a direct (non-virtual) call to this. */
 void CSTGParamsOwner::UseDefaults() {}
-void CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) {}
-void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
+/* CSTGControllerRTData::SetAudioInSolo(unsigned int, bool) is real now,
+ * batch 57 -- see src/engine/controller_rt_data_set_audio_in_solo.cpp
+ * (its own dedicated TU; test_engine.cpp/test_global.cpp/
+ * test_global_ctor.cpp all keep their own pre-existing mocks for this
+ * symbol untouched, matching the WriteSTGMidiOutQueue precedent). Also
+ * gives global.cpp's own ResolveCurrentPerformance() external linkage so
+ * this file could reuse it instead of duplicating the 3-way mode-dispatch
+ * formula.
+ * CSTGControllerRTData::ResetSendKnobsJumpCatch() is real now too, batch
+ * 57 -- see src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp
+ * (its own dedicated TU, same reason). Five newly-discovered confirmed-
+ * real, deliberately deferred sibling callees (own bodies not
+ * reconstructed) defined in that same new file. */
 /* CSTGComPort::RTAIInterruptHandler is real now, batch 48 -- see
  * src/init/comport.cpp (a thin forwarder to the already-real
  * HandleInterrupt()/ComPortServiceLoop -- see oa_comport.h's own
@@ -280,6 +303,26 @@ void CSTGControllerRTData::ResetSendKnobsJumpCatch() {}
 void CSTGControllerRTData::OnExtModeSetChange() {}
 void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) {}
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
+/* CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) -- confirmed
+ * real, deliberately deferred (own body not reconstructed), per
+ * oa_global.h's own comment -- needed as a link target now that
+ * CSTGFrontPanel::HandleTouchPanel (src/engine/front_panel_handlers.cpp,
+ * 2026-07-24) calls it for real. Stubbed here, not given a real body,
+ * matching this file's own stated scope: this only sends a KARMA-pad CC
+ * value to the (not-present-in-a-VM) KG audio DSP core, so a no-op is
+ * safe and inert for kronos_vm boot-testing purposes. */
+void CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) {}
+/* CSTGControllerInfo::ButtonPressHandler(unsigned int, bool)/
+ * AnalogControllerHandler(unsigned int, unsigned short, unsigned short) --
+ * confirmed real, deliberately deferred (own per-button action table /
+ * three device-code-range jump tables not traced), per oa_global.h's own
+ * comment -- needed as link targets now that CSTGFrontPanel::
+ * HandleSwitchEvent/HandleAnalogController (front_panel_handlers.cpp,
+ * 2026-07-24) call them for real. Stubbed here: with no physical front
+ * panel attached in a VM, no real hardware event can ever reach these
+ * calls in the first place, so a no-op is safe and inert. */
+void CSTGControllerInfo::ButtonPressHandler(unsigned int, bool) {}
+void CSTGControllerInfo::AnalogControllerHandler(unsigned int, unsigned short, unsigned short) {}
 /* CLoadBalancer::BalanceStaticLoad()/BalanceStaticLoadHelper(...) and
  * CSTGSlotVoiceData::EnableSlot() are real now, batch 18 -- see
  * src/engine/load_balancer_static.cpp. Their own fourth cluster sibling,
@@ -394,7 +437,14 @@ void CSTGSlotVoiceData::GetPatchStaticCosts(unsigned int, unsigned long *, unsig
  * policy. Its own real caller, CSTGPerformanceVarsManager::RunEffects(),
  * IS reconstructed for real -- see oa_global.h/global.cpp. */
 void CSTGPerformance::RunEffects(CSTGPerformanceVars *) {}
-void CSTGSmoother::FinalizeSmoother(void *, bool) {}
+/* CSTGSmoother::FinalizeSmoother(void*, bool) is real now, batch 57 --
+ * see src/engine/smoother_finalize.cpp (its own dedicated TU; four
+ * sibling verify/ files keep their own pre-existing mocks for this
+ * symbol untouched). Its own newly-discovered confirmed-real,
+ * deliberately deferred callee (own body not reconstructed, genuine
+ * audio-DSP dispatch, confirmed unreachable from any currently-real
+ * caller): CSTGSmootherMapping_DispatchSmoothedValue, defined in that
+ * same new file. */
 /* CSTGChannelValues::Reset() is real now, batch 18 -- see
  * src/engine/channel_values_reset.cpp (its own dedicated translation
  * unit; test_engine.cpp/test_global.cpp/test_global_ctor.cpp all keep
@@ -551,6 +601,34 @@ unsigned char CSTGChannelValues::sTemplateReady;
 unsigned char CSTGChannelValues::sTemplate[0x92c];
 void CSTGChannelValues::InitializeLongHand() {}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
+/*
+ * UpdateGlobalTune(float) (batch 57 investigation, .text+0xb4860, 335
+ * bytes) -- deliberately left stubbed, NOT a "too hard to determine"
+ * case (behavior IS determined) but a "disproportionate new
+ * infrastructure for one function" case, same class of call as batch
+ * 43's own CIFXEffectSlot cluster deferral:
+ *   - calls CSTGProgramSlot::UsesPatch(unsigned int, CSTGProgram*) const
+ *     (real, not yet reconstructed) up to twice.
+ *   - on a true result, constructs a REAL, fully-vtabled
+ *     `CSTGPatchMessageContext` object on the stack (installs
+ *     `vtable-for-CSTGPatchMessageContext + 8` via a genuine `R_386_32`
+ *     relocation, confirmed via `objdump -dr` -- NOT a placeholder/
+ *     zero-filled class; this project has no `CSTGPatchMessageContext`
+ *     class at all yet, own fields beyond the vtable ptr not derived),
+ *     then dispatches through vtable slot 53 (raw offset 0xd4) on `this`
+ *     own `CSTGProgramSlot` object (`this->fieldAt(0x1488)` or
+ *     `this->fieldAt(0x68)`/`this->fieldAt(0xa68)` depending on branch --
+ *     TWO different embedded `CSTGProgramSlot` sub-objects, presumably
+ *     per-layer/per-timbre).
+ *   - slot 53 is past the current `g_programModeProgramSlotVtable`/
+ *     `g_programModeDrumTrackSlotVtable` split's own populated range
+ *     (currently only slot 56 -- ProcessPreviousSVDOnProgramChange --
+ *     is real, sec 10.153/batch 47); would need its own `readelf -r`
+ *     derivation and a THIRD populated slot, on top of the brand-new
+ *     `CSTGPatchMessageContext` class this function alone would require.
+ * Deferred to a future batch with more time budget for the new-class
+ * work, rather than attempted piecemeal here.
+ */
 void CSTGSlotVoiceData::UpdateGlobalTune(float) {}
 /* Sec 10.92's own confirmed-real, deliberately deferred externs.
  * EmergencyFreeAllVoices is now real (sec 10.138). CSTGSlotVoiceData::

@@ -119,6 +119,14 @@ char *CSTGHeapManager::sInstance;
 char *CSTGEffectManager::sInstance;
 char *CSTGGlobal::sInstance;
 
+/* ---- captured-value getter mocks (2026-07-24 workaround, see
+ * heap_manager.cpp's own file comment) -- link-satisfying only, this
+ * test's own AuthorizeBuiltins()/IsAuthorizedVoiceModel() coverage
+ * never exercises klm_manager.cpp's oa_heap_base()-dependent paths
+ * (AuthorizeMultisampleBank etc.), so a fixed 0 return is sufficient. */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void) { return 0; }
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int) { return 0; }
+
 struct MockObj { const void *vtbl; unsigned char pad[0x10]; };
 
 static void make_mock_object(unsigned char *buf, unsigned int id, unsigned int locked)

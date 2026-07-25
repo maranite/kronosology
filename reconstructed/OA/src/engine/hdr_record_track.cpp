@@ -192,30 +192,31 @@ void CSTGRecordTrack::StandbyRec(const char *, unsigned int, unsigned long, int,
  *   ptr = *(this+0x4);            // packed 32-bit pointer field
  *   *(ptr+0x60) = &sGlobalBusSet[busIndex];   // busIndex*0x80 stride
  * The `+0x4` field is dereferenced UNCONDITIONALLY, no null check in
- * the real disassembly -- faithfully reproduced. Real caveat, out of
- * scope to fix this pass: `CSTGMonitorMixerChannel::CSTGMonitorMixerChannel()`
- * is STILL an unreconstructed no-op stub in this project
- * (`managers.cpp`'s own `{ }` body, sec 10.147-era placeholder,
- * a "hidden" non-bare stub per the sec 10.164-established gotcha: it
- * has content between the braces so it doesn't show up in the bare-`{}`
- * stub count) -- meaning this `+0x4` field is never actually populated
- * by any code in THIS project yet. `CSTGBankMemory::AllocAligned()`
- * (bank_memory.cpp) is a plain bump allocator with no zeroing, so on
- * real hardware this field's value depends entirely on whatever the
- * kernel handed back as fresh module memory (typically zeroed at
- * module load, but not guaranteed by this allocator itself) -- a real,
- * pre-existing gap inherited from the deferred ctor, not introduced by
- * this reconstruction. Host KATs must provide a valid backing buffer
- * for this field explicitly (matching the sec 10.162
- * "unconditional dereference" precedent) rather than relying on a
- * zero-filled default.
+ * the real disassembly -- faithfully reproduced. NOTE: the ctor is no
+ * longer a stub (managers.cpp, batch 23) -- it computes `+0x4` as a
+ * pure, deterministic self-aligned pointer (`(this+0x17) & ~0xF`), not
+ * an externally-allocated buffer (this comment previously said
+ * otherwise; stale as of that batch).
+ *
+ * WORKAROUND (2026-07-24): originally read `ptr` back from `this+0x4`
+ * as the real disassembly does. A live kronos_vm boot proved that
+ * stored copy -- written once by the ctor, long before and from a
+ * different call chain than this Initialize(), called from
+ * CSTGHDRManager::Initialize()'s own per-track loop -- doesn't reliably
+ * survive the reread (same "write not visible to a much-later read"
+ * symptom hit repeatedly elsewhere in this reconstruction; see
+ * heap_manager.cpp's own file comment for the running history, and this
+ * file's own CSTGRecordTrack::Initialize() comment for the identical
+ * fix applied there moments earlier in the same call chain). Since the
+ * ctor's formula is a pure function of `this` alone, recompute it
+ * directly instead of trusting the stored copy.
  */
 void CSTGMonitorMixerChannel::Initialize(unsigned int busIndex)
 {
 	unsigned char *base = (unsigned char *)this;
 	base[0x0] = (unsigned char)busIndex;
 
-	unsigned char *ptr = FromU32(*(unsigned int *)(base + 0x4));
+	unsigned char *ptr = (unsigned char *)(((unsigned long)base + 0x17) & ~0xFUL);
 	*(unsigned int *)(ptr + 0x60) =
 		(unsigned int)(unsigned long)(CSTGAudioBusManager::sGlobalBusSet + busIndex * 0x80);
 }
@@ -278,7 +279,26 @@ void CSTGRecordTrack::Initialize(unsigned short trackIdx)
 {
 	unsigned char *base = (unsigned char *)this;
 
-	unsigned char *otherPtr = FromU32(*(unsigned int *)(base + 0x24));
+	/* WORKAROUND (2026-07-24): `this+0x24` (the embedded
+	 * CSTGMonitorMixerChannel's own +0x4 field, this class's own
+	 * `+0x20+0x4`) is written once by CSTGMonitorMixerChannel's
+	 * constructor -- called from CSTGHDRManager's own constructor, long
+	 * before this Initialize() ever runs, from a completely different
+	 * call chain -- and a live kronos_vm boot proved that write doesn't
+	 * reliably survive to this reread (BUG: kernel NULL pointer
+	 * dereference, CR2=0x68, i.e. `otherPtr` itself read back 0). Same
+	 * "write not visible to a much-later read" symptom hit repeatedly
+	 * elsewhere in this reconstruction (see heap_manager.cpp's own file
+	 * comment for the running history). Unlike those other cases, no
+	 * capture/shadow-state workaround is even needed here: managers.cpp's
+	 * own CSTGMonitorMixerChannel::CSTGMonitorMixerChannel() computes
+	 * this value as a pure, deterministic function of its own `this`
+	 * (`(this+0x17) & ~0xF`, a runtime 16-byte realignment) -- so it can
+	 * just be recomputed directly instead of trusting the stored copy.
+	 * MonitorMixerChannel's own `this` is `base+0x20` (confirmed real,
+	 * see this method's own header comment), giving `(base+0x20+0x17) &
+	 * ~0xF` here. */
+	unsigned char *otherPtr = (unsigned char *)(((unsigned long)(base + 0x20) + 0x17) & ~0xFUL);
 
 	*(unsigned short *)(base + 0x0) = trackIdx;
 	*(int *)(base + 0xac) = 0;	/* +0xac..+0xb4: confirmed zeroed, real gap fields */

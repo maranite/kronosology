@@ -252,6 +252,17 @@ public:
 	void ResetSendKnobsJumpCatch();
 
 	/*
+	 * SendKarmaCCToKG(eKarmaCCNo, unsigned char) -- confirmed real,
+	 * deliberately deferred extern (own body not reconstructed in this
+	 * pass): both real call sites in `CSTGFrontPanel::HandleTouchPanel`
+	 * (src/engine/front_panel_handlers.cpp) pass `this =
+	 * CSTGControllerRTData::sInstance` (this class's OWN singleton, not
+	 * the `CSTGGlobal+0x10` embedded sub-object). Real `eKarmaCCNo` enum
+	 * not modeled -- plain `int` (project convention).
+	 */
+	void SendKarmaCCToKG(int ccNo, unsigned char value);
+
+	/*
 	 * sInstance (sec 10.69, confirmed via a direct relocation from
 	 * UpdateKnobFaderMode) -- a real static singleton pointer, DISTINCT
 	 * from the embedded `CSTGGlobal+0x10` sub-object used everywhere
@@ -1118,6 +1129,23 @@ struct CSTGEffectRackVars {
  */
 struct CSTGMidiQueueWriter {
 	void Write(const unsigned char *data, unsigned int length, bool flag);
+
+	/*
+	 * Write(unsigned char) -- confirmed real single-byte overload,
+	 * found via `CSTGMidiInPortGeneric::Receive()`'s own disassembly
+	 * (see src/engine/midi_in_port.cpp). Real symbol
+	 * `_ZN19CSTGMidiQueueWriter5WriteEh` is WEAK/COMDAT (own section
+	 * `.text._ZN19CSTGMidiQueueWriter5WriteEh`, 72 bytes) rather than
+	 * living in the main `.text`, but IS defined inside OA.ko itself
+	 * (not an external/imported symbol). Confirmed body: computes free
+	 * space via `GetNumWritableBytes()` on the same `ringCtl` this
+	 * object's 3-arg `Write()` uses; no-ops if 0; otherwise stores the
+	 * one byte at `bufBase[writeCursor & mask]` and increments
+	 * `writeCursor` by 1 -- algebraically the length==1 special case of
+	 * the 3-arg overload above, but genuinely a separate compiled
+	 * function, not a thin wrapper around it.
+	 */
+	void Write(unsigned char byte);
 };
 struct CSTGPerformanceVarsManager {
 	/*
@@ -1671,8 +1699,14 @@ public:
 	 * struct copy), then calls `busChangeArray[i].Reset(busId=
 	 * busChangeArray[i]'s own +0xa byte, busType=+0xb byte)` -- i.e.
 	 * `Reset(0x20, 0)` given the defaults just written above.
-	 */
-	void Initialize(unsigned int count);
+	 *
+	 * WORKAROUND (2026-07-24): returns `unsigned char *` (the freshly-
+	 * allocated mixerArr, same value stored into `mixerStateArray32`)
+	 * instead of `void` as ground truth has it -- see
+	 * audio_input_mixer.cpp's own comment on this function for why. This
+	 * class's `Initialize` is not virtual and has exactly one caller in
+	 * this project, so the widened signature is contained. */
+	unsigned char *Initialize(unsigned int count);
 };
 
 /*
@@ -2159,6 +2193,29 @@ struct CSTGControllerInfo {
 	 */
 	static void SendUnsolicitedUIParam(unsigned int paramId, unsigned int value,
 					    long arg3, int midiSource);
+
+	/*
+	 * ButtonPressHandler(eSTGButtonCode, bool)/
+	 * AnalogControllerHandler(eSTGAnalogDeviceCode, unsigned short,
+	 * unsigned short) -- confirmed real (relocations from
+	 * `CSTGFrontPanel::HandleSwitchEvent`/`HandleAnalogController`,
+	 * src/engine/front_panel_handlers.cpp), deliberately deferred
+	 * extern: each is a real per-button/per-device jump/dispatch table
+	 * (ButtonPressHandler's full per-button action table,
+	 * AnalogControllerHandler's three device-code-range jump tables) not
+	 * traced in this pass. `this` at both real call sites is NOT
+	 * `CSTGControllerInfo::sInstance` -- it is the embedded sub-object at
+	 * `+0xad3` within whichever `CSTGProgram+3`/`CSTGCombi+6`/
+	 * `CSTGSequence+0` target HandleSwitchEvent/HandleAnalogController's
+	 * own mode-dependent resolution selects (see their shared
+	 * "resolveControllerInfoTarget" comment). AnalogControllerHandler's
+	 * mangled signature (`ht` = `unsigned short, unsigned short`) takes
+	 * `param2` widened from the caller's `unsigned char` -- modeled here
+	 * as `unsigned short` to match the real ABI exactly. Real enum types
+	 * not modeled (project convention).
+	 */
+	void ButtonPressHandler(unsigned int code, bool pressed);
+	void AnalogControllerHandler(unsigned int deviceCode, unsigned short param2, unsigned short param3);
 
 	/* OnPerformanceDeactivate() (batch 19, `.text+0x92a90`, 106 bytes,
 	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --

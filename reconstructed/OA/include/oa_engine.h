@@ -1207,6 +1207,122 @@ public:
 /* ---- Minimal opaque singletons touched only by the destructor ---- */
 
 /*
+ * CSTGMidiOutPort -- forward-declared here (used only by pointer/array
+ * element type in this class), fully defined in oa_engine_init.h right
+ * after CSTGMidiQueue (which it embeds pointers to and which this header
+ * cannot see -- oa_engine_init.h includes oa_engine.h, not the other way
+ * around). See that definition for the confirmed real q0-q3 field layout,
+ * cross-checked against KronosScreenRemoteDaemon/midi_module/
+ * midi_bridge.c's own independent real-hardware findings.
+ */
+struct CSTGMidiOutPort;
+
+/*
+ * CSTGMidiInPort / CSTGMidiInPortGeneric -- confirmed real classes (sec
+ * MIDI-IN, batch "midi_in_port"). CSTGMidiInPort's field layout below is
+ * reconstructed directly from THREE confirmed real functions' own raw
+ * disassembly (readelf/objdump against OA_real.ko, MD5
+ * 955636c2b11a70a1dbecefaaa7bd4f80 -- NOT the Ghidra decompile of
+ * Receive(), which mis-attributes several tail calls due to stack-spill
+ * confusion around this function's optimized register allocation):
+ *   - CSTGMidiInPort::CSTGMidiInPort(eSTGMidiPort, unsigned int)
+ *     (`_ZN14CSTGMidiInPortC2E12eSTGMidiPortj`, .text+0xf59a0, 144 bytes)
+ *   - CSTGMidiPortManager::RegisterMidiInPort(CSTGMidiInPort*)
+ *     (`_ZN19CSTGMidiPortManager18RegisterMidiInPortEP14CSTGMidiInPort`,
+ *     .text+0xf4f40, 12 bytes) -- see src/engine/midi_in_port.cpp
+ *   - CSTGMidiInPortGeneric::Receive(const unsigned char*, unsigned int)
+ *     (`_ZN21CSTGMidiInPortGeneric7ReceiveEPKhj`, .text+0xf7a10, 862
+ *     bytes, confirmed regparm(3): EAX=this, EDX=data, ECX=len) -- this
+ *     is the function the project brief calls "MidiInPortGeneric7Receive"
+ *     (a fragment of its own mangled name); see
+ *     src/engine/midi_in_port.cpp for the full reconstruction and an
+ *     `extern "C"` flat-signature alias under that exact name.
+ *
+ * Confirmed fields (everything else is a real but not-yet-individually-
+ * characterized gap, folded into `_unrecoveredNN` byte arrays below,
+ * matching this project's established convention):
+ *   +0x25  portType -- ctor's own 2nd parameter (`eSTGMidiPort`), stored
+ *          BEFORE RegisterMidiInPort() is called; RegisterMidiInPort()
+ *          reads this same byte back as the index into
+ *          `CSTGMidiPortManager::sMidiInPorts[4]`
+ *          (`sMidiInPorts[(char)this->portType] = this;`) -- matches the
+ *          project brief's "+0x25 = port-type byte".
+ *   +0x26  flags -- bit0 = also-forward-raw-to-the-KG-engine passthrough
+ *          (gates the `+0x100` writer), bit1 = STG-generic-processing
+ *          enabled/"active" (matches project brief's "+0x26 = flags,
+ *          bit1 = active"); ctor only ever sets/clears bit0 from its own
+ *          incoming `unsigned int` 3rd parameter's low bit, never bit1 --
+ *          bit1 must be set by some other, not-yet-traced call site.
+ *   +0x04..+0x23  a 32-byte local raw SysEx accumulation scratch buffer
+ *          (ctor does not zero it; only the count below).
+ *   +0x24  sysExScratchLen -- running count into the scratch buffer above.
+ *   +0xf0/+0xf4   embedded "primary" CSTGMidiQueueWriter (ringCtl/
+ *          bufBase, see oa_global.h) -- SysEx-scratch-flush and
+ *          new-channel-status-byte tail-flush target.
+ *   +0xf8/+0xfc   embedded "realtime" CSTGMidiQueueWriter -- target of
+ *          the inlined single-byte realtime-message ring push (0xF8/FA/
+ *          FB/FC) AND the "system common" (0xF1-F6) tail-flush target.
+ *   +0x100/+0x104 embedded "KG" CSTGMidiQueueWriter -- passthrough
+ *          target, gated by flags&1.
+ *   +0x140..+0x1ab  8-slot realtime-byte-with-timestamp ring (12-byte
+ *          stride; see PushRealtimeByte() in the .cpp for the exact,
+ *          slightly-offset real addressing this project reproduces
+ *          verbatim rather than "cleans up").
+ *   +0x1ac  realtimeRingWriteIdx (masked `& 7` on every use).
+ *   +0x2e0  sysExState: 0=idle, 2=locally-buffering (scratch buffer),
+ *          3=streaming (per-byte via the flags below).
+ *   +0x2e1  streamFlagPrimary -- state-3 only: flush a single 0xF7 to the
+ *          primary writer on message end.
+ *   +0x2e2  streamFlagKG -- state-3 only: flush a single 0xF7 to the KG
+ *          writer on message end (also gated by flags&1).
+ *   +0x2e3  activeSensingSeen -- set (never cleared, here) on 0xFE.
+ *   +0x2e4  an unresolved 4-byte copy from
+ *          `*(unsigned int*)((char*)CSTGGlobal::sInstance+0x29c9fa8)` --
+ *          see the .cpp file header for why this displacement is flagged
+ *          as a genuine anomaly rather than a plausible struct offset.
+ *
+ * `ReceiveSysEx(const unsigned char*, unsigned int)` is a separate,
+ * independently confirmed real regparm(3) method
+ * (`_ZN14CSTGMidiInPort12ReceiveSysExEPKhj`, .text+0xf63f0, 291 bytes)
+ * -- declared here (so callers link against its real mangled name) but
+ * deliberately NOT implemented in this pass; out of this task's scope.
+ */
+class CSTGMidiInPort {
+public:
+	unsigned char _unrecovered04[0x20];		/* +0x04..+0x23: local SysEx scratch buffer */
+	unsigned char sysExScratchLen;			/* +0x24 */
+	unsigned char portType;			/* +0x25 */
+	unsigned char flags;				/* +0x26 */
+	unsigned char _unrecovered27[0xc9];		/* +0x27..+0xef */
+	unsigned int  writerPrimaryRingCtl;		/* +0xf0 */
+	unsigned int  writerPrimaryBufBase;		/* +0xf4 */
+	unsigned int  writerRealTimeRingCtl;		/* +0xf8 */
+	unsigned int  writerRealTimeBufBase;		/* +0xfc */
+	unsigned int  writerKGRingCtl;			/* +0x100 */
+	unsigned int  writerKGBufBase;			/* +0x104 */
+	unsigned char _unrecovered108[0x1d8];		/* +0x108..+0x2df (includes the +0x140 realtime ring) */
+	unsigned char sysExState;			/* +0x2e0 */
+	unsigned char streamFlagPrimary;		/* +0x2e1 */
+	unsigned char streamFlagKG;			/* +0x2e2 */
+	unsigned char activeSensingSeen;		/* +0x2e3 */
+	unsigned int  _unknown2e4;			/* +0x2e4 */
+
+	void ReceiveSysEx(const unsigned char *data, unsigned int len);
+};
+
+/*
+ * CSTGMidiInPortGeneric -- adds NO confirmed fields of its own beyond
+ * CSTGMidiInPort (every offset Receive() touches is one of the base
+ * class's own confirmed fields above); modeled as a field-less subclass
+ * purely to carry the real, independently-confirmed `Receive()` method
+ * under its own real mangled name.
+ */
+class CSTGMidiInPortGeneric : public CSTGMidiInPort {
+public:
+	void Receive(const unsigned char *data, unsigned int len);
+};
+
+/*
  * CSTGMidiPortManager -- CONFIRMED to have no constructor function at all,
  * not merely "not yet found". Checked exhaustively, not assumed:
  *   - No `CSTGMidiPortManagerC1Ev`/`C2Ev` symbol anywhere in OA.ko's ELF
@@ -1261,6 +1377,38 @@ public:
 	 */
 	static void *sMidiInPorts[4];
 	static void *sMidiOutPorts[4];
+
+	/*
+	 * RegisterMidiInPort(CSTGMidiInPort*) -- confirmed real
+	 * (`_ZN19CSTGMidiPortManager18RegisterMidiInPortEP14CSTGMidiInPort`,
+	 * regparm(3), .text+0xf4f40, 12 bytes): a 1-line body,
+	 * `sMidiInPorts[(char)port->portType] = port;` -- called from the
+	 * tail of `CSTGMidiInPort::CSTGMidiInPort()` once `portType` (+0x25)
+	 * has already been stored. See src/engine/midi_in_port.cpp.
+	 */
+	static void RegisterMidiInPort(CSTGMidiInPort *port);
+
+	/*
+	 * RegisterMidiOutPort(CSTGMidiOutPort*) -- newly reconstructed (was
+	 * entirely missing: only Initialize()'s own dead port-registration
+	 * loop referenced sMidiOutPorts before this, never a real writer).
+	 * Real disassembly, confirmed via the exact byte pattern
+	 * KronosScreenRemoteDaemon/midi_module/midi_bridge.c's
+	 * resolve_out_ports() independently ground-truthed on real hardware
+	 * (that helper doesn't call this function, it PATTERN-MATCHES
+	 * its .text bytes at runtime to recover &sMidiOutPorts -- reproduced
+	 * here as the equivalent C the pattern actually disassembles to):
+	 *   0f be 50 04     movsx edx, byte ptr [eax+4]   ; port->portIndex
+	 *   89 04 95 <d32>  mov   sMidiOutPorts[edx*4], eax
+	 *   c3              ret
+	 * i.e. a plain static (no `this`) regparm(3) function: arg1 (eax) is
+	 * the port object itself, which self-reports its own array slot via
+	 * a byte field at +0x4 (see CSTGMidiOutPort, oa_engine_init.h). No
+	 * bounds check on that index -- reproduced faithfully (this
+	 * project's established "preserve real bugs, don't add error
+	 * handling" convention). See src/engine/midi_out_port.cpp.
+	 */
+	static void RegisterMidiOutPort(CSTGMidiOutPort *port);
 
 	~CSTGMidiPortManager();
 

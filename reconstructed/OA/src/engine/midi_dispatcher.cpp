@@ -26,6 +26,11 @@
  * here, matching this project's established ODR-avoidance pattern. */
 struct CSTGHeapManager { static char *sInstance; };
 
+/* See heap_manager.cpp's own file comment -- reliable snapshots to use
+ * instead of re-deriving heap offsets from the (unreliable) object. */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void);
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
+
 /* CSTGMidiDispatcher::sInstance is already defined in engine_init.cpp
  * (sec 10.58, same treatment as CSTGWaveSeqManager::sInstance,
  * sec 10.62) -- NOT redefined here. */
@@ -103,10 +108,18 @@ void CSTGMidiDispatcher::Initialize()
 		 * observed a third time: it was a mistaken worry in this
 		 * project's own earlier derivation, not a real bug -- see
 		 * this pass's own MASTER_REFERENCE.md correction. */
+		/* WORKAROUND (2026-07-24): this used to re-derive the offset/
+		 * heapBase read directly from the object -- a live kronos_vm
+		 * boot proved that's not reliably readable outside
+		 * CSTGHeapManager::Initialize()/Alloc() themselves (see
+		 * heap_manager.cpp's own file comment). Not currently
+		 * exercised on this project's own boot path per the comment
+		 * above (slot is normally the 0xffffffff sentinel), but fixed
+		 * for consistency/safety rather than left as a latent bug. */
 		unsigned char *entry = heap + 0x18 + slot * 0x14;
 		if (entry != 0) {
-			unsigned int offset = *(unsigned int *)(entry + 0xc);
-			unsigned int heapBase = *(unsigned int *)(heap + 0x1e8498);
+			unsigned int offset = CSTGHeapManager_GetCapturedOffset(slot);
+			unsigned int heapBase = (unsigned int)CSTGHeapManager_GetCapturedHeapBase();
 			resolved = offset + heapBase;
 		}
 	}

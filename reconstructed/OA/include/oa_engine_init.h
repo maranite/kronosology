@@ -454,6 +454,86 @@ struct CSTGMidiQueue {
 };
 
 /*
+ * CSTGMidiOutPort -- newly reconstructed. Field layout is NOT from this
+ * project's own Ghidra pass; it's ported directly from
+ * KronosScreenRemoteDaemon/midi_module/midi_bridge.c's own independently
+ * ground-truthed real-hardware findings (that daemon taps these exact
+ * fields live via raw offset arithmetic on a real Kronos, no guessing):
+ * see midi_bridge.c's QUEUE_PTR_OFF/QUEUE_BUF_OFF tables and its own
+ * "Port layout from CSTGMidiOutPort::Activate" comment, which names this
+ * class's own real method -- reused verbatim below as `Activate()`.
+ *
+ * Each instance holds up to 4 queue slots. Confirmed real offsets:
+ *   +0x00  vtable ptr (CallVtableSlot-style dispatch, see
+ *          midi_port_manager.cpp's PortQuery()/PortRegister() -- slot 0
+ *          bool query, slot 1 hands the port a CSTGMidiQueue region;
+ *          that dispatch is this class's own vtable, confirmed real but
+ *          independently not fully mapped beyond those 2 slots)
+ *   +0x04  portIndex (signed byte) -- this port's own slot number in
+ *          CSTGMidiPortManager::sMidiOutPorts[4], read by
+ *          RegisterMidiOutPort()'s `movsx edx,[eax+4]` (oa_engine.h).
+ *          Exact write site not independently confirmed (plausibly set
+ *          by CKorgUsbAudioDriverMidiPorts's static init alongside
+ *          constructing the 2 real out-ports -- not reconstructed here).
+ *   +0x08/+0x0c  q0: CSTGMidiQueue* / data buffer  (active-sensing/
+ *                realtime -- midi_bridge.c: "not interesting", excluded
+ *                from its own capture on purpose)
+ *   +0x14/+0x18  q1: CSTGMidiQueue* / data buffer  (SHARED across every
+ *                out-port -- identical pointer value in all instances)
+ *   +0x20/+0x24  q2: CSTGMidiQueue* / data buffer  (SHARED; carries live
+ *                notes/CC/program-change/combi SysEx per midi_bridge.c)
+ *   +0x2c/+0x30  q3: CSTGMidiQueue* / data buffer  (per-port bulk-dump
+ *                queue -- where a data-dump reply routes, USB vs DIN)
+ *   +0x10/+0x1c/+0x28/+0x34  one reader-index byte per slot, immediately
+ *                after that slot's own buffer pointer -- THIS port's own
+ *                reader slot on that queue (the value AllocReader()
+ *                returned when the port itself became a reader in order
+ *                to transmit from it), NOT a tap module's reader (a
+ *                third party like midi_bridge.c claims its OWN separate
+ *                index via its own AllocReader() call and stores it in
+ *                its own private state, never writing here).
+ *   +0x05  flags -- CONFIRMED (not merely inferred) by
+ *          `CSTGMidiPortManager::~CSTGMidiPortManager()`'s own real
+ *          disassembly (.text+0xf5280, 264 bytes, src/engine/
+ *          midi_port_manager.cpp): `testb $0x2,0x5(%eax)` gates whether
+ *          this out-port's vtable slot 2 (presumably its own virtual
+ *          destructor) gets called during manager teardown -- bit1 =
+ *          "active"/live, by direct analogy with CSTGMidiInPort's own
+ *          confirmed `flags` field at +0x26, bit1 (oa_engine.h). This
+ *          byte was previously modeled as unconfirmed padding here; the
+ *          other 7 bits' meaning is still not independently determined,
+ *          and the exact write site (this class has no reconstructed
+ *          constructor) is not confirmed either.
+ * No further fields/total size independently confirmed -- modeled as
+ * exactly the 0x38 bytes these confirmed fields span, deliberately not
+ * padded further.
+ */
+struct CSTGMidiOutPort {
+	void   *vtable;               /* +0x00 */
+	signed char portIndex;        /* +0x04 -- this port's own sMidiOutPorts[] slot */
+	unsigned char flags;          /* +0x05 -- bit1 = active/live, see class comment above */
+	unsigned char _pad6[2];       /* +0x06..+0x07, natural alignment, not independently confirmed */
+
+	CSTGMidiQueue *q0Queue;        unsigned char *q0Buf;  unsigned char q0ReaderIdx; unsigned char _pad11[3];
+	CSTGMidiQueue *q1Queue;        unsigned char *q1Buf;  unsigned char q1ReaderIdx; unsigned char _pad1d[3];
+	CSTGMidiQueue *q2Queue;        unsigned char *q2Buf;  unsigned char q2ReaderIdx; unsigned char _pad29[3];
+	CSTGMidiQueue *q3Queue;        unsigned char *q3Buf;  unsigned char q3ReaderIdx; unsigned char _pad35[3];
+
+	/*
+	 * Activate(int qslot, CSTGMidiQueue*, unsigned char*) -- real method
+	 * name confirmed by midi_bridge.c's own header comment (it names
+	 * this exact method as the source of the field layout above), body
+	 * NOT independently disassembled by this project -- modeled as the
+	 * straightforward store-both-pointers-and-claim-a-reader operation
+	 * the confirmed field layout implies: populates one of the 4 queue
+	 * slots and claims this port's own reader slot on it via the
+	 * already-real CSTGMidiQueue::AllocReader() (sec 10.82,
+	 * global.cpp) -- marked speculative body, real layout.
+	 */
+	void Activate(int qslot, CSTGMidiQueue *queue, unsigned char *buf);
+};
+
+/*
  * CSTGChannelValues (confirmed real via 3 relocations from
  * CSTGMidiDispatcher::PerfChangeControllerReset, sec 10.115) --
  * per-MIDI-channel controller/pitch-bend state, confirmed to live at a

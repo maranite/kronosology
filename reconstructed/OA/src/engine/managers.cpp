@@ -1621,17 +1621,39 @@ void CSTGVoiceAllocator::Initialize()
 	}
 
 	/* 200 CSTGVoice objects, packed 32-bit pointers stored into
-	 * voicePtrs[]. */
+	 * voicePtrs[].
+	 *
+	 * WORKAROUND (2026-07-24): `localVoicePtrs` is NOT part of ground
+	 * truth -- added because a live kronos_vm boot proved this object's
+	 * own `voicePtrs[]` member (living inside this ~283KB
+	 * AllocAligned()-backed CSTGVoiceAllocator instance, same
+	 * ioremap'd heap region as CSTGVectorManager) doesn't reliably
+	 * survive from this loop's writes to the SECOND loop's reads a few
+	 * lines below (BUG: kernel NULL pointer dereference at 0x60, i.e.
+	 * `voice` read back NULL -- see this method's own header comment
+	 * for the wider pattern this is part of: CSTGHeapManager's statics,
+	 * the ten voice models' vtable pointers, and CSTGVectorManager's
+	 * embedded objects' vtable pointers all showed this same "write not
+	 * visible to a later read" symptom in this specific freestanding/
+	 * regparm(3)/-O2 kernel-module environment; each got its own
+	 * targeted workaround rather than a shared fix, since root cause
+	 * was never conclusively pinned down despite extensive investigation
+	 * -- see heap_manager.cpp's own file comment for that history). The
+	 * real `voicePtrs[]` member is still written for structural
+	 * fidelity (anything else reading it later still gets the real
+	 * value); the second loop just no longer trusts rereading it. */
+	unsigned int localVoicePtrs[200];
 	for (i = 0; i < 200; i++) {
 		void *mem = CSTGBankMemory::AllocAligned(0xf0, 0x10);
 		new (mem) CSTGVoice((unsigned short)i);
 		voicePtrs[i] = ToU32(mem);
+		localVoicePtrs[i] = ToU32(mem);
 	}
 	/* Second pass: a separate 0x4000-byte buffer per voice, pointer
 	 * stored at voice+0x60. */
 	for (i = 0; i < 200; i++) {
 		void *buf = CSTGBankMemory::AllocAligned(0x4000, 0x10);
-		unsigned char *voice = FromU32(voicePtrs[i]);
+		unsigned char *voice = FromU32(localVoicePtrs[i]);
 		*(unsigned int *)(voice + 0x60) = ToU32(buf);
 	}
 

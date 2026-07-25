@@ -77,6 +77,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/smoother_init.o \
            src/engine/smoother_ctor.o \
            src/engine/smoother_cancel.o \
+           src/engine/smoother_finalize.o \
            src/engine/controller_rt_data_init.o \
            src/engine/controller_rt_data_ctor.o \
            src/engine/slot_voice_data_ctor.o \
@@ -102,6 +103,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/hdr_playback_commands.o \
            src/engine/file_opener_events.o \
            src/engine/controller_rt_data_set_assignment.o \
+           src/engine/controller_rt_data_set_audio_in_solo.o \
+           src/engine/controller_rt_data_reset_send_knobs_jump_catch.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
            src/engine/slot_voice_data_free.o \
@@ -148,7 +151,13 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/sequence_combi_init.o \
            src/stub/bar2_stubs.o \
            src/stub/bar2_stubs_auth.o \
-           src/stub/bar2_stubs_c.o
+           src/stub/bar2_stubs_c.o \
+           src/engine/front_panel_handlers.o \
+           src/engine/karma_chord_trigger.o \
+           src/engine/midi_in_port.o \
+           src/engine/midi_queue_writer_byte.o \
+           src/engine/midi_out_port.o \
+           src/engine/vm_test_accessors.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -256,6 +265,16 @@ CFLAGS_keybed_debounce.o := -mhard-float -msse2 -mfpmath=sse
 # libgcc soft-float helpers under the kernel's own -msoft-float default.
 CFLAGS_midi_port_manager.o := -mhard-float -msse2 -mfpmath=sse
 
+# Same reasoning again: CSTGFrontPanel::HandleTouchPanel's confirmed real
+# ADC-to-CC scaling (`(float)(hAdc - 0xd) * *(float*)(self+0x10c)` and the
+# matching v-axis computation) does genuine plain-C float arithmetic
+# confirmed real in the original binary, which would otherwise pull in
+# unresolvable libgcc soft-float helpers (__fixsfsi/__floatsisf/__mulsf3)
+# under the kernel's own -msoft-float default -- missed when this file was
+# added (2026-07-24), unlike its siblings above which all got this same
+# override at the time they were added.
+CFLAGS_front_panel_handlers.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -307,6 +326,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/waveseq_generator.cpp \
        src/engine/smoother_ctor.cpp \
        src/engine/smoother_cancel.cpp \
+       src/engine/smoother_finalize.cpp \
        src/engine/controller_rt_data_ctor.cpp \
        src/engine/slot_voice_data_ctor.cpp \
        src/engine/alias_bank_convert.cpp \
@@ -334,6 +354,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/hdr_playback_commands.cpp \
        src/engine/file_opener_events.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
+       src/engine/controller_rt_data_set_audio_in_solo.cpp \
+       src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
        src/engine/slot_voice_data_free.cpp \
@@ -415,12 +437,13 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_audio_input_mixer \
          verify/test_alias_bank_convert verify/test_waveseq_generator \
          verify/test_audio_bus_manager verify/test_program_slot_ctor \
-         verify/test_sequence_ctor verify/test_smoother_cancel \
+         verify/test_sequence_ctor verify/test_smoother_cancel verify/test_smoother_finalize \
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
          verify/test_sampling_interface_ctor \
          verify/test_channel_values verify/test_hdr_record_track \
          verify/test_smoother_ctor verify/test_hdr_manager_init \
-         verify/test_controller_rt_data_set_assignment verify/test_slot_voice_data_midi_filters \
+         verify/test_controller_rt_data_set_assignment verify/test_controller_rt_data_set_audio_in_solo \
+         verify/test_controller_rt_data_reset_send_knobs_jump_catch verify/test_slot_voice_data_midi_filters \
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
          verify/test_message_processor \
@@ -613,6 +636,9 @@ verify/test_smoother_init: verify/test_smoother_init.cpp src/engine/smoother_ini
 verify/test_smoother_cancel: verify/test_smoother_cancel.cpp src/engine/smoother_cancel.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_cancel.cpp src/engine/smoother_cancel.cpp -o $@
 
+verify/test_smoother_finalize: verify/test_smoother_finalize.cpp src/engine/smoother_finalize.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_finalize.cpp src/engine/smoother_finalize.cpp -o $@
+
 verify/test_controller_rt_data_ctor: verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp include/oa_global.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp -o $@
 
@@ -648,6 +674,12 @@ verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_se
 
 verify/test_slot_voice_data_midi_filters: verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_slot_voice_data_midi_filters.cpp src/engine/slot_voice_data_midi_filters.cpp -o $@
+
+verify/test_controller_rt_data_set_audio_in_solo: verify/test_controller_rt_data_set_audio_in_solo.cpp src/engine/controller_rt_data_set_audio_in_solo.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_audio_in_solo.cpp src/engine/controller_rt_data_set_audio_in_solo.cpp -o $@
+
+verify/test_controller_rt_data_reset_send_knobs_jump_catch: verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp include/oa_global.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp -o $@
 
 verify/test_heap_manager_alloc_static: verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp -o $@

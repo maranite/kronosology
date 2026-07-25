@@ -1169,41 +1169,47 @@ int main(void)
 		unsigned char *frontPanelBuf = mmap32(0x10);
 		CSTGFrontPanel::sInstance = (CSTGFrontPanel *)frontPanelBuf;
 		g_omapWriteCommandCalls = 0;
-		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own Initialize() is
-		 * now real and genuinely dispatches through ITS OWN (different)
-		 * vtable slot 7 -- a plain `static` placeholder array's address
-		 * isn't guaranteed to survive g_programModeProgramSlotVtable/
-		 * g_programModeDrumTrackSlotVtable's own 32-bit truncation on a
+		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own ctor still
+		 * writes `ToU32(&g_programModeProgramSlotVtable[2])`/
+		 * `&g_programModeDrumTrackSlotVtable[2]` into each object's own
+		 * +0x0 field regardless of how Initialize() itself dispatches
+		 * (see below) -- a plain `static` placeholder array's address
+		 * isn't guaranteed to survive that 32-bit truncation on a
 		 * 64-bit host (PIE puts static data above 4GB), so repoint both
 		 * at the SAME mmap32'd buffer before constructing either
-		 * sub-object (batch 47 split what used to be one shared
-		 * `g_programSlotVtable` into two class-specific globals so
-		 * ChangeProgram()'s own real slot 56 can differ per class -- this
-		 * scenario only exercises slot 7, so pointing both at one 10-slot
-		 * buffer reproduces the exact same behavior as before the split). */
+		 * sub-object, same as before (batch 47 split what used to be
+		 * one shared `g_programSlotVtable` into two class-specific
+		 * globals so ChangeProgram()'s own real slot 56 can differ per
+		 * class -- this scenario only needs a valid low-address target,
+		 * pointing both at one 10-slot buffer is enough). */
 		void **programSlotVtableBuf = (void **)mmap32(10 * sizeof(void *));
-		typedef void (*Slot7TrapFn)(void *);
-		static int programSlotTrapCalls;
-		Slot7TrapFn programSlotTrap = [](void *) { programSlotTrapCalls++; };
-		programSlotTrapCalls = 0;
-		programSlotVtableBuf[0] = 0;
-		programSlotVtableBuf[1] = 0;
-		for (int i = 2; i < 10; i++)
-			programSlotVtableBuf[i] = (void *)programSlotTrap;
+		for (int i = 0; i < 10; i++)
+			programSlotVtableBuf[i] = 0;
 		g_programModeProgramSlotVtable = programSlotVtableBuf;
 		g_programModeDrumTrackSlotVtable = programSlotVtableBuf;
 
-		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own Initialize() is
-		 * now real and genuinely dispatches through ITS OWN (different)
-		 * vtable slot 7 -- placement-construct both embedded sub-objects
-		 * for real so that dispatch has a valid vtable pointer to read. */
+		/* CSTGProgramModeProgramSlot/DrumTrackSlot's own Initialize() --
+		 * placement-construct both embedded sub-objects for real.
+		 *
+		 * 2026-07-24: Initialize() no longer dispatches through slot 7
+		 * at runtime at all -- a live kronos_vm boot proved the vtable
+		 * pointer written by the ctor above doesn't reliably survive
+		 * the reread from a separately-called Initialize() (same
+		 * "write not visible to a much-later read" symptom hit
+		 * repeatedly elsewhere in this reconstruction; see
+		 * heap_manager.cpp's own file comment for the running history,
+		 * and global.cpp's own comment on this exact call site for the
+		 * specific fix). Slot 7 is confirmed to always resolve to the
+		 * same inert `ProgramSlotVtableTrap` no-op for both classes, so
+		 * it's now called directly, compile-time-fixed, no longer
+		 * mockable/countable through the object's own vtable pointer --
+		 * the previous "trap called twice" counter this test used is
+		 * gone along with the indirection it was observing. */
 		new (buf + 0x2977b1f) CSTGProgramModeProgramSlot();
 		new (buf + 0x2977c08) CSTGProgramModeDrumTrackSlot();
 
 		g->Initialize();
 
-		check_eq("CSTGProgramModeProgramSlot/DrumTrackSlot Initialize's own vtable slot 7 called twice",
-			 (unsigned int)programSlotTrapCalls, 2);
 		munmap(programSlotVtableBuf, 10 * sizeof(void *));
 
 		check_eq("CSTGParamsOwner::UseDefaults called once", (unsigned int)g_useDefaultsCalls, 1);

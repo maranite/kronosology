@@ -35,26 +35,31 @@ CSTGGlobal *CSTGGlobal::sInstance;
 void *CSTGMidiPortManager::sMidiInPorts[4];
 void *CSTGMidiPortManager::sMidiOutPorts[4];
 
-/* Local minimal CSTGHeapManager stand-in, matching midi_port_manager.cpp's
- * own internal declaration (same mangled `sInstance` symbol) -- needed
- * here so tests [1]-[3] can SET the value via convenient `char*`
- * arithmetic; see midi_port_manager.cpp's own top-of-file note on why it
- * can't just `#include "oa_heap.h"` (ODR conflict with oa_global.h's
- * CSTGGlobal). Storage is now provided by src/mem/heap_manager.cpp
- * (linked into this test as of sec 10.230, for CSTGMidiQueue::
- * Initialize()'s own real `CSTGHeapManager::Alloc(unsigned long)` call)
- * -- NOT defined again here, that would be a duplicate definition of the
- * same real symbol. */
-struct CSTGHeapManager { static char *sInstance; };
+/* Storage for CSTGMidiPortManager::sInstance -- normally defined in
+ * engine.cpp (not linked into this test); needed now that
+ * ~CSTGMidiPortManager() (batch 57, this same file) references it
+ * directly. */
+CSTGMidiPortManager *CSTGMidiPortManager::sInstance;
 
-/* Real C-linkage wrapper (oa_heapmanager.h) -- declared directly rather
+/* Real C-linkage wrappers (oa_heapmanager.h) -- declared directly rather
  * than `#include`d, since that header's own `class CSTGHeapManager`
  * declaration would conflict with this file's local minimal stand-in
  * above WITHIN THE SAME TRANSLATION UNIT (a hard redefinition error,
  * unlike the cross-TU same-mangled-name trick used everywhere else in
- * this project) -- this one function's signature doesn't reference the
- * class type at all, so it's safe to forward-declare standalone. */
+ * this project) -- none of these functions' signatures reference the
+ * class type, so they're safe to forward-declare standalone. */
 extern "C" unsigned long CSTGHeapManager_Initialize(unsigned long base, unsigned long size);
+
+/* 2026-07-24 workaround wrappers (see heap_manager.cpp's own file comment):
+ * test [3] below drives NotifyNKS4TestMode()'s heap-region resolution
+ * through these REAL functions now (this file links the real
+ * heap_manager.cpp, unlike test_setup_global_resources.cpp's own mocked
+ * version of these same two getters) rather than poking raw bytes into a
+ * fake CSTGHeapManager object at the old `+0x24+slot*0x14`/`+0x1e8498`
+ * offsets, which LocalHeapBase()/LocalHeapRegion() no longer read at all. */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void);
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
+extern "C" unsigned int CSTGHeapManager_BumpAlloc(unsigned int size);
 
 /* Local minimal CSTGCPUInfo stand-in, matching midi_port_manager.cpp's
  * own internal declaration -- needed here to provide `sInstance`'s
@@ -157,30 +162,51 @@ int main(void)
 	printf("[3] NotifyNKS4TestMode: heap up, slot in range -> resets all 4\n"
 	       "    embedded CSTGMidiQueue objects (stride 0x64), leaving\n"
 	       "    mask/readerCount untouched (same confirmed Reset() gap\n"
-	       "    as test_midi_queue.cpp's own [5])\n");
+	       "    as test_midi_queue.cpp's own [5])\n"
+	       "    REWRITTEN (2026-07-24): LocalHeapBase()/LocalHeapRegion()\n"
+	       "    now resolve through the real captured-offset workaround\n"
+	       "    (CSTGHeapManager_GetCapturedOffset/HeapBase), not raw\n"
+	       "    `+0x24+slot*0x14`/`+0x1e8498` heap-manager-object bytes --\n"
+	       "    drive it through a real CSTGHeapManager_Initialize() +\n"
+	       "    CSTGHeapManager_BumpAlloc() pair instead of poking a fake\n"
+	       "    heap-manager object (that object's own bytes are no longer\n"
+	       "    read by LocalHeapBase()/LocalHeapRegion() at all).\n");
 	{
-		/* heapMgrBuf must be big enough to cover +0x1e8498 (the
-		 * confirmed real heap-translation-base field, see
-		 * oa_heap.h) -- set to 0 here so heapBase == the raw
-		 * pointer at +0x38 and region == the raw pointer at
-		 * +0x24+slot*0x14, exercising the real formula's control
-		 * flow without needing a second real translation base. */
-		unsigned long heapMgrSize = 0x1e8500;
-		unsigned char *heapMgrBuf = map32(heapMgrSize);
-		memset(heapMgrBuf, 0, heapMgrSize);
+		/* CSTGHeapManager_Initialize() zeroes its own sentinel/handle-table
+		 * region up to raw+0x18+0x1e8480 (~2MB) before any usable heap
+		 * begins at raw+0x1e94af rounded to a page -- must be at least that
+		 * big, matching test [4]'s own 8MB buffer below. */
+		unsigned long heapBufSize = 8 * 1024 * 1024;
+		unsigned char *heapBuf = map32(heapBufSize);
+		memset(heapBuf, 0, heapBufSize);
+		CSTGHeapManager_Initialize((unsigned long)heapBuf, heapBufSize);
 
-		unsigned char *heapBaseBuf = map32(0x10);
-		memset(heapBaseBuf, 0, 0x10);
-		unsigned char *regionBuf = map32(0x200);
-		memset(regionBuf, 0xCC, 0x200);
+		/* Alloc #1 = slot 1, the "heapBase" handle LocalHeapBase() resolves
+		 * (see midi_port_manager.cpp's own LocalHeapBase() comment: "Slot 1
+		 * is the very first CSTGHeapManager::Alloc() call of the whole
+		 * boot"). Its own +0x8 field stores the SECOND slot number, which
+		 * is where the real 4-queue region actually lives. */
+		/* Address = CSTGHeapManager_GetCapturedHeapBase() + GetCapturedOffset(slot)
+		 * -- GetCapturedHeapBase() already returns the real ALIGNED absolute
+		 * base address (CSTGHeapManager_Initialize()'s own `alignedBase`,
+		 * ~0x1e9000 bytes into heapBuf, past the object's own sentinel/
+		 * handle-table bookkeeping region), not an offset from heapBuf
+		 * itself -- matching exactly how LocalHeapBase()/LocalHeapRegion()
+		 * themselves compute it. Using `heapBuf + offset` directly (an
+		 * earlier version of this fix) landed inside that bookkeeping
+		 * region instead of the real heap, corrupting CSTGHeapManager's own
+		 * internal state. */
+		unsigned int heapBaseSlot = CSTGHeapManager_BumpAlloc(0x10);
+		unsigned char *heapBaseBuf = (unsigned char *)(CSTGHeapManager_GetCapturedHeapBase() +
+								CSTGHeapManager_GetCapturedOffset(heapBaseSlot));
 
-		unsigned int slot = 0;
-		*(unsigned int *)(heapMgrBuf + 0x38) = ToU32(heapBaseBuf); /* heapBase ptr */
-		*(unsigned int *)(heapMgrBuf + 0x1e8498) = 0;              /* translation base = 0 */
-		*(unsigned int *)(heapBaseBuf + 0x8) = slot;               /* slot stored inside heap base */
-		*(unsigned int *)(heapMgrBuf + 0x24 + slot * 0x14) = ToU32(regionBuf);
+		/* Alloc #2 = the region holding the 4 embedded CSTGMidiQueue
+		 * objects (stride 0x64 each, per NotifyNKS4TestMode()'s own body). */
+		unsigned int regionSlot = CSTGHeapManager_BumpAlloc(4 * 0x64);
+		unsigned char *regionBuf = (unsigned char *)(CSTGHeapManager_GetCapturedHeapBase() +
+							      CSTGHeapManager_GetCapturedOffset(regionSlot));
 
-		CSTGHeapManager::sInstance = (char *)heapMgrBuf;
+		*(unsigned int *)(heapBaseBuf + 0x8) = regionSlot; /* slot stored inside heap base */
 
 		/* Poison mask (+0x8)/readerCount (+0x20) of each of the 4
 		 * embedded CSTGMidiQueue slots to confirm they're left

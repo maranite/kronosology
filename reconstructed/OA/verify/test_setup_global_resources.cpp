@@ -122,7 +122,31 @@ static unsigned char *mmap32(unsigned long size)
 }
 static unsigned char *g_heapInstanceBuf = mmap32(0x1869f * 0x14 + 0x30);
 static unsigned char *g_panelBuf = mmap32(STGAPI_FRONTPANEL_SIZE);
-static unsigned char *g_bigRegionBuf = mmap32(256 * 0x604);
+/*
+ * ENLARGED (2026-07-23, FIX regression coverage): this buffer is also
+ * `local_heap_base()`'s own resolved `heapBase` in this test harness --
+ * NOT by any deliberate setup, but as a real side effect this mock
+ * already had: `heap+0x38` (local_heap_base()'s own first add-in term)
+ * is `handles[0]`'s "offset" sub-field (entry stride 0x14, offset at
+ * +0xc, handle[0] based at +0x2c -> +0x2c+0xc = +0x38), which Step 2's
+ * very first ("fire and forget") `Alloc(0x6a578)` call unconditionally
+ * populates below with this buffer's own address (the mock's default
+ * target for any slot other than 2/4) -- with `heap+0x1e8498` (the
+ * second add-in term) staying its fresh-mmap 0, `heapBase` has ALWAYS
+ * resolved to exactly this buffer's address in this test, even before
+ * this pass. That was harmless while nothing heapBase-derived ever
+ * wrote past this buffer's original 256*0x604-byte size -- but
+ * setup_global_resources()'s now-fixed Step 7 call site (see that
+ * file's own comment) writes through `heapBase+0x60524`/`heapBase+
+ * 0x6a54c`, well past the old size. Enlarged (not given a separate
+ * buffer) specifically so this pre-existing, real heapBase resolution
+ * mechanism can be exercised/asserted against directly, rather than
+ * fighting it with an independent heapBase of its own (any nonzero
+ * `heap+0x1e8498` value would also shift every OTHER slot resolution
+ * in this same mock, which all rely on it staying 0 -- see
+ * local_heap_region()'s own `+*(heap+0x1e8498)` term below).
+ */
+static unsigned char *g_bigRegionBuf = mmap32(0x6c000);
 /* CORRECTED (2026-07-12): a dedicated buffer for the 4th, previously-
  * missing CSTGHeapManager::Alloc(0xaaf1140) call setup_global_resources.cpp
  * now makes for CSTGBankMemory::Initialize's own base (see that file's
@@ -131,6 +155,27 @@ static unsigned char *g_bigRegionBuf = mmap32(256 * 0x604);
  * keeps the two heap regions distinguishable in this test. */
 static unsigned char *g_bankMemoryBuf = mmap32(256 * 0x604);
 char *CSTGHeapManager::sInstance = (char *)g_heapInstanceBuf;
+
+/* Mock for the 2026-07-24 CSTGHeapManager_GetCapturedHeapBase() workaround
+ * (see heap_manager.cpp's file comment / oa_setup_global_resources.h) --
+ * returns 0, matching this mock's own pre-existing assumption that the
+ * `heap+0x1e8498` term local_heap_base()/local_heap_region() add in is 0
+ * (see the comment above g_bigRegionBuf).
+ */
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void) { return 0; }
+
+/* Mock for the 2026-07-24 CSTGHeapManager_GetCapturedOffset() workaround
+ * (see heap_manager_alloc_static.cpp's file comment) -- Alloc() below
+ * populates this table the same way the real implementation does, and
+ * local_heap_region()/local_heap_base() now read through it instead of
+ * `*(rec+0x24)` directly.
+ */
+static unsigned int g_capturedOffsets[8];
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot)
+{
+	return slot < 8 ? g_capturedOffsets[slot] : 0;
+}
+
 static unsigned int g_allocCallCount;
 static int g_forceAllocFail; /* if set, Alloc() returns an out-of-range slot */
 unsigned int CSTGHeapManager::Alloc(unsigned int)
@@ -154,6 +199,8 @@ unsigned int CSTGHeapManager::Alloc(unsigned int)
 	unsigned char *rec = g_heapInstanceBuf + slot * 0x14;
 	*(unsigned int *)(rec + 0x18) = 1; /* non-zero "valid" marker */
 	*(unsigned int *)(rec + 0x24) = (unsigned int)(unsigned long)target;
+	if (slot < 8)
+		g_capturedOffsets[slot] = (unsigned int)(unsigned long)target;
 	return slot;
 }
 
@@ -230,6 +277,13 @@ int main(void)
 	g_sampleRateMonitorInitCalls = g_askInitCalls = 0;
 	g_incProgressBarCalls = 0;
 	g_costProfileVtableTargetCalled = 0;
+	/*
+	 * Poison the tail of g_bigRegionBuf (the real `heapBase` this test
+	 * resolves to, see that buffer's own declaration comment above) past
+	 * where Step 6's own 256*0x604-byte zero-fill reaches, so [2b] below
+	 * can distinguish "never written" from a coincidental real zero.
+	 */
+	memset(g_bigRegionBuf + 256 * 0x604, 0xcc, 0x6c000 - 256 * 0x604);
 	rc = setup_global_resources(0);
 	check_eq("return value", rc, 0);
 	/* CORRECTED (2026-07-12): was 3 -- now 4, matching real ground truth
@@ -255,6 +309,34 @@ int main(void)
 	check_eq("CCostProfile vtable slot 2 dispatched", (long)g_costProfileVtableTargetCalled, 1);
 	check_eq("CSTGCPUInfo::Update received CCostProfile's +4 field", (long)(g_updateArg * 10), 25);
 	check_eq("IncProgressBar called (hwVersion==3 skips one call)", (long)g_incProgressBarCalls, 2);
+
+	printf("\n[2b] Step 7 heap-arena `this` regression check (2026-07-23 fix):\n");
+	/*
+	 * CSTGMultisampleBankManager::Initialize()/CSTGPCMPrecacheManager::
+	 * Initialize()'s own bodies are already verified in isolation below
+	 * ("[direct]") -- this instead confirms setup_global_resources()'s
+	 * Step 7 call site itself passes the REAL `heapBase+0x60524`/
+	 * `heapBase+0x6a54c` addresses as `this`, not a throwaway stack
+	 * local whose +0xa000..+0xa01c writes would land ~40KB off the end
+	 * of the kernel stack (the confirmed root cause of a live
+	 * `CSTGHeapManager::sInstance` corruption, see setup_global_
+	 * resources.cpp's own Step 7 comment). A stack-local `this` would
+	 * never touch g_bigRegionBuf's tail at all, so every check below
+	 * would fail (still reading the 0xcc poison) if the old bug
+	 * reappeared.
+	 */
+	check_eq("multisample +0xa000 zeroed at heapBase+0x60524",
+		 *(unsigned int *)(g_bigRegionBuf + 0x60524 + 0xa000), 0u);
+	check_eq("multisample +0xa014 == 0xffffffff at heapBase+0x60524",
+		 *(unsigned int *)(g_bigRegionBuf + 0x60524 + 0xa014), 0xffffffffu);
+	check_eq("multisample +0xa01c zeroed at heapBase+0x60524",
+		 *(unsigned int *)(g_bigRegionBuf + 0x60524 + 0xa01c), 0u);
+	check_eq("pcm precache +0x0 zeroed at heapBase+0x6a54c",
+		 g_bigRegionBuf[0x6a54c + 0x0], 0);
+	check_eq("pcm precache +0x14 zeroed at heapBase+0x6a54c",
+		 *(unsigned int *)(g_bigRegionBuf + 0x6a54c + 0x14), 0u);
+	check_eq("pcm precache +0x29 zeroed at heapBase+0x6a54c",
+		 g_bigRegionBuf[0x6a54c + 0x29], 0);
 
 	printf("\n[3] CSTGHeapManager::Alloc failure (simulated kronos_vm heap capacity "
 	       "shortfall, sec 10.22x): controlled failure, not a garbage-pointer collapse:\n");

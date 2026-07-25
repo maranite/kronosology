@@ -1229,9 +1229,14 @@ void CSTGGlobal::UpdatePadFuncCCAssign(CSTGMessageContext &ctx, STGConvertedPara
 
 /*
  * ResolveCurrentPerformance()/UpdateVJSAssignment() (sec 10.77): see
- * oa_global.h for the full confirmed shape.
+ * oa_global.h for the full confirmed shape. Deliberately NOT `static` any
+ * more (batch 57): CSTGControllerRTData::SetAudioInSolo() needs this same
+ * formula from its own separate TU (controller_rt_data_set_audio_in_solo.cpp
+ * -- kept apart from this file for the usual reason, test_global.cpp's own
+ * load-bearing call-tracking mock for SetAudioInSolo), so this helper is
+ * now externally linked and forward-declared there instead of duplicated.
  */
-static CSTGPerformance *ResolveCurrentPerformance(unsigned char *base)
+CSTGPerformance *ResolveCurrentPerformance(unsigned char *base)
 {
 	int mode = *(int *)(base + 0x684);
 	if (mode == 1) {
@@ -1887,7 +1892,19 @@ CSTGProgramModeDrumTrackSlot::CSTGProgramModeDrumTrackSlot()
  */
 void CSTGProgramModeProgramSlot::Initialize(unsigned int arg)
 {
-	CallVtableSlot7(this);
+	/* WORKAROUND (2026-07-24): originally `CallVtableSlot7(this)`, a raw
+	 * indirect dispatch through this object's own vtable pointer. A live
+	 * kronos_vm boot proved that pointer (written by the ctor, long
+	 * before and from a different call chain than this Initialize())
+	 * doesn't reliably survive the reread (BUG: kernel NULL pointer
+	 * dereference, CR2=0x1c -- same "write not visible to a much-later
+	 * read" symptom hit repeatedly elsewhere in this reconstruction, see
+	 * heap_manager.cpp's own file comment for the running history).
+	 * Slot 7 is confirmed to always resolve to the same inert
+	 * `ProgramSlotVtableTrap` no-op for both derived classes (see
+	 * PROGRAM_SLOT_VTABLE_TRAPS above) -- call it directly instead of
+	 * trusting the reread. */
+	ProgramSlotVtableTrap(this);
 	unsigned char *base = (unsigned char *)this;
 	*(unsigned int *)(base + 0x6f) = 0;
 	base[0x10] = (unsigned char)arg;
@@ -1899,7 +1916,10 @@ void CSTGProgramModeProgramSlot::Initialize(unsigned int arg)
 
 void CSTGProgramModeDrumTrackSlot::Initialize(unsigned int arg)
 {
-	CallVtableSlot7(this);
+	/* WORKAROUND (2026-07-24): see CSTGProgramModeProgramSlot::
+	 * Initialize()'s own comment on this exact same call, just above --
+	 * identical fix, same reasoning. */
+	ProgramSlotVtableTrap(this);
 	unsigned char *base = (unsigned char *)this;
 	*(unsigned int *)(base + 0x6f) = 0;
 	base[0x10] = (unsigned char)arg;

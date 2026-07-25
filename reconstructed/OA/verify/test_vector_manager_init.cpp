@@ -36,46 +36,36 @@ static void check_eq(const char *label, long got, long want)
 }
 
 static int g_xOnlyCalls, g_xyCalls, g_ccCalls;
-static void *g_xOnlyVtable[1];
-static void *g_xyVtable[1];
-static void *g_ccVtable[1];
-static void XOnlySlot0(void *) { g_xOnlyCalls++; }
-static void XYSlot0(void *) { g_xyCalls++; }
-static void CCSlot0(void *) { g_ccCalls++; }
 
-/* sec 10.227: CSTGVectorEGBase/XOnly/XY/CC are now genuinely C++-
- * polymorphic (real `virtual void Init()`, see oa_engine_init.h). This
- * test target doesn't link the real vector_eg_ctors.cpp (it provides
- * its own mock constructors below, to precisely count vtable-slot-0
- * dispatches instead of running the real bodies), so the linker still
- * needs SOME definition for each class's own compiler-generated
- * `Init()` -- these trivial bodies are never actually reached: each
- * mock constructor below immediately overwrites its object's real
- * vtable pointer with a fake one (g_xOnlyVtable/g_xyVtable/g_ccVtable)
- * pointing at XOnlySlot0/XYSlot0/CCSlot0 instead, which is what
- * CSTGVectorManager::Initialize()'s own generic vtable-slot-0 dispatch
- * (vector_manager_init.cpp's DispatchSlot0) actually calls through. */
+/* 2026-07-24: vector_manager_init.cpp no longer dispatches these
+ * through a runtime vtable read -- a live kronos_vm boot proved these
+ * embedded objects' vtable pointers, written by CSTGVectorManager's own
+ * constructor but reread much later (and from a different call chain)
+ * in Initialize(), don't reliably survive the round trip (BUG: kernel
+ * NULL pointer dereference, CR2=0 -- see vector_manager_init.cpp's own
+ * comment on this call site for the full story). Initialize() now
+ * calls each concrete class's own `Init()` directly via a scope-
+ * qualified (non-virtual) call, so this test's mocks count calls
+ * directly in each class's own Init() override instead of through a
+ * fake vtable indirection layer that's no longer exercised. */
 void CSTGVectorEGBase::Init() {}
-void CSTGVectorEGXOnly::Init() {}
-void CSTGVectorEGXY::Init() {}
-void CSTGVectorEGCC::Init() {}
+void CSTGVectorEGXOnly::Init() { g_xOnlyCalls++; }
+void CSTGVectorEGXY::Init() { g_xyCalls++; }
+void CSTGVectorEGCC::Init() { g_ccCalls++; }
 
 CSTGVectorEGBase::CSTGVectorEGBase() {}
 
 CSTGVectorEGXOnly::CSTGVectorEGXOnly()
 {
 	memset(this, 0, sizeof(*this));
-	*(void ***)this = g_xOnlyVtable;
 }
 CSTGVectorEGXY::CSTGVectorEGXY()
 {
 	memset(this, 0, sizeof(*this));
-	*(void ***)this = g_xyVtable;
 }
 CSTGVectorEGCC::CSTGVectorEGCC()
 {
 	memset(this, 0, sizeof(*this));
-	*(void ***)this = g_ccVtable;
 }
 
 CSTGVectorManager *CSTGVectorManager::sInstance;
@@ -99,10 +89,6 @@ int main(void)
 {
 	printf("CSTGVectorManager::Initialize() known-answer test\n");
 	printf("=========================================================\n");
-
-	g_xOnlyVtable[0] = (void *)&XOnlySlot0;
-	g_xyVtable[0] = (void *)&XYSlot0;
-	g_ccVtable[0] = (void *)&CCSlot0;
 
 	unsigned char *buf = (unsigned char *)mmap(0, sizeof(CSTGVectorManager),
 						    PROT_READ | PROT_WRITE,

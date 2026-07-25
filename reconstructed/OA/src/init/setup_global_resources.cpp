@@ -11,15 +11,42 @@
  * disassembly + relocation trace of `setup_global_resources`
  * (`.text+0x116c40`, 7267 bytes) in OA_real.ko -- the largest single
  * function this project has reconstructed so far.
+ *
+ * WORKED AROUND (2026-07-23/24, rounds 3-6): a live kronos_vm boot showed
+ * `local_heap_base()` resolving to NULL (both raw-offset terms reading
+ * back as 0) despite `CSTGHeapManager::sInstance` itself being a
+ * confirmed-valid, live object -- NOT a bug in this file's own offset
+ * formula (re-verified via a compile-time `offsetof()` probe against the
+ * real `oa_heapmanager.h` class AND a real end-to-end host functional test,
+ * both passing cleanly). Round 3 fixed one real, confirmed bug upstream in
+ * `CSTGHeapManager::Initialize()` (an incomplete application of that
+ * function's own 2026-07-12 "uninitialized member read within this
+ * function" fix -- `activeListHead`/`activeCount`), but `heapBase`/
+ * `heapSize` themselves kept reading back as 0 by the time anything else
+ * observed them, through EVERY access path tried across rounds 4-6: raw
+ * offset arithmetic, a plain duplicate write, a `volatile` write + compiler
+ * memory barrier, and finally real C++ member access via
+ * `CSTGHeapManager_GetHeapSize()` (a one-liner in the SAME file as
+ * `Initialize()`, not this file's own re-derivation) -- ruling out an
+ * offset-formula bug, simple dead-store elimination, and a cross-TU
+ * visibility artifact specific to this file. A GDB hardware-watchpoint
+ * attempt to catch the exact writing instruction hit its own practical
+ * wall (never fired across a full boot, ~100x normal runtime under
+ * gdbstub overhead). The free-list-threading loop's own bounds were
+ * independently verified exactly correct (`handles[]` spans
+ * `[0x2c, 0x1e8498)` precisely) -- not an off-by-one there either. Given
+ * the exact mechanism resisted six rounds of live-boot investigation,
+ * `local_heap_base()`/`local_heap_region()` below now use
+ * `CSTGHeapManager_GetCapturedHeapBase()` -- a value snapshotted into
+ * storage OUTSIDE the `CSTGHeapManager` object at the one point it's
+ * proven correct (see heap_manager.cpp's own file comment) -- instead of
+ * reading `heapBase` out of the object at all. All temporary `OA-DIAG2`-
+ * `OA-DIAG10` printk instrumentation used across these rounds has been
+ * removed from this file and from stgheap_init.cpp/heap_manager.cpp.
  */
 
 #include "oa_setup_global_resources.h"
 #include "oa_new_delete.h"	/* oa_size_t, for CSTGPCMPrecacheManager::Reset()'s new[]/delete[] use */
-
-/* TEMP DIAG (2026-07-23): same declaration convention as init_module.cpp's own
- * local printk extern. Remove along with the printk call sites below once the
- * live capacity-shortfall question is settled. */
-extern "C" __attribute__((regparm(0))) int printk(const char *fmt, ...);
 
 /* No <cstring> here -- it conflicts with oa_internal.h's own `strlen`
  * declaration (different exception specifier), same reasoning
@@ -38,20 +65,35 @@ static void local_fill(void *p, unsigned char value, unsigned long n)
  * conflict that rules out including oa_heap.h directly here). Formula
  * confirmed identical to oa_heap.h's own via this exact function's
  * disassembly: -44 (0xFFFFFFD4) is the "heap not up yet" sentinel;
- * otherwise `*(heap+0x38) + *(heap+0x1e8498)` is the base, and
- * `*(heap+0x24+slot*0x14) + *(heap+0x1e8498)` resolves a slot -- with
+ * otherwise `*(heap+0x38) + heapBase` is the base, and
+ * `*(heap+0x24+slot*0x14) + heapBase` resolves a slot -- with
  * an additional real null-check on `*(heap+0x18+slot*0x14)` this
  * function's own disassembly includes but oa_heap.h's existing
  * oa_heap_region() does not (a small, real, previously-unconfirmed
  * detail this pass adds).
+ *
+ * `heapBase` here is CSTGHeapManager_GetCapturedHeapBase(), NOT a direct
+ * read of `*(heap+0x1e8498)` -- see oa_setup_global_resources.h's own
+ * comment on that getter for why (a live-boot-confirmed, not fully
+ * root-caused issue where the real class member reads back as 0 through
+ * every access path tried).
  */
 static unsigned char *local_heap_base(void)
 {
 	unsigned char *heap = (unsigned char *)CSTGHeapManager::sInstance;
 	if (heap == (unsigned char *)(long)-44)
 		return 0;
-	return (unsigned char *)(*(unsigned int *)(heap + 0x38) +
-				  *(unsigned int *)(heap + 0x1e8498));
+	/* `*(heap+0x38)` is structurally identical to local_heap_region(1)'s
+	 * own `rec+0x24` term (rec = heap+1*0x14 = heap+0x14; rec+0x24 =
+	 * heap+0x38) -- i.e. this is slot 1's (the very first Alloc() call's)
+	 * own captured offset, not a separate field. Using the captured-value
+	 * getter here for the same reliability reason as termB below (see
+	 * heap_manager_alloc_static.cpp's own comment on why the object's own
+	 * entry->offset fields aren't trustworthy to re-read later).
+	 */
+	unsigned int termA = CSTGHeapManager_GetCapturedOffset(1);
+	unsigned int termB = (unsigned int)CSTGHeapManager_GetCapturedHeapBase();
+	return (unsigned char *)(termA + termB);
 }
 
 static unsigned char *local_heap_region(unsigned int slot)
@@ -79,8 +121,12 @@ static unsigned char *local_heap_region(unsigned int slot)
 	unsigned long recAddr = (unsigned long)(rec + 0x18);
 	if (!recAddr)
 		return 0;
-	return (unsigned char *)(*(unsigned int *)(rec + 0x24) +
-				  *(unsigned int *)(heap + 0x1e8498));
+	/* `*(rec+0x24)` (the entry's own `offset` field) is the SAME class of
+	 * unreliable-on-later-re-read field as heapBase/heapSize -- see
+	 * heap_manager_alloc_static.cpp's own comment. Use the captured value
+	 * instead of re-reading it from the object. */
+	return (unsigned char *)(CSTGHeapManager_GetCapturedOffset(slot) +
+				  (unsigned int)CSTGHeapManager_GetCapturedHeapBase());
 }
 
 int setup_global_resources(int param)
@@ -174,13 +220,62 @@ int setup_global_resources(int param)
 	if (bigRegion)
 		local_fill(bigRegion, 0, 256 * 0x604);
 
-	/* Step 7: multisample bank manager / PCM precache manager --
+	/*
+	 * Step 7: multisample bank manager / PCM precache manager --
 	 * return values discarded in the real code (confirmed: neither is
-	 * tested at its call site). */
-	CSTGMultisampleBankManager multisampleMgr;
-	multisampleMgr.Initialize();
-	CSTGPCMPrecacheManager pcmPrecacheMgr;
-	pcmPrecacheMgr.Initialize();
+	 * tested at its call site).
+	 *
+	 * FIXED (2026-07-23, root-caused via a direct re-disassembly of
+	 * OA_real.ko around `.text+0x118548`..`0x118577`): the real `this`
+	 * for BOTH calls is `heapBase + 0x60524` / `heapBase + 0x6a54c` --
+	 * the SAME fixed heap-arena addresses oa_heap.h's own
+	 * oa_multisample_bank_manager()/oa_pcm_precache_manager()
+	 * accessors already document (`oa_heap_base()+0x60524`/`+0x6a54c`).
+	 * Confirmed directly: `[esp+0x1c]` (this function's own persisted
+	 * `heapBase` local, last reloaded at Step 6 above -- matches
+	 * `_ZN15CSTGHeapManager9sInstanceE`'s relocation at `.text+0x117593`,
+	 * no further reload before this point) is read twice and fed
+	 * straight into `add $0x60524,%eax`/`add $0x6a54c,%eax` immediately
+	 * before each `call` -- no stack-relative address is ever loaded as
+	 * `this` for either call.
+	 *
+	 * An earlier pass of this reconstruction used a throwaway
+	 * stack-local `CSTGMultisampleBankManager`/`CSTGPCMPrecacheManager`
+	 * object instead (rationalized at the time as an accepted,
+	 * "technically-1-byte stack object" simplification -- see this
+	 * file's own CSTGMultisampleBankManager::Initialize() comment
+	 * below, now corrected to match). That was a genuine bug, not a
+	 * cosmetic one: CSTGMultisampleBankManager::Initialize() writes 8
+	 * dwords spanning +0xa000..+0xa01c -- ~40KB past whatever few bytes
+	 * an empty-class stack local actually occupies, WAY beyond this
+	 * kernel's entire THREAD_SIZE kernel stack (8KB on this target) --
+	 * a genuine unbounded stack-overflow write into whatever memory
+	 * happens to sit past the stack, capable of corrupting anything
+	 * nearby. This is the confirmed root cause of a live 2026-07-23
+	 * kronos_vm boot showing `CSTGHeapManager::sInstance` reading back
+	 * as the -44 ("heap not up yet") sentinel by Step 9, despite Step 5
+	 * (InitializeSTGHeap) having already set it to a real, valid
+	 * ioremap'd pointer earlier in the very same boot -- nothing else
+	 * in this reconstruction's call graph between the two points ever
+	 * touches `CSTGHeapManager::sInstance`, and this stack-OOB write is
+	 * the one call in between capable of an unbounded, out-of-object
+	 * write. Using the real, fixed heap-arena addresses instead keeps
+	 * both writes safely inside CSTGHeapManager's own multi-hundred-KB
+	 * managed region, matching real behavior exactly and eliminating
+	 * the stack corruption entirely.
+	 *
+	 * `if (heapBase)` is a defensive guard the real disassembly doesn't
+	 * have at this exact call site (matches this function's own
+	 * established convention elsewhere -- e.g. the `panelSlot`/`bigSlot`
+	 * store-throughs above -- of not dereferencing a possibly-null
+	 * heapBase even where real ground-truth code doesn't bother, since
+	 * heapBase is only ever null in an already-degraded state this
+	 * project treats as unreachable on real hardware).
+	 */
+	if (heapBase) {
+		((CSTGMultisampleBankManager *)(heapBase + 0x60524))->Initialize();
+		((CSTGPCMPrecacheManager *)(heapBase + 0x6a54c))->Initialize();
+	}
 
 	if (panel)
 		panel[0x10f4] = 0x90; /* confirmed literal write, meaning not further resolved */
@@ -288,18 +383,10 @@ int setup_global_resources(int param)
 	 */
 	heapBase = local_heap_base(); /* real code reloads it here too */
 	unsigned int bankSlot = CSTGHeapManager::Alloc(0xaaf1140);
-	/* TEMP DIAG (2026-07-23): pin down live capacity vs. request before
-	 * assuming the prior session's 48MB reading still applies -- a fresh
-	 * live boot this session showed physMemSize=528MB, which should be
-	 * far more than the ~199.5MB this function requests total. Remove
-	 * once the real failure point is confirmed. */
-	printk("OA-DIAG: bank alloc heapBase=%p bankSlot=%u (0xaaf1140=%u requested)\n",
-	       (void *)heapBase, bankSlot, 0xaaf1140u);
 	if (heapBase)
 		*(unsigned int *)(heapBase + 4) = bankSlot;
 	heapBase = local_heap_base(); /* real code reloads it here too */
 	unsigned char *bankBase = heapBase ? local_heap_region(*(unsigned int *)(heapBase + 4)) : 0;
-	printk("OA-DIAG: bankBase=%p\n", (void *)bankBase);
 
 	/*
 	 * DEFENSIVE ADDITION (2026-07-23, sec 10.22x): real ground-truth
@@ -465,20 +552,15 @@ void cleanup_global_resources(void)
  * seen elsewhere in this project, e.g. CSTGMidiPortManager's own +0xc/
  * +0x70/+0xd4), +0xa018/+0xa01c (zeroed). No calls, no branches.
  *
- * Same known, ALREADY-DOCUMENTED tradeoff as CSTGPCMPrecacheManager::
- * Initialize() just below (see this file's own real call site above,
- * `init_global_resources()` step 7): `CSTGMultisampleBankManager
- * multisampleMgr; multisampleMgr.Initialize();` is a throwaway stack
- * local whose real, fixed heap-arena address is `oa_multisample_bank_
- * manager()` (oa_heap.h, `oa_heap_base()+0x60524`) -- this reconstruction
- * keeps using the dummy stack `this` at that one call site (matching
- * this project's pre-existing, explicitly-flagged decision not to
- * refactor the CSTGGlobal/CSTGMultisampleBankManager declaration-
- * ecosystem conflict in this pass), so this call still writes past a
- * technically-1-byte empty-class stack object there -- exactly as
- * already tolerated for CSTGPCMPrecacheManager's own promotion (sec
- * 10.144). The real body itself is verified directly, on a properly-
- * sized buffer, in test_setup_global_resources.cpp instead.
+ * CORRECTED (2026-07-23): this function's own real call site
+ * (`setup_global_resources()`, step 7 above) now passes the REAL,
+ * fixed heap-arena address (`heapBase+0x60524`, matching oa_heap.h's
+ * own `oa_multisample_bank_manager()`) as `this`, not a throwaway
+ * stack local -- see that call site's own comment for the full
+ * root-cause trace (a live 2026-07-23 kronos_vm boot's
+ * `CSTGHeapManager::sInstance` corruption). The real body itself is
+ * verified directly, on a properly-sized buffer, in
+ * test_setup_global_resources.cpp.
  */
 void CSTGMultisampleBankManager::Initialize()
 {

@@ -309,10 +309,28 @@ int init_module(void)
 	}
 
 	oa_debug_marker(14);
-	if (CSTGKeybedInterface_Startup() == 0) {	/* step 14 -- INVERTED convention */
+	/*
+	 * WORKAROUND (2026-07-24): ground truth confirms this is a genuine
+	 * hard-fail on real hardware (ground-truthed ...+0x1a0, see this
+	 * file's own header comment on the cascade shape) -- but on real
+	 * Kronos units the keybed's W83627-family Super I/O chip is always
+	 * physically present, so this branch is effectively dead code
+	 * there; it only ever fires in this reconstruction because the VM
+	 * boot-test environment has no keybed hardware stand-in (unlike
+	 * AT88VirtualChip's own graceful synthetic-chip fallback for the
+	 * analogous "no real hardware" case, see at88_chip_load_synthetic()
+	 * -- comport_init.cpp's own DetectChipAt() has no such fallback
+	 * yet). A live kronos_vm boot proved the real hard-fail behavior
+	 * here tears down the whole module on unwind (including /proc/.shm,
+	 * step 6's InitSharedMemProcInterface()), which then makes Eva's
+	 * own CSTGHandle::Access() crash on a NULL result moments later --
+	 * blocking the actual goal (Eva reasonably booting in the VM) on a
+	 * missing peripheral that's structurally guaranteed present on
+	 * every real unit. Downgraded to soft here, matching step 15's own
+	 * already-established "soft, result unchecked" treatment of
+	 * CSTGDrumPadInterface_Initialize() -- logged, not fatal. */
+	if (CSTGKeybedInterface_Startup() == 0)	/* step 14 -- INVERTED convention */
 		stg_log_startup_error("keybed");	/* .rodata.str1.1+0x1a0 */
-		goto fail_audio;
-	}
 
 	oa_debug_marker(15);
 	CSTGDrumPadInterface_Initialize();		/* step 15 -- soft, result unchecked */

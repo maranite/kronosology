@@ -190,16 +190,16 @@ int main(void)
 	{
 		unsigned char *chanMem = (unsigned char *)mmap32(0x1000);
 		memset(chanMem, 0xcc, 0x1000);
-		unsigned char *targetObj = (unsigned char *)mmap32(0x1000);
-		memset(targetObj, 0xcc, 0x1000);
-		/* This test exercises Initialize() directly on a raw poisoned
-		 * buffer (no ctor call) -- the real ctor (batch 23) computes
-		 * +0x4 as a self-referential aligned pointer into its OWN
-		 * object, not an externally-allocated one, so poking a
-		 * SEPARATE target object here (rather than a self-pointer)
-		 * remains a valid, independent way to verify Initialize()'s
-		 * own dereference-and-store behavior in isolation. */
-		*(unsigned int *)(chanMem + 0x4) = ToU32(targetObj);
+		/* 2026-07-24: Initialize() no longer rereads `this+0x4` -- a
+		 * live kronos_vm boot proved that stored copy (written once
+		 * by the ctor, from a different call chain) doesn't reliably
+		 * survive the reread, so the source now recomputes the same
+		 * deterministic self-aligned pointer directly:
+		 * `(this+0x17) & ~0xF` (see hdr_record_track.cpp's own
+		 * comment on this call site). `targetObj` mirrors that exact
+		 * formula here instead of injecting a pointer through `+0x4`,
+		 * matching what the function now actually dereferences. */
+		unsigned char *targetObj = (unsigned char *)(((unsigned long)chanMem + 0x17) & ~0xFUL);
 
 		CSTGMonitorMixerChannel *chan = (CSTGMonitorMixerChannel *)chanMem;
 		chan->Initialize(5);
@@ -222,14 +222,20 @@ int main(void)
 		 * buffer, not two independent ones (an earlier draft of this
 		 * KAT used two separate buffers and got a real check FAILED
 		 * as a result -- see this method's own header comment in
-		 * hdr_record_track.cpp for the full derivation). This test
-		 * exercises `Initialize()` directly on a raw poisoned buffer
-		 * (no ctor call, same as [3] above), so it needs an explicit
-		 * valid backing buffer here too regardless of the ctor's own
-		 * real behavior (batch 23; see managers.cpp). */
-		unsigned char *otherObj = (unsigned char *)mmap32(0x1000);
-		memset(otherObj, 0xcc, 0x1000);
-		*(unsigned int *)(trackMem + 0x24) = ToU32(otherObj);
+		 * hdr_record_track.cpp for the full derivation).
+		 *
+		 * 2026-07-24: Initialize() no longer reads `this+0x24` at
+		 * all -- a live kronos_vm boot proved that stored copy
+		 * (written once by CSTGMonitorMixerChannel's own ctor, long
+		 * before and from a different call chain than this
+		 * Initialize()) doesn't reliably survive the reread, so the
+		 * source now recomputes the same deterministic self-aligned
+		 * pointer directly: `(this+0x20+0x17) & ~0xF` (see
+		 * hdr_record_track.cpp's own comment on this call site).
+		 * `otherObj` mirrors that exact formula here instead of
+		 * injecting a pointer through `+0x24`, matching what the
+		 * function now actually dereferences. */
+		unsigned char *otherObj = (unsigned char *)(((unsigned long)(trackMem + 0x20) + 0x17) & ~0xFUL);
 
 		CSTGRecordTrack *track = (CSTGRecordTrack *)trackMem;
 		track->Initialize(9);

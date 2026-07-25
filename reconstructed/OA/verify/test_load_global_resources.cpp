@@ -29,12 +29,13 @@
  * `extern`, so this test provides its own local definition instead of
  * linking that unrelated file.
  *
- * `CSTGHeapManager::sInstance` needs a real MAP_32BIT-backed buffer big
- * enough to cover the confirmed `+0x1e8498` heap-translation-base field
- * (oa_heap.h) -- same established "heapMgrBuf must be big enough" pattern
- * as verify/test_midi_port_manager.cpp's own [3], with `+0x1e8498` set to
- * 0 so `oa_heap_base()` reduces to the raw pointer stored at `+0x38`,
- * avoiding a second ~2MB allocation.
+ * `CSTGHeapManager::sInstance` needs a real MAP_32BIT-backed buffer just
+ * to be a non-`-44` sentinel value -- oa_heap.h's oa_heap_base() no
+ * longer reads through it directly (2026-07-24 captured-value
+ * workaround, see heap_manager.cpp's own file comment); instead this
+ * test mocks CSTGHeapManager_GetCapturedOffset()/GetCapturedHeapBase()
+ * directly, standing in for slot 1's captured allocation the same way
+ * the real boot's first-ever CSTGHeapManager::Alloc() call would.
  */
 
 #include <cstdio>
@@ -63,6 +64,14 @@ static unsigned char g_progressPercent;
 extern "C" unsigned char COmapNKS4_GetProgressBarPercent(void) { return g_progressPercent; }
 
 char *CSTGHeapManager::sInstance;
+
+/* ---- captured-value getter mocks (2026-07-24 workaround) ---- */
+static unsigned int g_mockCapturedOffset1;
+extern "C" unsigned long CSTGHeapManager_GetCapturedHeapBase(void) { return 0; }
+extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot)
+{
+	return slot == 1 ? g_mockCapturedOffset1 : 0;
+}
 
 /* ---- CSTGKLMManager::sInstance / AuthorizeBuiltins mock ---- */
 struct CSTGKLMManager *CSTGKLMManager::sInstance;
@@ -139,9 +148,8 @@ static void reset_all()
 {
 	memset(g_heapMgrBuf, 0, 0x1e8500);
 	memset(g_heapRegionBuf, 0, 0x70000);
-	*(unsigned int *)(g_heapMgrBuf + 0x38) = ToU32(g_heapRegionBuf);
-	*(unsigned int *)(g_heapMgrBuf + 0x1e8498) = 0;
 	CSTGHeapManager::sInstance = (char *)g_heapMgrBuf;
+	g_mockCapturedOffset1 = ToU32(g_heapRegionBuf);
 
 	g_progressPercent = 0;
 	g_authorizeBuiltinsCalls = 0;

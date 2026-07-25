@@ -286,12 +286,18 @@ CSTGMidiPortManager *CSTGMidiPortManager::sInstance;
 CSTGMidiPortManager::~CSTGMidiPortManager() {}
 void CSTGMidiPortManager::Initialize() { g_midiPortInitCalls++; }
 
-/* ---- mocks: the ten Model classes ---- */
-static int g_modelSlot2Calls;
-static void ModelSlot2(void *) { g_modelSlot2Calls++; }
-static void *g_modelVtable[3] = { 0, 0, (void *)&ModelSlot2 };
+/* ---- mocks: the ten Model classes ----
+ *
+ * 2026-07-24: engine_init.cpp no longer dispatches these through a
+ * runtime vtable read (`CallVtableSlot`) -- a live kronos_vm boot proved
+ * the freshly-placement-new'd object's own vtable pointer, written by
+ * the ctor the instruction before, reads back as NULL at the dispatch
+ * site (see engine_init.cpp's own comment on this call site for the
+ * full story). Each model's real vtable-slot-2 target is a known, fixed
+ * function (OA_VoiceModel_*_Initialize) called directly instead -- mock
+ * those symbols directly here rather than a shared fake vtable. */
 #define MOCK_MODEL(cls) \
-	cls::cls() { *(void ***)this = g_modelVtable; }
+	cls::cls() {}
 MOCK_MODEL(CSTGOffModel)
 MOCK_MODEL(CSTGPCMModel)
 MOCK_MODEL(CSTGAnalogSyncModel)
@@ -302,6 +308,20 @@ MOCK_MODEL(CSTGPolysixModel)
 MOCK_MODEL(CSTGVPMModel)
 MOCK_MODEL(CSTGPianoModel)
 MOCK_MODEL(CSTGEPModel)
+
+static int g_modelSlot2Calls;
+extern "C" {
+void OA_VoiceModel_Off_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_PCM_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_AnalogSync_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_Organ_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_Plucked_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_MS20_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_Polysix_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_VPM_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_Piano_Initialize(void *) { g_modelSlot2Calls++; }
+void OA_VoiceModel_EP_Initialize(void *) { g_modelSlot2Calls++; }
+}
 
 static int g_commonLfoInitCalls, g_commonStepSeqInitCalls;
 void CSTGCommonLFO::Initialize() { g_commonLfoInitCalls++; }

@@ -83,13 +83,30 @@ void **CSTGVectorEGXY::sMutex;
  * pointers, but a native host pointer is 8 bytes on a 64-bit build. */
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 
-typedef void (*VtableSlot0Fn)(void *);
-
-static void DispatchSlot0(void *obj)
-{
-	void **vtable = *(void ***)obj;
-	((VtableSlot0Fn)vtable[0])(obj);
-}
+/*
+ * WORKAROUND (2026-07-24): originally a generic `DispatchSlot0(obj)`
+ * helper doing a raw `(*(void***)obj)[0](obj)` indirect vtable-slot-0
+ * dispatch. A live kronos_vm boot proved that for these embedded
+ * objects -- constructed by CSTGVectorManager's OWN constructor, then
+ * read back here in the SEPARATE CSTGVectorManager::Initialize() call,
+ * often tens of thousands of bytes and a completely different call
+ * chain away -- the vtable pointer the constructor wrote is NOT
+ * reliably visible at this read site (BUG: kernel NULL pointer
+ * dereference at (null), CR2=0, meaning `*(obj)` itself read back 0).
+ * This is the same "write not visible to a later read in this specific
+ * freestanding/regparm(3)/-O2 kernel-module environment" symptom
+ * already root-workaround'd for CSTGHeapManager (heap_manager.cpp's own
+ * file comment) and for the ten voice models (engine_init.cpp's own
+ * comment on that call site) -- root cause not re-litigated here.
+ *
+ * Since these four classes are genuinely C++-polymorphic now (sec
+ * 10.227, see oa_engine_init.h) and the concrete type at each call site
+ * below is always statically known (the phase itself determines
+ * EGXOnly/EGXY/EGCC), the fix is the same class of workaround: bypass
+ * the (proven unreliable, for this specific large-embedded-array case)
+ * vtable reread entirely via a scope-qualified `obj->ClassName::Init()`
+ * call, which C++ guarantees is a direct, non-virtual call regardless
+ * of what the object's own vtable pointer field currently reads as. */
 
 /* Push `node` (the object's own +0x3c/+0x40/+0x48 sub-fields) onto the
  * front of the intrusive list anchored at `head`/`tail`/`count`
@@ -131,7 +148,7 @@ void CSTGVectorManager::Initialize()
 	/* Phase 1: 400x CSTGVectorEGXOnly. */
 	for (unsigned int i = 0; i < 400; i++) {
 		unsigned char *obj = p + i * 0x88;
-		DispatchSlot0(obj);
+		reinterpret_cast<CSTGVectorEGXOnly *>(obj)->CSTGVectorEGXOnly::Init();
 		*(unsigned short *)(obj + 0x4) = (unsigned short)i;
 		ListPushFront(p, 0x1c9ac, 0x1c9b0, 0x1c9b4, obj);
 	}
@@ -139,7 +156,7 @@ void CSTGVectorManager::Initialize()
 	/* Phase 2: 400x CSTGVectorEGXY. */
 	for (unsigned int i = 0; i < 400; i++) {
 		unsigned char *obj = p + 0xd480 + i * 0x7c;
-		DispatchSlot0(obj);
+		reinterpret_cast<CSTGVectorEGXY *>(obj)->CSTGVectorEGXY::Init();
 		*(unsigned short *)(obj + 0x4) = (unsigned short)i;
 		ListPushFront(p, 0x1c9b8, 0x1c9bc, 0x1c9c0, obj);
 	}
@@ -152,7 +169,7 @@ void CSTGVectorManager::Initialize()
 	/* Phase 4: 17x CSTGVectorEGCC ("batch1" only) -- no list insertion. */
 	for (unsigned int i = 0; i < 17; i++) {
 		unsigned char *obj = p + 0x19640 + i * 0x70;
-		DispatchSlot0(obj);
+		reinterpret_cast<CSTGVectorEGCC *>(obj)->CSTGVectorEGCC::Init();
 		*(unsigned short *)(obj + 0x4) = (unsigned short)i;
 	}
 
@@ -163,11 +180,11 @@ void CSTGVectorManager::Initialize()
 		unsigned short idx = (unsigned short)(400 + i);
 
 		unsigned char *egXOnly = p + 0x19db0 + i * 0x88;
-		DispatchSlot0(egXOnly);
+		reinterpret_cast<CSTGVectorEGXOnly *>(egXOnly)->CSTGVectorEGXOnly::Init();
 		*(unsigned short *)(egXOnly + 0x4) = idx;
 
 		unsigned char *egXY = p + 0x1a630 + i * 0x7c;
-		DispatchSlot0(egXY);
+		reinterpret_cast<CSTGVectorEGXY *>(egXY)->CSTGVectorEGXY::Init();
 		*(unsigned short *)(egXY + 0x4) = idx;
 
 		*(unsigned short *)(p + 0x1af70 + i * 2) = 0;
