@@ -60,6 +60,49 @@ CChkCmd::CChkCmd(const CModule &owner)
 	Add(link);
 }
 
+/* ===== CChkCmdBG ===== */
+
+CChkCmdBG::CChkCmdBG(const CModule &owner)
+	: CChkBaseTask(owner, "ChkCmdBG" /* real: CChkCmdBG::sm_pkcTaskName, string
+	                                   * content not decoded */, 5, 0),
+	  mState(2), mHeap1(10, 5), mHeap2(10, 5), mPendingCount(0), mOutLinkMono(0)
+{
+	*reinterpret_cast<void **>(this) = (void *)PTR__CChkCmdBG_08e85768;
+	*reinterpret_cast<void **>(reinterpret_cast<char *>(this) + 8) =
+		&EvaDataPlaceholder_08e85788;
+
+	void *raw = malloc(0x38);
+	COutLinkMono *link = new (raw) COutLinkMono(
+		*this, "ChkCmdBGInternalForNotify" /* real: CChkCmdBG::sm_pkcInternalForNotify,
+		                                     * string content not decoded, but this
+		                                     * exact literal is already used by
+		                                     * CChunkMan::Config()'s own link-register
+		                                     * call below */,
+		0, 0x8003);
+	mOutLinkMono = link;
+
+	Add(link);
+}
+
+CChkCmdBG::~CChkCmdBG()
+{
+	/* Real dtor asserts mPendingCount == 0 via Api vtable slot +0x94 before
+	 * tearing down -- assert call itself not modeled (same "real call, condition
+	 * faithfully checked, string transcribed" treatment as tempo.cpp/
+	 * edit_server.cpp/config_manager.cpp's own Api+0x94 asserts).
+	 */
+	if (mPendingCount != 0) {
+		typedef void (*AssertFn)(void *, const char *, const char *, int);
+		AssertFn fn = (AssertFn)(((void **)*(void **)Api)[0x94 / 4]);
+		fn(Api, "Assertion failed in module %s, line %i.\n", "ChkCmdBG.cpp", 0x3f);
+	}
+	/* mHeap2/mHeap1/base dtor run automatically in reverse declaration order,
+	 * matching the real dtor's explicit ~CHeap(+0xa8) then ~CHeap(+0x98) then
+	 * ~CChkBaseTask(this) sequence. mOutLinkMono is not freed here, matching
+	 * ground truth (the real dtor never touches +0xbc either).
+	 */
+}
+
 /* ===== CChunkMan ===== */
 
 CChunkMan::CChunkMan()
@@ -141,9 +184,24 @@ void *PTR__CChkCmd_08e85708[8] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 
-/* Opaque data placeholders CChkBaseTask/CChkCmd's own ctors store the ADDRESS of
- * at +0x08 (mIfcThunk) -- never dereferenced by any reconstructed code, same
- * treatment as EvaDataPlaceholder_08e82144 (omega_vtables.cpp).
+/* CChkCmdBG's own real vtable -- confirmed by direct .rodata byte read (see file
+ * header): 6 real function slots (dtor pair + Exec/ExecMsg/AcceptDuplicate-shaped
+ * overrides, all out of scope per file header) followed by the this-adjusted
+ * secondary vtable's own [offset_to_top][RTTI] preamble at slots 6/7 -- the 8-dword
+ * size is thus CONFIRMED correct, not a heuristic guess.
+ */
+void *PTR__CChkCmdBG_08e85768[8] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+/* Opaque data placeholders CChkBaseTask/CChkCmd/CChkCmdBG's own ctors store the
+ * ADDRESS of at +0x08 (mIfcThunk) -- never dereferenced by any reconstructed code,
+ * same treatment as EvaDataPlaceholder_08e82144 (omega_vtables.cpp). For
+ * CChkCmdBG specifically this is confirmed to be the true start of its own
+ * this-adjusted secondary vtable's vfunc array (see file header) -- still safe as
+ * an opaque, uncalled placeholder since nothing dispatches through it.
  */
 int EvaDataPlaceholder_08e85668;
 int EvaDataPlaceholder_08e85728;
+int EvaDataPlaceholder_08e85788;

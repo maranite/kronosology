@@ -363,6 +363,43 @@ extern int   EvaDataPlaceholder_08e85728;
 extern void *PTR__CChkCmdBG_08e85768[8];
 extern int   EvaDataPlaceholder_08e85788;
 
+/* CTimerEngine/CWheelsContainer/CExternalClock/CInternalClock/CSyncRXInterface/
+ * CSyncTXInterface/CClockBase cluster (Stage 6 breadth sweep, 2026-07-25 follow-up
+ * batch -- timer_engine.h, unblocks CSeqTimer::Setup()). Direct .rodata dword reads
+ * (the naive "next symbol" heuristic is actively wrong here -- typeinfo/typeinfo-name
+ * objects for MULTIPLE classes are grouped together in .rodata immediately after a
+ * short run of adjacent vtables, same trap as CApiDescriptor/CResMan):
+ *
+ *   CTimerEngine       08e896c8 -> DAT_08e896e4 (opaque secondary-vtable target,
+ *                      same idiom as CTask's own +0x08 identity)       =  7 slots
+ *   CExternalClock     08e897a8 -> 08e897c0 (own typeinfo-name)        =  6 slots
+ *   CInternalClock     08e89888 -> 08e898a0 (own typeinfo-name)        =  6 slots
+ *   CClockBase         08e891e8 -> 08e89200 (typeinfo cluster start)   =  6 slots
+ *                      (2 real dtor slots + 4 IDENTICAL __cxa_pure_virtual-shaped
+ *                      PLT-stub entries at 0x0804c6ac -- CExternalClock/
+ *                      CInternalClock each override those same 4 slots)
+ *   CSyncRXInterface   08e89748 -> 08e8975c (typeinfo cluster start)   =  5 slots
+ *   CSyncTXInterface   08e89198 -> 08e891c0 (CVirtualClock's own vtable header) =
+ *                      10 slots (4 real function pointers + 6 literal zero words
+ *                      whose exact cause isn't resolved -- not the CClockBase-style
+ *                      repeated-PLT-stub pattern; sized to the confirmed real
+ *                      boundary regardless, per this file's "avoid an undersized
+ *                      array" discipline)
+ * All 6 confirmed install-only (never dispatched through by any reconstructed code
+ * on this pass's own traced boot path) -- same status as everything else in this
+ * file. CVirtualClock (08e891c8, 6 slots) and CWheel (08e897e8, 5 slots) are also
+ * visible in this same .rodata run but NOT declared here -- nothing this pass
+ * reconstructs installs either of their vtables (CWheelsContainer only ever stores
+ * null CWheel* pointers on the traced path; CVirtualClock is never referenced).
+ */
+extern void *PTR__CTimerEngine_08e896c8[7];
+extern int   EvaDataPlaceholder_08e896e4;
+extern void *PTR__CExternalClock_08e897a8[6];
+extern void *PTR__CInternalClock_08e89888[6];
+extern void *PTR__CClockBase_08e891e8[6];
+extern void *PTR__CSyncRXInterface_08e89748[5];
+extern void *PTR__CSyncTXInterface_08e89198[10];
+
 /* CFileMan/CResMan/CChunkOnDemand cluster (Stage 6 breadth sweep, 2026-07-25 --
  * file_man.h/res_man.h/chunk_on_demand.h, the "What's still open" CFileMan/CResMan
  * ctor batch). Unlike every other MMainXxx(void) module in mains.cpp, these two

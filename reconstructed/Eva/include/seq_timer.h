@@ -19,18 +19,12 @@
  * `Config()`/`Start()` (.text+0x081692f0/0x08169300, 3 bytes each) are confirmed
  * genuinely empty.
  *
- * `CTimerEngine` (.text+0x0816bf40, 181 bytes) is the ONE genuinely-too-deep
- * sibling task in this batch: beyond chaining into `CTask::CTask(owner,
- * "Engine", 2, 1, 0x804b)` and the usual opaque +0x08 identity overwrite, its
- * real ctor constructs THREE embedded sub-objects this project has no other
- * reason to build -- `CWheelsContainer`, `CExternalClock`, `CInternalClock`
- * (a real sequencer clock/wheel engine, ~24 further real `CTimerEngine` methods
- * per `nm -C`: `CreateWheel`/`StartWheel`/`SetSyncInput`/`RunVirtualTime`/...) --
- * plus 2 more real per-object vtable installs (`CSyncRXInterface`/
- * `CSyncTXInterface`). Modeled as a Tier-B stub deriving directly from `CTask`
- * (matching `CESCommonTask`'s own precedent, es_common.h) with the real,
- * confirmed ctor args and an otherwise-empty body -- `CWheelsContainer`/
- * `CExternalClock`/`CInternalClock` and the 24 further methods are NOT modeled.
+ * `CTimerEngine` (.text+0x0816bf40, 181 bytes) is now ALSO fully reconstructed
+ * (2026-07-25 follow-up, see timer_engine.h): its ctor/dtor and its 3 embedded
+ * sub-objects (`CWheelsContainer`/`CExternalClock`/`CInternalClock`) are real.
+ * The ~24 FURTHER `CTimerEngine` methods per `nm -C` (`CreateWheel`/`StartWheel`/
+ * `SetSyncInput`/`RunVirtualTime`/...) remain genuinely out of scope -- a deeper
+ * sequencer clock/wheel engine nothing on this pass's traced boot path calls.
  */
 
 #ifndef SEQ_TIMER_H
@@ -38,16 +32,7 @@
 
 #include "module.h"
 #include "task.h"
-
-/* Tier-B stub -- see file header. Real embedded CWheelsContainer/CExternalClock/
- * CInternalClock sub-objects and the ~24 further CTimerEngine methods are not
- * modeled.
- */
-class CTimerEngine : public CTask {
-public:
-	explicit CTimerEngine(const CModule &owner)
-		: CTask(owner, "Engine", 2, 1, 0x804b) {}
-};
+#include "timer_engine.h"
 
 class CSeqTimer : public CModule {
 public:

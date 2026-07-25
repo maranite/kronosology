@@ -40,20 +40,36 @@
  * "chunk save/load command" state machine, a `CClientCommServer`-scale dependency
  * this batch correctly defers, same boundary as `CDumpManStateMachine`).
  *
- * `CChkCmdBG` (.text+0x080c1380, 260 bytes) is the ONE genuinely-too-deep sibling
- * in this pair: beyond the same `CChkBaseTask`/opaque-identity/mCommId-shaped-
- * sentinel pattern as `CChkCmd`, its real ctor also constructs TWO embedded `CHeap`
- * objects (`CHeap::CHeap(this+0x98, 10, 5)` / `CHeap::CHeap(this+0xa8, 10, 5)`) --
- * `CHeap` is a brand-new, wholly unreconstructed memory-heap-allocator class (not
- * the unrelated `CSTGHeapManager` from the OA.ko project) this pass has no other
- * reason to build. Modeled as a Tier-B stub deriving from the now-real
- * `CChkBaseTask` (not `CModule`/`CTask` directly, since a valid `CChkBaseTask`
- * base is now cheap and more faithful than skipping straight to `CTask`) with a
- * plausible (real level/scheduleFlag, unfaithful name) ctor -- same
- * "chain to nearest real base, no real derived body" precedent as
- * `CFileMan`/`CResMan` (mains.cpp) and `CESCommonTask` (es_common.h). Its own
- * `COutLinkMono`/`CTask::Add(COutLink*)` construction and `CHeap` sub-objects are
- * NOT modeled, matching that same license.
+ * `CChkCmdBG` (.text+0x080c1380, 260 bytes) is now ALSO fully reconstructed
+ * (2026-07-25 follow-up): its real ctor chains `CChkBaseTask(owner, sm_pkcTaskName,
+ * 5, 0)` (confirmed byte-exact match for the earlier plausible-guess level/
+ * scheduleFlag), installs its own vtable + opaque +0x08 identity, default-
+ * constructs TWO embedded `CHeap` objects at +0x98/+0xa8 (`CHeap(growBy=10,
+ * capacity=5)` each -- see `heap.h`), sets an inferred `mState` int at +0x94 to 2
+ * and an inferred `mPendingCount` int at +0xb8 to 0 (the dtor asserts this is
+ * still 0 before tearing down, `Api` vtable slot +0x94, "Assertion failed in
+ * module %s, line %i.\n" / "ChkCmdBG.cpp" / line 0x3f), then mallocs a real
+ * `COutLinkMono` (already reconstructed, out_link.h) via the same
+ * `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()`-bracketed `malloc(0x38)` as
+ * `CEvBuffersPool`/`out_link.cpp` (brackets dropped, same established userspace
+ * no-op precedent) and registers it via `CTask::Add(COutLink*)`. Object size
+ * confirmed 0xc0 bytes (matches `CChunkMan::Setup()`'s own `malloc(0xc0)`).
+ * `CHeap` itself is a brand-new, tractable ctor/dtor-only reconstruction (see
+ * `heap.h`) -- NOT the unrelated `CSTGHeapManager` from the OA.ko project.
+ * `CChkCmdBG`'s own real vtable (`PTR__CChkCmdBG_08e85768`) is confirmed by a
+ * direct .rodata byte read: 6 real function slots (non-deleting dtor, deleting
+ * dtor, `Exec`@08180950 [confirmed elsewhere a real 3-byte `return;`],
+ * `ExecMsg`@0807e170, `Exec(CMessage&)`-shaped @080c6d50, `AcceptDuplicate`
+ * @08185d60) followed immediately by the this-adjusted (-8) secondary vtable's
+ * own `[offset_to_top][RTTI]` preamble at slots 6/7 -- i.e. the 8-dword size
+ * already used for the sibling `PTR__CChkBaseTask`/`PTR__CChkCmd` arrays is
+ * CONFIRMED correct (not a heuristic guess): the "next symbol" boundary
+ * (`DAT_08e85788`) is genuinely the START of the secondary (CTask-interface)
+ * vtable's own vfunc array, exactly where `this+8` is supposed to point -- so
+ * treating it as an opaque, never-dereferenced placeholder (same as
+ * `CChkBaseTask`/`CChkCmd`) is faithful, not a bug. Slots 2-5 are left as
+ * `EvaVTableStub` -- `Exec`/`ExecMsg`/`AcceptDuplicate` are `CChkCmd`'s own
+ * "further methods" already deferred as out of scope in this same file header.
  */
 
 #ifndef CHUNK_MAN_H
@@ -61,6 +77,7 @@
 
 #include "module.h"
 #include "task.h"
+#include "heap.h"
 
 class CChkBaseTask : public CTask {
 public:
@@ -81,13 +98,28 @@ private:
 	void         *mOutLinkMono;   /* +0x94 */
 };
 
-/* Tier-B stub -- see file header. Real name/CHeap sub-objects/COutLinkMono not
- * modeled.
- */
 class CChkCmdBG : public CChkBaseTask {
 public:
-	CChkCmdBG(const CModule &owner)
-		: CChkBaseTask(owner, "ChkCmdBG", 5, 0) {}
+	/* .text+0x080c1380, 260 bytes. Real body -- see file header. */
+	explicit CChkCmdBG(const CModule &owner);
+
+	/* .text+0x080c11b0, 115 bytes (non-deleting D2 dtor). Real body: tears
+	 * down the 2 CHeap sub-objects then chains to CChkBaseTask's own dtor.
+	 * (Also asserts mPendingCount == 0 first -- see file header. Assertion
+	 * path itself not modeled, matches this project's usual "assert is a
+	 * real call, condition is faithfully checked, string content
+	 * transcribed" treatment.)
+	 */
+	~CChkCmdBG();
+
+private:
+	int    mState;         /* +0x94, ctor sets 2, inferred name */
+	CHeap  mHeap1;          /* +0x98 */
+	CHeap  mHeap2;          /* +0xa8 */
+	int    mPendingCount;   /* +0xb8, ctor sets 0, dtor asserts == 0, inferred name */
+	void  *mOutLinkMono;    /* +0xbc */
+
+	friend struct ChkCmdBGTestHooks;
 };
 
 class CChunkMan : public CModule {
