@@ -552,6 +552,17 @@ int CKorgPreloadFile::Load() { return 1; }
 void CSTGProgram::Initialize(unsigned int, unsigned int, unsigned int) {}
 void CSTGProgram::Copy(CSTGProgram *, unsigned int, unsigned int, unsigned int) {}
 void CSTGGlobal::PopulateDefaultProgramSlotTemplates() {}
+/* CSTGProgramBank::ChangeBankType() -- confirmed real caller found
+ * 2026-07-25 (CSTGControlMsgHandler::SetProgramBankTypeHandler, see
+ * oa_control_msg_handler.h), own body still deliberately deferred (same
+ * reasoning as CSTGProgram::Initialize/Copy just above). */
+void CSTGProgramBank::ChangeBankType(unsigned int) {}
+/* CSTGMessageProcessor::StartDownload()/EndDownload() -- confirmed real
+ * callers found 2026-07-25 (CSTGControlMsgHandler::StartDownloadHandler/
+ * EndDownloadHandler, see oa_control_msg_handler.h), own bodies still
+ * deliberately deferred (same reasoning as ChangeBankType above). */
+void CSTGMessageProcessor::StartDownload() {}
+void CSTGMessageProcessor::EndDownload() {}
 /* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
  * src/engine/engine_init.cpp. */
 void CSTGHDRMiniModel::Initialize() {}
@@ -772,6 +783,11 @@ void CSTGFrontPanelSmoothers::OnPerformanceDeactivate() {}
  * src/engine/vector_eg_ctors.cpp (also corrects a real speculative claim
  * in oa_engine_init.h's own header comment, sec 10.66 -- see there). */
 void CSTGVoiceAllocator::StealAllVoices() {}
+/* CSTGVoiceAllocator::FreeStolenVoices() -- confirmed real caller found
+ * 2026-07-25 (CSTGControlMsgHandler::StealAllVoices, see
+ * oa_control_msg_handler.h), own body still deliberately deferred (same
+ * reasoning as StealAllVoices() just above). */
+void CSTGVoiceAllocator::FreeStolenVoices() {}
 /* CSTGWaveSeqData::Initialize()/CSetListBank::Initialize() reconstructed
  * for real, sec 10.84 -- see src/engine/global.cpp. */
 /* CSTGWaveSeqGenerator::CSTGWaveSeqGenerator()/Init() are real now, sec

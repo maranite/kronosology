@@ -948,4 +948,57 @@ observe what actually happens on screen/LEDs at the warning threshold
 and at expiry, to confirm the 0x27/0x28/0x29 message subtypes map to
 the interpretation above; separately, trigger a long save/load
 operation and confirm the countdown visibly pauses/resets (tests
+
+---
+
+## CSTGControlMsgHandler — front-panel/remote system control dispatch, 51 methods (batch, 2026-07-25)
+
+Reconstructed in full (Item 1's flagged `SetLCDBrightness` turned out to
+be one method of a 100% previously-unclaimed 51-method class -- see
+`include/oa_control_msg_handler.h`/`src/init/control_msg_handler.cpp`).
+
+Uncertain:
+
+1. **`MuteADC` actually mutes the AUDIO OUTPUTS in ground truth, not the
+   inputs** (confirmed via the real vtable slot offsets used, `+0x3c`/
+   `+0x40` = `MuteAudioOutputs`/`UnmuteAudioOutputs`, not `+0x44`/`+0x48`
+   = `MuteAudioInputs`/`UnmuteAudioInputs`). Reproduced faithfully, not
+   "fixed" -- but worth independently confirming this isn't itself a
+   ground-truth compiler/linker mixup (e.g. two adjacent vtable slots
+   swapped at build time) rather than a deliberate real behavior. A
+   real-hardware test (toggle "Mute ADC" from the UI, listen for which
+   signal path actually goes silent) would settle this definitively.
+2. **`CLoadBalancer::sInstance+0xa4`** (set by `StartSTG`) and
+   **`CSTGAudioManager::sInstance+0xc`'s per-core stats sub-object
+   array** / **`+0x3c`'s single FX stats sub-object** (read by
+   `ReadCPUUsagePeak`/`ReadFXUsagePeak`) all have no independently
+   confirmed field name or purpose beyond "a real, disassembly-confirmed
+   offset this function touches" -- transcribed faithfully, semantic
+   meaning inferred from the caller's own name/context only.
+3. **`ReadCPUUsagePeak`'s 64-bit `fild` load zero-extends its 32-bit
+   scaled accumulator (via `movd`+`movq`) rather than sign-extending
+   it** -- for realistic (small, non-negative) CPU-usage percentages
+   this makes no observable difference, but this project's own C++
+   model uses a plain `(double)` cast from a signed `int` (sign-extends)
+   for simplicity. Flagged as a known, deliberately-unaddressed
+   divergence for pathological/negative accumulator values, not a
+   confirmed-safe simplification.
+4. **`ChangeBankType`/`FreeStolenVoices`/`StartDownload`/`EndDownload`/
+   `CSTGDrumPadInterface::StartScanning`/`COmapNKS4Driver_StartScanning`**
+   -- all newly-declared real callees this batch found real callers for,
+   own bodies deliberately still deferred (matches this project's
+   long-established "reconstruct the caller, defer the DSP/hardware-
+   protocol-scale callee" pattern). `ResetAllEffectsInActivePerf` was
+   deliberately left a full no-op stub (effect-rack DSP internals, out
+   of scope per project policy) despite being a real, disassembly-
+   confirmed 416-byte function -- see the header comment for the full
+   dependency chain if ever revisited.
+
+Real-HW test that would help: toggle "Mute ADC" and "Mute DAC" from the
+front panel/remote UI while monitoring both physical audio inputs and
+outputs, to settle uncertainty #1 above; trigger the CPU/FX/disk-
+throughput-peak diagnostic reads (if a UI control for them exists) and
+compare the reported percentage against a known synthetic CPU load, to
+validate the `*100` scale-and-truncate math in `ReadCPUUsagePeak`/
+`ReadFXUsagePeak`/`ReadDiskThroughputPeak`.
 Begin/EndLongProcess and the CSTGGlobal+0x6a8 gate).

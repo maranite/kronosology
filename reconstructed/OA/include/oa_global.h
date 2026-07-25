@@ -3003,7 +3003,7 @@ public:
  * (`InitializePerformances()`'s own file-loading loop, see that
  * method's class comment above). Ground-truthed methods (`nm -CS`):
  *   `CSTGProgramBank::Initialize(eSTGProgramBankId,eSTGProgramBankType,bool)`  .text+0xa27f0, 151B
- *   `CSTGProgramBank::ChangeBankType(eSTGProgramBankType)`                     .text+0xa2890, 135B (not reachable from any currently-real caller, not modeled)
+ *   `CSTGProgramBank::ChangeBankType(eSTGProgramBankType)`                     .text+0xa2890, 135B (REAL CALLER FOUND, see below -- own body still not modeled)
  *   `CSTGProgramBank::InitializePrograms()`                                    .text+0xa2920, 135B (not reachable from any currently-real caller, not modeled)
  *   `CSTGProgramBank::GetPatchSize() const`                                    .text+0xa29b0,  17B
  * Only `Initialize()`/`GetPatchSize()` are confirmed CALLED from
@@ -3038,6 +3038,20 @@ class CSTGProgramBank {
 public:
 	void Initialize(unsigned int bankId, unsigned int bankType, bool flag);
 	unsigned int GetPatchSize() const;
+
+	/*
+	 * A confirmed real caller now exists (2026-07-25):
+	 * `CSTGControlMsgHandler::SetProgramBankTypeHandler` (oa_control_msg_
+	 * handler.h/src/init/control_msg_handler.cpp) computes `this` via
+	 * the same `CSTGGlobal+0x132e4d0+bankId*0x67603` array arithmetic
+	 * documented above, then tail-calls this method with the raw
+	 * `bankType` value from its own message param -- own body STILL not
+	 * reconstructed here (matches this class's own established
+	 * "reconstruct the caller, defer the DSP/patch-management-scale
+	 * callee" pattern already used for `Initialize()`'s
+	 * `CSTGProgram::Initialize`/`Copy` callees).
+	 */
+	void ChangeBankType(unsigned int bankType);
 
 	unsigned char _bankId;		/* +0x0 */
 	unsigned char _flag;		/* +0x1 */

@@ -171,7 +171,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_out_port_serial.o \
            src/engine/midi_korgusb_port.o \
            src/engine/vm_test_accessors.o \
-           src/init/calibration_msg_handler.o
+           src/init/calibration_msg_handler.o \
+           src/init/control_msg_handler.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -336,6 +337,12 @@ CFLAGS_calibration_data.o := -mhard-float -msse2 -mfpmath=sse
 # sibling override above.
 CFLAGS_power_off_timer.o := -mhard-float -msse2 -mfpmath=sse
 
+# CSTGControlMsgHandler (batch, 2026-07-25): ReadCPUUsagePeak/
+# ReadFXUsagePeak/ReadDiskThroughputPeak do genuine plain-C float/double
+# arithmetic (CSTGCPUInfo::field10 scale factor, disk throughput peak) --
+# same reasoning as every sibling override above.
+CFLAGS_control_msg_handler.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -468,7 +475,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/tone_adjust_descriptors.cpp \
        src/engine/init_performances.cpp \
        src/engine/sequence_combi_init.cpp \
-       src/init/calibration_msg_handler.cpp
+       src/init/calibration_msg_handler.cpp \
+       src/init/control_msg_handler.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -564,7 +572,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_midi_korgusb_port \
          verify/test_calibration_msg_handler \
          verify/test_cuuid_convert \
-         verify/test_multisample_bank_access
+         verify/test_multisample_bank_access \
+         verify/test_control_msg_handler
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -708,6 +717,9 @@ verify/test_midi_korgusb_port: verify/test_midi_korgusb_port.cpp src/engine/midi
 
 verify/test_calibration_msg_handler: verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp include/oa_calibration.h include/oa_global.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp -o $@
+
+verify/test_control_msg_handler: verify/test_control_msg_handler.cpp src/init/control_msg_handler.cpp include/oa_control_msg_handler.h include/oa_global.h include/oa_engine.h include/oa_setup_global_resources.h include/oa_keybed_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_control_msg_handler.cpp src/init/control_msg_handler.cpp -o $@
 
 verify/test_cuuid_convert: verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp include/oa_types.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp -o $@

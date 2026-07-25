@@ -1882,6 +1882,16 @@ public:
 	 * unsol-msg senders documented in this class's own ctor comment
 	 * above). */
 	void ClearUnsolicitedMessages();
+
+	/* StartDownload()/EndDownload() -- confirmed real (2026-07-25) via
+	 * relocation from CSTGControlMsgHandler::StartDownloadHandler/
+	 * EndDownloadHandler (oa_control_msg_handler.h). Own bodies not
+	 * reconstructed in this pass -- session/filesystem-download state
+	 * bookkeeping, deliberately deferred (definitions in bar2_stubs.cpp,
+	 * matching this project's established "confirmed real caller,
+	 * deferred callee" pattern). */
+	void StartDownload();
+	void EndDownload();
 };
 
 /*
@@ -2436,8 +2446,16 @@ public:
 
 	/* Confirmed real (via relocation from CSTGGlobal::
 	 * UpdateConvertPosition, sec 10.70), own body not reconstructed in
-	 * this pass. */
+	 * this pass. ALSO confirmed real (2026-07-25) via a second,
+	 * independent relocation from CSTGControlMsgHandler::StealAllVoices
+	 * (oa_control_msg_handler.h) -- same symbol, no new declaration
+	 * needed, just a second confirmed caller. */
 	void StealAllVoices();
+
+	/* Confirmed real (2026-07-25, relocation from CSTGControlMsgHandler::
+	 * StealAllVoices, always called immediately after StealAllVoices()
+	 * above) -- own body not reconstructed in this pass. */
+	void FreeStolenVoices();
 
 	/*
 	 * EmergencyFreeVoiceList(TLinkedList<TListLink<CSTGVoice>,CSTGVoice>*)
