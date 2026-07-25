@@ -1542,17 +1542,117 @@ typedef unsigned int USBMidiPacket;
  * (non-virtual) call into `_ZN17CSTGMidiInPortUSB13ReceivePacketE
  * 13USBMidiPacket` (`.text+0xf7500`, 1287 bytes) -- CONFIRMED real and
  * called, but its own body/fields are a disproportionate separate
- * cluster (own class hierarchy, own `CSTGMidiOutPortUSB`/
- * `CSTGUSBMidiAccessoryMidiInPort` siblings) deliberately NOT
- * reconstructed this pass, matching this project's established
- * "confirmed real, deliberately deferred" convention. DECLARED ONLY,
- * no definition anywhere in production code -- this project's host
- * KATs supply their own stand-in, same convention as
- * `CSTGMidiOutPortSerial::CanTransmitHardware()`/`TransmitHardwareByte()`.
+ * cluster (own class hierarchy) deliberately NOT reconstructed this
+ * pass, matching this project's established "confirmed real,
+ * deliberately deferred" convention. DECLARED ONLY, no definition
+ * anywhere in production code -- this project's host KATs supply their
+ * own stand-in, same convention as `CSTGMidiOutPortSerial::
+ * CanTransmitHardware()`/`TransmitHardwareByte()`.
+ *
+ * `CSTGMidiOutPortUSB` (oa_engine_init.h) and `CSTGUSBMidiAccessoryMidiInPort`
+ * (below) are its own separate siblings in the same hierarchy --
+ * `ProcessRegularMessage()`/`CanSendRealTime()`/`CanSendRegular()`/
+ * `SendRealTime()`/`SendSingleByte()`/`ReceivePacket()` above remain
+ * deliberately deferred (the Send* quartet bottoms out in a genuinely
+ * UNRESOLVED `__cxa_pure_virtual` vtable slot in ground truth itself --
+ * see `oa_hdrfilereader_processcommands_and_usbmidi_reassessment.md`
+ * item 3.1, a real dead end in the original binary, not a gap here),
+ * but each sibling's own small `Activate()`/`Deactivate()`/
+ * `ShouldActivate()` plumbing methods are now reconstructed (see
+ * midi_usb_accessory_port.cpp).
  */
 class CSTGMidiInPortUSB : public CSTGMidiInPort {
 public:
 	void ReceivePacket(USBMidiPacket pkt);
+};
+
+/*
+ * CSTGUSBMidiAccessoryMidiInPort -- the generic-USB-MIDI-accessory
+ * receive-side wrapper (own class, own vtable, distinct from both
+ * `CSTGMidiInPortUSB` above and `CSTGMidiInPortKorgUsb` below --
+ * confirmed via `.rel.rodata._ZTV30CSTGUSBMidiAccessoryMidiInPort`, 5
+ * slots: dtor still pure, `ShouldActivate() const` (own comdat, `.text.
+ * _ZNK30CSTGUSBMidiAccessoryMidiInPort14ShouldActivateEv`, 6 bytes,
+ * `mov eax,1; ret` -- CONFIRMED real, identical "always active" shape
+ * to `CSTGMidiInPortKorgUsb::ShouldActivate()`), `Activate(CSTGMidiQueue*)`
+ * (`.text+0xfa820`, 25 bytes) and `Deactivate()` (`.text+0xfa7f0`, 36
+ * bytes), both CONFIRMED real via raw `objdump -dr`.
+ *
+ * Adds NO new fields beyond the base `CSTGMidiInPort`'s own 0x2e8 bytes
+ * (same "raw offset access only, no reliable named-field layout"
+ * situation as `CSTGMidiInPortKorgUsb` -- see that class's own header
+ * note) -- confirmed: neither `Activate` nor `Deactivate` touches
+ * anything beyond calling the base method and one companion-module
+ * extern. No own constructor symbol exists either (only a `global
+ * constructors keyed to ...Activate(CSTGMidiQueue*)` static-init
+ * trampoline building the real `sUSBMidiAccessoryMidiInPort` singleton,
+ * `.bss+0x105400`, 0x2e8 bytes -- that trampoline's own reconstruction,
+ * and the singleton's real representation, are a deliberately separate
+ * future task, see the reassessment memory cited above) -- test code
+ * constructs instances the same way `midi_korgusb_port.cpp` already
+ * does for `CSTGMidiInPortKorgUsb`: placement-`new` the BASE
+ * `CSTGMidiInPort` into storage sized for this derived type, then
+ * reinterpret as this class.
+ *
+ * Real bodies (both regparm(3), this=EAX, q=EDX):
+ *   Activate(q):   base CSTGMidiInPort::Activate(q) FIRST, then
+ *                  USBMidiAccessory_SetMidiInClient(&sMidiInClient).
+ *   Deactivate():  USBMidiAccessory_SetMidiInClient(0) FIRST (note:
+ *                  reversed order vs Activate -- confirmed by
+ *                  disassembly, not a copy-paste of Activate's order),
+ *                  then base CSTGMidiInPort::Deactivate().
+ * `USBMidiAccessory_SetMidiInClient` -- CONFIRMED genuinely new real
+ * external companion-module symbol (`U` in ground truth, single-arg
+ * regparm(3): `void*` in EAX -- same family as the already-real
+ * `USBMidiAccessory_SetDrumPadClient`, drumpad_init.cpp). `sMidiInClient`
+ * (`.bss+0x1056e8`, 4 bytes = a bare `CMidiInClient` instance -- vtable
+ * pointer only, no other fields) is modeled as an opaque 4-byte
+ * placeholder: its own type's real behavior (`CMidiInClient::Receive()`,
+ * a hard-redirect into the still-unmodeled `sUSBMidiAccessoryMidiInPort`
+ * singleton) is explicitly OUT OF SCOPE this pass -- only ITS ADDRESS is
+ * ever touched by the 2 methods reconstructed here.
+ */
+class CSTGUSBMidiAccessoryMidiInPort : public CSTGMidiInPort {
+public:
+	void Activate(CSTGMidiQueue *q);
+	void Deactivate();
+	bool ShouldActivate() const { return true; }
+};
+
+/*
+ * CUSBMidiAccessory_DrumPadClient -- the generic-USB-MIDI-accessory
+ * drum-pad-trigger receive interface (own class, own vtable, confirmed
+ * via `.rel.rodata._ZTV31CUSBMidiAccessory_DrumPadClient`, 5 slots: dtor
+ * still pure, `CanReceiveTriggerEvent()`/`ReceiveTriggerEvent(...)` BOTH
+ * still `__cxa_pure_virtual` in THIS class's own vtable (the only
+ * concrete override, `CSTGDrumPadClient`, remains genuinely blocked --
+ * see `oa_hdrfilereader_processcommands_and_usbmidi_reassessment.md`
+ * item 3.2: its trigger-ring fields are accessed via addresses
+ * relocated against `CSTGDrumPadInterface::sInstance+N`, genuine
+ * linker-adjacency aliasing that cannot be faithfully reproduced in a
+ * clean-room rebuild -- deliberately NOT declared here, no consumer
+ * needs them modeled this pass), `ReceiveNotification(eNotificiation)`
+ * CONFIRMED real with a literal 1-byte default body (own un-merged
+ * comdat, `.text._ZN31CUSBMidiAccessory_DrumPadClient19ReceiveNotificationE
+ * NS_14eNotificiationE`, exactly `ret` -- the base class's own inline
+ * empty-body virtual, emitted because SOME translation unit ODR-uses
+ * it even though `CSTGDrumPadClient` itself always overrides it).
+ *
+ * NOT modeled with real C++ `virtual`/a vtable (this project's
+ * established "genuine virtual corrupts hand-modeled layout" caution --
+ * moot here since no field layout exists to corrupt, but also
+ * unnecessary: the one blocked concrete override is never going to be
+ * linked against this class in this project, so ordinary non-virtual
+ * dispatch is both simpler and matches the sibling classes' own
+ * "plain shadowing method, no real virtual" convention).
+ * `eNotificiation` modeled as a plain `int` (real enum values not
+ * independently confirmed, matches this project's `portType`
+ * convention for not-yet-reconstructed enums).
+ */
+class CUSBMidiAccessory_DrumPadClient {
+public:
+	typedef int eNotificiation;
+	void ReceiveNotification(eNotificiation n) { (void)n; }
 };
 
 /*

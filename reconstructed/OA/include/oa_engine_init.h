@@ -716,6 +716,40 @@ struct CSTGMidiOutPort {
 };
 
 /*
+ * CSTGMidiOutPortUSB -- the generic-USB-MIDI-class accessory transmit
+ * side (own class, own vtable, sibling of `CSTGMidiInPortUSB`/
+ * `CSTGUSBMidiAccessoryMidiInPort`, oa_engine.h). CONFIRMED real via
+ * `.rel.rodata._ZTV18CSTGMidiOutPortUSB` (11 slots, same base shape as
+ * `CSTGMidiOutPortSerial`): dtor still pure; `ProcessRegularMessage()`
+ * (`.text+0xf7d80`, 394 bytes) IS a real, defined, non-pure override
+ * (own `kSysComCodeTable` rodata table) but deliberately deferred --
+ * disproportionate on its own, unrelated to this batch; `CanSendRealTime()
+ * const`/`CanSendRegular() const`/`SendRealTime(uchar)`/`SendSingleByte
+ * (uchar)` are ALL still `__cxa_pure_virtual` in THIS class's own vtable
+ * (confirmed via `readelf -r`, offsets +0x18/+0x1c/+0x24/+0x28 relative
+ * to slot 0) -- a genuinely UNRESOLVED dead end in ground truth itself
+ * (no further-derived concrete class anywhere in OA.ko provides them),
+ * deliberately NOT declared here, matching this project's "confirmed
+ * real dead end, not a gap in this reconstruction" convention (same as
+ * `CSTGMidiOutPortSerial::CanTransmitHardware()`/`TransmitHardwareByte()`
+ * above).
+ *
+ * `Activate(CSTGMidiQueue*)` (`.text+0xf7d70`... own weak comdat, 15
+ * bytes, `_ZN18CSTGMidiOutPortUSB8ActivateEP13CSTGMidiQueue`) IS
+ * reconstructed here: CONFIRMED real, a trivial forward to the base
+ * `CSTGMidiOutPort::Activate(CSTGMidiQueue*)` with no other work (no
+ * new fields touched, no companion-module call unlike the InPort-side
+ * sibling `CSTGUSBMidiAccessoryMidiInPort::Activate()`). Adds no new
+ * fields of its own in this reconstruction (the real class likely has
+ * additional state for the still-deferred `ProcessRegularMessage()`,
+ * not independently determined since that method is out of scope here).
+ */
+class CSTGMidiOutPortUSB : public CSTGMidiOutPort {
+public:
+	void Activate(CSTGMidiQueue *q3);
+};
+
+/*
  * CSTGMidiOutPortSerial -- the physical (5-pin DIN) hardware MIDI-OUT
  * UART port: the direct output-side counterpart to
  * `CSTGMidiInPortSerial` (midi_in_port_serial.cpp). CONFIRMED real via

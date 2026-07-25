@@ -170,6 +170,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_out_port.o \
            src/engine/midi_out_port_serial.o \
            src/engine/midi_korgusb_port.o \
+           src/engine/midi_usb_accessory_port.o \
            src/engine/vm_test_accessors.o \
            src/init/calibration_msg_handler.o \
            src/init/control_msg_handler.o \
@@ -576,6 +577,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_midi_in_port_serial \
          verify/test_midi_out_port_serial \
          verify/test_midi_korgusb_port \
+         verify/test_midi_usb_accessory_port \
          verify/test_calibration_msg_handler \
          verify/test_cuuid_convert \
          verify/test_multisample_bank_access \
@@ -723,6 +725,9 @@ verify/test_midi_out_port_serial: verify/test_midi_out_port_serial.cpp src/engin
 
 verify/test_midi_korgusb_port: verify/test_midi_korgusb_port.cpp src/engine/midi_korgusb_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_midi_korgusb_port.cpp src/engine/midi_korgusb_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp -o $@
+
+verify/test_midi_usb_accessory_port: verify/test_midi_usb_accessory_port.cpp src/engine/midi_usb_accessory_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heapmanager.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_midi_usb_accessory_port.cpp src/engine/midi_usb_accessory_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp -o $@
 
 verify/test_calibration_msg_handler: verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp include/oa_calibration.h include/oa_global.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp -o $@
