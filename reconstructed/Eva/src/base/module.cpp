@@ -15,6 +15,7 @@
  */
 
 #include "module.h"
+#include "task.h"
 #include "omega_ptr_array.h"
 #include "omega_vtables.h"
 #include "system_api.h"
@@ -86,4 +87,27 @@ void CModule::AdjustTaskMask()
 			task = *(unsigned char **)(*(int *)(self + 0x1c) + i * 4);
 		*(task + 0x4c) &= 0xfd;
 	}
+}
+
+CTask *CModule::Add(CTask *task)
+{
+	/* Real body -- see module.h's header comment. `mTasks` is treated by raw offset
+	 * (this+8), same convention AdjustTaskMask() above already uses, so this works
+	 * correctly against either a real CModule or a raw offset-matched test buffer.
+	 */
+	((COmegaPtrArray *)((unsigned char *)this + 8))->Add(task);
+
+	/* Real: two Api vtable-slot notifications, both call-contract-only (system_api.h)
+	 * -- neither slot's real behavior is decoded, both discard any return value, same
+	 * CallVSlot idiom used throughout this project for undecoded CSystemApi slots.
+	 */
+	typedef void (*NotifyTaskFn)(void *, CTask *);
+	typedef void (*NotifyModuleFn)(void *, CModule *);
+	void *apiVtbl = *(void **)Api;
+	NotifyTaskFn notifyTask = *(NotifyTaskFn *)((char *)apiVtbl + 0x134);
+	notifyTask(Api, task);
+	NotifyModuleFn notifyModule = *(NotifyModuleFn *)((char *)apiVtbl + 0x12c);
+	notifyModule(Api, this);
+
+	return task;
 }

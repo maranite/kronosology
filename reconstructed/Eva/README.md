@@ -1591,3 +1591,136 @@ Once the concurrent `CModule`/`CTask` pass lands a real `CTask`, revisit whether
 `CEditor::CPanelIfcTask`'s own constructor becomes tractable (it would make this
 class's boot-path caller fully real end to end, not just "real address, not-yet-owned
 base class").
+
+## Stage 6: breadth sweep, `CTask::CTask()` reconstruction batch — 2026-07-25
+
+Directly follows up on batch 6's own flag above: **`CTask::CTask()` genuinely IS
+called** in ground truth. Direct `objdump -dr` inspection this batch confirmed TWO real
+callers -- `CEditor::CPanelIfcTask::CPanelIfcTask()` (`.text+0x0824b7e0`, matching batch
+6's own finding) and, newly found, `CPoller::CPoller(CModule const&, char const*)`
+(`.text+0x089ef740`). This corrects Stage 6 batch 2's own verdict ("`CTask::CTask()` has
+zero callers anywhere in this reconstruction's call graph -- implementing it would be
+dead code") and batch 5's dependent verdict that `CModule::AdjustTaskMask()`'s loop body
+is "provably dead... nothing constructs a `CTask`". Per PLAN.md's own verification
+methodology (faithfulness judged against ground truth, not against this reconstruction's
+own partial call graph), a real, ground-truth-reachable function is a legitimate target
+regardless of whether every one of its own callers is reconstructed yet -- the same bar
+`CModuleManager::AddModule()` met before `mains.cpp` populated `mModules` (batch 3).
+
+### What changed (uncommitted at time of writing this section; commit hash added on
+commit)
+
+1. **`CTask::CTask(CModule const&, char const*, ETaskLevel, EScheduleFlag, unsigned
+   short)`** (`.text+0x0807ee80`, 330 bytes) -- new `include/task.h`/`src/base/task.cpp`,
+   Tier A. Real 0x7c-byte layout: 2 embedded `COmegaPtrArray`s (link list), owner-module
+   pointer, level/lastArg, an Api-vtable-derived scope id (same `+0x3c` call
+   `CModule::CModule()` already makes), the mask/period/countdown fields
+   `CLevelManager::RunLevel()`/`CModule::AdjustTaskMask()` already expected, an embedded
+   `TVector<SRegisteredIfc,1>`, and an embedded `CLimiterMan` sub-object.
+
+   **Real, cross-confirming finding**: the ctor's own mask computation is two-tiered --
+   a base value from the `EScheduleFlag` argument (0x04/0x0c/0x0d), bumped by exactly
+   +2 (bit 0x02) if the owning module's own `mState` (module.h) is < 4 (not yet
+   "started"). Bit 0x02 is the EXACT bit `CModule::AdjustTaskMask()` unconditionally
+   clears. Read together: tasks constructed before their module finishes starting come
+   into existence pre-masked, and `AdjustTaskMask()`'s own per-module pass is the real
+   un-masking mechanism -- a genuine two-phase activation design, not an accidental
+   pattern. Confirmed with a real KAT (`verify/test_task.cpp`, case [4]) chaining the
+   real ctor, `CModule::Add()`, `CLevelManager::RunLevel()`, and
+   `CModule::AdjustTaskMask()` together end to end.
+
+2. **`CLimiterMan::CLimiterMan(CTask*)`** (`.text+0x0807bd10`, 46 bytes) -- new
+   `include/limiter_man.h`/`src/base/limiter_man.cpp`, Tier A (ctor only; `~CLimiterMan()`
+   not reconstructed, same "construct don't destruct" scope as everywhere else no
+   traced caller destroys the enclosing object).
+
+3. **`CModule::Add(CTask*)`** (`.text+0x0807c410`, 91 bytes) -- new method on the
+   already-existing `CModule` (module.h/module.cpp), Tier A. **This is the actual
+   `mTasks`-populating method neither batch 2 nor batch 5 knew existed.** Real,
+   DEFINITIVELY boot-path-reachable caller: `CEditor::Setup()` (`.text+0x08249b60`)
+   calls it once per constructed task member, and `CEditor::Setup()` is dispatched by
+   `CModuleManager::Setup()`'s own already-real per-module vtable+8 call, from
+   `CKernel::InitSystemLayer()` -- the SAME spine `AddModule()`/`AdjustTaskMask()` sit
+   on. Also fires 2 new, real, undecoded Api vtable notifications (`system_api.h`:
+   `+0x134` with the task, `+0x12c` with the module).
+
+4. **`CTask::RegisterIfc(CIfcUnknown*)`** (472 bytes) stays Tier B -- real dedup-scan +
+   `TVector<SRegisteredIfc,1>::MakeCapacity()`-driven append, genuinely deep (the
+   `MakeCapacity` growth routine alone is 539 bytes; this project has never
+   generalized `TVector<T,1>` growth anywhere it appears, ckernel.h's own note).
+
+5. **`CPoller` surveyed, NOT pursued** (batch 6 flagged it as tempting but
+   territory-blocked; now checked with this territory owned): its ctor does call
+   `CTask::CTask()` (a real second confirmed caller), but the ctor body itself is
+   ~1900 bytes of straight-line handle-table initialization plus a new, not-yet-
+   reconstructed `CTask::SetMask(EMask)` dependency and an Api `+0xac` named-resource
+   lookup -- deeper than any Tier-A candidate this batch, correctly deferred (same
+   several-hundred-plus-byte, pulls-in-further-subsystems shape as
+   `CSysApiInstance::RegisterApi`/`CModuleManager::AddModule`'s own precedent).
+
+6. **`CEditor::CPanelIfcTask`'s own ctor stays out of scope** (`panel_ifc_task.h`
+   updated) -- its post-`CTask::CTask()` tail does real multiple-inheritance work
+   (a second malloc'd `COutLinkMono` sub-object, installed via a `this+8`-adjusted
+   secondary vtable pointer) that is Peg/UI-editor-toolkit depth, not
+   CModule/CTask/CLevelManagerArray/CPoller family depth. `CEditor` itself (a
+   `CModule`-derived class constructed via a not-reconstructed `CEditorConstructor`
+   factory object) also stays unreconstructed, so this reconstruction's own call
+   graph still does not actually construct a `CPanelIfcTask`/`CTask` on any live path
+   -- ground-truth reachability and this-reconstruction's-own-wiring are two
+   different questions, and only the first flipped this batch.
+
+7. **`CLevelManager::RunLevel()`'s own task queue is a DIFFERENT container from
+   `CModule::mTasks`** -- worth stating precisely, since it would be easy to
+   over-claim "the whole chain is now live": `CModule::mTasks` (per-module) is now
+   confirmed genuinely populated in ground truth via `CModule::Add()`.
+   `CLevelManager`'s own per-scheduling-level array (what `RunLevel()` itself walks)
+   is a separate structure; the obvious ground-truth population candidate,
+   `CScheduler::InsertTask(CTask const&)` (`.text+0x08062d80`), exists but a full
+   disassembly sweep found ZERO direct `call` instructions targeting it anywhere in
+   the binary -- left as an open, flagged lead (`level_manager_array.h`), not
+   fabricated or assumed reachable. `RunLevel()`'s own "faithful but currently-empty"
+   status is therefore unchanged by this batch.
+
+### New vtable-slot arrays (`omega_vtables.h`/`.cpp`)
+
+5 new install-only entries, same installed-pointer-to-next-symbol methodology as
+every other entry in this file: `PTR__CTask_08e82128` (7 slots, matching `CModule`'s
+own count), `PTR__TNamedPtrArray_08e82198` (3 slots, shared by both of `CTask`'s
+embedded `COmegaPtrArray`s), `PTR__TVector_08e82188` (2 slots), `PTR__CLimiterMan_08e81ee8`
+(4 slots), `PTR__TVector_08e81f78` (2 slots) -- plus `EvaDataPlaceholder_08e82144`, a
+plain safe stand-in for an opaque data blob (`DAT_08e82144`) `CTask`'s own ctor stores
+the address of but never dereferences.
+
+### Verification
+
+New `verify/test_task.cpp` (28 checks): both ctor mask-computation branches (fresh vs.
+raw `mState>=4` module) across all 3 `EScheduleFlag` cases; `mPeriod`/`mCountdown`/
+`mScopeId`; `CModule::Add()`'s real population + both Api notifications, in order; and
+the full real chain described in finding 1 above -- a genuine `CTask`, constructed
+through its real ctor, appended via the real `CModule::Add()`, correctly SKIPPED by
+`CLevelManager::RunLevel()` while pre-masked, un-masked by the real
+`CModule::AdjustTaskMask()`, then genuinely ticked by `RunLevel()` on the next call.
+This is the first KAT in this project chaining 4 independently-reconstructed real
+functions together end to end rather than each in isolation.
+
+`make objs`/`make -k verify`: this batch's own new/changed TUs compile and the new
+test passes cleanly (0/28 failed), 0 regressions in every other verify binary that
+built. One PRE-EXISTING, NOT-mine verify binary (`test_stg_unsol_msg_handler`) failed
+to rebuild this session due to an unrelated, actively-in-progress concurrent edit in
+`include/stg_unsol_msg_handler.h` (a stray `CForm*/` in a comment closes it early --
+confirmed via file mtime to be a live, uncommitted, in-flight edit by the concurrent
+agent explicitly working that class this session, not something introduced here) --
+left untouched, not in this batch's scope to fix. `tools/build_lenny.sh` (the real
+on-image-lib link) was not run this batch for the same reason (it links every TU
+including the currently-broken one) -- deferred rather than worked around. No live
+`kronos_vm` boot test: the newly-real chain is provably not yet reachable from this
+reconstruction's own currently-wired boot path either (`CEditor`/`CPoller` themselves
+still unreconstructed, finding 6 above), so a boot test would show zero new signal,
+same reasoning batch 5 used for the same reason.
+
+### Manifest delta
+
+`gen_manifest.py`: added `0807ee80` (`CTask::CTask`), `0807bd10`
+(`CLimiterMan::CLimiterMan`), `0807c410` (`CModule::Add`) under a new "Stage 6:
+breadth sweep, CTask::CTask() reconstruction batch" section. Regenerated: 120 → 123
+of 37,795.

@@ -5,14 +5,27 @@
  *
  * CPanelIfcTask itself (constructor, instance fields, vtable, every other real
  * method -- SetupPanelInterface/OnTouchPanelEvent/OnButtonEvent/Exec/SetLEDStatus/
- * ShortBeep/EnterDiagnostics/SetAllLED) is NOT reconstructed here -- the real
- * constructor (.text+0x0824b7e0) pulls in CTask/COutLinkMono, which belong to a
- * concurrent pass's CModule/CTask/CLevelManagerArray work (see include/task_buffer.h).
- * Only SetMargin/GetMargin (real boot-path calls, Tier A) and OnAnalogEvent/
- * OnEncoderEvent (declared, not implemented -- Tier B call-contract externs
- * CSTGUnsolMsgHandler needs) are present. The rest of CEditor::CPanelIfcTask -- and
- * CEditor itself -- is Peg/UI-toolkit-adjacent territory, deliberately out of scope
- * for this pass (see PLAN.md Stage 4).
+ * ShortBeep/EnterDiagnostics/SetAllLED) is NOT reconstructed here. UPDATE (Stage 6,
+ * 2026-07-25, CTask::CTask() reconstruction batch): the real constructor's
+ * (.text+0x0824b7e0) own `CTask` base-construction call is now itself reconstructed
+ * for real (task.h/task.cpp) -- confirmed via direct disassembly to be
+ * `CTask::CTask(this, param_1, "PanelIfcTask", 3, 1, 0x804b)`. The REMAINING reason
+ * `CPanelIfcTask`'s own ctor stays out of scope is its post-CTask::CTask() tail: real
+ * multiple-inheritance work constructing a second malloc'd sub-object (`COutLinkMono`,
+ * 0x3c bytes) and installing it via a `this+8`-adjusted secondary vtable pointer (a
+ * classic Itanium virtual-thunk pattern) -- genuinely Peg/UI-editor-toolkit depth
+ * (COutLinkMono/CIfcUnknown-adjustment-thunk machinery), not CModule/CTask/
+ * CLevelManagerArray/CPoller family depth. `CEditor::Setup()` (.text+0x08249b60,
+ * the real caller of this ctor) IS confirmed on the already-real boot-path spine
+ * (dispatched by CModuleManager::Setup(), from CKernel::InitSystemLayer()) -- see
+ * task.h/module.h for the full writeup -- but `CEditor` itself (a CModule-derived
+ * class with its own deep Peg/UI construction, `CEditorConstructor`) is not
+ * reconstructed, so this reconstruction's own call graph does not yet actually reach
+ * `CPanelIfcTask::CPanelIfcTask()` regardless. Only SetMargin/GetMargin (real
+ * boot-path calls, Tier A) and OnAnalogEvent/OnEncoderEvent (declared, not
+ * implemented -- Tier B call-contract externs CSTGUnsolMsgHandler needs) are present.
+ * The rest of CEditor::CPanelIfcTask -- and CEditor itself -- is Peg/UI-toolkit-
+ * adjacent territory, deliberately out of scope for this pass (see PLAN.md Stage 4).
  */
 
 #ifndef PANEL_IFC_TASK_H

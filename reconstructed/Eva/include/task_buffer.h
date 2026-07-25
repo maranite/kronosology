@@ -4,6 +4,20 @@
  * +0x04 (8 bytes, see level_manager_array.h) -- CLevelManager::RunLevel()'s own first
  * statement is `CTaskBuffer::SendBuffer((CTaskBuffer*)(this+4))`.
  *
+ * CORRECTION (Stage 6, 2026-07-25, CTask::CTask() reconstruction batch): this file's
+ * own prior note ("CTask::CTask() has no caller anywhere in this reconstruction's own
+ * call graph") is now stale. `CTask::CTask()` genuinely IS called in ground truth (by
+ * `CEditor::CPanelIfcTask::CPanelIfcTask()` and `CPoller::CPoller()`, both confirmed via
+ * direct disassembly) and is now reconstructed for real (task.h/task.cpp), along with
+ * the actual `mTasks`-populating method, `CModule::Add(CTask*)` (module.h/module.cpp) --
+ * itself boot-path-reachable from `CEditor::Setup()` via the already-real
+ * `CModuleManager::Setup()` dispatch. `CTaskBuffer` itself is a SEPARATE queue from
+ * `CModule::mTasks`/`CLevelManager`'s own task array, though (see below) -- nothing
+ * newly reconstructed this batch enqueues into a CTaskBuffer specifically, so THIS
+ * class's own producer-side-unreached status is unchanged; see task.h's own header
+ * comment for the full writeup of what did change (CModule::AdjustTaskMask() /
+ * CLevelManager::RunLevel(), not CTaskBuffer).
+ *
  * Real layout confirmed from ~CTaskBuffer@08055ec0.c / SendBuffer@08055f20.c: this
  * class is NOT polymorphic (no vtable -- SendBuffer() dereferences `*this` directly as
  * a linked-list head pointer, never as a vtable pointer):

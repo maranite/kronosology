@@ -219,18 +219,35 @@ RECONSTRUCTED = {
     "08916260",  # CSTGUnsolMsgHandler::FrontPanelMsgHandler (confirmed-empty, static)
     "08916270",  # CSTGUnsolMsgHandler::KLMMsgHandler (confirmed-empty, static)
     "0824cc30",  # CEditor::CPanelIfcTask::GetMargin (real companion to SetMargin, added while re-touching this header)
+
+    # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
+    # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()
+    # genuinely IS called in ground truth (CEditor::CPanelIfcTask's and CPoller's own
+    # ctors, both confirmed via direct objdump -dr inspection), and CModule::Add(CTask*)
+    # is the real mTasks-populating method neither this project's own batch 2 nor
+    # batch 5 knew existed -- itself boot-path-reachable via CEditor::Setup() ->
+    # CModuleManager::Setup(). See task.h/module.h for the full writeup.
+    "0807ee80",  # CTask::CTask
+    "0807bd10",  # CLimiterMan::CLimiterMan
+    "0807c410",  # CModule::Add(CTask*)
 }
 
-# CTask itself is NOT in RECONSTRUCTED (no ctor implemented) -- CTask::CTask()
-# (0807ee80) has zero callers anywhere in this reconstruction's own call graph (nothing
-# on the traced path ever calls `new CTask(...)`), so implementing it would be
-# unreachable code; only its real per-instance field layout (+0x4c mask, +0x78/+0x7a
-# period/countdown, vtable slot+8 Exec()) is modeled, in level_manager_array.h's own
-# header comment, sufficient for CLevelManager::RunLevel()'s real per-tick walk. Same
-# "don't fabricate an uncalled function" license already established for
-# OmegaExitThread below. CTask::RegisterIfc (0807ec90, 472 bytes) and CLimiterMan
-# (0807bd10) are real CTask-ctor dependencies, also not reconstructed for the same
-# reason -- both genuinely out of scope while CTask::CTask() itself isn't implemented.
+# CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
+# stub only (real signature, empty body): genuinely deep dedup-scan +
+# TVector<SRegisteredIfc,1>::MakeCapacity()-driven append, a TVector<T,1> growth
+# routine this project has never generalized anywhere it appears (ckernel.h's own
+# note). CPoller (29 methods, .text+0x089ef740 ctor) surveyed but NOT pursued --
+# genuinely deeper (~1900-byte ctor, pulls in a new not-yet-reconstructed
+# CTask::SetMask(EMask) dependency) than any Tier-A candidate this batch, correctly
+# out of scope. CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) also stays out of
+# scope -- its post-CTask::CTask() tail is real multiple-inheritance work
+# (COutLinkMono sub-object + adjustment thunk) that is Peg/UI-editor-toolkit depth,
+# not CModule/CTask/CLevelManagerArray/CPoller family depth; see task.h/
+# panel_ifc_task.h. CScheduler::InsertTask(CTask const&) (.text+0x08062d80) -- the
+# obvious ground-truth candidate for populating CLevelManager's own SEPARATE
+# per-level task array (distinct from CModule::mTasks) -- exists but has ZERO
+# confirmed direct callers found this batch; left as an open lead
+# (level_manager_array.h), not fabricated.
 
 # COmegaInterface::ExitRequested is declared but its body is a no-op stand-in (the real
 # vtable-slot-0x7c indirect call isn't resolved) -- deliberately NOT in RECONSTRUCTED.

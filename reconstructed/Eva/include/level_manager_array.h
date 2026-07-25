@@ -55,13 +55,23 @@ public:
  * bits set (masked/disabled -- real code short-circuits on this BEFORE touching the
  * countdown at all, so a masked task's countdown stays frozen, not decremented);
  * otherwise decrement the countdown (+0x7a) and, once it reaches 0, reload it from the
- * task's own period (+0x78) and dispatch CTask's vtable slot+8. CTask itself is not
- * reconstructed as a constructible class here (its real ctor, `CTask@0807ee80.c`, has
- * no caller anywhere in this reconstruction's own call graph -- nothing on the traced
- * boot path ever calls `new CTask(...)`, so the level's own task queue is always empty
- * in practice, same "faithful but currently-empty" status CLevelManagerArray itself
- * had before the prior Stage-6 batch populated it) -- only its real per-tick field
- * layout is modeled, sufficient for this loop.
+ * task's own period (+0x78) and dispatch CTask's vtable slot+8. `CTask` is now a real,
+ * reconstructed, constructible class (task.h/task.cpp, Stage 6, 2026-07-25) with a
+ * confirmed real caller in ground truth (`CEditor::CPanelIfcTask`'s and `CPoller`'s own
+ * ctors) -- **CORRECTION**: this comment's prior claim ("no caller anywhere in this
+ * reconstruction's own call graph") is stale, see task.h's header comment for the full
+ * writeup. That said, this array specifically (`CLevelManager`'s own per-scheduling-
+ * level task queue, distinct from `CModule::mTasks` -- see module.h) is populated by a
+ * DIFFERENT real mechanism this batch did not confirm reachable: `CScheduler::
+ * InsertTask(CTask const&)` (.text+0x08062d80) exists in ground truth, by name and
+ * signature the obvious candidate, but a full disassembly sweep this batch found ZERO
+ * direct `call` instructions targeting it anywhere in the binary (only 2 raw 4-byte
+ * occurrences of its address at all, neither yet confirmed to sit in an executable
+ * dispatch table vs. some other data use) -- left as an open, flagged lead for a future
+ * pass, not fabricated or assumed live. So: this array's own "faithful but currently-
+ * empty in this reconstruction" status is UNCHANGED by this batch (still real code,
+ * still not exercised) -- what changed is `CModule::mTasks` (module.h) and
+ * `CModule::AdjustTaskMask()`'s own reachability, a different container.
  *
  * The real function's own tail unconditionally clears this level's missed-tick counter
  * (+0x1c, see CScheduler::Exec(), scheduler.cpp) regardless of what the loop above did.

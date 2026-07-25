@@ -95,6 +95,41 @@
  *   CChunkMan     08e85968 -> 08e85984 (own typeinfo-name)        =  7 slots
  *   CDumpManMod   08e85ca8 -> 08e85cc4 (own typeinfo-name)        =  7 slots
  *
+ * Added in the Stage 6 breadth-sweep pass (2026-07-25), CTask::CTask()/CLimiterMan
+ * batch -- same installed-pointer-to-next-symbol methodology, confirmed against
+ * symbols.csv's 08e81d78..08e821e7 cluster:
+ *
+ *   CTask        08e82128 -> DAT_08e82144 (opaque data blob, not a vtable) = 7 slots.
+ *     Matches CModule's own 7-slot count -- plausible (dtor pair + Setup-analog +
+ *     Exec() (RunLevel()'s own +8 dispatch, confirmed elsewhere) + further named
+ *     methods this pass didn't trace individually, e.g. CTask::SetMask() (found via
+ *     CPoller::CPoller(), see task.h)).
+ *   TNamedPtrArray<COutLink>  08e82198 -> 08e821a4 (TVector<SRegisteredIfc,1>
+ *     typeinfo) = 3 slots. Installed into BOTH of CTask's own embedded
+ *     COmegaPtrArray sub-objects (+0xc and +0x24) -- confirmed via the real ctor
+ *     writing this same address into both offsets (task.cpp).
+ *   TVector<CTask::SRegisteredIfc,1>  08e82188 -> 08e82190 (TNamedPtrArray<COutLink>
+ *     vtable) = 2 slots. Installed at CTask+0x50 (the RegisteredIfc vector
+ *     RegisterIfc() would grow -- RegisterIfc itself stays Tier B, see task.h).
+ *   CLimiterMan  08e81ee8 -> 08e81ef8 (CMarshaller<ILimiterNotify> vtable) = 4 slots.
+ *     Installed at CTask+0x60 (the embedded CLimiterMan sub-object every CTask
+ *     ctor constructs unconditionally).
+ *   TVector<CLimiterBase*,1>  08e81f78 -> 08e81f80 (own typeinfo) = 2 slots.
+ *     Installed at CLimiterMan+0x08 (its own embedded TVector). Same 2-slot count
+ *     as every other TVector<T,1> instantiation seen in this file -- a real,
+ *     cross-confirming pattern, not a coincidence.
+ *
+ * None of these 5 are ever actually dispatched through by any code in this
+ * reconstruction (CTask's own vtable slots would only fire via CLevelManager::
+ * RunLevel(), which stays real-but-unreached pending a live task-scheduling boot
+ * path -- see level_manager_array.h; CLimiterMan's own vtable would only fire via
+ * ~CLimiterMan(), not reconstructed since nothing in this reconstruction calls
+ * ~CTask()) -- same "install-only, real slot count" status as this file's other
+ * entries. DAT_08e82144 itself (CTask+0x08, a plain data symbol, not a class
+ * vtable) is represented by EvaDataPlaceholder_08e82144 below -- its own contents
+ * are never decoded or dereferenced by any reconstructed code, only its address is
+ * ever stored.
+ *
  * Every slot points at the same no-op stub (EvaVTableStub, cdecl, zero declared
  * parameters) -- safe under the real cdecl calling convention regardless of how many
  * args/regs a caller's own Fn-typedef pushes, since cdecl callees never pop caller-
@@ -135,6 +170,12 @@ extern void *PTR__CSeqTimer_08e892a8[7];
 extern void *PTR__CSysEx_08e899e8[7];
 extern void *PTR__CChunkMan_08e85968[7];
 extern void *PTR__CDumpManMod_08e85ca8[7];
+extern void *PTR__CTask_08e82128[7];
+extern void *PTR__TNamedPtrArray_08e82198[3];
+extern void *PTR__TVector_08e82188[2];
+extern void *PTR__CLimiterMan_08e81ee8[4];
+extern void *PTR__TVector_08e81f78[2];
+extern int   EvaDataPlaceholder_08e82144;
 }
 
 #endif /* OMEGA_VTABLES_H */

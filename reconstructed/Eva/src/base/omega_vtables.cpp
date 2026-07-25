@@ -175,4 +175,29 @@ void *PTR__CDumpManMod_08e85ca8[7] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+/* CTask's own real vtable (7 slots) + its 2 embedded sub-object vtables + the
+ * embedded CLimiterMan's own vtable + ITS embedded TVector's vtable -- see
+ * header comment's "CTask::CTask()/CLimiterMan batch" note. All install-only,
+ * same status as this file's other entries.
+ */
+void *PTR__CTask_08e82128[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TNamedPtrArray_08e82198[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TVector_08e82188[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CLimiterMan_08e81ee8[4] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TVector_08e81f78[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+/* Opaque data blob CTask+0x08 stores the ADDRESS of (never dereferences) -- see
+ * header comment. Any addressable object is a safe stand-in.
+ */
+int EvaDataPlaceholder_08e82144 = 0;
 }

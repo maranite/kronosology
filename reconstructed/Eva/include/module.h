@@ -47,6 +47,22 @@
  * went Tier A, Stage 6 batch 3), now genuinely exercised. See module.cpp for the real
  * body and a preserved-but-dead near-NULL-deref quirk in the original disassembly.
  *
+ * CModule::Add(CTask*) (.text+0x0807c410, 91 bytes) is Tier A (Stage 6 breadth sweep,
+ * 2026-07-25 -- CTask::CTask() reconstruction batch). Real, DEFINITIVELY-boot-path-
+ * reachable caller: `CEditor::Setup()` (.text+0x08249b60) calls it once per
+ * freshly-constructed CTask-derived member (CMainTask, CPanelIfcTask,
+ * CChunkServerTask, ...), and `CEditor::Setup()` itself is dispatched by
+ * `CModuleManager::Setup()`'s own already-real per-module vtable+8 call
+ * (module_manager.cpp), from `CKernel::InitSystemLayer()` (ckernel.cpp) -- the SAME
+ * already-real boot-path spine `AddModule()`/`AdjustTaskMask()` sit on. This is the
+ * genuine `mTasks`-populating method neither Stage 6 batch 2 nor batch 5 knew existed
+ * when they wrote "nothing... constructs a CTask, so mTasks stays permanently empty" /
+ * "no AddTask()-shaped method exists" -- both corrected, see task.h's own header
+ * comment for the full writeup. `CEditor`/`CPoller` themselves (the only two real
+ * callers of `CTask::CTask()`, task.h) remain unreconstructed (genuinely deep Peg/UI
+ * depth), so mTasks still stays empty on THIS reconstruction's own currently-wired
+ * boot path -- but the claim that no such mechanism exists in ground truth is false.
+ *
  * CModule's own real vtable (PTR__CModule_08e81fe8) is a ground-truth-counted 7-slot
  * array (omega_vtables.h/.cpp, Stage 6, 2026-07-25): dtor pair (0/4), Setup(+8),
  * Config(+0xc), Start(+0x10) -- all 3 dispatched by name in module_manager.cpp -- plus
@@ -65,11 +81,21 @@
 #ifndef MODULE_H
 #define MODULE_H
 
+class CTask;
+
 class CModule {
 public:
 	CModule(const char *name);
 
 	void AdjustTaskMask(); /* Tier A, see header comment + module.cpp */
+
+	/* .text+0x0807c410, 91 bytes. Tier A, see header comment + module.cpp. Appends
+	 * `task` to mTasks and fires 2 Api notifications (system_api.h: +0x134/+0x12c);
+	 * real return value is just `task` echoed back (matches every real caller
+	 * ignoring it, e.g. CEditor::Setup()'s own `CModule::Add(this, task)` call whose
+	 * result is discarded).
+	 */
+	CTask *Add(CTask *task);
 
 private:
 	void *mVtbl;
