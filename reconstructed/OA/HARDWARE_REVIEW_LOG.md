@@ -747,3 +747,60 @@ counter or ring-fill-level log) whether `RunFileDaemonSynchronization()`'s
 polling cadence ever lets any of these five rings approach full under
 real I/O latency -- would validate or refute the "these ring sizes are
 comfortably oversized" assumption above.
+
+---
+
+## CSTGControllerInfo::ButtonPressHandler — 37 deferred sub-branches now real, unconfirmed field names (2026-07-25)
+
+Uncertain: all 37 previously-deferred sub-branches (20 Pattern-B, 17
+table1/3 special-button else-branches) are now reconstructed from
+disassembly with high confidence in the CONTROL FLOW (every branch,
+constant, and call target individually traced), but several
+`CSTGControllerRTData`/`CSTGGlobal` byte/dword fields involved have no
+independently-confirmed NAME, only an observed single-purpose
+read/write: `CSTGControllerRTData+0x21` (solo-related byte),
+`CSTGGlobal+0x684`/`+0x6a4` (the project's already-established "program/
+combi/sequence mode" and a byte flag, reused here in a new context for
+`ChangeControlSurfaceMode`'s own dispatch), and the exact real meaning
+of `ChangeControlSurfaceMode`'s own `int mode` argument values (0-8)
+themselves. `ProcessPerfSwitchPress`/`ResetSolo`/`ChangeControlSurfaceMode`
+are new deferred externs -- their own bodies are NOT reconstructed, so
+this pass cannot confirm what UI-visible effect they actually have.
+
+Real-HW test that would help: press each of the 12 "special" buttons
+(9, 0x2c, 0x35-0x39, 0x4a-0x4e) and the 10 Pattern-B buttons (0x26-0x2b,
+0x2f-0x32) individually in each of the ~9 controller-mode states
+(`CSTGControllerRTData+0x2b` 0-8), and confirm the real
+`SendUnsolControl2MessageToUI`/`SendKarmaCCToKG` traffic matches this
+reconstruction's per-branch table -- especially the `ChangeControlSurfaceMode`
+cascades for codes 0x35/0x36/0x39, the deepest and least-independently-
+cross-checked part of this batch.
+
+---
+
+## CSTGControllerInfo AnalogXxxHandler family — 9 of 22 now real, unconfirmed field names (2026-07-25)
+
+Uncertain: `AnalogRibbonXHandler`/`AnalogVectorXHandler`/
+`AnalogVectorYHandler`/`AnalogDamperHandler` all touch
+`CSTGControllerRTData`/`CSTGGlobal` byte fields with NO independently-
+confirmed name (`CSTGControllerRTData+0x14/0x15/0x16/0x20/0x49`,
+`CSTGGlobal+0x6ac/0x6c0/0x6c1/0x29c9fbc`) -- real per-purpose semantics
+inferred only from how each byte is used within these five functions,
+not cross-checked against any other reconstructed code in this project.
+The `STGAPIFrontPanelStatus+0x108/+0x10a` writes in `AnalogRibbonXHandler`
+are explicitly NOT claimed to be the same-purpose fields as the
+existing `STGAPI_OFF_ANALOG_ECHO_*` constants that happen to share the
+0x108 offset (those are written only from a different code path,
+`AnalogControllerHandler`'s own busy-flag-SET direct-echo branch) --
+this is a real ambiguity, not resolved this pass. The two extracted
+`.rodata` tables (`kDamperFilterTable`, `kControllerLockFlagTable`) are
+BYTE-EXACT from the real binary (script-extracted, not hand-transcribed
+after the first draft caught a manual-transcription row-merge bug), so
+their VALUES are not in question, only their semantic PURPOSE.
+
+Real-HW test that would help: move the physical ribbon/vector/damper
+controllers through their full range while watching real MIDI CC output
+(`SendCCToKG`'s ultimate destination) and the front-panel UI's own
+touch-position readback, to confirm this reconstruction's per-field
+semantics (especially the ribbon "lock flag" gating and the vector
+"assignment" sentinel check) match observed behavior.
