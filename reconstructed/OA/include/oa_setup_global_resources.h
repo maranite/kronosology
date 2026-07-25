@@ -239,6 +239,26 @@ extern "C" unsigned int CSTGHeapManager_GetCapturedOffset(unsigned int slot);
  * meaning not independently confirmed. */
 #define STGAPI_OFF_KEYBED_NIBBLE_D_FLAG 0x108d
 
+/*
+ * Confirmed real (batch 65, `CSTGControllerInfo::AnalogControllerHandler`'s
+ * device-1..7 "busy" (edit-in-context UI notify) sub-path, a per-device
+ * 16-bit UI echo of the raw analog reading -- own semantic meaning
+ * ("last raw ADC value shown on screen for this control") inferred from
+ * usage, not independently named in ground truth). RibbonZ's own table
+ * slot (device 4) has NO echo write at all (confirmed real -- its jump
+ * table entry points straight at the shared return, not a write block).
+ */
+#define STGAPI_OFF_ANALOG_ECHO_JOYX      0x0100  /* device 1: JoystickX */
+#define STGAPI_OFF_ANALOG_ECHO_JOYY      0x0108  /* device 2: JoystickY */
+#define STGAPI_OFF_ANALOG_ECHO_RIBX      0x0102  /* device 3: RibbonX */
+#define STGAPI_OFF_ANALOG_ECHO_VECX      0x00fe  /* device 5: VectorX */
+#define STGAPI_OFF_ANALOG_ECHO_VECY      0x0104  /* device 6: VectorY */
+#define STGAPI_OFF_ANALOG_ECHO_ATOUCH    0x29116 /* device 7: Aftertouch */
+/* Device 0x1d (Damper)'s own "busy" sub-path direct echo -- confirmed
+ * real, stores `0x3ff - param3` (a polarity-inverted 10-bit continuous
+ * pedal position), not a plain copy like the seven above. */
+#define STGAPI_OFF_ANALOG_ECHO_DAMPER    0x0106
+
 struct STGAPIFrontPanelStatus {
 	static unsigned char *sInstance;
 };

@@ -74,6 +74,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_input_mixer.o \
            src/engine/set_list_eq_init.o \
            src/engine/controller_info_send_unsolicited_ui_param.o \
+           src/engine/controller_info_analog_handler.o \
            src/engine/waveseq_setlist_init.o \
            src/engine/alias_bank_init.o \
            src/engine/alias_bank_convert.o \
@@ -428,6 +429,7 @@ SRC := src/auth/klm_manager.cpp \
        src/init/stg_daemons.cpp \
        src/engine/tick_count.cpp \
        src/engine/controller_info_perf_deactivate.cpp \
+       src/engine/controller_info_analog_handler.cpp \
        src/init/rtwrap.cpp \
        src/init/drumpad_init.cpp \
        src/init/keybed_debounce.cpp \
@@ -518,6 +520,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_hdr_sampler_commands \
          verify/test_file_opener_events \
          verify/test_front_panel_key_handlers \
+         verify/test_controller_info_analog_handler \
          verify/test_hdr_playback_commands \
          verify/test_load_global_resources \
          verify/test_performance_vars_manager_init \
@@ -842,6 +845,9 @@ verify/test_tick_count: verify/test_tick_count.cpp src/engine/tick_count.cpp inc
 
 verify/test_controller_info_perf_deactivate: verify/test_controller_info_perf_deactivate.cpp src/engine/controller_info_perf_deactivate.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_info_perf_deactivate.cpp src/engine/controller_info_perf_deactivate.cpp -o $@
+
+verify/test_controller_info_analog_handler: verify/test_controller_info_analog_handler.cpp src/engine/controller_info_analog_handler.cpp include/oa_global.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_info_analog_handler.cpp src/engine/controller_info_analog_handler.cpp -o $@
 
 verify/test_rtwrap: verify/test_rtwrap.cpp src/init/rtwrap.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtwrap.cpp src/init/rtwrap.cpp -o $@

@@ -41,6 +41,8 @@
 
 struct CSTGPerformance;	/* forward decl, real definition in oa_engine_init.h */
 struct CSTGPerformanceVars;	/* forward decl, real definition in oa_engine_init.h */
+struct CSTGParamDescriptor;	/* forward decl, real definition in oa_engine.h (needed by
+				 * CSTGControllerRTData::ConvertKnobToControl below) */
 
 /* Confirmed real, deliberately deferred extern (sec 10.67) -- takes a
  * single int hardware command code in eax (regparm), called from
@@ -428,6 +430,55 @@ public:
 	 * full layout isn't independently recovered -- NOT modeled as
 	 * struct members to avoid implying a false byte-exact layout
 	 * between +0x02 and +0x18. */
+
+	/*
+	 * CJumpCatch (batch 65, `CSTGControllerInfo::AnalogControllerHandler`
+	 * reconstruction) -- a nested sub-object confirmed embedded at
+	 * `CSTGControllerRTData::sInstance+0x84` (five independent call
+	 * sites in `AnalogControllerHandler` all compute `this+0x84` before
+	 * calling either method; no separate ctor/field storage recovered,
+	 * matching this project's "declare the shape, defer the body"
+	 * treatment). `CheckPosition(int position, bool flag)` (`.text+
+	 * 0x1e740`-ish, real mangled `...CJumpCatch13CheckPositionEib`)
+	 * returns bool and gates whether a "jump catch" style knob/slider
+	 * has caught up to a target position; `UpdateStatus()` (`...
+	 * CJumpCatch12UpdateStatusEv`) takes no args. Both confirmed real,
+	 * deliberately deferred externs -- own bodies not reconstructed.
+	 * `JumpCatch()` is a convenience accessor, not a real symbol.
+	 */
+	struct CJumpCatch {
+		bool CheckPosition(int position, bool flag);
+		void UpdateStatus();
+	};
+	static CJumpCatch *JumpCatch()
+	{
+		return (CJumpCatch *)((unsigned char *)sInstance + 0x84);
+	}
+
+	/*
+	 * SendUnsolControl2MessageToUI(eSTGUnsolControlMsg, int, int,
+	 * eSTGMidiSource) (batch 65, confirmed real via ~15 independent call
+	 * sites across `AnalogControllerHandler`/`ButtonPressHandler`,
+	 * mangled `...28SendUnsolControl2MessageToUIE19eSTGUnsolControlMsg
+	 * ii14eSTGMidiSource`) -- a "notify the UI of a raw control move/
+	 * press without applying it" message send, always called with
+	 * `source=1` in every confirmed call site so far. Own body not
+	 * reconstructed (deliberately deferred extern). Real enum types
+	 * modeled as `int` (project convention).
+	 */
+	void SendUnsolControl2MessageToUI(int msgType, int id, int value, int source);
+
+	/*
+	 * ConvertKnobToControl(CSTGParamDescriptor const&, unsigned char)
+	 * (batch 65, `.text+0x1d2a0`, 75 bytes, confirmed via relocation from
+	 * `AnalogControllerHandler`'s device-0x18/mode-4 "Value fader as a
+	 * CC" sub-path) confirmed real, deliberately deferred extern -- own
+	 * body not reconstructed. Real return width not independently
+	 * confirmed (only the low byte is read back by its one caller so
+	 * far) -- modeled as `int`, matching this project's convention for
+	 * an unconfirmed return width.
+	 */
+	int ConvertKnobToControl(const CSTGParamDescriptor &desc, unsigned char arg2);
 };
 
 /*
@@ -2280,27 +2331,164 @@ struct CSTGControllerInfo {
 					    long arg3, int midiSource);
 
 	/*
-	 * ButtonPressHandler(eSTGButtonCode, bool)/
-	 * AnalogControllerHandler(eSTGAnalogDeviceCode, unsigned short,
-	 * unsigned short) -- confirmed real (relocations from
-	 * `CSTGFrontPanel::HandleSwitchEvent`/`HandleAnalogController`,
+	 * ButtonPressHandler(eSTGButtonCode, bool) -- confirmed real
+	 * (relocation from `CSTGFrontPanel::HandleSwitchEvent`,
 	 * src/engine/front_panel_handlers.cpp), deliberately deferred
-	 * extern: each is a real per-button/per-device jump/dispatch table
-	 * (ButtonPressHandler's full per-button action table,
-	 * AnalogControllerHandler's three device-code-range jump tables) not
-	 * traced in this pass. `this` at both real call sites is NOT
-	 * `CSTGControllerInfo::sInstance` -- it is the embedded sub-object at
-	 * `+0xad3` within whichever `CSTGProgram+3`/`CSTGCombi+6`/
-	 * `CSTGSequence+0` target HandleSwitchEvent/HandleAnalogController's
-	 * own mode-dependent resolution selects (see their shared
-	 * "resolveControllerInfoTarget" comment). AnalogControllerHandler's
-	 * mangled signature (`ht` = `unsigned short, unsigned short`) takes
-	 * `param2` widened from the caller's `unsigned char` -- modeled here
-	 * as `unsigned short` to match the real ABI exactly. Real enum types
-	 * not modeled (project convention).
+	 * extern. `.text+0x95fa0`, 5822 bytes -- a genuine ~144-entry
+	 * per-button dispatch across TWO `.rodata` jump tables
+	 * (`.rodata+0x47ae0`, 70 x 4-byte entries, index=`buttonCode-9`,
+	 * reached only for `buttonCode>0x49` AND `pressed==true`;
+	 * `.rodata+0x47bf8`, 74 x 4-byte entries, index=`buttonCode`
+	 * directly, for `buttonCode<=0x49`) plus a
+	 * `HandleEditInContextButton(eSTGButtonCode, bool)` gate ahead of
+	 * both tables (same "UI edit mode intercepts the raw event" idiom
+	 * `AnalogControllerHandler` below uses for knobs/sliders). The vast
+	 * majority of individual case targets follow one uniform pattern --
+	 * `CSTGControllerRTData::sInstance->SendUnsolControl2MessageToUI(
+	 * msgType, buttonId, pressed?0x7f:0, 1)` with per-button constant
+	 * `msgType`/`buttonId` immediates -- confirmed by spot-disassembling
+	 * ~15 of the ~144 case targets, but NOT exhaustively enumerated in
+	 * this pass (would need a dedicated per-entry table-dump batch on
+	 * the scale of the `CSTGKeybedInterface` batch-64 session, not a
+	 * quick promotion) -- see the `oa_front_panel_analog_button_
+	 * handlers` agent-memory note for the full confirmed shape and
+	 * exact table addresses for that future pass. `this` at the real
+	 * call site is NOT `CSTGControllerInfo::sInstance` -- see
+	 * `AnalogControllerHandler` below for the shared
+	 * `ResolveControllerInfoTarget` resolution both handlers go through.
 	 */
 	void ButtonPressHandler(unsigned int code, bool pressed);
+
+	/*
+	 * AnalogControllerHandler(eSTGAnalogDeviceCode, unsigned short,
+	 * unsigned short) -- confirmed real (relocation from
+	 * `CSTGFrontPanel::HandleAnalogController`,
+	 * src/engine/front_panel_handlers.cpp). `.text+0x9a5f0`, 2274 bytes.
+	 * Reconstructed for real (batch 65) -- see
+	 * src/engine/controller_info_analog_handler.cpp for the complete
+	 * confirmed device-code dispatch (knobs 8-15/sliders 16-23 via a
+	 * per-mode pointer-to-member-function table each, joystick/ribbon/
+	 * vector/aftertouch 1-7 and value-slider/tempo/foot-pedal/foot-
+	 * switch/damper 0x19-0x1D via direct-index tables, the "Value" knob
+	 * 0x18's own internal mode dispatch, and device 0x1e's direct
+	 * `SetControllerAssignment` call) -- with THREE genuinely
+	 * DSP-adjacent sub-branches (tempo-curve float math, SetListEQ
+	 * float-curve math, and the default effect-rack front-panel-
+	 * smoother invocation, all reached only from the "Value" knob in
+	 * specific edit modes) deliberately left as local file-scope stubs,
+	 * documented in that file's own header comment -- not real OA.ko
+	 * symbols of their own, just named extractions of inlined DSP logic
+	 * this pass didn't trace, matching the same idiom
+	 * `ResolveControllerInfoTarget` (front_panel_handlers.cpp) already
+	 * established for inlined-logic extraction. `param2` widened from
+	 * the caller's `unsigned char` -- modeled here as `unsigned short`
+	 * to match the real ABI exactly. Real enum types not modeled
+	 * (project convention).
+	 */
 	void AnalogControllerHandler(unsigned int deviceCode, unsigned short param2, unsigned short param3);
+
+	/*
+	 * HandleEditInContextKnob/HandleEditInContextSlider(
+	 * eSTGAnalogDeviceCode, unsigned short, unsigned short) (batch 65,
+	 * confirmed via relocation from `AnalogControllerHandler`'s own
+	 * `CSTGGlobal::sInstance+0x29cc4dc != 0` gate for the knobs/sliders
+	 * device ranges -- the SAME field `SendUnsolicitedUIParam` above
+	 * gates on) confirmed real, deliberately deferred externs -- own
+	 * bodies not reconstructed. Both return `bool`: `AnalogControllerHandler`
+	 * treats `true` as "UI edit mode fully handled this event" (return
+	 * immediately) and `false` as "fall through to the normal per-mode
+	 * dispatch table anyway" -- confirmed via the real post-call branch,
+	 * not assumed.
+	 */
+	bool HandleEditInContextKnob(unsigned int deviceCode, unsigned short param2, unsigned short param3);
+	bool HandleEditInContextSlider(unsigned int deviceCode, unsigned short param2, unsigned short param3);
+
+	/*
+	 * SendExtModeSliderEvent(eFader, unsigned int, bool) (batch 65,
+	 * confirmed via relocation from `AnalogControllerHandler`'s device-
+	 * 0x18/mode-4 "Value fader" sub-path, called with a hardcoded
+	 * `eFader` id of 8 at both real call sites) confirmed real,
+	 * deliberately deferred extern -- own body not reconstructed. Real
+	 * `eFader` enum modeled as `int` (project convention).
+	 */
+	void SendExtModeSliderEvent(int fader, unsigned int value, bool notify);
+
+	/*
+	 * The 22 real `AnalogXxxHandler(unsigned int, unsigned short,
+	 * unsigned short)` / `AnalogXxxHandler(unsigned short, unsigned
+	 * short)` per-continuous-controller handlers `AnalogControllerHandler`
+	 * dispatches to via its four `.rodata` pointer-to-member-function
+	 * tables (batch 65; all confirmed via direct R_386_32 relocations at
+	 * each table SLOT, not guessed from position -- see
+	 * controller_info_analog_handler.cpp's own header for the full
+	 * table-to-symbol map). Confirmed real, deliberately deferred
+	 * externs -- own bodies not reconstructed (each is presumably
+	 * comparable in scope to the `CSTGKeybedInterface` per-mode handlers,
+	 * a future batch's worth of work on its own).
+	 *
+	 * The knob/slider "adjustment" table field (the pointer-to-member
+	 * representation's second dword) is confirmed ZERO for every one of
+	 * these 30 table slots (raw `.rodata` bytes are all-zero, relocations
+	 * only ever target the first dword) -- so every real call's implicit
+	 * `this` is simply the SAME `CSTGControllerInfo*` `AnalogControllerHandler`
+	 * itself was called with, no this-pointer adjustment. This project's
+	 * reconstruction therefore calls these as plain non-virtual member
+	 * functions on `this`, not via a modeled pointer-to-member value.
+	 */
+	void AnalogJoystickXHandler(unsigned short a, unsigned short b);
+	void AnalogJoystickYHandler(unsigned short a, unsigned short b);
+	void AnalogRibbonXHandler(unsigned short a, unsigned short b);
+	void AnalogRibbonZHandler(unsigned short a, unsigned short b);
+	void AnalogVectorXHandler(unsigned short a, unsigned short b);
+	void AnalogVectorYHandler(unsigned short a, unsigned short b);
+	void AnalogAftertouchHandler(unsigned short a, unsigned short b);
+
+	void AnalogValueSliderHandler(unsigned short a, unsigned short b);
+	void AnalogTempoHandler(unsigned short a, unsigned short b);
+	void AnalogFootPedalHandler(unsigned short a, unsigned short b);
+	void AnalogFootSwitchHandler(unsigned short a, unsigned short b);
+	void AnalogDamperHandler(unsigned short a, unsigned short b);
+
+	void AnalogSliderExtHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogSliderRTKHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogSliderTAHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogSliderAInHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogSliderSetListEQHandler(unsigned int idx, unsigned short a, unsigned short b);
+
+	void AnalogKnobExtHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogKnobRTKHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogKnobTAHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogKnobAInHandler(unsigned int idx, unsigned short a, unsigned short b);
+	void AnalogKnobSetListEQHandler(unsigned int idx, unsigned short a, unsigned short b);
+
+	/*
+	 * The 8 remaining knob/slider-mode table slots (T18/T916/A18/A916,
+	 * both Knob and Slider variants) are confirmed WEAK UNDEFINED in the
+	 * real OA.ko itself (`nm -C`: `00000000 W ...AnalogSliderT18Handler...`
+	 * etc, all 8) -- i.e. the real shipped binary NEVER provides a
+	 * definition for these four knob/slider assignment modes either;
+	 * a real insmod resolves them to address 0 via standard weak-symbol
+	 * semantics (no "unknown symbol" load failure, unlike a normal
+	 * undefined strong symbol) rather than to any real code. Since the
+	 * controlling "mode" byte (`CSTGControllerRTData::sInstance+0x2b`)
+	 * is written only by already-real code elsewhere in this project and
+	 * none of it is ever observed writing these four specific mode
+	 * values, these slots are believed permanently unreachable on real
+	 * hardware -- but if they ever WERE reached, real hardware would
+	 * crash via a null-pointer call, not silently no-op. Declared here
+	 * `__attribute__((weak))` with NO definition anywhere in this
+	 * project's own sources, faithfully reproducing that same "resolves
+	 * to 0, never a load error" real-binary behavior in this
+	 * reconstruction's own `.ko` link. See HARDWARE_REVIEW_LOG.md.
+	 */
+	void AnalogSliderT18Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogSliderT916Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogSliderA18Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogSliderA916Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogKnobT18Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogKnobT916Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogKnobA18Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
+	void AnalogKnobA916Handler(unsigned int idx, unsigned short a, unsigned short b) __attribute__((weak));
 
 	/* OnPerformanceDeactivate() (batch 19, `.text+0x92a90`, 106 bytes,
 	 * confirmed via relocation from `CSTGPerformance::SetIsDying` --
@@ -2314,6 +2502,16 @@ struct CSTGControllerInfo {
 	 * directly). */
 	void OnPerformanceDeactivate();
 };
+
+/* SetListDataParams (`.bss`, confirmed real size 0x444 = 1092 bytes) --
+ * a not-yet-independently-modeled global table of `CSTGParamDescriptor`
+ * entries, referenced by `AnalogControllerHandler`'s device-0x18 "Value"
+ * sub-paths at two confirmed real byte offsets (`+0x16c`, `+0x30c`).
+ * Opaque byte array (matching `CSTGParamDescriptor`'s own
+ * not-independently-recovered layout) -- entries are only ever passed
+ * through by reference to `ConvertKnobToControl`/smoother functions,
+ * never read directly by this project's own reconstructed code. */
+extern "C" unsigned char SetListDataParams[0x444];
 
 /*
  * CSetListSlot -- confirmed real (relocation from CSTGGlobal::

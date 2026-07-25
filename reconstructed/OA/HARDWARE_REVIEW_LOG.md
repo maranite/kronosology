@@ -567,4 +567,58 @@ audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
     project's own OA.ko too (`nm -u`: 116 -> 118) -- expected and
     unavoidable, not a regression, but never exercised against the real
     kernel's actual `_ctype` table contents (only a host-side mock table
+
+- **NEW (batch 65): `CSTGControllerInfo::AnalogControllerHandler`**
+  (`src/engine/controller_info_analog_handler.cpp`) -- the real physical
+  knob/slider/joystick/ribbon/vector/aftertouch/value-wheel/damper move
+  dispatcher. This is genuinely REAL physical front-panel I/O that
+  currently does nothing on real hardware unless/until this module is
+  deployed (the prior stub was a deliberate no-op, safe only for
+  no-panel VM boot testing -- see bar2_stubs.cpp's own updated comment).
+  Structural dispatch (range checks, busy/edit-in-context gating,
+  per-mode table selection, message constants) is disassembly-confirmed
+  via `objdump -dr` + a `readelf -rW` relocation dump of all four
+  `.rodata` dispatch tables -- high confidence, not guessed. Genuinely
+  unverified against real hardware / open items:
+  - The 22 real per-controller `AnalogXxxHandler` methods this function
+    dispatches to are ALL still deliberately deferred externs (own
+    bodies not reconstructed) -- so even once this dispatcher is
+    correct, nothing downstream of it does anything real yet on
+    hardware. Confirmed real via relocation, not yet load-bearing.
+  - THREE sub-branches (tempo-curve, SetListEQ-curve, and the default
+    effect-rack front-panel-smoother edit, all reachable only from the
+    "Value" knob/jog-wheel in specific edit modes) are deliberately left
+    as local no-op stubs (DSP-adjacent, not traced this pass) -- turning
+    the physical Value wheel while editing tempo, an EQ band, or an
+    effect-rack parameter will currently do nothing at all on real
+    hardware, not even a partial/wrong effect. See this file's own
+    header comment for exact ground-truth address ranges for a future
+    pass.
+  - The 8 weak-undefined `AnalogXxxT18/T916/A18/A916Handler` slots
+    (4 knob + 4 slider assignment modes) are believed permanently
+    unreachable on real hardware (no writer of the controlling mode byte
+    to those specific values found anywhere in this project so far), and
+    this reconstruction faithfully reproduces the real binary's own
+    "resolves to a null-pointer call if ever reached" behavior rather
+    than inventing a safe no-op -- if this belief is ever wrong, a real
+    unit would crash (kernel Oops) turning a knob/slider into one of
+    these 4 modes. Worth a deliberate real-hardware "try to select every
+    knob/slider assignment mode via the UI" sanity pass before this
+    module is trusted on a real unit, specifically to confirm these 4
+    modes truly are unreachable through the real UI.
+  - `ButtonPressHandler` (the sibling per-BUTTON dispatcher, 5822 bytes,
+    ~144-entry action table) is still the deliberate no-op stub it always
+    was -- every physical button press still does nothing at all on real
+    hardware. Its own confirmed shape/table addresses are documented in
+    oa_global.h's own comment and the `oa_front_panel_analog_button_
+    handlers` agent-memory note for a future dedicated batch.
+  - Device-code-to-symbol-name mapping (e.g. which physical connector is
+    "RibbonX" vs "RibbonZ", which UI echo offset belongs to which
+    control) is inferred from table POSITION and the real (already
+    human-readable) symbol names alone -- not independently cross-checked
+    against a real unit's actual wiring/silkscreen labels.
+  - `CSTGCCInfo::sCCInfoTable`'s per-entry byte-0 "default/current value"
+    semantics (used by the mode==4/busy2 CC-lookup path) are reused from
+    an EARLIER pass's own confirmed derivation (oa_global.h's
+    `CSTGCCInfo` comment) -- not re-verified independently in this batch.
     covering the two relevant bits was tested here).
