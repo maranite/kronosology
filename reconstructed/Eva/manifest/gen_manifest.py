@@ -415,6 +415,27 @@ RECONSTRUCTED = {
     "08bd1d80",  # CESCommon::Setup()
     "08bd1bd0",  # CESCommon::Start(), confirmed-empty
     "08bd1bc0",  # CESCommon::Config(), confirmed-empty
+
+    # --- Stage 6: breadth sweep, SECOND CClientCommServer follow-up pass same day
+    # (2026-07-25). Promotes 4 more of the 16 methods the first follow-up pass left
+    # Tier B (14/26 Tier A total now). Biggest finding: what that pass called
+    # `mUnknown04` ("some kind of retry-in-flight flag, not fully confirmed") is
+    # actually this class's own top-level protocol state (IDLE=0/SENT=1/WAIT=2) --
+    # confirmed independently by OnReceiveSysExBuffer()'s own 3-way dispatch and
+    # OnRxPacket()'s own state transitions -- renamed mUnknown04 -> mState. The other
+    # 12 methods stay Tier B, each for a distinct, examined reason (see
+    # include/client_comm_server.h's own SCOPE section): PrepareMsgBuffer()/
+    # UnprepareBuffer()/EventToMessage()/MessageToEvent() need a real, non-trivial
+    # byte-packing wire transform not yet decoded bit-exact; Error() is real but
+    # ~2KB of heavily-shared-tail-duplicated code judged disproportionate to
+    # de-duplicate correctly this pass; OnReceiveMessage() needs CMessage's own
+    # out-of-scope internals; OnRxMsgWhenInIDLE/SENT and OnRxSexWhenInIDLE/SENT (the
+    # other 4 members of the IDLE/SENT/WAIT dispatch family besides
+    # OnRxSexWhenInWAIT, reconstructed here) depend on the same two blockers.
+    "08172860",  # CClientCommServer::OnRxSexWhenInWAIT
+    "08173210",  # CClientCommServer::OnReceiveSysExBuffer
+    "08172320",  # CClientCommServer::OnRxPacket
+    "08170090",  # CClientCommServer::TransmitSexAnswer
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
