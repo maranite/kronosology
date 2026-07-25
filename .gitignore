@@ -45,3 +45,8 @@ reconstructed/AT88VirtualChip/verify/test_pairfact_decrypt.cpp
 
 # Claude memories
 .claude/*
+reconstructed/Eva/.claude/*
+
+# Eva host-linked build artifact (regenerable via `make link`, see
+# reconstructed/Eva/Makefile)
+reconstructed/Eva/Eva

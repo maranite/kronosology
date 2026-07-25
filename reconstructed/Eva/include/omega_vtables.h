@@ -69,6 +69,8 @@
 #define OMEGA_VTABLES_H
 
 extern "C" {
+void EvaVTableStub();
+void *GetFMApiStub(void *);
 extern void *PTR__CHostInterfaceBase_08e80b68[22];
 extern void *PTR__CHostInterface_08e80b08[22];
 extern void *PTR__COmegaPtrArray_08e80be0[4];

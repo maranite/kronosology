@@ -603,25 +603,68 @@ void *RMApi = 0;
 void *RTRouterApi = 0;
 void *SysExApi = 0;
 
-/* Opaque real per-class vtables these 7 static constructors install -- same
- * "install but never dispatch" treatment as PTR__CHIDDriver_08fd9ce8/
- * PTR__CLinuxPanelDriver_08fd9dc8 above (nothing in this reconstruction ever
- * dispatches through an XxxApiInstance object's own vtable -- RegisterApi()/
- * AssignScope() etc. are all called directly by name, not through these).
+/* Opaque real per-class vtables these 7 static constructors install.
+ *
+ * WORKAROUND (2026-07-24): this block's own comment used to claim "nothing in
+ * this reconstruction ever dispatches through an XxxApiInstance object's own
+ * vtable" -- disproven by a live kronos_vm boot: CKernel::CKernel()'s own
+ * Phase-1 walk over sm_poGlobalObjectList (ckernel.cpp, traced the same day
+ * as this file's own EditApiInstance work, apparently after this comment was
+ * written) dispatches vtable slots +8/+0xc/+0x10/+0x14 (PreKernelConstructor/
+ * PostKernelConstructor/PreKernelDestructor/PostKernelDestructor) on EVERY
+ * CGlobalObjectBase-derived object it's ever seen, including all 7 of these
+ * (each is placement-`new`'d as one, unconditionally, in its own ctor below)
+ * -- BUG: kernel NULL pointer dereference... well, userspace segfault "ip
+ * (null)", a call through a null function pointer. These 6 were bare `void*
+ * = 0` instead of a properly-sized array (unlike this file's own correctly-
+ * shaped PTR__CHIDDriver_08fd9ce8/PTR__CLinuxPanelDriver_08fd9dc8, or
+ * sysapi_instance.cpp's PTR__CSysApiInstance_08e81008[94]) -- reading slot
+ * index 2 (byte offset +8) out of a single 4/8-byte variable is undefined
+ * behavior, landing on whatever happens to be adjacent in `.data`. Fixed to
+ * properly-sized `EvaVTableStub`-filled arrays (6 slots -- the confirmed
+ * CGlobalObjectBase minimum actually dispatched through; none of these
+ * classes' own real vtable sizes are independently ground-truthed, matching
+ * PTR__CSysApiInstance_08e81008's own "safe regardless of real slot count"
+ * precedent, omega_vtables.cpp). RegisterApi()/AssignScope() etc. are still
+ * correct to call directly by name -- only the CKernel-side phase-hook
+ * dispatch was the gap.
  */
-extern "C" void *PTR__CEditApiInstance_08e85da8 = 0;
-extern "C" void *PTR__CSeqApiInstance_08e88fa8 = 0;
-extern "C" void *PTR__CChkApiInstance_08e855c8 = 0;
-extern "C" void *PTR__CDumpApiInstance_08e85ba8 = 0;
-extern "C" void *PTR__CRTRouterApiInstance_08e822e8 = 0;
-extern "C" void *PTR__CSysExApiInstance_08e89a28 = 0;
+extern "C" void *PTR__CEditApiInstance_08e85da8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+extern "C" void *PTR__CSeqApiInstance_08e88fa8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+extern "C" void *PTR__CChkApiInstance_08e855c8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+extern "C" void *PTR__CDumpApiInstance_08e85ba8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+extern "C" void *PTR__CRTRouterApiInstance_08e822e8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 /* RMApiInstance's own ctor transiently installs these 2 before overwriting with its
  * real, final CRMApiInstance vtable (see the ctor below) -- included for the same
- * shape-fidelity reason, never left installed nor dispatched through.
+ * shape-fidelity reason, never left installed nor dispatched through, so left as
+ * bare placeholders (never survive to be walked).
  */
 extern "C" void *PTR__CRMApi_08e88de8 = 0;
 extern "C" void *PTR__CRMApiCallBack_08e886e8 = 0;
-extern "C" void *PTR__CRMApiInstance_08e88c48 = 0;
+/* Final, real, dispatched-through vtable -- same fix as the 6 above. */
+extern "C" void *PTR__CRMApiInstance_08e88c48[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 extern "C" void *DAT_08e88d80 = 0; /* real 2nd vtable-like slot RMApiInstance+4 installs */
 
 /* 7 real static constructors -- global.constructors.keyed.to.<Name>@<addr>.c
@@ -636,7 +679,7 @@ __attribute__((constructor))
 static void ConstructEditApiInstance()
 {
 	new (EditApiInstance) CGlobalObjectBase();
-	*(void **)EditApiInstance = &PTR__CEditApiInstance_08e85da8;
+	*(void **)EditApiInstance = PTR__CEditApiInstance_08e85da8;
 	*(int *)(EditApiInstance + 4) = 0;
 	*(int *)(EditApiInstance + 8) = 0;
 	*(int *)(EditApiInstance + 12) = 0;
@@ -657,7 +700,7 @@ __attribute__((constructor))
 static void ConstructSeqApiInstance()
 {
 	new (SeqApiInstance) CGlobalObjectBase();
-	*(void **)SeqApiInstance = &PTR__CSeqApiInstance_08e88fa8;
+	*(void **)SeqApiInstance = PTR__CSeqApiInstance_08e88fa8;
 	*(int *)(SeqApiInstance + 4) = 0;
 
 	SeqApi = SeqApiInstance;
@@ -669,7 +712,7 @@ __attribute__((constructor))
 static void ConstructChkApiInstance()
 {
 	new (ChkApiInstance) CGlobalObjectBase();
-	*(void **)ChkApiInstance = &PTR__CChkApiInstance_08e855c8;
+	*(void **)ChkApiInstance = PTR__CChkApiInstance_08e855c8;
 
 	ChkApi = ChkApiInstance;
 	DAT_0930a6ac = "ChkApi";
@@ -680,7 +723,7 @@ __attribute__((constructor))
 static void ConstructDumpApiInstance()
 {
 	new (DumpApiInstance) CGlobalObjectBase();
-	*(void **)DumpApiInstance = &PTR__CDumpApiInstance_08e85ba8;
+	*(void **)DumpApiInstance = PTR__CDumpApiInstance_08e85ba8;
 	*(int *)(DumpApiInstance + 4) = 2;
 
 	DumpApi = DumpApiInstance;
@@ -697,7 +740,7 @@ __attribute__((constructor))
 static void ConstructRTRouterApiInstance()
 {
 	new (RTRouterApiInstance) CGlobalObjectBase();
-	*(void **)RTRouterApiInstance = &PTR__CRTRouterApiInstance_08e822e8;
+	*(void **)RTRouterApiInstance = PTR__CRTRouterApiInstance_08e822e8;
 	*(int *)(RTRouterApiInstance + 4) = 0;
 	*(int *)(RTRouterApiInstance + 8) = 0;
 	*(int *)(RTRouterApiInstance + 12) = 0;
@@ -726,7 +769,7 @@ static void ConstructRMApiInstance()
 
 	void *job = malloc(0x54); /* CRMJob -- Tier-B, uninitialized raw blob */
 
-	*(void **)RMApiInstance = &PTR__CRMApiInstance_08e88c48;
+	*(void **)RMApiInstance = PTR__CRMApiInstance_08e88c48;
 	*(void **)(RMApiInstance + 4) = &DAT_08e88d80;
 	*(int *)(RMApiInstance + 32) = -1;
 	*(int *)(RMApiInstance + 36) = 0;
@@ -748,7 +791,7 @@ static void ConstructSysExApiInstance()
 	new (g_oSysExApiInstance) CGlobalObjectBase();
 	/* Real: 8-dword zero loop at +0x10..+0x2c, collapsed to one memset. */
 	memset(g_oSysExApiInstance + 0x10, 0, 8 * sizeof(int));
-	*(void **)g_oSysExApiInstance = &PTR__CSysExApiInstance_08e89a28;
+	*(void **)g_oSysExApiInstance = PTR__CSysExApiInstance_08e89a28;
 
 	SysExApi = g_oSysExApiInstance;
 	_DAT_0931b314 = "SysExApi";

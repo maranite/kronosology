@@ -32,8 +32,9 @@ Eva/
 | 3. CKernel/threading substrate | Done for `COmegaInterface::Init`'s own direct callees: `SetConfigInfo`, `Mains` + all 17 `MMainXxx` registration shims, `CKernel::CKernel`/`~CKernel`/`InitSystemLayer`/`GetSysApi`, the 3 `OmegaXxxThread` worker bodies. See "Stage 3" below |
 | 4. Link-completion pass | **Done — reached a real, full link (`LINK OK`).** Every symbol Stage 3 left as a bare call-contract extern now has either a faithful (Tier A) or explicitly-stubbed (Tier B) real definition. See "Stage 4" below for the full breakdown and the tier convention |
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
-| 5. Peg toolkit substrate | Not started, not yet known to be necessary |
-| 6. Breadth sweep | Not started, out of scope for this effort |
+| 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
+| 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
+| 6. Breadth sweep | Not started — first candidate scoped, not yet begun: `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (currently Tier-B no-ops that leave `CLevelManagerArray` permanently empty, so `CScheduler::Exec()`'s real per-tick dispatch loop is dead code in this reconstruction even once transcribed) |
 
 ## Ground truth
 
@@ -823,7 +824,58 @@ documentation-only, not a functional change.
 
 `make objs` and `tools/build_lenny.sh` both stay clean after this pass — the pre-existing
 `LINK OK` full link against the real on-image `RestoreDVD_SystemMNT` libs still
-succeeds with zero unresolved symbols, no regression from Stage 4. Not executed in any
-VM as part of this pass (no SSH access from this task) — the resulting binary is
-expected, but not yet confirmed, to get past the `MMainEditMan()` crash on the next
-live boot test.
+succeeds with zero unresolved symbols, no regression from Stage 4. This pass's own binary
+did get past the `MMainEditMan()` crash on the next live boot test — see "Boot-path crash
+chain closed out" below for what it hit next and how that was resolved.
+
+## Boot-path crash chain closed out — 2026-07-24
+
+Continuing the exact same live-`kronos_vm`-boot iteration loop that found 4b's `Api`/
+`SysApiInstance` bug, two more real bugs were found and fixed, both in Eva's own code
+(not OA.ko). Diagnostic technique: sprinkle `puts("CHECKPOINT: <label>"); fflush(stdout);`
+after every remaining statement in the suspected span, rebuild via `tools/build_lenny.sh`,
+redeploy, reboot, read `/korg/rw/eva_test_stdout.log` off the live ttyS1 shell to see
+exactly how far execution got before the segfault line in `boot_console.log` — narrows a
+whole function body down to one statement per iteration. Reusable for any future "ip
+(null)" crash where the fault address alone doesn't pin a location.
+
+1. **`mains.cpp`: 7 of the ~9 `PTR__CXxxApiInstance_*` "vtables" (Edit/Seq/Chk/Dump/
+   RTRouter/SysEx/RM ApiInstance) were declared as bare `void* = 0` instead of a
+   properly-sized array** (unlike the correct `PTR__CSysApiInstance_08e81008[94]` pattern
+   already used elsewhere, `omega_vtables.cpp`). Each of these 7 objects is a real
+   `CGlobalObjectBase`-derived global, unconditionally registered into
+   `sm_poGlobalObjectList` by its own `__attribute__((constructor))` function, and
+   `CKernel::CKernel()`'s own ctor genuinely walks that whole list and dispatches vtable
+   slots +8/+0xc/+0x10/+0x14 (the 4 phase hooks) on EVERY entry — reading slot index 2
+   (byte +8) out of a single 4-byte variable is UB, landing on adjacent `.data`, crashing
+   as `ip (null)` inside `CKernel::CKernel()` right after its own "create new kernel"
+   print. This file's own header comment used to claim "nothing in this reconstruction
+   ever dispatches through an XxxApiInstance object's own vtable" — written before
+   `CKernel::CKernel()`'s own phase-hook walk was traced (4b, same day), directly
+   disproven by this live boot. Fixed: each of the 7 is now a proper 6-slot
+   `EvaVTableStub`-filled array (6 = the confirmed `CGlobalObjectBase` minimum actually
+   dispatched through), and every `= &PTR__Xxx;` assignment site had its stray `&`
+   removed (array decay already gives the right `void**`, `&array` doesn't).
+2. **`omega_vtables.cpp`: `EvaVTableStub()` is a genuine no-op with no return statement**
+   — safe for the vast majority of "installed but never dispatched, or dispatched but
+   return value discarded" vtable slots, but ONE slot on `Api`'s own 94-slot vtable
+   (index 40, byte offset `+0xa0`) is a real exception: `mains.cpp`'s `MMainLinuxDriver`
+   fetches "FMApi" via a virtual call through exactly this slot and USES the return value
+   (dispatches through FMApi's own vtable moments later, `+0x24`). Calling a no-op with no
+   `return` leaves EAX holding whatever was there before the call (observed live: the call
+   target's own address) — that garbage got used as a `CSystemApi*` and immediately
+   dereferenced-and-dispatched-through, landing on arbitrary memory. Fixed by installing a
+   dedicated `GetFMApiStub(void*)` at that one array index instead, returning
+   `SysApiInstance` itself (a real, valid, already-fully-stubbed object) — safe for
+   anything downstream to dispatch through again, without claiming to know what the real
+   `FMApi` object actually is.
+
+**Confirmed working live, full run** (re-verified 2026-07-25 against the debug-print-free
+cleanup of this same fix): every one of the 17 `MMainXxx()` calls in `Mains()` completes,
+`Omega.Init(0)` returns normally, and Eva reaches its own natural "Start closing"/
+"End closing" shutdown and exits cleanly — zero segfaults, matching this project's
+"reasonably boots" goal exactly. `OmegaTimingThread(0)` returning immediately (rather than
+blocking forever the way it would on real hardware) is why `main()` reaches its shutdown
+path at all in this VM — expected and fine for the boot-milestone bar, not itself a bug to
+chase. **This closes out the Stage-1-through-4 boot-path effort**; remaining work is
+Stage 6 breadth (see the status table above).
