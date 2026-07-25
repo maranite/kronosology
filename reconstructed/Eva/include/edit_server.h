@@ -349,6 +349,33 @@ public:
 	 */
 	int PutNotify(unsigned char group, unsigned char subIndex);
 
+	/* Trivial public accessors -- no matching .text address of their own; added
+	 * for CEditMan::CMainTask (edit_man.h, Stage 6 breadth sweep, 2026-07-25),
+	 * which the real binary reads via raw `param_1[0x40030]`/`*(char**)(x+0x40034)`
+	 * offset pokes from a DIFFERENT class entirely (same "new external caller
+	 * needs raw access this class's own methods never required" reasoning as
+	 * omega_ptr_array.h's Count()/Get()).
+	 */
+	unsigned char GetAssignedScope() const { return mAssignedScope; }
+	const char *GetName() const { return mName; }
+
+	/* Raw redispatch through this object's own vtable slots +8/+0xc/+0x10 (Get/
+	 * Set/SetDefault, by this class's own established slot convention -- see
+	 * class header) -- CEditMan::CMainTask's own external Get/Set/SetDefault
+	 * wrappers (edit_man.h) call these directly on a DIFFERENT, already-
+	 * FindDescriptor()-confirmed server object, bypassing this class's own
+	 * Get()/Set()/SetDefault() member-function logic entirely (confirmed real
+	 * ground-truth behavior from CMainTask's own decompile, not a
+	 * simplification). Every real derived CEditServer's own override at these
+	 * slots is out of scope (EvaVTableStub placeholder, same as this class's
+	 * whole vtable), so these calls are functionally inert here -- zero-arg
+	 * cdecl-safe shape, same convention as every other undecoded vtable-slot
+	 * dispatch in this project (module.h's own header comment).
+	 */
+	void InvokeGetSlot() const { ((void (*)())(((void **)mVtbl)[2]))(); }
+	void InvokeSetSlot() const { ((void (*)())(((void **)mVtbl)[3]))(); }
+	void InvokeSetDefaultSlot() const { ((void (*)())(((void **)mVtbl)[4]))(); }
+
 private:
 	void          *mVtbl;
 	CDataHandler   mData;              /* +0x04 */

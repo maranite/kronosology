@@ -60,6 +60,28 @@ extern "C" void AddConstructorVSlot(void *obj, void *ctor)
 	((CSysApiInstance *)obj)->AddConstructor((CModuleConstructor *)ctor);
 }
 
+/*
+ * FIX (2026-07-25, small-derived-module follow-up batch): PTR__CSysApiInstance_
+ * 08e81008's own slot 17 (byte offset 0x44) is installed as this dedicated stub
+ * instead of the generic EvaVTableStub. `CChunkMan::Config()` (chunk_man.cpp) is
+ * the one caller that genuinely CONSUMES this slot's return value
+ * (`if (0 < result) { ...second call...; return result < 1; } return true;`) --
+ * same "EvaVTableStub leaves EAX as stale, meaningless garbage" hazard class
+ * already fixed for the +0x40/+0xa0 slots above (AddConstructorVSlot/
+ * GetFMApiStub's own header comments). Real meaning not decoded -- judging from
+ * CChunkMan::Config()'s own 6-string-argument call shape (SysName, a task name, an
+ * outlink name, SysName again, another task name, 0), plausibly an Api-mediated
+ * "link two named outlinks together" registration call -- returns 0
+ * unconditionally, which keeps both of CChunkMan::Config()'s own `0 < result`
+ * checks false, i.e. the whole function deterministically returns `true` on its
+ * first call, matching its own real early-return shape on any non-positive first
+ * result. A safe, documented placeholder, not a claim about the real return value.
+ */
+extern "C" int ChunkLinkRegisterVSlotStub()
+{
+	return 0;
+}
+
 extern "C" {
 void *PTR__CHostInterfaceBase_08e80b68[22] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -122,7 +144,7 @@ void *PTR__CSysApiInstance_08e81008[94] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)AddConstructorVSlot, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)AddConstructorVSlot, (void *)ChunkLinkRegisterVSlotStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -163,29 +185,11 @@ void *PTR__CModule_08e81fe8[7] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-/* 6 real derived-module vtables (mains.cpp) -- see omega_vtables.h's Stage 6
- * "AddModule()/EnableUpdate() batch" note for why these must be real slot arrays
- * (not a bare NULL scalar) now that CModuleManager::AddModule() is Tier A.
+/* CSysEx's own vtable stays here -- its own Setup/Config/Start are all confirmed
+ * genuinely empty (not yet transcribed as real forwarders; the class itself has no
+ * further tractable methods pursued this pass), unlike its 4 siblings below.
  */
-void *PTR__CEditMan_08e85ea8[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-};
-void *PTR__CMessagePort_08e88468[13] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub,
-};
-void *PTR__CSeqTimer_08e892a8[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-};
 void *PTR__CSysEx_08e899e8[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-};
-void *PTR__CChunkMan_08e85968[7] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
@@ -193,6 +197,13 @@ void *PTR__CChunkMan_08e85968[7] = {
  * breadth sweep, 2026-07-25, DumpManager cluster batch) -- slots 2/3/4 (Setup/
  * Config/Start) are wired to real forwarders there, same "define locally where the
  * real forwarders live" precedent as es_common.cpp's own PTR__CESCommon_08fbafc8.
+ *
+ * CEditMan/CSeqTimer/CChunkMan/CMessagePort's own vtable definitions now live in
+ * edit_man.cpp/seq_timer.cpp/chunk_man.cpp/message_port.cpp respectively (Stage 6
+ * breadth sweep, 2026-07-25, small-derived-module follow-up batch) -- same
+ * "define locally where the real forwarders live" precedent, now that all 4 have
+ * real Setup()/Config()/Start() bodies (or, for CMessagePort, confirmed-empty ones)
+ * to wire in.
  */
 /* CTask's own real vtable (7 slots) + its 2 embedded sub-object vtables + the
  * embedded CLimiterMan's own vtable + ITS embedded TVector's vtable -- see

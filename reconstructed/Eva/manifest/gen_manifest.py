@@ -594,6 +594,50 @@ RECONSTRUCTED = {
     "08e1d4c0",  # USTGAPIFrontPanel::ResetLED(uint)
     "08e1d500",  # USTGAPIFrontPanel::SetLED16Bit(uint, ushort)
     "08e1d550",  # USTGAPIFrontPanel::Beep()
+
+    # Stage 6 breadth sweep, 2026-07-25 -- small-derived-module follow-up batch
+    # (edit_man.h/chunk_man.h/seq_timer.h/message_port.h): CEditMan/CMainTask,
+    # CChunkMan/CChkBaseTask/CChkCmd, CSeqTimer, CMessagePort. CTimerEngine/
+    # CChkCmdBG's own real ctors stay Tier-B stubs (NOT listed here) -- only the
+    # nearest real base (CTask/CChkBaseTask) they chain into is real.
+    "080d2810",  # CEditMan::CEditMan()
+    "080d2790",  # CEditMan::Setup()
+    "080d2640",  # CEditMan::Config()
+    "080d2650",  # CEditMan::Start()
+    "080d2840",  # CEditMan::RegisterServer(CEditServer const*)
+    "080d2860",  # CEditMan::UnregisterServer(CEditServer const*)
+    "080d2880",  # CEditMan::GetServerScope(CEditServer const*)
+    "080d28a0",  # CEditMan::GetServerScope(char const*)
+    "080d28c0",  # CEditMan::RegisterClient(CEditClient const*)
+    "080d28e0",  # CEditMan::UnregisterClient(CEditClient const*)
+    "080d2900",  # CEditMan::FindDescriptor(uchar, uchar, uchar, CEditServer**)
+    "080d29c0",  # CEditMan::SetDefault(uchar, uchar, uchar)
+    "080d3130",  # CEditMan::CMainTask::CMainTask(CModule const&)
+    "080d3230",  # CEditMan::CMainTask::RegisterServer(CEditServer const*)
+    "080d32e0",  # CEditMan::CMainTask::UnregisterServer(CEditServer const*)
+    "080d3340",  # CEditMan::CMainTask::GetServerScope(CEditServer const*)
+    "080d3350",  # CEditMan::CMainTask::GetServerScope(char const*)
+    "080d34b0",  # CEditMan::CMainTask::RegisterClient(CEditClient const*)
+    "080d3500",  # CEditMan::CMainTask::UnregisterClient(CEditClient const*)
+    "080d3550",  # CEditMan::CMainTask::FindDescriptor(uchar, uchar, uchar, CEditServer**)
+    "080d35f0",  # CEditMan::CMainTask::Get(uchar, uchar, uchar, void*, uint)
+    "080d36b0",  # CEditMan::CMainTask::Set(uchar, uchar, uchar, void const*, uint, EEditSource)
+    "080d3780",  # CEditMan::CMainTask::SetDefault(uchar, uchar, uchar)
+    "080d3820",  # CEditMan::CMainTask::Notify(uchar, uchar, uchar)
+    "080cb930",  # CChunkMan::CChunkMan()
+    "080cb880",  # CChunkMan::Setup()
+    "080cb6a0",  # CChunkMan::Config()
+    "080cb740",  # CChunkMan::Start()
+    "080bfec0",  # CChkBaseTask::CChkBaseTask(CModule const&, char const*, ETaskLevel, CTask::EScheduleFlag)
+    "080c0ea0",  # CChkCmd::CChkCmd(CModule const&)
+    "081693a0",  # CSeqTimer::CSeqTimer(char const*)
+    "08169310",  # CSeqTimer::Setup()
+    "081692f0",  # CSeqTimer::Config()
+    "08169300",  # CSeqTimer::Start()
+    "0814cea0",  # CMessagePort::CMessagePort()
+    "0814b6c0",  # CMessagePort::Setup()
+    "0814b6d0",  # CMessagePort::Config()
+    "0814b6e0",  # CMessagePort::Start()
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

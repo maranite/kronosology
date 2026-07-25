@@ -296,6 +296,39 @@ extern void *PTR__CDumpManStateMachine_08e85ce8[10];
 extern void *PTR__CDumpTask_08e85d48[14];
 extern int   EvaDataPlaceholder_08e85ac4;
 extern int   EvaDataPlaceholder_08e85d74;
+
+/* CEditMan::CMainTask/CChkBaseTask/CChkCmd (Stage 6 breadth sweep, 2026-07-25,
+ * small-derived-module follow-up batch -- edit_man.h/chunk_man.h). Same
+ * installed-pointer-to-next-symbol methodology as the rest of this file:
+ *   CMainTask     08e85ee8 -> 08e85f04 (own opaque +8 data blob)         =  7 slots
+ *     (adds no new virtuals beyond CTask's own 7 -- every CMainTask method is a
+ *     plain non-virtual thiscall function, confirmed by direct-call, not
+ *     vtable-indirect, shape in every one of its own decompiles)
+ *   TPtrArray<CEditClient> 08e85f40 -> 08e85f4c (typeinfo)               =  3 slots
+ *     (CMainTask's own embedded client-list COmegaPtrArray, +0x27c)
+ *   CChkBaseTask  08e85648 -> 08e85668 (own opaque +8 data blob)         =  8 slots
+ *     (1 more than CTask's own 7 -- CChkBaseTask genuinely adds one new virtual;
+ *     never dispatched through by any reconstructed code)
+ *   TPtrArray<CRegistrationEntry> 08e85698 -> 08e856a4 (typeinfo)        =  3 slots
+ *     (CChkBaseTask's own embedded COmegaPtrArray(10,5,1), +0x7c)
+ *   CChkCmd       08e85708 -> 08e85728 (own opaque +8 data blob)         =  8 slots
+ *     (same 8-slot count as its own CChkBaseTask base -- CChkCmd adds no further
+ *     new virtuals of its own)
+ * All install-only (EvaVTableStub-backed), same status as every other entry in
+ * this file. CChkCmdBG (the OTHER sibling task CChunkMan::Setup() constructs)
+ * stays a Tier-B stub reusing CChkBaseTask's own real base -- see chunk_man.h --
+ * so its own real vtable/opaque-blob pair (08e85768/08e85788) is NOT declared
+ * here, matching CFileMan/CResMan's own precedent (mains.cpp) of not declaring a
+ * vtable for a derived class whose own ctor is never really called.
+ */
+extern void *PTR__CMainTask_08e85ee8[7];
+extern void *PTR__TPtrArray_08e85f40[3];
+extern int   EvaDataPlaceholder_08e85f04;
+extern void *PTR__CChkBaseTask_08e85648[8];
+extern void *PTR__TPtrArray_08e85698[3];
+extern int   EvaDataPlaceholder_08e85668;
+extern void *PTR__CChkCmd_08e85708[8];
+extern int   EvaDataPlaceholder_08e85728;
 }
 
 #endif /* OMEGA_VTABLES_H */

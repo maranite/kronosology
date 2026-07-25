@@ -96,6 +96,20 @@ public:
 	 */
 	void Shrink();
 
+	/* Trivial public accessors -- not separate real methods (no matching .text
+	 * address of their own), added for CEditMan::CMainTask::Notify() (edit_man.h,
+	 * Stage 6 breadth sweep, 2026-07-25), which the real binary implements by
+	 * reading mCount/mArray directly at the usual +0xc/+0x14 offsets (same raw-
+	 * offset access CDataHandler's own FindDescriptor()/AddDescriptors() already
+	 * use, per the `protected` note above) -- CMainTask merely EMBEDS a
+	 * COmegaPtrArray as a member rather than deriving from it, so it cannot reach
+	 * protected fields the way CDataHandler does; these 2 inline wrappers give it
+	 * the same raw access without loosening encapsulation further than that one
+	 * new caller needs.
+	 */
+	unsigned Count() const { return (unsigned)mCount; }
+	void *Get(unsigned index) const { return mArray[index]; }
+
 protected:
 	/* protected, not private: CDataHandler (edit_server.h, Stage 6 breadth
 	 * sweep 2026-07-25) is a real derived class that needs direct raw access
