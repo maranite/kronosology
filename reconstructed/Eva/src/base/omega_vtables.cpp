@@ -313,4 +313,31 @@ void *PTR__CDumpTask_08e85d48[14] = {
 };
 int EvaDataPlaceholder_08e85ac4 = 0;
 int EvaDataPlaceholder_08e85d74 = 0;
+
+/* CFileMan/CResMan/CChunkOnDemand cluster's simple, no-real-forwarder vtables --
+ * see header comment. PTR__CFileMan_08e86e48/PTR__CResMan_08e88b08 themselves are
+ * defined in file_man.cpp/res_man.cpp instead (real Setup/Config/Start forwarders
+ * live there, same "define locally where the real forwarders live" precedent as
+ * dump_man_mod.cpp's own PTR__CDumpManMod_08e85ca8).
+ */
+void *PTR__TNamedPtrArray_08e86fc8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TPtrArray_08e885a0[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+/* BUG FIX: was `void *PTR__CRMApiCallBack_08e886e8 = 0;` (a bare scalar) in
+ * mains.cpp -- see header comment. Moved here, real 7-slot size.
+ */
+void *PTR__CRMApiCallBack_08e886e8[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TPtrArray_08e88bb8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TVector_08e88ba8[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

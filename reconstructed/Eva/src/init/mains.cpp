@@ -63,6 +63,8 @@
 #include "global_object_base.h"
 #include "hid_driver.h"
 #include "panel_driver.h"
+#include "file_man.h"
+#include "res_man.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -626,10 +628,16 @@ extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
 /* RMApiInstance's own ctor transiently installs these 2 before overwriting with its
  * real, final CRMApiInstance vtable (see the ctor below) -- included for the same
  * shape-fidelity reason, never left installed nor dispatched through, so left as
- * bare placeholders (never survive to be walked).
+ * a bare placeholder (never survives to be walked).
+ *
+ * PTR__CRMApiCallBack_08e886e8 itself is now declared/defined in omega_vtables.h/.cpp
+ * instead (Stage 6, CFileMan/CResMan ctor batch, 2026-07-25) -- CResMan::CResMan()
+ * needed this exact vtable's own real slot count (7, was a bare scalar here, the same
+ * undersized-vtable bug class fixed repeatedly elsewhere in this project), and it's
+ * shared between that ctor and this one. `&PTR__CRMApiCallBack_08e886e8` below still
+ * yields the correct (array-base) address unchanged.
  */
 extern "C" void *PTR__CRMApi_08e88de8 = 0;
-extern "C" void *PTR__CRMApiCallBack_08e886e8 = 0;
 /* Final, real, dispatched-through vtable -- same fix as the 6 above. */
 extern "C" void *PTR__CRMApiInstance_08e88c48[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -780,40 +788,23 @@ extern "C" const char *CEditMan_SysName = "EditMan";
 extern "C" const char *CViewBase_SysName = "ViewBase";
 extern "C" const char *CChunkMan_SysName = "ChunkMan";
 
-/* CFileMan::CFileMan()/CResMan::CResMan() -- .text+0x081068d0-ish/0x08160a20-ish
- * (not individually looked up), 0xa5c / 0x21a0 malloc sizes in the real MMainFileMan/
- * MMainResMan callers below. Tier-B link-stubs: real derived-class constructors,
- * genuinely too deep for this pass (each is its own large subsystem, matching
- * PLAN.md's "UI/CForm/Peg-scale breadth is out of scope" boundary).
- *
- * SAFETY FIX (Stage 6, 2026-07-25, AddModule()/EnableUpdate() batch): both classes
- * must derive from CModule, not stand alone. Both real ctors are called with NO name
- * argument (functions.csv: `CFileMan::CFileMan()`/`CResMan::CResMan()`, no params),
- * which only makes sense if each really does what every other MMainXxx module does --
- * chain up into CModule's own base ctor with a hardcoded name literal -- since
- * CModuleManager::AddModule() (now Tier A) unconditionally reads a name pointer at
- * `this+4` on every registered module for its by-name dedup scan. Left as plain,
- * unrelated stub classes (as this file previously had them), `new (raw) CFileMan()`
- * would leave the malloc'd buffer's +4 slot as uninitialized garbage -- AddModule()'s
- * real scan runs before either of these registers (EditMan/Viewer/SeqTimer already
- * added), so that garbage pointer gets fed straight into strcmp(), a near-certain
- * crash (guaranteed if the fresh page happens to come back zeroed, since strcmp(NULL,
- * ...) dereferences NULL). Chaining into CModule("FileMan")/CModule("ResMan") gives
- * both a real, valid mVtbl (CModule's own now-safe base vtable, matching the real
- * binary's own behavior for any module whose specific derived vtable isn't
- * reconstructed) and mName, at the cost of not asserting the real hardcoded name
- * string content (not decoded) -- same "unfaithful placeholder name doesn't change
- * this pass's own control flow" license already used for CEditMan_SysName etc. above.
+/* CFileMan::CFileMan() (.text+0x081011e0, 1079 bytes) / CResMan::CResMan()
+ * (.text+0x081523a0, 1333 bytes) are now REAL (Stage 6 breadth sweep, 2026-07-25 --
+ * the "What's still open" CFileMan/CResMan ctor batch, file_man.h/res_man.h) --
+ * upgraded from the Tier-B placeholder stub classes this file used to declare
+ * locally. Both real ctors are called with NO name argument (functions.csv:
+ * `CFileMan::CFileMan()`/`CResMan::CResMan()`, no params) because each does exactly
+ * what every other MMainXxx module does -- chains into CModule's own base ctor with
+ * a hardcoded class-static name literal (`CFileMan::SysName`/`CResMan::SysName`,
+ * confirmed real 4-byte globals in symbols.csv, content not decoded -- same
+ * "opaque, non-null is enough" treatment as `CEditMan_SysName` etc. above) -- then
+ * installs its own real vtable itself (unlike every other MMainXxx(void) module
+ * here, which leaves that to its caller). The rest of each class (~50-60 further
+ * methods, some multi-KB -- CResMan::Save() alone is 16175 bytes) remains a
+ * genuine god-object, out of scope for this pass, matching PLAN.md's
+ * "UI/CForm/Peg-scale breadth is out of scope" boundary -- see file_man.h/res_man.h
+ * for the exact per-field/per-method breakdown.
  */
-class CFileMan : public CModule {
-public:
-	CFileMan() : CModule("FileMan") {}
-};
-
-class CResMan : public CModule {
-public:
-	CResMan() : CModule("ResMan") {}
-};
 
 /* CChkApiInstance::SetOwnerModule()/CRMApiInstance::SetResMan() -- Tier-B link-stubs. */
 class CChkApiInstance {
@@ -873,17 +864,17 @@ void MMainSeqTimer()
 }
 
 /* .text+0x08105a70, 101 bytes. The one MMainXxx(void) member of this family that
- * calls a real, distinct derived-class ctor (CFileMan::CFileMan, Tier-B) instead of
- * the shared CModule::CModule() base + vtable-swap idiom. Also the one member NOT
- * converted to a direct RegisterApi() call despite dispatching through the same
- * +0xa4 slot: unlike the other 6 raw-dispatch siblings, DAT_0930b174 has no matching
- * `global.constructors.keyed.to.*` producer setting it to a string (FMApiInstance
- * itself isn't a CGlobalObjectBase-style global either -- it's constructed inline by
- * this very function, via CFileMan::CFileMan()) -- Ghidra types it `undefined4` at
- * every site, including MMainLinuxDriver's own reuse of the same constant as a
- * `GetSubApiFn` integer id argument (mains.cpp, above). Left as a raw vtable
- * dispatch with its `int` type intact, not asserted to be a name string like its 6
- * siblings.
+ * calls a real, distinct derived-class ctor (CFileMan::CFileMan, now Tier A --
+ * file_man.h/.cpp) instead of the shared CModule::CModule() base + vtable-swap
+ * idiom. Also the one member NOT converted to a direct RegisterApi() call despite
+ * dispatching through the same +0xa4 slot: unlike the other 6 raw-dispatch
+ * siblings, DAT_0930b174 has no matching `global.constructors.keyed.to.*` producer
+ * setting it to a string (FMApiInstance itself isn't a CGlobalObjectBase-style
+ * global either -- it's constructed inline by this very function, via
+ * CFileMan::CFileMan()) -- Ghidra types it `undefined4` at every site, including
+ * MMainLinuxDriver's own reuse of the same constant as a `GetSubApiFn` integer id
+ * argument (mains.cpp, above). Left as a raw vtable dispatch with its `int` type
+ * intact, not asserted to be a name string like its 6 siblings.
  */
 void MMainFileMan()
 {
@@ -948,7 +939,7 @@ void MMainDumpMan()
 }
 
 /* .text+0x08160db0, 111 bytes. The other MMainXxx(void) member calling a real,
- * distinct derived-class ctor (CResMan::CResMan, Tier-B). */
+ * distinct derived-class ctor (CResMan::CResMan, now Tier A -- res_man.h/.cpp). */
 void MMainResMan()
 {
 	((CSysApiInstance *)Api)->RegisterApi(DAT_0931b1f0, (CApiBase *)RMApiInstance);

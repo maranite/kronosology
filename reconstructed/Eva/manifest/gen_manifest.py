@@ -638,6 +638,23 @@ RECONSTRUCTED = {
     "0814b6c0",  # CMessagePort::Setup()
     "0814b6d0",  # CMessagePort::Config()
     "0814b6e0",  # CMessagePort::Start()
+
+    # CFileMan/CResMan ctor batch (Stage 6 breadth sweep, 2026-07-25 -- the "What's
+    # still open" CFileMan/CResMan ctor batch, file_man.h/res_man.h/
+    # chunk_on_demand.h/cz_util.h). Setup()/Config() (CResMan) and ~60/~50 further
+    # CFileMan/CResMan methods (FDisk/RegisterDriver/Save/...) remain Tier-B/pending
+    # -- genuine god-object depth, out of scope for this pass.
+    "081011e0",  # CFileMan::CFileMan()
+    "080fc710",  # CFileMan::Setup()
+    "080fc720",  # CFileMan::Config()
+    "080fc730",  # CFileMan::Start()
+    "080fc740",  # CFileMan::IsBackgroundJobsEnabled()
+    "080fc750",  # CFileMan::EnableBackgroundJobs(int)
+    "081523a0",  # CResMan::CResMan()
+    "08151300",  # CResMan::Start()
+    "0814d080",  # CChunkOnDemand::CChunkOnDemand()
+    "080be680",  # CZ::StrCmpIgnoreCase(char const*, char const*)
+    "080a7080",  # COmegaPtrArray::RemoveAll(int)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

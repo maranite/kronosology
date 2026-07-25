@@ -108,6 +108,24 @@ void COmegaPtrArray::Destroy()
 	}
 }
 
+void COmegaPtrArray::RemoveAll(int callDtorCallback)
+{
+	if (callDtorCallback != 0) {
+		while (mCount != 0) {
+			mCount--;
+			CallFreeElement(this, mArray[mCount]);
+		}
+	}
+
+	void *oldArray = mArray;
+	mCapacity = 0;
+	mCount = 0;
+	if (oldArray != 0) {
+		free(oldArray);
+		mArray = 0;
+	}
+}
+
 unsigned COmegaPtrArray::FindIndex(const void *item) const
 {
 	for (int i = 0; i < mCount; i++) {

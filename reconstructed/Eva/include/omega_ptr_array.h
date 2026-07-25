@@ -28,13 +28,22 @@
  *                       neither is reconstructed)
  *   +0x14  mArray       flat malloc'd void* array, NULL when empty
  *
- * 6 of COmegaPtrArray's real methods are reconstructed here (both ctors, Add, Destroy,
- * FindIndex, RemoveAtIndex, Shrink) -- all self-contained, no further Stage 4+
- * dependencies beyond the generic vtable-slot-8 "free element" callback dispatch (which
- * every real caller so far either never triggers with this pass's data, or is itself a
- * documented no-op stub -- see omega_vtables.cpp). RemoveAll()/SetAtIndex() are real
- * COmegaPtrArray methods too (symbols.csv: 080a7080/080a72f0) but nothing on any traced
- * call path invokes them -- not reconstructed, out of scope for this pass.
+ * 7 of COmegaPtrArray's real methods are reconstructed here (both ctors, Add, Destroy,
+ * FindIndex, RemoveAtIndex, RemoveAll, Shrink) -- all self-contained, no further Stage
+ * 4+ dependencies beyond the generic vtable-slot-8 "free element" callback dispatch
+ * (which every real caller so far either never triggers with this pass's data, or is
+ * itself a documented no-op stub -- see omega_vtables.cpp).
+ *
+ * RemoveAll() (.text+0x080a7080, 361 bytes) added for CResMan::CResMan() (res_man.cpp,
+ * Stage 6 breadth sweep, 2026-07-25), which calls it once, immediately after
+ * constructing its own embedded array -- a real but redundant defensive clear (the
+ * array is already empty at that point, so behaviorally a no-op in that one call site,
+ * but the real method itself is genuinely a twin of Destroy() above: same "pop from the
+ * end via the vtable-slot-8 callback" idiom, just gated by an explicit `callDtorCallback`
+ * parameter instead of the ctor-fixed `mUnknown04`, and it doesn't leave the array
+ * struct itself in a to-be-destroyed state -- callable again afterward). SetAtIndex()
+ * is still real but unreconstructed (symbols.csv: 080a72f0) -- nothing on any traced
+ * call path invokes it, out of scope for this pass.
  *
  * Add() (.text+0x080a6da0, 343 bytes) was added in the Api/SysApiInstance pass
  * (2026-07-23) -- it's CKernel::AddGlobalObject()'s own real dependency (see
@@ -89,6 +98,15 @@ public:
 	 * for the removed element before it's shifted out.
 	 */
 	void RemoveAtIndex(unsigned index, int callDtorCallback);
+
+	/* .text+0x080a7080, 361 bytes (symbols.csv: _ZN14COmegaPtrArray9RemoveAllEi).
+	 * Real body: if `callDtorCallback` is nonzero, pops and fires the vtable-slot-8
+	 * callback for every element from the end backward (same idiom as Destroy()
+	 * above); either way, resets mCapacity/mCount to 0 and frees+NULLs mArray.
+	 * Real return value (the element count before clearing) is discarded by its one
+	 * known real caller (CResMan::CResMan()) -- kept void here to match.
+	 */
+	void RemoveAll(int callDtorCallback);
 
 	/* .text+0x080a7310, 356 bytes. Real "shrink to fit": reallocates the backing array
 	 * down to mCount slots (or frees it entirely if mCount == 0). Only does anything

@@ -26,6 +26,13 @@
  *          at the very start of destruction, before anything else is torn down;
  *          real meaning not decoded (task.cpp, Stage 6 SetMask/~CTask batch,
  *          2026-07-25)
+ *   +0x38  named config-string getter: `char *(Api, const char *key)` -- returns
+ *          NULL if `key` is absent, else a `char*` value (CFileMan::CFileMan(),
+ *          file_man.cpp, Stage 6 breadth sweep, 2026-07-25, called 3 times for
+ *          "FMBackGroundJobs"/"FMMinIdleTimeToStartBGJobs"/
+ *          "FMDeltaTimeBetweenBGJobs"). Real identity not decoded, only this call
+ *          shape (same per-key config lookup pattern as CConfigManager's own
+ *          config-table reads elsewhere in this project).
  *   +0x058 CTask::~CTask()'s own per-outlink notification: `(Api, COutLink*)` --
  *          fired once for each element of mOutLinks (task.h) as it's drained, right
  *          before that element's own COmegaPtrArray::RemoveAtIndex(0, true) call;

@@ -329,6 +329,93 @@ extern void *PTR__TPtrArray_08e85698[3];
 extern int   EvaDataPlaceholder_08e85668;
 extern void *PTR__CChkCmd_08e85708[8];
 extern int   EvaDataPlaceholder_08e85728;
+
+/* CFileMan/CResMan/CChunkOnDemand cluster (Stage 6 breadth sweep, 2026-07-25 --
+ * file_man.h/res_man.h/chunk_on_demand.h, the "What's still open" CFileMan/CResMan
+ * ctor batch). Unlike every other MMainXxx(void) module in mains.cpp, these two
+ * derived-class ctors ARE real and ARE reconstructed here -- the note 2 batches above
+ * ("CFileMan/CResMan's own precedent... of not declaring a vtable for a derived class
+ * whose own ctor is never really called") describes mains.cpp's OLD, now-superseded
+ * state; both now install real vtables from inside their own real ctor bodies (matching
+ * ground truth exactly -- see file_man.cpp/res_man.cpp). Same installed-pointer-to-
+ * next-symbol methodology as the rest of this file:
+ *   CFileMan       08e86e40 -> 08e86f24 (typeinfo name for CFMDriverInterface) = 55
+ *     slots. A genuinely huge god-object vtable (CFileMan itself has ~60 further
+ *     methods -- FDisk/RegisterDriver/ScanPartitionTable/... -- none reconstructed,
+ *     same "CForm/Peg-scale, indefinitely deferred" boundary as the ES-family
+ *     CXxxTask god-objects). Slots 2/3/4 (Setup/Config/Start) wired to real
+ *     forwarders (file_man.cpp: all 3 are confirmed genuinely empty `return 0;`
+ *     bodies in the real binary) -- everything else stays EvaVTableStub.
+ *   TNamedPtrArray<CFMDriverConstructor>  08e86fc0 -> 08e86fe0 (vtable for
+ *     CFileManVirtual) = 6 slots. CFileMan's own embedded driver-constructor
+ *     registry (its ctor installs this at its `mDriverConstructors` member,
+ *     file_man.h) -- confirmed real element type by name, matching
+ *     AddDriverConstructor()/RemoveDriverConstructor()/FindDriverConstructor()
+ *     (none reconstructed).
+ *   TPtrArray<CChunkOnDemand::STripletOnDemand>  08e88598 -> 08e885ac (own
+ *     typeinfo) = 3 slots. CChunkOnDemand's own embedded array (chunk_on_demand.h).
+ *   CResMan  -- CORRECTED after a direct raw `.rodata` byte read (not just the
+ *     next-symbol-boundary heuristic, since this one turned out to have real
+ *     internal structure the heuristic alone would have gotten wrong): the
+ *     08e88b00..08e88b5c region is NOT one flat 21-slot array. It's a genuine
+ *     Itanium-ABI primary+secondary vtable pair sharing one typeinfo:
+ *       - primary header  08e88b00/04 = {offset-to-top=0, typeinfo="CResMan"}
+ *       - primary vfuncs  08e88b08..08e88b38 = 12 slots, ALL individually
+ *         confirmed by address: {~CResMan, ~CResMan(deleting), Setup, Config,
+ *         Start, CModule::Destroy, CModule::GetErrorMsg, OnSave, OnDelete,
+ *         OnLoad, OnSetRes, OnLoadRes} -- 7 CModule-shaped slots (matching
+ *         module.h's own layout exactly) plus 5 real CResMan-specific
+ *         overrides. Slot 4 (Start) wired to a real forwarder (res_man.cpp:
+ *         confirmed genuinely empty `return 0;`). Setup()/Config() (slots 2/3)
+ *         are real but genuinely deeper (Setup constructs CResChkServer/
+ *         CResChkClient/CRMMainTask; Config depends on ChkApi + 2 undecoded
+ *         `sm_pkcTaskName` statics) -- out of scope, stay EvaVTableStub.
+ *         OnSave/OnDelete/OnLoad/OnSetRes/OnLoadRes (slots 7-11, 272-2023
+ *         bytes each) are real CResMan callback handlers, also genuinely out
+ *         of scope for this ctor-focused pass -- stay EvaVTableStub too.
+ *       - secondary header  08e88b38/3c = {offset-to-top=-0x2c, typeinfo=
+ *         same "CResMan"} -- the -0x2c confirms this is CResMan's own +0x2c
+ *         `CRMApiCallBack`-interface sub-object's this-adjustment, exactly
+ *         matching res_man.h's own `mCallbackVtbl` field offset.
+ *       - secondary vfuncs  08e88b40..08e88b5c = 7 slots, all confirmed
+ *         `non-virtual thunk to CResMan::Xxx` entries (this-adjusted dtor +
+ *         OnSetRes/OnLoadRes/OnLoad/OnSave/OnDelete) -- never dispatched
+ *         through by any reconstructed code either.
+ *     Declared as ONE 21-element `void*` array anyway (`PTR__CResMan_08e88b08`,
+ *     indices 0-20 spanning the full 08e88b08..08e88b5c byte range) purely so
+ *     the ADDRESS arithmetic for `&PTR__CResMan_08e88b08[14]` (== 0x08e88b40,
+ *     the real secondary vfunc0 -- res_man.cpp's own `mCallbackVtbl` final
+ *     write) stays correct and self-documenting; indices 12/13 are NOT
+ *     function pointers (they hold the secondary header's own offset-to-top/
+ *     typeinfo words in the real binary) and are declared `0`, not
+ *     EvaVTableStub, precisely so nothing mistakes them for callable slots
+ *     (same "opaque, not a vtable" precedent as this file's own
+ *     `EvaDataPlaceholder_*` scalars).
+ *   TPtrArray<CRMResult::SSingleError>  08e88bb0 -> 08e88bc4 (typeinfo for
+ *     TVector<CResEntryEx,1>) = 3 slots. CResMan's own embedded `mResults` array.
+ *   TVector<CResEntryEx,1>  08e88ba0 -> 08e88bb0 (the TPtrArray entry above) =
+ *     2 slots -- matches every other `TVector<T,1>` instantiation already in this
+ *     file. Installed 10 times into CResMan's own trailing region (res_man.cpp).
+ *
+ * BUG FIX (same batch): `PTR__CRMApiCallBack_08e886e8` (mains.cpp,
+ * ConstructRMApiInstance's own transient +4 slot) was a bare scalar `void* = 0` --
+ * the same undersized-vtable-array bug class found repeatedly elsewhere in this
+ * project (WORKAROUND #1/#2/#3, mains.cpp). Harmless there today (RMApiInstance
+ * overwrites it before anything could dispatch through it), but CResMan::CResMan()
+ * needed this exact vtable's own real slot count anyway (08e886e0 -> 08e88704 =
+ * 7 slots, confirmed by the same next-symbol methodology) to confirm the CResMan
+ * analysis, so it's fixed to a real, properly-sized array here at zero extra
+ * cost -- moved from a `void*` scalar to a 7-slot array, still install-only
+ * (this is CResMan's OWN transient value before its final vtable install, an
+ * entirely separate object from the secondary-vtable derivation above).
+ */
+extern void *PTR__CFileMan_08e86e48[55];
+extern void *PTR__TNamedPtrArray_08e86fc8[6];
+extern void *PTR__TPtrArray_08e885a0[3];
+extern void *PTR__CResMan_08e88b08[21];
+extern void *PTR__CRMApiCallBack_08e886e8[7];
+extern void *PTR__TPtrArray_08e88bb8[3];
+extern void *PTR__TVector_08e88ba8[2];
 }
 
 #endif /* OMEGA_VTABLES_H */
