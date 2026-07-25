@@ -696,3 +696,54 @@ reconstructed: press every physical front-panel button (including
 mode/mixer buttons) and confirm the real `SendUnsolControl2MessageToUI`
 traffic (observable via `/proc/.oacmd` or a UI-side log) matches this
 reconstruction's `(msgType, buttonId)` table for each one.
+
+---
+
+## CSTGFileOpener/CSTGFileCloser/CSTGHDRFileWriter::ProcessCommands() — no real disk-I/O timing modeled (2026-07-25)
+
+Uncertain: this reconstruction pass covers the pure ring-buffer bookkeeping
+and command-tag dispatch of three of the five file-daemon
+`ProcessCommands()` methods (drain-a-ring, dispatch-by-tag-byte, push a
+follow-on record into a sibling daemon's ring). It intentionally does NOT
+model anything about the REAL underlying SSD/flash I/O these commands are
+presumably orchestrating -- the dispatched-to vtable slots on the
+"payload" object (confirmed real call targets: `CSTGFileOpener` tag 0/1
+via slots 2/4, `CSTGFileCloser` tag 0 via slot 3, `CSTGHDRFileWriter`
+tag 2 via slot 6) are themselves still unreconstructed/opaque, so this
+pass cannot say anything about:
+
+- Whether the real per-command latency (actual `open()`/`read()`/`write()`/
+  `fsync()` against the Kronos's own SSD, presumably issued from whatever
+  these vtable slots ultimately call) ever causes the ring to back up
+  faster than `RunFileDaemonSynchronization()`'s own polling cadence can
+  drain it -- this reconstruction's ring-drain loop has no bound on
+  iteration count per call (drains until producer==consumer), which is
+  faithful to the real disassembly, but real disk stalls could make a
+  single call to one of these three methods take much longer than a VM's
+  instant-return mock I/O ever would.
+- The real capacity values transcribed from `Initialize()` (`CSTGFileOpener`
+  0x1069 entries/33608 bytes, `CSTGFileCloser` two independent 0x11fa-entry/
+  0x8fd0-byte rings, `CSTGHDRFileWriter` 0x129 entries/0x948 bytes) are
+  confirmed exactly from the real binary's own `AllocAligned` call sites,
+  but whether those sizes are comfortably oversized for real streaming/HDR
+  recording workloads on real flash, or whether the real hardware has
+  actually been observed hitting ring-full conditions (this project's own
+  already-documented "silent overwrite on double overflow" quirk for
+  `CSTGFileOpener::AddPlaybackEvent`/`AddRecordEvent`, batch 51), was not
+  and cannot be determined from disassembly alone.
+- `CSTGHDRFileReader`/`CSTGStreamingFileReader::ProcessCommands()` remain
+  unreconstructed specifically because their own dispatch goes through a
+  not-yet-recovered `TSTGArrayManager<T>::indexArray` lookup table --
+  since that table's real populated contents are unknown, this project
+  also has zero visibility into whatever timing/ordering guarantees (if
+  any) those two methods' own real command types assume about the
+  underlying storage.
+
+Real-HW test that would help: with the vtable dispatch targets on these
+"payload" objects eventually reconstructed too, trigger a real HDR
+recording/streaming-playback session on physical hardware while an SD
+card or a deliberately slow SSD is installed, and watch (via a debug
+counter or ring-fill-level log) whether `RunFileDaemonSynchronization()`'s
+polling cadence ever lets any of these five rings approach full under
+real I/O latency -- would validate or refute the "these ring sizes are
+comfortably oversized" assumption above.
