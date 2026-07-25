@@ -136,7 +136,19 @@ RECONSTRUCTED = {
     "080878a0",  # global.constructors.keyed.to.RTRouterApiInstance (own ApiInstance
                  # sequence faithful; 2 unrelated coincidentally-grouped globals --
                  # kInvalidBytePair/kPitchBendDefault -- not modeled, see mains.cpp)
+
+    # --- Stage 6: breadth sweep, first batch (2026-07-25) -- CScheduler's own
+    # per-tick dispatch substrate, closing out its last 2 Tier-B methods that sat on
+    # the already-reconstructed boot path.
+    "080623e0",  # CScheduler::Exec
+    "0805ec70",  # CLevelManagerArray::Add
+    "0805ee90",  # CLevelManagerArray::Find
 }
+
+# CLevelManager::RunLevel (0805ea10) is NOT in RECONSTRUCTED -- stays Tier-B (its own
+# real body depends on CTaskBuffer, a wholly unintroduced class, and dispatches through
+# every queued CModule's own vtable slot +8; only its trivial, real tail effect --
+# clearing the level's own missed-tick counter -- is modeled, see scheduler.cpp).
 
 # COmegaInterface::ExitRequested is declared but its body is a no-op stand-in (the real
 # vtable-slot-0x7c indirect call isn't resolved) -- deliberately NOT in RECONSTRUCTED.

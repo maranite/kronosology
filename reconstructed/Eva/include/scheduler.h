@@ -24,11 +24,17 @@
  *                          the WriteMessageToHost(3, 0x1c) call fires -- real setter
  *                          not traced
  *
- * CScheduler::Exec() (.text+0x080623e0, 1025 bytes -- the real per-tick task dispatch
- * loop) is genuinely out of scope for this pass: it walks CLevelManagerArray x
- * CLevelManager's own task queues, none of which are reconstructed. Declared here as a
- * real, correctly-mangled but empty (no-op) method -- Tier-B "link-stub", not
- * behaviorally reconstructed; see README.md's Stage 4 section for the tier convention.
+ * CScheduler::Exec() (.text+0x080623e0, 1025 bytes) is now reconstructed (Stage 6
+ * breadth sweep, 2026-07-25): a faithful per-tick walk over CLevelManagerArray's now-
+ * real, sorted-by-level array, decrementing each CLevelManager's own countdown and
+ * calling RunLevel() when it reaches 0. See scheduler.cpp for the full field-offset
+ * writeup (also fixes this file's own former mistranscribed CLevelManagerArray::Add/
+ * Find addresses -- were off by an inserted digit, real addresses 0x0805ec70/
+ * 0x0805ee90, corrected against functions.csv). CLevelManager::RunLevel() itself stays
+ * Tier-B (declared below) -- its own real body depends on CTaskBuffer (a wholly new,
+ * unintroduced class) and dispatches through each queued CModule's own vtable slot +8
+ * ("Update"), which would pull in this project's entire per-module task-queue
+ * substrate -- out of scope for this pass, deferred to a future breadth-sweep batch.
  */
 
 #ifndef SCHEDULER_H
@@ -49,8 +55,8 @@ public:
 	/* .text+0x08063120, 119 bytes. */
 	void Enable(int enable);
 
-	/* .text+0x080623e0, 1025 bytes -- Tier-B link-stub, not reconstructed (see header
-	 * comment). Called once per scheduling-signal wakeup from CKernel::Exec().
+	/* .text+0x080623e0, 1025 bytes -- reconstructed (see header comment + scheduler.cpp).
+	 * Called once per scheduling-signal wakeup from CKernel::Exec().
 	 */
 	void Exec();
 

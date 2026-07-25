@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | Not started — first candidate scoped, not yet begun: `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (currently Tier-B no-ops that leave `CLevelManagerArray` permanently empty, so `CScheduler::Exec()`'s real per-tick dispatch loop is dead code in this reconstruction even once transcribed) |
+| 6. Breadth sweep | **First batch done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` reconstructed for real (previously Tier-B no-ops that left `CLevelManagerArray` permanently empty) — `CScheduler`'s own per-tick level-dispatch substrate is now genuinely live, confirmed via `verify/test_level_manager_array.cpp` (15/15 checks) and a fresh live `kronos_vm` boot (same clean `Start closing`/`End closing` exit as 4c, now with real `OmegaSchedulingThread`s actually ticking it). See "Stage 6: breadth sweep" below. 37,696 of 37,795 functions still `pending` — this is one small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -879,3 +879,71 @@ blocking forever the way it would on real hardware) is why `main()` reaches its 
 path at all in this VM — expected and fine for the boot-milestone bar, not itself a bug to
 chase. **This closes out the Stage-1-through-4 boot-path effort**; remaining work is
 Stage 6 breadth (see the status table above).
+
+## Stage 6: breadth sweep, first batch — 2026-07-25
+
+With the boot-path effort closed out (4c above), this session's own broader `/goal`
+directive ("if OA.ko hits a true blocker, pivot to Eva and continue reverse engineering
+it") extends past the original "just get it booting" scoping — picking up real,
+tractable function reconstruction beyond the boot path. First candidate: `CScheduler`'s
+own last 2 Tier-B methods, both already on the already-reconstructed boot path
+(`CKernel::InitSystemLayer()` calls `CScheduler::InsertLevel()` 7 times; `CKernel::Exec()`
+— itself called from every `OmegaSchedulingThread` wakeup — calls `CScheduler::Exec()`)
+but stubbed to no-ops until now:
+
+- **`CLevelManagerArray::Find()`/`Add()`** (`.text+0x0805ee90`/`0x0805ec70`, 258/522
+  bytes — this file's own header comment had mistranscribed both addresses with an
+  extra digit before this pass, corrected against `functions.csv`). `CLevelManagerArray`
+  IS-A `COmegaPtrArray` (vtable-swapped, no new fields, same idiom used throughout this
+  project). `Add()` appends via the real `COmegaPtrArray::Add()` base method then sifts
+  the new element left while its own level number (`+0xc`) is smaller than its
+  predecessor's — a real insertion-sort step that keeps the array sorted ascending by
+  level regardless of insertion order. `Find()` linear-scans for the first element whose
+  `+0xc` matches. Both were previously always-empty/always-"not found" stubs — the array
+  is now genuinely populated by `InsertLevel()`'s existing real "build a `CLevelManager`,
+  call `Add()`" path, which was already faithfully transcribed but had nothing real to
+  hand off to.
+- **`CScheduler::Exec()`** (`.text+0x080623e0`, 1025 bytes) — the real per-tick dispatch
+  loop, now a faithful (Duff's-device-unrolled-to-plain-loop, same collapse license as
+  `omega_ptr_array.cpp`) walk over the now-real, sorted `CLevelManagerArray`: for each
+  level, decrements a short countdown (`+0x18`, reloaded from a period value at `+0x1a`)
+  and calls `CLevelManager::RunLevel()` once it reaches 0. Two real "bail the *entire*
+  tick, not just this level" guards (`+0x38` disabled flag, `+0x10` reentrancy flag) are
+  transcribed faithfully but stay unreached given this reconstruction's own data (nothing
+  sets either field to a nonzero value) — same "faithful but currently-dead branch"
+  treatment already established elsewhere in this project (e.g. `CKernel::Exec()`'s own
+  empty timer vector). `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` around the
+  countdown read/write are dropped, same established reason as every other occurrence of
+  that pair (kernel-side critical-section shim, not applicable to this single-threaded-
+  per-tick userspace reconstruction).
+- **`CLevelManager::RunLevel()`** (`.text+0x0805ea10`, 567 bytes) stays Tier-B — its real
+  body calls `CTaskBuffer::SendBuffer()` (a wholly unintroduced class) then walks the
+  level's own embedded `TNamedPtrArray<CModule>` task queue, dispatching through each
+  due `CModule`'s own vtable slot `+8` ("Update"). Modeling that for real would pull in
+  this project's entire per-module task substrate — genuinely out of scope for this
+  batch, deferred to a future breadth-sweep pass. The one real, trivial side effect kept:
+  `RunLevel()`'s own tail unconditionally clears the level's missed-tick counter
+  (`+0x1c`) — free to preserve faithfully even with the rest stubbed.
+
+`CLevelManagerArray`/`CLevelManager` were broken out of `scheduler.cpp` into their own
+header (`include/level_manager_array.h`) purely so `verify/test_level_manager_array.cpp`
+could drive `Add()`/`Find()` directly against a synthetic `COmegaPtrArray`-shaped buffer
+— same reason `omega_ptr_array.h` exists as its own header. `CScheduler::Exec()` itself
+isn't independently KAT-tested (its own fields are private, and `RunLevel()`'s only
+externally-observable side effect is the trivial counter clear) — verified instead by
+(a) meticulous decompile cross-check while writing it and (b) a live `kronos_vm` re-boot,
+which now genuinely exercises it every `OmegaSchedulingThread` tick during the run
+(6 threads, 7 real inserted levels) — still reached the same clean `Start closing`/
+`End closing` exit, zero crashes.
+
+**Build/verify**: `make` (15/15 `test_level_manager_array` checks) and
+`tools/build_lenny.sh` (`LINK OK`) both clean; manifest 96 → 99 reconstructed.
+
+**Next candidates for a future batch** (not started): `CModule`'s own real layout/vtable
+(`+0x4c` status byte, `+0x78`/`+0x7a` period/countdown, vtable slot `+8` "Update") and
+`CTaskBuffer` — both genuinely needed to make `CLevelManager::RunLevel()` real, and the
+natural next step to keep widening `CScheduler`'s already-real substrate. Beyond that,
+this is a ~38,000-function binary with 99 reconstructed — Stage 6 breadth-sweep work
+remains almost entirely ahead; pick candidates the same way this batch did (Tier-B stubs
+already sitting on an already-reconstructed real call path, not cold/unreferenced
+functions) rather than trying to move broadly at random.
