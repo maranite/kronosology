@@ -543,6 +543,57 @@ RECONSTRUCTED = {
     "08172bf0",  # CClientCommServer::OnRxSexWhenInSENT(ESexMsgType, uchar const*, uchar, uchar)
     "08171510",  # CClientCommServer::OnRxMsgWhenInIDLE(uchar const*, uchar, uchar)
     "08171db0",  # CClientCommServer::OnRxMsgWhenInSENT(uchar const*, uchar, uchar)
+
+    # --- Stage 6: breadth sweep, CHIDDriver/CLinuxPanelDriver batch (2026-07-25).
+    # Found via a fresh nm -C class-inventory sweep for boot-path-DIRECT (not just
+    # -adjacent) unclaimed territory: both classes are MMainHIDDriver/
+    # MMainPanelDriver's own direct-construction targets (mains.cpp), constructed
+    # unconditionally every boot, before any of Mains()'s own config-table gating
+    # applies -- previously declared as opaque `__thiscall` ctor-only call-contract
+    # externs with a bare, undersized `void* = 0` vtable scalar (the same
+    # undersized-vtable bug class found repeatedly elsewhere in this project, though
+    # not yet load-bearing here since nothing dispatched through either vtable
+    # before this batch). Both fully reconstructed -- real ctor/dtor/all named
+    # methods, byte-exact real vtables (read directly off .rodata, not inferred) --
+    # see include/hid_driver.h/include/panel_driver.h for the full writeup.
+    # CHIDDriver is a genuine Linux-evdev USB keyboard driver (bustype-scans
+    # /sys/class/input, reads raw `struct input_event` records, decodes scancodes
+    # via a real 127-byte .rodata lookup table, tracks a modifier bitmask) --
+    # found and preserved (not fixed) one genuine ground-truth bug along the way:
+    # GetKeyboardEvent() computes its own "isKeyDown" output field from a byte
+    # GetEvent() never actually writes (real uninitialized-stack read in the
+    # binary itself). CLinuxPanelDriver's PutCommand() confirmed and generalized
+    # STGMessage's `{u16,u16,u32,u32[,u32]}` wire shape via a new
+    # USTGAPIFrontPanel (SetLED/SetLEDBlinking/ResetLED/SetLED16Bit/Beep), all
+    # bottoming out in the already-real USTGUserAPI::SendPanelMessage().
+    "08e4f7e0",  # CHIDDriver::Open(void*)
+    "08e4f7f0",  # CHIDDriver::Close(void*)
+    "08e4f800",  # CHIDDriver::PutEvent(IHIDDriver::SUsbKeybEvent&)
+    "08e4f810",  # CHIDDriver::GetKeyboardEvent(IAlphaKeybEvent::SKeyboardEvt&)
+    "08e4f8e0",  # CHIDDriver::ReadOvercurrentCondition()
+    "08e4f8f0",  # CHIDDriver::EnableAfterOvercurrent()
+    "08e4f900",  # CHIDDriver::SetTypematicRateDelay(uchar)
+    "08e4f910",  # CHIDDriver::SetLeds(uchar)
+    "08e4f920",  # CHIDDriver::GetEvent(IHIDDriver::SUsbKeybEvent*)
+    "08e4fb20",  # CHIDDriver::KeyboardIsConnected()
+    "08e4fc80",  # CHIDDriver::~CHIDDriver() (complete-object)
+    "08e4fce0",  # CHIDDriver::~CHIDDriver() (deleting)
+    "08e4fd50",  # CHIDDriver::CHIDDriver(char const*, char const*, char const*)
+    "08e4fdf0",  # IHIDDriver::GetDriverClass()
+    "08e4fee0",  # CLinuxPanelDriver::Open(void*)
+    "08e4fef0",  # CLinuxPanelDriver::Close(void*)
+    "08e4ff00",  # CLinuxPanelDriver::PutEvent(CPanelDriver::SEvent&)
+    "08e4ff10",  # CLinuxPanelDriver::PutCommand(CPanelDriver::SCommand*)
+    "08e4ffa0",  # CLinuxPanelDriver::GetEvent(CPanelDriver::SEvent*)
+    "08e4ffe0",  # CLinuxPanelDriver::~CLinuxPanelDriver() (complete-object)
+    "08e50010",  # CLinuxPanelDriver::~CLinuxPanelDriver() (deleting)
+    "08e50050",  # CLinuxPanelDriver::CLinuxPanelDriver(char const*)
+    "08e500d0",  # CPanelDriver::GetDriverClass()
+    "08e1d440",  # USTGAPIFrontPanel::SetLED(uint)
+    "08e1d480",  # USTGAPIFrontPanel::SetLEDBlinking(uint)
+    "08e1d4c0",  # USTGAPIFrontPanel::ResetLED(uint)
+    "08e1d500",  # USTGAPIFrontPanel::SetLED16Bit(uint, ushort)
+    "08e1d550",  # USTGAPIFrontPanel::Beep()
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

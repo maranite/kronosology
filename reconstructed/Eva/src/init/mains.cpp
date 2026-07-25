@@ -42,12 +42,15 @@
  *    (`FMApi`, obtained via a virtual call through Api's own vtable slot +0xa0) at
  *    vtable slot +0x24, not through Api at +0x40. Preserved exactly.
  *
- * 2. Direct construction of a real, already-reconstructed-elsewhere-eventually
- *    driver class, registered through a CSystemApi-shaped object's vtable slot
- *    +0xb4 instead of +0x40 (2 of 17): MMainPanelDriver (CLinuxPanelDriver, no
- *    idempotency guard) and MMainHIDDriver (CHIDDriver, has the guard). Both real
- *    driver classes' own constructors are declared here as call-contract externs
- *    (__thiscall, confirmed from functions.csv) -- not implemented, Stage 4+.
+ * 2. Direct construction of a real driver class, registered through a
+ *    CSystemApi-shaped object's vtable slot +0xb4 instead of +0x40 (2 of 17):
+ *    MMainPanelDriver (CLinuxPanelDriver, no idempotency guard) and MMainHIDDriver
+ *    (CHIDDriver, has the guard). Both real driver classes are now fully
+ *    reconstructed -- see include/hid_driver.h/include/panel_driver.h (Stage 6
+ *    breadth sweep, 2026-07-25; found via the project's broad `nm -C` class-
+ *    inventory sweep -- both are small, self-contained, and boot-path-*direct*,
+ *    constructed unconditionally every boot before any of Mains()'s own config-table
+ *    gating applies).
  */
 
 #include "mains.h"
@@ -58,6 +61,8 @@
 #include "sysapi_instance.h"
 #include "ustg_user_api.h"
 #include "global_object_base.h"
+#include "hid_driver.h"
+#include "panel_driver.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -122,82 +127,13 @@ void *PTR__CESDiskModuleConstructor_08fcc0a8;
 }
 
 /* The 2 real driver classes MMainPanelDriver/MMainHIDDriver construct directly.
- * __thiscall ctors confirmed from functions.csv; bodies not reconstructed (Stage
- * 4+) -- both derive from the same CNamedObjectBase base (their own ctors install
- * PTR__CNamedObjectBase_08e81378 first, same pattern as the descriptor objects).
+ * Both fully reconstructed (Stage 6 breadth sweep, 2026-07-25) -- see
+ * include/hid_driver.h/include/panel_driver.h for the real ctor/dtor/method bodies
+ * and byte-exact real vtables (PTR__CHIDDriver_08fd9ce8[13]/
+ * PTR__CLinuxPanelDriver_08fd9dc8[8], now properly-sized arrays defined in
+ * hid_driver.cpp/panel_driver.cpp -- previously bare `void* = 0` scalars here, the
+ * same undersized-vtable bug class found repeatedly elsewhere in this project).
  */
-/* Real vtables these 2 ctors install -- opaque, never dispatched through by any
- * reconstructed code (same "install but never dispatch" treatment as the 15
- * ModuleConstructor vtables above).
- */
-extern "C" void *PTR__CHIDDriver_08fd9ce8 = 0;
-extern "C" void *PTR__CLinuxPanelDriver_08fd9dc8 = 0;
-
-class CLinuxPanelDriver {
-public:
-	/* .text+0x08e50050, 91 bytes -- reconstructed. */
-	CLinuxPanelDriver(const char *name);
-
-private:
-	void *mVtbl;
-	char *mName;
-};
-
-class CHIDDriver {
-public:
-	/* .text+0x08e4fd50, 132 bytes -- reconstructed. */
-	CHIDDriver(const char *name, const char *eventsName, const char *commandsName);
-
-private:
-	void *mVtbl;
-	char *mName;
-	int   mFd;         /* +0x08, ctor sets -1 */
-	int   mUnknown0c;  /* +0x0c, ctor zeroes */
-	int   mUnknown10;  /* +0x10, ctor zeroes */
-	char  mUnknown14;  /* +0x14, ctor zeroes (byte write in the real disassembly) */
-	int   mUnknown18;  /* +0x18, ctor zeroes */
-	int   mUnknown1c;  /* +0x1c, ctor zeroes */
-	short mUnknown20;  /* +0x20, ctor zeroes */
-	short mUnknown22;  /* +0x22, ctor zeroes */
-	int   mUnknown24;  /* +0x24, ctor zeroes */
-};
-
-CLinuxPanelDriver::CLinuxPanelDriver(const char *name)
-{
-	mVtbl = PTR__CNamedObjectBase_08e81378;
-	mName = 0;
-
-	size_t len = strlen(name);
-	char *dup = new char[len + 1];
-	mName = dup;
-	strcpy(dup, name);
-
-	mVtbl = &PTR__CLinuxPanelDriver_08fd9dc8;
-
-	USTGUserAPI::ConnectPanelFifo();
-}
-
-CHIDDriver::CHIDDriver(const char *name, const char * /*eventsName*/, const char * /*commandsName*/)
-{
-	mVtbl = PTR__CNamedObjectBase_08e81378;
-	mName = 0;
-
-	size_t len = strlen(name);
-	char *dup = new char[len + 1];
-	mName = dup;
-	strcpy(dup, name);
-
-	mVtbl = &PTR__CHIDDriver_08fd9ce8;
-	mFd = -1;
-	mUnknown0c = 0;
-	mUnknown14 = 0;
-	mUnknown10 = 0;
-	mUnknown18 = 0;
-	mUnknown1c = 0;
-	mUnknown20 = 0;
-	mUnknown22 = 0;
-	mUnknown24 = 0;
-}
 
 namespace {
 
@@ -297,10 +233,11 @@ void Mains()
 void MMainPanelDriver(CSystemApi * /*api*/)
 {
 	/* Real malloc(8) + placement CLinuxPanelDriver::CLinuxPanelDriver(this,"PanelDriver"),
-	 * same collapse convention as omega_interface.cpp's `new CKernel(0)` -- 8 bytes is
-	 * CLinuxPanelDriver's real observed size, preserved via placement new rather than a
-	 * bare `new CLinuxPanelDriver(...)` (which would allocate this TU's own, wrong,
-	 * not-reconstructed sizeof instead).
+	 * same collapse convention as omega_interface.cpp's `new CKernel(0)`. CLinuxPanelDriver
+	 * is now fully reconstructed (panel_driver.h) and its real sizeof is genuinely 8 bytes,
+	 * so a bare `new CLinuxPanelDriver(...)` would also be size-correct now -- kept as
+	 * malloc+placement-new anyway for consistency with this file's own established
+	 * convention (and in case any future field is discovered that isn't yet modeled).
 	 */
 	void *raw = malloc(8);
 	CLinuxPanelDriver *driver = new (raw) CLinuxPanelDriver("PanelDriver");
@@ -313,7 +250,8 @@ void MMainHIDDriver(CSystemApi *api, const char *eventsName, const char *command
 	if (Api == 0)
 		Api = api;
 
-	/* Real malloc(0x28) + placement construct -- see MMainPanelDriver's comment above. */
+	/* Real malloc(0x28) + placement construct -- CHIDDriver's real sizeof is genuinely
+	 * 0x28 now too (hid_driver.h) -- see MMainPanelDriver's comment above. */
 	void *raw = malloc(0x28);
 	CHIDDriver *driver = new (raw) CHIDDriver("HIDDriver", eventsName, commandsName);
 	CallVSlot(Api, 0xb4, driver);

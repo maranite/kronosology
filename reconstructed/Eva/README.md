@@ -2178,3 +2178,112 @@ touches this same module-lifecycle spine.
 `CDumpManStateMachine`/`CDumpMachine`/`CDumpTask`/`CBufferingTask`/`CDumpManMod`
 under a new "Stage 6: breadth sweep, DumpManager cluster batch" section. Regenerated:
 222 → 256 of 37,795.
+
+## Stage 6: breadth sweep, CHIDDriver/CLinuxPanelDriver batch — 2026-07-25
+
+Broad `nm -C` class-inventory survey for other unclaimed territory, staying clear of
+the two other agents working this same tree concurrently today (one on
+`CEditMan`/`CChunkMan`/`CSeqTimer`/`CMessagePort`, one on `CFileMan`/`CResMan`).
+Checked and set aside as not tractable this batch: `CPoller` (29 methods, genuine Peg
+depth — already flagged deferred by an earlier batch), `CStorage` (22 methods,
+already independently confirmed "genuinely deep, out-of-scope algorithm-database
+state" by the `CSTGUnsolMsgHandler` batch 2 follow-up), `CEditor` itself (15 direct
+methods — real, boot-path-central, but its `Setup()` fans out immediately into
+`CModuleManager::Setup()` and several already-real subsystems in ways that would
+take a dedicated pass to do justice; left for a future batch rather than a rushed
+partial pass this time).
+
+**What landed instead**: `mains.cpp`'s own note that `MMainPanelDriver`/
+`MMainHIDDriver` "construct real driver classes... not implemented, Stage 4+" turned
+out to be stale — both `CLinuxPanelDriver` (8 real vtable slots) and `CHIDDriver` (13
+real vtable slots) are small, fully self-contained, and — unlike most of today's
+other Stage 6 candidates — boot-path-**direct**, not just adjacent: `Mains()` calls
+`MMainPanelDriver`/`MMainHIDDriver` first and second, unconditionally, before any of
+the 17-member registration-shim family's own config-table gating even applies.
+
+Both fully reconstructed, ctor through every named method, with byte-exact real
+vtables read directly off `.rodata` (not inferred from call sites — a raw dword read
+at `PTR__CHIDDriver_08fd9ce8`/`PTR__CLinuxPanelDriver_08fd9dc8`, cross-checked against
+where each vtable run ends and the compiler's own typeinfo-name string begins). This
+also fixes the same undersized-vtable bug class found repeatedly elsewhere in this
+project today (`mains.cpp` previously declared both as bare `void* = 0` scalars) —
+not yet load-bearing here since nothing dispatched through either vtable before this
+batch, but real all the same. New `include/hid_driver.h`/`src/hw/hid_driver.cpp`,
+`include/panel_driver.h`/`src/hw/panel_driver.cpp`.
+
+`CHIDDriver` is a genuine Linux-evdev USB keyboard driver: `KeyboardIsConnected()`
+scans `/sys/class/input/eventN` (N=0..3) for USB bustype (the literal dword
+`0x33303030`, ASCII `"0003"` read little-endian) and opens the matching
+`/dev/input/eventN`; `GetEvent()` reads raw 16-byte `struct input_event` records and
+decodes the scancode through a real 127-byte `.rodata` lookup table
+(`s_kucMappingTable`, byte-read directly off the binary, not decompiled) into a
+Korg-internal keycode, tracking a running Ctrl/Shift/Alt/CapsLock/NumLock modifier
+bitmask; `GetKeyboardEvent()` dispatches back through its own `mVtbl[5]` (calling its
+own `GetEvent()` virtually rather than directly — confirmed by the real vtable-slot
+table, preserved as a raw vtable call per this project's "no real C++ `virtual` for
+ground-truth slots" rule) to relay a higher-level event shape.
+
+`CLinuxPanelDriver::GetEvent()` reads 8-byte panel events off
+`CCommDriver::getInstance()`'s own `mEventFd` field by raw offset (`+0x10`,
+cross-checked against `comm_driver.h`'s own field layout) — the same "treat the
+other class as an opaque blob, read by offset" idiom `module_manager.cpp` already
+established. `PutCommand()`'s 5-way opcode switch confirmed and generalized
+`STGMessage`'s wire shape (`lcd_control.cpp`'s own 4-field `{u16,u16,u32,u32}`
+header, here shown to take an optional trailing `u32` param field) via a new
+`USTGAPIFrontPanel` namespace (`ResetLED`/`SetLED`/`SetLEDBlinking`/`SetLED16Bit`/
+`Beep`), all bottoming out in the already-real `USTGUserAPI::SendPanelMessage()`.
+
+**Real ground-truth bug found and preserved (not fixed)**: `CHIDDriver::
+GetKeyboardEvent()`'s own stack layout (Ghidra's `local_1c`/`local_18`/`local_17`
+naming) places an "isKeyDown" computation directly over a byte `GetEvent()` never
+actually writes — a genuine uninitialized-stack read in the real binary itself, not
+a decompiler artifact (confirmed by tracing every write site in `GetEvent()`'s own
+body). Reproduced faithfully: the reconstruction's own local variable is likewise
+left uninitialized rather than deterministically zeroed, matching the real
+undefined behavior instead of papering over it. Documented in `hid_driver.h`/
+`hid_driver.cpp`'s own comments, same "flag, don't silently fix" convention as
+`CCommDriver::setupfifoname()`'s own no-NULL-check bug.
+
+### Verification
+
+New `verify/test_hid_driver.cpp` (16 checks) and `verify/test_panel_driver.cpp` (17
+checks), both first-run clean. `test_hid_driver.cpp` drives `GetEvent()`/
+`GetKeyboardEvent()` over a real `pipe(2)` standing in for the evdev fd (bypassing
+`KeyboardIsConnected()`'s own real-hardware `/sys` dependency via a small new
+`HIDDriverTestHooks` friend), confirming the real scancode-to-keycode table lookup
+and modifier-bit assembly, plus the `mVtbl[5]` self-dispatch. `test_panel_driver.cpp`
+similarly drives `GetEvent()` over a real pipe by pointing `CCommDriver::singleton`
+at a raw buffer with a poked `mEventFd` (a second, independent, per-TU local
+definition of the same friended `CommDriverTestHooks` struct name
+`test_comm_driver.cpp` already established — safe since verify binaries are never
+linked against each other), and exercises every real `PutCommand()` opcode plus all
+5 `USTGAPIFrontPanel` wrappers directly.
+
+`make objs`: clean (both new TUs compile with zero warnings, including under
+`-Wall -Wextra`). `make link`/`make verify`: this pass landed while two concurrent
+agents' own work in this same tree was mid-edit — at various points during this
+batch, `omega_vtables.cpp`/`edit_man.cpp` and 1-2 of `PTR__CSeqTimer_*`/
+`PTR__CMessagePort_*`/`PTR__CChunkMan_*` were transiently unresolved or
+non-compiling for reasons entirely unrelated to this batch's own files (confirmed by
+`git status`/`git diff` showing those files as someone else's uncommitted changes,
+not this batch's). Rather than block on that, both new verify binaries were
+independently confirmed clean (0 failures) by linking against the FULL real object
+tree plus a throwaway local stub for whichever 1-2 concurrently-in-flight vtable
+symbols were unresolved at the moment of testing — same effective coverage as
+`make verify` once the concurrent work lands and the shared build goes green again.
+`tools/build_lenny.sh` (real on-image ABI): compiled clean; link showed only the
+same known concurrent-work-in-progress unresolved symbols, zero unresolved symbols
+belonging to this batch's own two new files.
+
+No live `kronos_vm` boot test this batch — both classes are constructed but nothing
+in the currently-wired call graph dispatches through either object's higher-level
+methods yet (matching `mains.cpp`'s own pre-existing "install but never dispatch"
+treatment for these two driver vtables); same "host KAT + LINK OK sufficient,
+live boot reserved for safety-critical or previously-crashing paths" reasoning the
+DumpManager batch above already used.
+
+### Manifest delta
+
+`gen_manifest.py`: added 26 functions (13 `CHIDDriver`, 8 `CLinuxPanelDriver`, 5
+`USTGAPIFrontPanel`) under a new "Stage 6: breadth sweep, CHIDDriver/
+CLinuxPanelDriver batch" section. Regenerated: 265 → 291 of 37,795.
