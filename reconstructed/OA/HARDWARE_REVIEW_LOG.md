@@ -622,3 +622,77 @@ audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
     an EARLIER pass's own confirmed derivation (oa_global.h's
     `CSTGCCInfo` comment) -- not re-verified independently in this batch.
     covering the two relevant bits was tested here).
+
+---
+
+## CSTGControllerInfo::ButtonPressHandler — REAL now (batch 66); six new deferred callees + ~23 un-traced sub-branches
+
+`ButtonPressHandler` (`src/engine/controller_info_button_handler.cpp`) is
+the real physical front-panel BUTTON press/release dispatcher -- this is
+genuinely REAL hardware I/O that previously did nothing at all (the prior
+stub was a deliberate no-op). Structural dispatch (all THREE `.rodata`
+jump tables -- the batch-65 characterization above only found two, this
+pass found a third release-side table it missed -- every `(msgType,
+buttonId)` immediate pair, every busy/mode/bitmap flag check) is
+disassembly-confirmed via `objdump -dr` plus a full byte-level dump of
+all three tables' 214 raw dword slots, cross-checked against every
+individual jump target's real code. High confidence, not guessed. Real
+button-numbering-to-physical-control mapping (which `eSTGButtonCode`
+value is which silkscreened front-panel button) is NOT independently
+confirmed against a real unit -- only the `(msgType, buttonId)` pairs and
+control-flow shape are ground-truthed; this reconstruction never had to
+determine "button 0x2c is the Combi button" or similar to be correct.
+
+Genuinely unverified against real hardware / open items:
+
+  - Six new real sibling methods (`HandleEditInContextButton`,
+    `ProcessMixerSwitchPress`, `SetMixerKnobMode`, `SetSoloSelected`,
+    `ResetAllKnobCCs`, `ResetAllExtModeControllers`) plus a weak-undefined
+    `NotifyParam(unsigned int, long)` overload are all still deliberately
+    deferred (own bodies not reconstructed) -- so pressing one of the 12
+    "special" buttons or one of the 16 "mixer switch" buttons currently
+    calls into an unresolved OA.ko-internal symbol on real hardware
+    (matches the real binary's own unresolved-symbol shape at this stage
+    of the project, not a crash risk on its own -- these become genuine
+    `insmod` blockers only once every OTHER unresolved symbol is also
+    resolved).
+  - Table 2 "Pattern B" (10 codes: 0x26-0x2b, 0x2f-0x32) has 20 individual
+    deferred sub-branches (2 per code -- a `!pressed` release action and a
+    `busy-flag-clear` action), each with its own real ground-truth address
+    but none traced this pass (see `controller_info_button_handler.cpp`'s
+    own `HandleButtonPatternBDeferred()` comment for the full 20-address
+    table). Pressing/releasing these 10 buttons in anything other than
+    "already in busy/UI-edit mode, holding it down" currently does
+    nothing on real hardware.
+  - The 12 "special" buttons (codes 9, 0x2c, 0x35-0x39, 0x4a-0x4e) have 14
+    press-time and 3 release-time deferred sub-branches (mostly the
+    "busy/busy2 flag clear" else-paths of an if/else the real code
+    guards these buttons' main actions with) -- see the `ButtonDeferred_
+    0xNNNNN()` stub functions' own individual comments for exact
+    addresses and the little that IS confirmed about each gate. None of
+    these are DSP in the audio-engine sense (this cluster is entirely
+    front-panel UI/mode-switching state, in scope per this project's
+    stated goal) -- just genuinely un-traced this pass given the size of
+    the rest of the reconstruction.
+  - The real byte at `CSTGControllerRTData::sInstance+0x2f` bit `&4`
+    (cleared unconditionally by button 0x39's release handler, distinct
+    from the `&2`/`&8` bits this project has already named "busy2"/
+    "busy") has no confirmed semantic meaning of its own -- transcribed
+    faithfully from the disassembly, not interpreted.
+  - The exact real semantics of the per-button "active" bitmap at
+    `CSTGControllerRTData::sInstance+0x30` (one bit per `eSTGButtonCode`)
+    are inferred purely from its set/clear/test call sites in this
+    function (a plausible "is this button currently held down"
+    latch) -- not independently confirmed against any other real OA.ko
+    code path that reads it.
+  - `HandleEditInContextButton`'s real gating condition (`CSTGGlobal::
+    sInstance+0x29cc4dc != 0`) is the SAME field this project's other
+    "edit in context" gates already use (`AnalogControllerHandler`,
+    `SendUnsolicitedUIParam`) -- reused with high confidence, not
+    independently re-derived for buttons specifically.
+
+Real-HW test that would help once the six deferred callees above are also
+reconstructed: press every physical front-panel button (including
+mode/mixer buttons) and confirm the real `SendUnsolControl2MessageToUI`
+traffic (observable via `/proc/.oacmd` or a UI-side log) matches this
+reconstruction's `(msgType, buttonId)` table for each one.

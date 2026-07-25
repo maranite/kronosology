@@ -2333,31 +2333,76 @@ struct CSTGControllerInfo {
 	/*
 	 * ButtonPressHandler(eSTGButtonCode, bool) -- confirmed real
 	 * (relocation from `CSTGFrontPanel::HandleSwitchEvent`,
-	 * src/engine/front_panel_handlers.cpp), deliberately deferred
-	 * extern. `.text+0x95fa0`, 5822 bytes -- a genuine ~144-entry
-	 * per-button dispatch across TWO `.rodata` jump tables
-	 * (`.rodata+0x47ae0`, 70 x 4-byte entries, index=`buttonCode-9`,
-	 * reached only for `buttonCode>0x49` AND `pressed==true`;
-	 * `.rodata+0x47bf8`, 74 x 4-byte entries, index=`buttonCode`
-	 * directly, for `buttonCode<=0x49`) plus a
-	 * `HandleEditInContextButton(eSTGButtonCode, bool)` gate ahead of
-	 * both tables (same "UI edit mode intercepts the raw event" idiom
-	 * `AnalogControllerHandler` below uses for knobs/sliders). The vast
-	 * majority of individual case targets follow one uniform pattern --
-	 * `CSTGControllerRTData::sInstance->SendUnsolControl2MessageToUI(
-	 * msgType, buttonId, pressed?0x7f:0, 1)` with per-button constant
-	 * `msgType`/`buttonId` immediates -- confirmed by spot-disassembling
-	 * ~15 of the ~144 case targets, but NOT exhaustively enumerated in
-	 * this pass (would need a dedicated per-entry table-dump batch on
-	 * the scale of the `CSTGKeybedInterface` batch-64 session, not a
-	 * quick promotion) -- see the `oa_front_panel_analog_button_
-	 * handlers` agent-memory note for the full confirmed shape and
-	 * exact table addresses for that future pass. `this` at the real
-	 * call site is NOT `CSTGControllerInfo::sInstance` -- see
+	 * src/engine/front_panel_handlers.cpp). `.text+0x95fa0`, 5822 bytes.
+	 * Reconstructed for real (batch 66) -- see
+	 * src/engine/controller_info_button_handler.cpp for the complete
+	 * confirmed dispatch across THREE `.rodata` jump tables (the batch-65
+	 * characterization below undercounted by one -- there is a third,
+	 * release-side table for the 12 "special" high-numbered buttons that
+	 * a shallower spot-check missed): `.rodata+0x47ae0` (70 entries,
+	 * index=`buttonCode-9`, PRESS-time special-button actions, reached
+	 * only for `buttonCode>0x49` AND `pressed==true`), `.rodata+0x47bf8`
+	 * (74 entries, index=`buttonCode` directly, the main dispatch for
+	 * `buttonCode<=0x49`, ALSO used for `buttonCode>0x49` as a shared
+	 * "fallthrough into the high-code path" redirect for a handful of
+	 * indices), and `.rodata+0x47d20` (70 entries, same index scheme as
+	 * the first table, RELEASE-time special-button actions, reached only
+	 * for `buttonCode>0x49` AND `pressed==false`) -- plus a
+	 * `HandleEditInContextButton(eSTGButtonCode, bool)` gate ahead of all
+	 * three (same "UI edit mode intercepts the raw event" idiom
+	 * `AnalogControllerHandler` below uses for knobs/sliders). ~40 of the
+	 * second table's individual case targets follow one uniform pattern
+	 * (`CSTGControllerRTData::sInstance->SendUnsolControl2MessageToUI(
+	 * msgType, buttonId, pressed?0x7f:0, 1)`, single code block serving
+	 * both press and release, with a shared tail that clears a per-button
+	 * "active" bitmap bit on release); 10 more follow a second uniform
+	 * "busy-gated" pattern (own press/busy-flag checks, sets the bitmap
+	 * bit and sends on success); 16 (`buttonCode` 0x3a-0x49) dispatch to
+	 * the sibling `ProcessMixerSwitchPress` on both press and release; the
+	 * 12 "special" buttons (`buttonCode` 9,0x2c,0x35-0x39,0x4a-0x4e) have
+	 * genuinely distinct press-time (table 1) and release-time (table 3)
+	 * bodies, individually reconstructed -- see the .cpp's own header
+	 * comment for the complete address-by-address derivation, including
+	 * ~17 genuinely DSP/mode-adjacent sub-branches deliberately left as
+	 * local stubs (documented with exact ground-truth addresses). `this`
+	 * at the real call site is NOT `CSTGControllerInfo::sInstance` -- see
 	 * `AnalogControllerHandler` below for the shared
 	 * `ResolveControllerInfoTarget` resolution both handlers go through.
 	 */
 	void ButtonPressHandler(unsigned int code, bool pressed);
+
+	/*
+	 * ButtonPressHandler is now REAL (batch 66), see
+	 * src/engine/controller_info_button_handler.cpp for the complete
+	 * confirmed dispatch (THREE `.rodata` jump tables, not two -- the
+	 * batch-65 characterization missed a third table for the release-
+	 * side of the 12 "special" high-numbered buttons). The following
+	 * member functions are the real, deliberately deferred callees that
+	 * dispatch reaches (own bodies not reconstructed this pass, matching
+	 * the same idiom `AnalogControllerHandler`'s own 22 `AnalogXxxHandler`
+	 * externs already established):
+	 */
+	bool HandleEditInContextButton(unsigned int code, bool pressed);
+	void ProcessMixerSwitchPress(unsigned int code, bool pressed);
+	void SetMixerKnobMode(int mode);
+	void SetSoloSelected(bool selected);
+	void ResetAllKnobCCs();
+	void ResetAllExtModeControllers();
+
+	/*
+	 * NotifyParam(unsigned int, long) -- confirmed WEAK UNDEFINED in the
+	 * real OA.ko (`nm -C`: `00000000 W CSTGControllerInfo::
+	 * NotifyParam(unsigned int, long)`), DISTINCT from the real, strongly
+	 * defined 4-arg overload `NotifyParam(unsigned int, unsigned int,
+	 * long, bool)` (`.text+0x93610`, not called from ButtonPressHandler).
+	 * Two real call sites in ButtonPressHandler's table1 dispatch (the
+	 * "Mixer Knob Mode" and "Solo Selected" buttons) call this 2-arg
+	 * weak overload, which a real insmod resolves to a null-pointer call
+	 * if ever reached -- faithfully reproduced here `__attribute__((weak))`
+	 * with no definition, same idiom as the T18/T916/A18/A916 slots
+	 * above. See HARDWARE_REVIEW_LOG.md.
+	 */
+	void NotifyParam(unsigned int paramId, long value) __attribute__((weak));
 
 	/*
 	 * AnalogControllerHandler(eSTGAnalogDeviceCode, unsigned short,

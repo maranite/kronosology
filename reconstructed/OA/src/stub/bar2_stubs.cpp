@@ -337,18 +337,18 @@ void CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) {}
  * has the full confirmed device-code dispatch). Superseded the deliberate
  * no-op stub that lived here.
  *
- * ButtonPressHandler(unsigned int, bool) -- confirmed real, deliberately
- * DEFERRED extern (own ~144-entry per-button action table across two
- * `.rodata` jump tables not traced this pass -- see oa_global.h's own
- * updated comment and the `oa_front_panel_analog_button_handlers`
- * agent-memory note for the confirmed shape/table addresses for a future
- * batch), needed as a link target now that CSTGFrontPanel::
- * HandleSwitchEvent (front_panel_handlers.cpp, 2026-07-24) calls it for
- * real. Stubbed here: with no physical front panel attached in a VM, no
- * real hardware event can ever reach this call in the first place, so a
- * no-op is safe and inert for kronos_vm boot-testing purposes -- but see
- * HARDWARE_REVIEW_LOG.md for the real-hardware impact. */
-void CSTGControllerInfo::ButtonPressHandler(unsigned int, bool) {}
+ * ButtonPressHandler(unsigned int, bool) -- REAL body now, batch 66, see
+ * src/engine/controller_info_button_handler.cpp (own header comment has
+ * the full confirmed three-`.rodata`-table dispatch). Superseded the
+ * deliberate no-op stub that lived here. Its own deferred callees
+ * (`HandleEditInContextButton`, `ProcessMixerSwitchPress`,
+ * `SetMixerKnobMode`, `SetSoloSelected`, `ResetAllKnobCCs`,
+ * `ResetAllExtModeControllers`, the weak `NotifyParam(unsigned int,
+ * long)`) are deliberately NOT stubbed here -- same convention as the 22
+ * `AnalogXxxHandler` methods `AnalogControllerHandler` calls: they remain
+ * genuinely unresolved OA.ko-internal symbols (see `nm -u`), matching
+ * the real binary's own "not yet load-bearing" state for this front-
+ * panel-button subsystem. */
 /* CSTGKeybedInterface::SetLED -- REAL body now, batch 64, see
  * src/init/keybed_interface.cpp. Superseded the deliberate no-op stub
  * this file carried since batch 63 -- the class's ~20-method
