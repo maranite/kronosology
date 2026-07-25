@@ -2025,9 +2025,23 @@ struct CSTGProgram {
 	 * not modeled (plain `unsigned int`, matching this project's
 	 * established convention for not-yet-modeled enums). Deferred body
 	 * (bar2_stubs.cpp) -- genuine per-program-slot initialization,
-	 * out of scope pending further tracing.
+	 * out of scope pending further tracing. `.text+0xa4f30`, 415 bytes.
 	 */
 	void Initialize(unsigned int bankId, unsigned int patchSize, unsigned int voiceModelType);
+
+	/*
+	 * Copy(CSTGProgram*, eSTGProgramBankId, unsigned int, eSTGVoiceModelType)
+	 * (batch 61, ground-truthed via `CSTGProgramBank::Initialize`'s own
+	 * loop, see that class's comment below) -- confirmed real
+	 * (`.text+0xa50d0`, `_ZN11CSTGProgram4CopyEPS_17eSTGProgramBankIdj
+	 * 18eSTGVoiceModelType`), 8620 bytes -- a genuine deep program-copy
+	 * (far larger than `Initialize()` itself), out of scope for this
+	 * pass. Deferred body (bar2_stubs.cpp). Args, in real regparm(3)
+	 * register order confirmed via `CSTGProgramBank::Initialize()`'s own
+	 * disassembly: this=dest program, EDX=src program pointer, ECX=bankId,
+	 * stack[0]=flags(j), stack[4]=voiceModelType.
+	 */
+	void Copy(CSTGProgram *src, unsigned int bankId, unsigned int flags, unsigned int voiceModelType);
 };
 /*
  * CSTGCombi::CSTGCombi() (batch 45, `.text+0x8fb40`, 730 bytes) confirmed
@@ -2558,23 +2572,45 @@ public:
  * (`InitializePerformances()`'s own file-loading loop, see that
  * method's class comment above). Ground-truthed methods (`nm -CS`):
  *   `CSTGProgramBank::Initialize(eSTGProgramBankId,eSTGProgramBankType,bool)`  .text+0xa27f0, 151B
- *   `CSTGProgramBank::ChangeBankType(eSTGProgramBankType)`                     .text+0xa2890, 135B
- *   `CSTGProgramBank::InitializePrograms()`                                    .text+0xa2920, 135B
+ *   `CSTGProgramBank::ChangeBankType(eSTGProgramBankType)`                     .text+0xa2890, 135B (not reachable from any currently-real caller, not modeled)
+ *   `CSTGProgramBank::InitializePrograms()`                                    .text+0xa2920, 135B (not reachable from any currently-real caller, not modeled)
  *   `CSTGProgramBank::GetPatchSize() const`                                    .text+0xa29b0,  17B
  * Only `Initialize()`/`GetPatchSize()` are confirmed CALLED from
- * `InitializePerformances()`; declared opaque (no named fields -- this
- * project always reaches individual bank objects via raw
- * `CSTGGlobal+0x132e4d0+bankId*0x67603` pointer arithmetic, matching the
- * established `fieldAt()`-style convention for CSTGGlobal itself, never
- * a real C++ array member), bodies DSP/filesystem-stub-callee deferred
- * (genuine program-bank/patch management, out of scope). Both methods'
- * REAL argument types are project-specific enums not modeled here (plain
- * `unsigned int`, matching this project's established convention).
+ * `InitializePerformances()`; declared opaque (no named fields beyond the
+ * 3-byte header `Initialize()` writes -- this project always reaches
+ * individual bank objects via raw `CSTGGlobal+0x132e4d0+bankId*0x67603`
+ * pointer arithmetic, matching the established `fieldAt()`-style
+ * convention for CSTGGlobal itself, never a real C++ array member). Both
+ * methods' REAL argument types are project-specific enums not modeled
+ * here (plain `unsigned int`, matching this project's established
+ * convention).
+ *
+ * BOTH ARE REAL NOW (batch 61) -- see src/engine/program_bank_init.cpp.
+ * CORRECTION of this comment's own prior "bodies DSP/filesystem-stub-
+ * callee deferred (genuine program-bank/patch management, out of scope)"
+ * claim: that was never actually disassembled -- a fresh look found
+ * `Initialize()`'s OWN body is a trivial 3-byte header write (bankId/
+ * flag/bankType) + a flags/voiceModelType formula + a 128-iteration loop
+ * calling `CSTGProgram::Initialize()` once and `CSTGProgram::Copy()` 127
+ * times -- no DSP, no vtable dispatch, no filesystem I/O of its own.
+ * `GetPatchSize()` turns out to be a MISNOMER -- it recomputes the exact
+ * same `flags` formula `Initialize()` derives from its own `flag`
+ * argument (0x610 if `this[1]!=0`, else 0xE14), reading the stored byte
+ * back from `this+1` -- not a byte count at all. Both callees
+ * (`CSTGProgram::Initialize()`/`Copy()`) remain deliberately deferred
+ * stubs (415B/8620B respectively, `Copy()` a genuine deep program copy)
+ * -- reconstructing the caller and stubbing the DSP-scale callee matches
+ * this project's established `ChangeProgram()`/`Setup()`/
+ * `CompleteLoadProgram()` pattern.
  */
 class CSTGProgramBank {
 public:
 	void Initialize(unsigned int bankId, unsigned int bankType, bool flag);
 	unsigned int GetPatchSize() const;
+
+	unsigned char _bankId;		/* +0x0 */
+	unsigned char _flag;		/* +0x1 */
+	unsigned char _bankType;	/* +0x2 */
 };
 
 class CSTGGlobal {

@@ -91,6 +91,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/audio_bus_manager.o \
            src/engine/program_slot_ctor.o \
            src/engine/program_ctor.o \
+           src/engine/program_bank_init.o \
            src/engine/combi_ctor.o \
            src/engine/sequence_ctor.o \
            src/engine/streaming_event_manager.o \
@@ -342,6 +343,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/audio_bus_manager.cpp \
        src/engine/program_slot_ctor.cpp \
        src/engine/program_ctor.cpp \
+       src/engine/program_bank_init.cpp \
        src/engine/combi_ctor.cpp \
        src/engine/sequence_ctor.cpp \
        src/engine/streaming_event_manager.cpp \
@@ -483,7 +485,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_init_module_real_atmel \
          verify/test_klm_authorize_builtins \
          verify/test_set_list_eq_init \
-         verify/test_controller_info_send_unsolicited_ui_param
+         verify/test_controller_info_send_unsolicited_ui_param \
+         verify/test_program_bank_init
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -817,6 +820,9 @@ verify/test_atmel_zone_io: verify/test_atmel_zone_io.cpp src/auth/atmel_zone_io.
 
 verify/test_program_ctor: verify/test_program_ctor.cpp src/engine/program_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_program_ctor.cpp src/engine/program_ctor.cpp -o $@
+
+verify/test_program_bank_init: verify/test_program_bank_init.cpp src/engine/program_bank_init.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_program_bank_init.cpp src/engine/program_bank_init.cpp -o $@
 
 verify/test_combi_ctor: verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp include/oa_global.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_combi_ctor.cpp src/engine/combi_ctor.cpp src/engine/program_ctor.cpp -o $@

@@ -503,17 +503,24 @@ void CSTGControllerRTData::ResetRTKKnobSmoothers() {}
 /* CSTGGlobal::InitializePerformances() is real now, batch 54 -- see
  * src/engine/init_performances.cpp. Its own genuinely-deferred filesystem-
  * I/O/DSP-stub-callee sub-parts follow, all newly declared this batch
- * (oa_global.h): CKorgPreloadFile::Load() (genuine SSD file I/O),
- * CSTGProgramBank::Initialize()/GetPatchSize() (genuine program-bank/
- * patch management), CSTGProgram::Initialize() (genuine per-program-slot
- * init), and PopulateDefaultProgramSlotTemplates() (the still-untraced
- * two-nested-loop default-performance-data block -- see
- * InitializePerformances()'s own class comment for the full derivation
- * of what this represents). */
+ * (oa_global.h): CKorgPreloadFile::Load() (genuine SSD file I/O), and
+ * PopulateDefaultProgramSlotTemplates() (the still-untraced two-nested-loop
+ * default-performance-data block -- see InitializePerformances()'s own
+ * class comment for the full derivation of what this represents).
+ * CSTGProgramBank::Initialize()/GetPatchSize() are real now too, batch 61
+ * -- see src/engine/program_bank_init.cpp (that file's own header
+ * comment corrects a stale "DSP/filesystem, out of scope" claim this
+ * comment previously made about them -- see oa_global.h's
+ * CSTGProgramBank class comment). CSTGProgram::Initialize() (415B) and
+ * CSTGProgram::Copy() (8620B, newly discovered this batch as
+ * CSTGProgramBank::Initialize()'s own 127-iteration loop callee) remain
+ * deliberately deferred -- their own no-op bodies are DELIBERATELY kept
+ * here rather than moved into program_bank_init.cpp, so
+ * test_program_bank_init.cpp can supply its own local call-tracking
+ * mocks for both without a multiple-definition conflict. */
 int CKorgPreloadFile::Load() { return 1; }
-void CSTGProgramBank::Initialize(unsigned int, unsigned int, bool) {}
-unsigned int CSTGProgramBank::GetPatchSize() const { return 0; }
 void CSTGProgram::Initialize(unsigned int, unsigned int, unsigned int) {}
+void CSTGProgram::Copy(CSTGProgram *, unsigned int, unsigned int, unsigned int) {}
 void CSTGGlobal::PopulateDefaultProgramSlotTemplates() {}
 /* CSTGHDRMiniModel::CSTGHDRMiniModel() is real now, sec 10.155 -- see
  * src/engine/engine_init.cpp. */
