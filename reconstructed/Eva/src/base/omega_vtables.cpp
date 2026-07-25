@@ -235,4 +235,13 @@ void *PTR__CSysExMsgTaskBase_08e84c28[13] = {
 	(void *)EvaVTableStub,
 };
 int EvaDataPlaceholder_08e84c50 = 0;
+
+/* CEditServer's own vtable pair -- see header comment. */
+void *PTR__CEditServer_08e817b0[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TPtrArray_08e817e8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

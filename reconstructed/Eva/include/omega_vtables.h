@@ -220,6 +220,19 @@ extern void *PTR__CMessageInput_08e80c68[1];
  */
 extern void *PTR__CSysExMsgTaskBase_08e84c28[13];
 extern int   EvaDataPlaceholder_08e84c50;
+
+/* CEditServer's own real vtable (edit_server.h, Stage 6 breadth sweep,
+ * 2026-07-25 -- MMainESCommon/MMainESGlobal survey batch): primary at
+ * 08e817a8+8=08e817b0 (7 slots, boundary = the next real symbol,
+ * typeinfo-name for CEditServer at 08e817c4, per this file's established
+ * methodology). The embedded COmegaPtrArray subobject's own vtable-swap
+ * target, TPtrArray<SDescriptorTable> (_ZTV9TPtrArrayI16SDescriptorTableE,
+ * 08e817e0+8=08e817e8, 3 slots -- same size as every other
+ * TPtrArray<T>/TNamedPtrArray<T> flavor already declared below, e.g.
+ * PTR__TNamedPtrArray_08e80ea8).
+ */
+extern void *PTR__CEditServer_08e817b0[7];
+extern void *PTR__TPtrArray_08e817e8[3];
 }
 
 #endif /* OMEGA_VTABLES_H */

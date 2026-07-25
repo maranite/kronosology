@@ -96,7 +96,14 @@ public:
 	 */
 	void Shrink();
 
-private:
+protected:
+	/* protected, not private: CDataHandler (edit_server.h, Stage 6 breadth
+	 * sweep 2026-07-25) is a real derived class that needs direct raw access
+	 * to mCount/mArray -- matches ground truth's own CDataHandler::
+	 * FindDescriptor()/AddDescriptors() reading these fields via `this+0xc`/
+	 * `this+0x14` raw offsets on what is, in the real binary, this exact
+	 * subobject.
+	 */
 	void  *mVtbl;
 	int    mUnknown04;
 	int    mCapacity;

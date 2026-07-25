@@ -377,6 +377,44 @@ RECONSTRUCTED = {
     "0806b530",  # CSysApiInstance::AddConstructor(CModuleConstructor&)
     "08056440",  # CConfigManager::CreateUserModules
     "08056760",  # CConfigManager::CreateFMDrivers
+
+    # --- Stage 6: breadth sweep, MMainESCommon/MMainESGlobal survey batch
+    # (2026-07-25). Broad nm -C survey of all 13 untraced mains.cpp MMainXxx
+    # shims found the entire 10-member CModule+CEditServer "edit server"
+    # family (ESCommon/ESProg/ESEffect/ESCombi/ESGlobal/ESMOSS/ESSampling/
+    # ESSetList/ESSong/ESDisk) shares one identical shell shape wrapping a
+    # generic, real, shared descriptor-based Get/Set engine (CDataHandler/
+    # CEditServer, edit_server.h) -- reconstructed here using CESCommon
+    # (es_common.h) as the representative instance. Each of the 10 classes'
+    # own Setup()-owned "CXxxTask" is a genuinely deep CSK/CForm-scale
+    # god-object (52-1092 real methods per nm -C, all 10 individually
+    # counted) and stays out of scope, same boundary as CFileMan/CResMan.
+    # Neither CDataHandler/CEditServer nor CESCommon are reachable from this
+    # reconstruction's own currently-wired boot path yet -- construction is
+    # gated behind CConfigManager::CreateUserModules() (above), itself a
+    # real no-op given today's zero-initialized sm_ptCreateInfo placeholder.
+    # Verified via verify/test_edit_server.cpp (30 checks) +
+    # verify/test_es_common.cpp (6 checks, including a byte-exact
+    # sizeof(CESCommon)==0x40064 check confirming the multiple-inheritance
+    # layout matches CESCommonModuleConstructor::Create()'s own real malloc
+    # size). Along the way, corrected this batch's own initial assumption
+    # about Get()/Set()'s return-code convention (neither is a simple
+    # success/failure boolean -- see edit_server.h's own Get()/Set() comments).
+    "0806d390",  # CDataHandler::AddDescriptors(CObjectBase*, SDescriptor*, int, bool)
+    "0806d8d0",  # CDataHandler::FindDescriptor(uchar,uchar,uchar,SDescriptor*&,CObjectBase*&) const
+    "0806e050",  # CDataHandler::FindDescriptor(CObjectBase*, uchar CObjectBase::*, SDescriptor*&) const
+    "08070970",  # CEditServer::CEditServer(char const*)
+    "08070820",  # CEditServer::~CEditServer() (complete-object dtor)
+    "08070a80",  # CEditServer::FindDescriptor(uchar,uchar,uchar) const
+    "0806fa90",  # CEditServer::SetDefault(uchar,uchar,uchar)
+    "0806fb40",  # CEditServer::Get(uchar,uchar,uchar,void*,uint)
+    "080700b0",  # CEditServer::Set(uchar,uchar,uchar,void const*,uint,EEditSource)
+    "08c1a680",  # CEditServer::PutNotify(uchar,uchar)
+    "08bd1e00",  # CESCommon::CESCommon(char const*, int)
+    "08bd1be0",  # CESCommon::~CESCommon() (complete-object dtor)
+    "08bd1d80",  # CESCommon::Setup()
+    "08bd1bd0",  # CESCommon::Start(), confirmed-empty
+    "08bd1bc0",  # CESCommon::Config(), confirmed-empty
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
