@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * midi_out_port.cpp  -  CSTGMidiPortManager::RegisterMidiOutPort() +
- * CSTGMidiOutPort::Activate() (real MIDI-OUT path reconstruction).
+ * midi_out_port.cpp  -  CSTGMidiPortManager::RegisterMidiOutPort() (real
+ * MIDI-OUT path reconstruction).
  *
  * Deliberately a separate TU from midi_port_manager.cpp: that file is
  * already large and actively shared with an in-flight parallel MIDI-IN
@@ -10,14 +10,23 @@
  * there, matching this project's established per-symbol-cluster TU
  * convention (see midi_queue.cpp/midi_queue_writer.cpp's own precedent).
  *
- * Ground truth for everything in this file is
- * KronosScreenRemoteDaemon/midi_module/midi_bridge.c, an independently
- * developed, real-hardware-validated kernel module that taps this exact
- * subsystem live (see that file's own header comment + resolve_out_ports()
- * / QUEUE_PTR_OFF / QUEUE_BUF_OFF / RC_* definitions). See
- * oa_engine.h's CSTGMidiPortManager::RegisterMidiOutPort() declaration
- * and oa_engine_init.h's CSTGMidiOutPort definition for the full citation
- * of each individual field/offset.
+ * Ground truth is KronosScreenRemoteDaemon/midi_module/midi_bridge.c, an
+ * independently developed, real-hardware-validated kernel module that
+ * taps this exact subsystem live (see that file's own header comment +
+ * resolve_out_ports() / QUEUE_PTR_OFF / QUEUE_BUF_OFF / RC_*
+ * definitions). See oa_engine_init.h's CSTGMidiOutPort definition for
+ * the full citation of each individual field/offset.
+ *
+ * CSTGMidiOutPort::Activate() USED to live in this file too, as a
+ * speculative single-body guess (`Activate(int qslot, CSTGMidiQueue*,
+ * unsigned char*)`) built purely from midi_bridge.c's field layout with
+ * no independent disassembly. It has been REMOVED here: full
+ * `objdump -dr` against OA.ko_Decomp/OA.ko (OA.ko MIDI-OUT hardware
+ * batch) found the real signature takes exactly ONE argument and always
+ * wires up all 4 slots itself -- see midi_out_port_serial.cpp's real,
+ * disassembly-confirmed `CSTGMidiOutPort::Activate(CSTGMidiQueue*)`
+ * body (declared alongside the rest of the base class's now-fully-
+ * reconstructed methods in oa_engine_init.h).
  */
 
 #include "oa_global.h"
@@ -48,31 +57,4 @@ void CSTGMidiPortManager::RegisterMidiOutPort(CSTGMidiOutPort *port)
 	int index = (signed char)p[0x4];
 
 	((void **)sMidiOutPorts)[index] = port;
-}
-
-/*
- * Activate(int, CSTGMidiQueue*, unsigned char*) -- real method NAME
- * confirmed (midi_bridge.c's own header comment cites
- * "CSTGMidiOutPort::Activate" as the source of the q0-q3 field layout);
- * this body is NOT independently disassembled -- it is the direct,
- * conservative C expression of that confirmed layout: store the queue
- * pointer and its data buffer at the slot's two confirmed offsets, then
- * claim this port's OWN reader slot on that queue via the already-real
- * CSTGMidiQueue::AllocReader() (global.cpp, sec 10.82 -- a confirmed
- * `lock xadd $1,[queue+0x20]`) and record the returned index at the
- * slot's third confirmed offset. `qslot` is 0..3 (q0..q3); out-of-range
- * values are not guarded, matching RegisterMidiOutPort()'s own real
- * unclamped-index behavior above.
- */
-void CSTGMidiOutPort::Activate(int qslot, CSTGMidiQueue *queue, unsigned char *buf)
-{
-	unsigned char *self = (unsigned char *)this;
-
-	static const unsigned int kQueueOff[4] = { 0x08, 0x14, 0x20, 0x2c };
-	static const unsigned int kBufOff[4]   = { 0x0c, 0x18, 0x24, 0x30 };
-	static const unsigned int kIdxOff[4]   = { 0x10, 0x1c, 0x28, 0x34 };
-
-	*(CSTGMidiQueue **)(self + kQueueOff[qslot]) = queue;
-	*(unsigned char **)(self + kBufOff[qslot])   = buf;
-	self[kIdxOff[qslot]] = queue ? queue->AllocReader() : 0;
 }

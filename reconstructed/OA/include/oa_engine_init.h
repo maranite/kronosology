@@ -454,14 +454,50 @@ struct CSTGMidiQueue {
 };
 
 /*
- * CSTGMidiOutPort -- newly reconstructed. Field layout is NOT from this
- * project's own Ghidra pass; it's ported directly from
+ * CSTGMidiOutPort -- base field layout originally ported from
  * KronosScreenRemoteDaemon/midi_module/midi_bridge.c's own independently
  * ground-truthed real-hardware findings (that daemon taps these exact
  * fields live via raw offset arithmetic on a real Kronos, no guessing):
  * see midi_bridge.c's QUEUE_PTR_OFF/QUEUE_BUF_OFF tables and its own
  * "Port layout from CSTGMidiOutPort::Activate" comment, which names this
  * class's own real method -- reused verbatim below as `Activate()`.
+ *
+ * UPDATED (OA.ko MIDI-OUT hardware batch, candidate 1): `Activate()`'s
+ * REAL signature/body is now independently confirmed via full
+ * `objdump -dr` against OA.ko_Decomp/OA.ko (`.text+0xf7f10`, 365 bytes,
+ * `_ZN15CSTGMidiOutPort8ActivateEP13CSTGMidiQueue`) -- the field LAYOUT
+ * midi_bridge.c ground-truthed was already exactly right, but the
+ * earlier stand-in body/signature here (`Activate(int qslot,
+ * CSTGMidiQueue*, unsigned char*)`) was a guess and WRONG: the real
+ * method takes exactly ONE argument (the q3/"per-port" queue) and
+ * unconditionally wires up all 4 slots itself every call. See the real
+ * body's own citation below and midi_out_port_serial.cpp's header
+ * comment for the full disassembly-confirmed derivation (relocations,
+ * vtable slot numbering, the `CSTGMidiQueueMessageReader` embedding,
+ * and the two `.rodata.cst4` float constants this file's lazy-init
+ * caches use).
+ *
+ * Also newly confirmed real (same batch): `Deactivate()`, `BumpTimers()`
+ * (a real, non-pure base-class body -- decrements the countdown timer at
+ * +0x3c), `ProcessNormal()`, `ProcessNKS4TestMode()`,
+ * `GenerateActiveSensing()`, `ProcessRealTimeMessage()`,
+ * `ReadNextMessage()`, and the 2-argument constructor. Real vtable
+ * (`_ZTV15CSTGMidiOutPort`, confirmed via `.rel.rodata` relocations)
+ * has 9 slots, byte offsets relative to the IN-OBJECT vtable pointer
+ * (which itself already points past the 2-word RTTI header):
+ *   +0x00 dtor (still __cxa_pure_virtual -- this class is abstract)
+ *   +0x04 Activate(CSTGMidiQueue*)      -- REAL (see above)
+ *   +0x08 Deactivate()                  -- REAL
+ *   +0x0c BumpTimers()                  -- REAL
+ *   +0x10 CanSendRealTime() const       -- pure in this class
+ *   +0x14 CanSendRegular() const        -- pure
+ *   +0x18 ProcessRegularMessage()       -- pure
+ *   +0x1c SendRealTime(unsigned char)   -- pure
+ *   +0x20 SendSingleByte(unsigned char) -- pure
+ * `CSTGMidiOutPortSerial` (below) overrides everything except
+ * `Deactivate()`, and adds 2 MORE trailing slots (+0x24/+0x28) that are
+ * STILL `__cxa_pure_virtual` even in Serial's own vtable -- see that
+ * class's own comment.
  *
  * Each instance holds up to 4 queue slots. Confirmed real offsets:
  *   +0x00  vtable ptr (CallVtableSlot-style dispatch, see
@@ -475,15 +511,23 @@ struct CSTGMidiQueue {
  *          Exact write site not independently confirmed (plausibly set
  *          by CKorgUsbAudioDriverMidiPorts's static init alongside
  *          constructing the 2 real out-ports -- not reconstructed here).
- *   +0x08/+0x0c  q0: CSTGMidiQueue* / data buffer  (active-sensing/
- *                realtime -- midi_bridge.c: "not interesting", excluded
- *                from its own capture on purpose)
- *   +0x14/+0x18  q1: CSTGMidiQueue* / data buffer  (SHARED across every
- *                out-port -- identical pointer value in all instances)
- *   +0x20/+0x24  q2: CSTGMidiQueue* / data buffer  (SHARED; carries live
- *                notes/CC/program-change/combi SysEx per midi_bridge.c)
- *   +0x2c/+0x30  q3: CSTGMidiQueue* / data buffer  (per-port bulk-dump
- *                queue -- where a data-dump reply routes, USB vs DIN)
+ *   +0x08/+0x0c  q0: CSTGMidiQueue* / resolved data-buffer pointer
+ *                (active-sensing/realtime -- midi_bridge.c: "not
+ *                interesting", excluded from its own capture on
+ *                purpose). Sourced from the embedded CSTGMidiQueue at
+ *                `CSTGMidiPortManager::sInstance + 0xd4`.
+ *   +0x14/+0x18  q1: CSTGMidiQueue* / resolved data-buffer pointer
+ *                (SHARED across every out-port -- identical pointer
+ *                value in all instances). Sourced from
+ *                `CSTGMidiPortManager::sInstance + 0x0c`.
+ *   +0x20/+0x24  q2: CSTGMidiQueue* / resolved data-buffer pointer
+ *                (SHARED; carries live notes/CC/program-change/combi
+ *                SysEx per midi_bridge.c). Sourced from
+ *                `CSTGMidiPortManager::sInstance + 0x70`.
+ *   +0x2c/+0x30  q3: CSTGMidiQueue* / resolved data-buffer pointer
+ *                (per-port bulk-dump queue -- where a data-dump reply
+ *                routes, USB vs DIN). THE ONLY ONE OF THE 4 THAT IS
+ *                CALLER-SUPPLIED: `Activate()`'s own one argument.
  *   +0x10/+0x1c/+0x28/+0x34  one reader-index byte per slot, immediately
  *                after that slot's own buffer pointer -- THIS port's own
  *                reader slot on that queue (the value AllocReader()
@@ -492,45 +536,379 @@ struct CSTGMidiQueue {
  *                third party like midi_bridge.c claims its OWN separate
  *                index via its own AllocReader() call and stores it in
  *                its own private state, never writing here).
+ *   +0x1d/+0x29/+0x35  CONFIRMED (this batch, `ReadNextMessage()`/
+ *                `CSTGMidiOutPortSerial::ProcessRegularMessage()`/
+ *                `RefillMsgBuffer()` all read it) -- NOT independent
+ *                padding as previously modeled. The q1/q2/q3 slots
+ *                (Queue* / Buf* / ReaderIdx, 9 bytes, +0x14/+0x20/+0x2c
+ *                respectively) are laid out BYTE-IDENTICALLY to
+ *                `CSTGMidiQueueMessageReader` (ringCtl/buf/readerIdx/
+ *                inSysEx, oa_engine_init.h below) and are literally
+ *                reinterpreted in place as one whenever
+ *                `CSTGMidiQueueMessageReader::ReadMessage()` is called
+ *                on them -- this byte IS that embedded reader's own
+ *                `inSysEx` flag, not a separate field. q0's own pad
+ *                (+0x11..+0x13) is never touched this way: q0 is read
+ *                via raw ring-cursor peek/advance in
+ *                `ProcessRealTimeMessage()`/`ProcessNormal()`/
+ *                `GenerateActiveSensing()` instead, never through
+ *                `CSTGMidiQueueMessageReader`.
  *   +0x05  flags -- CONFIRMED (not merely inferred) by
  *          `CSTGMidiPortManager::~CSTGMidiPortManager()`'s own real
  *          disassembly (.text+0xf5280, 264 bytes, src/engine/
  *          midi_port_manager.cpp): `testb $0x2,0x5(%eax)` gates whether
  *          this out-port's vtable slot 2 (presumably its own virtual
  *          destructor) gets called during manager teardown -- bit1 =
- *          "active"/live, by direct analogy with CSTGMidiInPort's own
- *          confirmed `flags` field at +0x26, bit1 (oa_engine.h). This
- *          byte was previously modeled as unconfirmed padding here; the
- *          other 7 bits' meaning is still not independently determined,
- *          and the exact write site (this class has no reconstructed
- *          constructor) is not confirmed either.
- * No further fields/total size independently confirmed -- modeled as
- * exactly the 0x38 bytes these confirmed fields span, deliberately not
- * padded further.
+ *          "active"/live, set by `Activate()`. Bit0 CONFIRMED this
+ *          batch: initialized from the low bit of the constructor's
+ *          2nd parameter (`flags = (flags & 0xfe) | (ctorParam2 & 1)`,
+ *          real disassembly of the ctor, `.text+0xf8270`). The other 6
+ *          bits' meaning is still not independently determined.
+ *   +0x38  roundRobinIdx (byte, CONFIRMED this batch) -- cycles 0/1/2
+ *          selecting which of q1/q2/q3's embedded
+ *          `CSTGMidiQueueMessageReader` to poll next
+ *          (`ReadNextMessage()`/Serial's `ProcessRegularMessage()`/
+ *          `RefillMsgBuffer()` all share this exact field+algorithm).
+ *   +0x3c  activeSensingTimer (int, CONFIRMED this batch) -- decremented
+ *          by `BumpTimers()` while nonzero; reloaded to
+ *          `sActiveSensingTransmitPeriodTicks` whenever ANY byte is
+ *          actually transmitted (`ProcessNormal()`) or when a due
+ *          Active Sensing byte (0xFE) is sent (`GenerateActiveSensing()`).
+ * CSTGMidiOutPort's own real size is exactly 0x40 bytes (confirmed:
+ * `CSTGMidiOutPortSerial`'s own new fields start immediately at +0x40,
+ * no gap) -- previously modeled as ending at 0x38.
  */
 struct CSTGMidiOutPort {
-	void   *vtable;               /* +0x00 */
+	/*
+	 * All pointer-shaped fields below are PACKED 32-bit
+	 * (`unsigned int`), not native C++ pointer types -- matching this
+	 * project's established `ToU32()`/`FromU32()` convention (see
+	 * CSTGMidiQueueWriter, oa_global.h) for any field whose offset was
+	 * derived from 32-bit target disassembly. Using native
+	 * `CSTGMidiQueue*`/`unsigned char*` members here was tried first and
+	 * reverted: on a 64-bit host KAT build those are 8 bytes, not 4,
+	 * silently doubling every field's real size and shifting all
+	 * offsets from +0x38 onward -- caught via a live KAT segfault
+	 * reading garbage through a q2/q3 slot reinterpreted as a
+	 * `CSTGMidiQueueMessageReader`. The kernel target itself is -m32,
+	 * where this distinction doesn't exist; packing keeps the struct's
+	 * `sizeof`/offsets IDENTICAL on both.
+	 */
+	unsigned int vtable;          /* +0x00 */
 	signed char portIndex;        /* +0x04 -- this port's own sMidiOutPorts[] slot */
-	unsigned char flags;          /* +0x05 -- bit1 = active/live, see class comment above */
+	unsigned char flags;          /* +0x05 -- bit1 = active/live, bit0 = ctor param2&1, see class comment above */
 	unsigned char _pad6[2];       /* +0x06..+0x07, natural alignment, not independently confirmed */
 
-	CSTGMidiQueue *q0Queue;        unsigned char *q0Buf;  unsigned char q0ReaderIdx; unsigned char _pad11[3];
-	CSTGMidiQueue *q1Queue;        unsigned char *q1Buf;  unsigned char q1ReaderIdx; unsigned char _pad1d[3];
-	CSTGMidiQueue *q2Queue;        unsigned char *q2Buf;  unsigned char q2ReaderIdx; unsigned char _pad29[3];
-	CSTGMidiQueue *q3Queue;        unsigned char *q3Buf;  unsigned char q3ReaderIdx; unsigned char _pad35[3];
+	unsigned int q0Queue;  unsigned int q0Buf;  unsigned char q0ReaderIdx; unsigned char _pad11[3];
+	unsigned int q1Queue;  unsigned int q1Buf;  unsigned char q1ReaderIdx; unsigned char q1InSysEx; unsigned char _pad1e[2];
+	unsigned int q2Queue;  unsigned int q2Buf;  unsigned char q2ReaderIdx; unsigned char q2InSysEx; unsigned char _pad2a[2];
+	unsigned int q3Queue;  unsigned int q3Buf;  unsigned char q3ReaderIdx; unsigned char q3InSysEx; unsigned char _pad36[2];
+
+	unsigned char roundRobinIdx;  /* +0x38 -- cycles 0/1/2 over q1/q2/q3 */
+	unsigned char _pad39[3];
+	int activeSensingTimer;       /* +0x3c */
+
+	/* sActiveSensingTransmitPeriodTicks -- confirmed real static
+	 * (`_ZN15CSTGMidiOutPort31sActiveSensingTransmitPeriodTicksE`,
+	 * BSS, .bss+0x9ef6c). Lazily computed on the first `Activate()`
+	 * call as `(int)(0.25f * CSTGAudioBusManager::sInstance->
+	 * busGainScale)` -- with the confirmed real `busGainScale`=1500.0f
+	 * this is exactly 375 ticks (0.25s of Active-Sensing period at a
+	 * 1500Hz tick rate). Shared by every CSTGMidiOutPort instance. */
+	static int sActiveSensingTransmitPeriodTicks;
 
 	/*
-	 * Activate(int qslot, CSTGMidiQueue*, unsigned char*) -- real method
-	 * name confirmed by midi_bridge.c's own header comment (it names
-	 * this exact method as the source of the field layout above), body
-	 * NOT independently disassembled by this project -- modeled as the
-	 * straightforward store-both-pointers-and-claim-a-reader operation
-	 * the confirmed field layout implies: populates one of the 4 queue
-	 * slots and claims this port's own reader slot on it via the
-	 * already-real CSTGMidiQueue::AllocReader() (sec 10.82,
-	 * global.cpp) -- marked speculative body, real layout.
+	 * CSTGMidiOutPort(eSTGMidiPort portType, unsigned int flagsInit) --
+	 * CONFIRMED real (`.text+0xf8270`, 95 bytes, regparm(3): this=EAX,
+	 * portType=EDX, flagsInit=ECX). Sets the base (still mostly pure)
+	 * vtable, `portIndex = (unsigned char)portType`, `flags` bit0 from
+	 * `flagsInit & 1`, zeroes all 4 queue-slot Queue* / Buf* pointers
+	 * (NOT the reader-index/inSysEx bytes, left uninitialized until
+	 * `Activate()`), then calls the already-real
+	 * `CSTGMidiPortManager::RegisterMidiOutPort(this)`.
 	 */
-	void Activate(int qslot, CSTGMidiQueue *queue, unsigned char *buf);
+	CSTGMidiOutPort(int portType, unsigned int flagsInit);
+
+	/*
+	 * Activate(CSTGMidiQueue *q3) -- CONFIRMED real
+	 * (`_ZN15CSTGMidiOutPort8ActivateEP13CSTGMidiQueue`, `.text+0xf7f10`,
+	 * 365 bytes). Takes exactly ONE argument (the per-port "bulk-dump"
+	 * queue, stored as q3) and unconditionally wires up ALL 4 slots:
+	 * q0/q1/q2 always resolve to the 3 SAME `CSTGMidiPortManager`-
+	 * embedded `CSTGMidiQueue` objects (+0xd4/+0x0c/+0x70 respectively);
+	 * q3 is the caller-supplied argument. For each slot: store the
+	 * `CSTGMidiQueue*`, resolve its data buffer (read the queue's own
+	 * `allocHandle` at its +0x0, translate via `CSTGHeapManager`'s
+	 * handle table -- see midi_out_port_serial.cpp's `resolve_heap_
+	 * handle()`, the exact formula this real body uses), and claim this
+	 * port's own reader slot via `CSTGMidiQueue::AllocReader()`. q1/q2/
+	 * q3 additionally zero their `inSysEx` byte (q0 does not -- it has
+	 * no embedded reader). Finally zeroes `roundRobinIdx`/
+	 * `activeSensingTimer` and sets `flags` bit1 (active).
+	 */
+	void Activate(CSTGMidiQueue *q3);
+
+	/* Deactivate() -- CONFIRMED real (`.text+0xf7d70`, 5 bytes): clears
+	 * `flags` bit1. */
+	void Deactivate();
+
+	/* BumpTimers() -- CONFIRMED real, non-pure base body
+	 * (`.text+0x5a6880`, comdat/weak, 14 bytes): decrements
+	 * `activeSensingTimer` by 1 while nonzero. `CSTGMidiOutPortSerial`
+	 * overrides this to ALSO decrement its own `runningStatusTimer`. */
+	void BumpTimers();
+
+	/*
+	 * NOTE on ProcessNormal()/ProcessNKS4TestMode()/GenerateActiveSensing()/
+	 * ProcessRealTimeMessage()/ReadNextMessage(): all 5 are CONFIRMED
+	 * real members of THIS class in the actual binary (vtable slots
+	 * 4-8, dispatched through the real vtable at runtime). They are
+	 * declared on `CSTGMidiOutPortSerial` below instead of here,
+	 * deliberately: every one of them internally calls
+	 * `CanSendRealTime()`/`CanSendRegular()`/`ProcessRegularMessage()`/
+	 * `SendRealTime()`/`SendSingleByte()` -- 5 more real vtable slots
+	 * that are still pure `__cxa_pure_virtual` in THIS class and only
+	 * become concrete in `CSTGMidiOutPortSerial`. Reproducing that with
+	 * genuine C++ `virtual` would insert a compiler-generated vtable
+	 * pointer that does NOT line up with the single explicit `vtable`
+	 * field this struct already models by hand (a real, confirmed
+	 * mismatch hit and fixed during this reconstruction: every field
+	 * offset below `+0x40` shifted by 4 bytes and corrupted the q1/q2/q3
+	 * embedded-`CSTGMidiQueueMessageReader` reinterpretation). Since
+	 * `CSTGMidiOutPortSerial` is the only concrete class this project
+	 * models at all (matching every other non-virtual class in this
+	 * codebase), hosting these 5 methods there and calling the other 5
+	 * as ordinary (non-virtual) same-class member functions produces
+	 * IDENTICAL observable behavior with zero ABI risk.
+	 */
+
+	/* Pure vtable hooks 4-8 in the real binary (`CanSendRealTime()`/
+	 * `CanSendRegular()`/`ProcessRegularMessage()`/`SendRealTime()`/
+	 * `SendSingleByte()`) are likewise declared+defined only on
+	 * `CSTGMidiOutPortSerial` below, for the same reason. */
+};
+
+/*
+ * CSTGMidiOutPortSerial -- the physical (5-pin DIN) hardware MIDI-OUT
+ * UART port: the direct output-side counterpart to
+ * `CSTGMidiInPortSerial` (midi_in_port_serial.cpp). CONFIRMED real via
+ * `.rel.rodata._ZTV21CSTGMidiOutPortSerial` (11 slots: the base's own 9
+ * at identical offsets, PLUS 2 trailing slots at +0x24/+0x28 that are
+ * STILL `__cxa_pure_virtual` even here -- i.e. this class remains
+ * abstract; some more-derived hardware-backend class not present
+ * anywhere in this .ko provides the actual UART transmit primitives).
+ * `CanSendRealTime()`/`CanSendRegular()` (both real, both 15 bytes, BYTE-
+ * IDENTICAL bodies) simply forward to vtable slot +0x24; `SendRealTime()`/
+ * `SendSingleByte()` (both real, both 18 bytes, byte-identical) forward
+ * to vtable slot +0x28 with the byte in EDX -- i.e. Serial itself does
+ * not distinguish realtime vs. regular transmit priority at the
+ * hardware level, it has exactly ONE "can transmit"/"transmit byte"
+ * pair underneath, shared for both. Modeled here as 2 unresolved pure-
+ * virtual hooks (`CanTransmitHardware()`/`TransmitHardwareByte()`) that
+ * this reconstruction does NOT implement, matching the real binary
+ * exactly: if ever actually invoked on a real `CSTGMidiOutPortSerial`
+ * object (rather than some further-derived concrete class), real
+ * hardware would hit `__cxa_pure_virtual` too. New fields (all
+ * CONFIRMED via `Activate()`/`ProcessRegularMessage()`/
+ * `RefillMsgBuffer()` disassembly, `.text+0xf8080`/`0xf80e0`/`0xf8570`):
+ *   +0x40..+0x42  3-byte decoded regular-message buffer (status,data1,
+ *                 data2) -- `ReadMessage()`'s own `buf` argument, always
+ *                 called with `bufLen=3`.
+ *   +0x43  msgLen -- the length `ReadMessage()` last returned (0..3).
+ *   +0x44  state (byte) -- gates whether `ProcessRegularMessage()` needs
+ *          to pull a NEW message this call or is still delivering a
+ *          previously-decoded one via running-status compression (0/1/2
+ *          observed values; exact state-machine semantics not fully
+ *          named, translated literally from the real disassembly).
+ *   +0x45  lastStatus (byte) -- the most recent channel-message status
+ *          byte sent, for running-status comparison.
+ *   +0x48  runningStatusTimer (int) -- decremented by this class's own
+ *          `BumpTimers()` override; reloaded to `sRunningStatusTimeoutTicks`
+ *          whenever a status byte is (re)confirmed.
+ * `sRunningStatusTimeoutTicks` (confirmed real static,
+ * `_ZN21CSTGMidiOutPortSerial25sRunningStatusTimeoutTicksE`, .bss+0x9ef70):
+ * lazily computed on the first `Activate()` call as
+ * `(int)(0.05f * CSTGAudioBusManager::sInstance->busGainScale)` = 75
+ * ticks (50ms at 1500Hz) with the confirmed real `busGainScale`=1500.0f.
+ */
+class CSTGMidiOutPortSerial : public CSTGMidiOutPort {
+public:
+	unsigned char msgBuf[3];      /* +0x40..+0x42 */
+	unsigned char msgLen;         /* +0x43 */
+	unsigned char state;          /* +0x44 */
+	unsigned char lastStatus;     /* +0x45 */
+	unsigned char _pad46[2];
+	int runningStatusTimer;       /* +0x48 */
+
+	static int sRunningStatusTimeoutTicks;
+
+	CSTGMidiOutPortSerial(int portType, unsigned int flagsInit)
+		: CSTGMidiOutPort(portType, flagsInit) {}
+
+	/*
+	 * Activate(CSTGMidiQueue*) override -- CONFIRMED real
+	 * (`.text+0xf8080`, 83 bytes): calls the base `Activate()` first,
+	 * lazily initializes `sRunningStatusTimeoutTicks`, then zeroes
+	 * `msgLen`/`state`/`lastStatus`/`runningStatusTimer`.
+	 */
+	void Activate(CSTGMidiQueue *q3);
+
+	/*
+	 * ProcessRegularMessage() override -- CONFIRMED real
+	 * (`.text+0xf80e0`, 378 bytes, full `objdump -dr` cross-checked
+	 * against the Ghidra decompile). See midi_out_port_serial.cpp's
+	 * own header comment for the full state-machine derivation
+	 * (running-status compression: when the same channel-status byte
+	 * repeats within `runningStatusTimer`, the status byte is omitted
+	 * and a 2-state "already sent status this round" flag is tracked
+	 * instead of re-sending it). Returns true iff a byte was actually
+	 * transmitted this call (CONFIRMED real: `ProcessNormal()`'s own
+	 * raw disassembly tests this return value in AL/DL) -- the earlier
+	 * `void` declaration here was wrong.
+	 */
+	bool ProcessRegularMessage();
+
+	/*
+	 * RefillMsgBuffer() -- CONFIRMED real (`.text+0xf8570`, 324 bytes).
+	 * The "prepare next message without sending" half of the same
+	 * running-status logic `ProcessRegularMessage()` uses -- pulls the
+	 * next message via the same round-robin `ReadMessage()` polling,
+	 * but only updates `lastStatus`/`runningStatusTimer`/`state`
+	 * bookkeeping, never calls a Send hook itself.
+	 */
+	void RefillMsgBuffer();
+
+	/* BumpTimers() override -- CONFIRMED real (`.text+0x5a68b0`, 27
+	 * bytes): decrements BOTH the base's `activeSensingTimer` (+0x3c)
+	 * AND this class's own `runningStatusTimer` (+0x48). */
+	void BumpTimers();
+
+	/* CanSendRealTime()/CanSendRegular()/SendRealTime()/SendSingleByte()
+	 * -- CONFIRMED real (`.text+0x5a6890`/`0x5a68a0`/`0x5a68d0`/
+	 * `0x5a68f0`), all thin forwarders to the 2 still-pure "hardware"
+	 * slots described in this class's own header comment above
+	 * (`CanTransmitHardware()`/`TransmitHardwareByte()` below). */
+	bool CanSendRealTime() const;
+	bool CanSendRegular() const;
+	void SendRealTime(unsigned char byte);
+	void SendSingleByte(unsigned char byte);
+
+	/*
+	 * The 2 trailing vtable slots (+0x24/+0x28, CONFIRMED via
+	 * `.rel.rodata._ZTV21CSTGMidiOutPortSerial` -- both still
+	 * `__cxa_pure_virtual` in the real binary's own vtable for THIS
+	 * class). No further-derived class providing them exists anywhere
+	 * in OA.ko: real hardware would hit `__cxa_pure_virtual` (a kernel
+	 * BUG()) if this code path were ever actually reached, meaning this
+	 * exact UART-transmit path is genuinely dead/unwired in this
+	 * firmware image as shipped. DECLARED ONLY, deliberately no
+	 * definition in production code (src/engine/midi_out_port_serial.cpp)
+	 * -- matches the real binary's own "reaching this is a kernel BUG()"
+	 * semantics as an honest link-time gap rather than invented
+	 * behavior. (Not modeled as C++ `virtual`/pure: doing so would
+	 * insert a compiler-generated vtable pointer for THIS class's own
+	 * portion of the object, which does not exist in the real binary's
+	 * layout here and would corrupt the `msgBuf`/`msgLen`/etc offsets
+	 * below -- same class of mistake documented on the base class
+	 * above.) This project's own host KATs provide their own definition
+	 * of these two directly, matching the "test supplies its own
+	 * minimal stand-in for an unresolved symbol" convention used
+	 * throughout this codebase.
+	 */
+	bool CanTransmitHardware() const;
+	void TransmitHardwareByte(unsigned char byte);
+
+	/*
+	 * ProcessNormal()/ProcessNKS4TestMode()/GenerateActiveSensing()/
+	 * ProcessRealTimeMessage()/ReadNextMessage() -- all 5 CONFIRMED real
+	 * members of the BASE class `CSTGMidiOutPort` in the actual binary
+	 * (vtable slots 4-8's own dispatch is exercised FROM these methods'
+	 * bodies, not the other way around); declared here instead purely
+	 * so they can call `CanSendRealTime()`/`CanSendRegular()`/
+	 * `ProcessRegularMessage()`/`SendRealTime()`/`SendSingleByte()` as
+	 * ordinary non-virtual same-class calls -- see the base class's own
+	 * header comment for why. Bodies match the real disassembly exactly
+	 * regardless of which C++ class hosts the declaration.
+	 */
+	int ProcessNormal();
+	void ProcessNKS4TestMode();
+	void GenerateActiveSensing();
+	bool ProcessRealTimeMessage();
+	void ReadNextMessage(unsigned char *buf, unsigned int bufLen);
+};
+
+/*
+ * CSTGMidiQueueReader -- CONFIRMED real (`_ZN19CSTGMidiQueueReader4ReadEPhj`,
+ * `.text+0x40100`, 152 bytes), the read-side mirror of the already-real
+ * `CSTGMidiQueueWriter` (oa_global.h). Same opaque-struct, raw-offset-
+ * in-.cpp convention as that class. Real (unaligned, packed) layout:
+ *   +0x0  ringCtl pointer (same shared ringCtl shape as CSTGMidiQueueWriter)
+ *   +0x4  data buffer base pointer
+ *   +0x8  reader index (byte, 0..3) -- this reader's own slot number,
+ *         used as `ringCtl+0x10+(idx)*4` for its cursor (the "+4" bias
+ *         seen in the raw disassembly is this same `+0x10` expressed in
+ *         dword units)
+ * Total 9 bytes, NO padding (confirmed: `CSTGMidiQueueMessageReader`
+ * below places its own next field immediately at +9).
+ */
+struct CSTGMidiQueueReader {
+	void Read(unsigned char *dest, unsigned int count);
+};
+
+/*
+ * CSTGMidiQueueMessageReader -- CONFIRMED real, genuinely new class
+ * (`ReadMessage()` `.text+0x403d0`/377 bytes, `ReadSysEx()`
+ * `.text+0x40250`/364 bytes, both `objdump -dr` + Ghidra-decompile
+ * cross-checked). Starts with the EXACT SAME 9-byte layout as
+ * `CSTGMidiQueueReader` above (ringCtl/buf/readerIdx) -- confirmed by
+ * `ReadMessage()`'s own body treating `this` interchangeably as a
+ * `CSTGMidiQueueReader*` when it calls `CSTGMidiQueueReader::Read()` --
+ * plus one new field:
+ *   +0x9  inSysEx (byte) -- set/cleared by `ReadSysEx()` to record
+ *         whether a SysEx transfer is still in progress across calls.
+ * THIS IS WHY `CSTGMidiOutPort`'s own q1/q2/q3 slots are laid out
+ * Queue* / Buf* / ReaderIdx/inSysEx (12-byte stride, 9 real bytes + pad):
+ * each slot's 9-byte Queue* / Buf* / ReaderIdx prefix is byte-identical to
+ * this class's own layout, and `CSTGMidiOutPort::ReadNextMessage()`/
+ * `CSTGMidiOutPortSerial::ProcessRegularMessage()`/`RefillMsgBuffer()`
+ * all call `ReadMessage()` with `this` = `outPort + 0x14 +
+ * roundRobinIdx*0xc` (CONFIRMED via raw disassembly of
+ * `CSTGMidiOutPortSerial::ProcessRegularMessage()`, `lea eax,
+ * [ebx+eax*4+0x14]` with `eax`=roundRobinIdx*3 pre-scaled) -- i.e. the
+ * port's own q1/q2/q3 slot storage IS reinterpreted in place as a
+ * `CSTGMidiQueueMessageReader`, no separate object exists.
+ */
+struct CSTGMidiQueueMessageReader {
+	/*
+	 * ReadMessage(unsigned char *buf, unsigned int bufLen) -- returns
+	 * the decoded message length (0 = nothing ready). If the ring is
+	 * empty, returns 0. If `inSysEx` is set, forwards straight to
+	 * `ReadSysEx()`. Otherwise peeks the next ring byte: if it's a
+	 * stray data byte or a bare 0xF7, resyncs forward until a real
+	 * status byte is found (or the ring runs dry), discarding the skipped
+	 * bytes without returning a message. Once a status byte is found:
+	 * 0xF0 (SysEx start) dispatches to `ReadSysEx()`; otherwise the
+	 * expected length comes from `USTGMidiUtils::kChannelMsgLen[]`/
+	 * `kSystemMsgLen[]` (same real tables as
+	 * `CSTGMidiInPortSerial`/midi_in_port_serial.cpp) unless the
+	 * queue's own `format` field (its +0x4) is 1, in which case every
+	 * message is treated as exactly 1 byte -- then copies that many
+	 * bytes out via `CSTGMidiQueueReader::Read()`.
+	 */
+	unsigned int ReadMessage(unsigned char *buf, unsigned int bufLen);
+
+	/*
+	 * ReadSysEx(unsigned char *buf, unsigned int bufLen, unsigned int
+	 * alreadyWritten) -- scans forward for an 0xF7 (EOX) terminator
+	 * within the available ring backlog (clamped to `bufLen`), copies
+	 * the scanned span via `CSTGMidiQueueReader::Read()`, and (if EOX
+	 * was found within the copied span) appends a synthesized trailing
+	 * 0xF7 if the copy didn't already end with one, clearing `inSysEx`.
+	 * If no EOX was found within the available/allowed span, sets
+	 * `inSysEx=1` and returns the partial byte count (SysEx continues
+	 * on the next call). Two real callers within `ReadMessage()`.
+	 */
+	unsigned int ReadSysEx(unsigned char *buf, unsigned int bufLen, unsigned int alreadyWritten);
 };
 
 /*
