@@ -271,3 +271,49 @@ real-HW/live-VM test that would help: once a caller is identified and
 reconstructed, confirm a "rescan port 0 only" keybed reconnect actually
 matches this member pair's own hardcoded-port-0 behavior rather than
 the free pair's 6-port scan.
+
+---
+
+## CSTGMidiInPortSerial::ReceiveByte/ReceiveBytes/CheckForCompleteMessage — physical MIDI-IN UART parser (new cluster, 2026-07-25)
+
+Real-hardware-verification uncertainty for the whole new physical
+DIN-MIDI-IN byte-parser cluster (`src/engine/midi_in_port_serial.cpp`):
+
+- **No known live caller.** Same reachability caveat as several prior
+  clusters: nothing else in this reconstruction currently calls
+  `CSTGMidiInPortSerial::ReceiveByte()`/`ReceiveBytes()`. On real
+  hardware these would be invoked from a UART RX interrupt handler
+  (or a DMA-completion callback) that is itself not yet reconstructed
+  anywhere in this project. A real-HW test that would help: identify
+  the actual physical MIDI-IN interrupt/ISR entry point in OA.ko (or a
+  companion module) and confirm it really does call through these two
+  methods with raw UART bytes, one at a time or in DMA-sized chunks.
+- **Realtime-message timestamp ring (+0x14c..+0x1ac, 8 x 12-byte
+  entries) is a genuinely new discovery this batch** (see
+  midi_in_port_serial.cpp's own header comment for the full derivation)
+  carved out of what was previously an undifferentiated
+  `_unrecovered108[0x1d8]` blob. The field NAMES/PURPOSE (timestamped
+  MIDI-clock-jitter diagnostic ring) are an inference from the
+  rdtsc+ring-index code shape, not from any string/symbol confirming
+  intended use -- plausible (used for tempo-sync jitter measurement or
+  a diagnostics/`.oacmd` dump) but unconfirmed. A real-HW test: if any
+  `/proc/.oacmd` command or debug ioctl ever dumps this region, compare
+  its output against live MIDI Clock traffic timing to confirm the
+  ring's actual consumer.
+- **`StartSysEx()`/`ReceiveSysExData(unsigned char)` are deliberately
+  deferred no-op stubs** (bar2_stubs.cpp) -- this means a REAL physical
+  SysEx dump into this port would currently be silently dropped by this
+  reconstruction (the running-status/channel/system-common path this
+  batch actually reconstructs is unaffected and behaves faithfully).
+  Confirmed real, substantial (368 + 1297 bytes, plus 178 + 268 bytes
+  for the also-deferred `EndSysExScan()`/`EndSysEx()`) -- a good target
+  for a future batch, not attempted here (see this project's own
+  agent-memory for the size/scope reasoning).
+- **The "sub eax,1;jne" dead/defensive branch for status>0xf7 mid-
+  message** (`CheckForCompleteMessageImpl`'s `expected = 1` fallback,
+  reached only if a data byte somehow gets accumulated against a
+  status byte >0xf7) is preserved verbatim as unreachable-in-practice
+  code, matching the real disassembly's own apparently-defensive
+  structure -- no real-HW scenario is expected to exercise it, since
+  0xF8-0xFF are always intercepted earlier as realtime bytes before
+  ever reaching the data-byte accumulation path.

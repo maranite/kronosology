@@ -1350,6 +1350,24 @@ public:
 	unsigned int  _unknown2e4;			/* +0x2e4 */
 
 	void ReceiveSysEx(const unsigned char *data, unsigned int len);
+
+	/*
+	 * StartSysEx()/ReceiveSysExData(unsigned char) -- confirmed real
+	 * regparm methods (`_ZN14CSTGMidiInPort10StartSysExEv`, .text+0xf5bd0,
+	 * 368 bytes; `_ZN14CSTGMidiInPort16ReceiveSysExDataEh`, .text+0xf5ed0,
+	 * 1297 bytes), both confirmed as direct call targets from
+	 * `CSTGMidiInPortSerial::ReceiveByte()`/`ReceiveBytes()`
+	 * (src/engine/midi_in_port_serial.cpp) via `R_386_PC32` relocations.
+	 * NOT implemented in this pass -- own substantial SysEx
+	 * capture/forward state machine (also touches the not-yet-declared
+	 * `EndSysExScan()`/`EndSysEx()`, .text+0xf6750/0xf6640), a
+	 * disproportionate separate cluster from the byte-level UART parser
+	 * this task reconstructs. Deliberately deferred no-op stubs live in
+	 * bar2_stubs.cpp, matching this project's established convention
+	 * (e.g. `ApplyKeybedCalibration`, sec/batch 64).
+	 */
+	void StartSysEx();
+	void ReceiveSysExData(unsigned char b);
 };
 
 /*
@@ -1362,6 +1380,45 @@ public:
 class CSTGMidiInPortGeneric : public CSTGMidiInPort {
 public:
 	void Receive(const unsigned char *data, unsigned int len);
+};
+
+/*
+ * CSTGMidiInPortSerial -- the physical (5-pin DIN) hardware MIDI-IN UART
+ * byte parser, as opposed to CSTGMidiInPortGeneric's pre-framed-buffer
+ * path. Confirmed via `nm -C`/vtable dump (readelf -sW) to add NO new
+ * data fields and NO new vtable of its own beyond CSTGMidiInPort's
+ * (no `_ZTV20CSTGMidiInPortSerial` section exists at all, and no
+ * `CSTGMidiInPortSerialC1/C2` constructor symbol exists either) --
+ * modeled the same way as CSTGMidiInPortGeneric, as a field-less
+ * subclass carrying the real mangled method names.
+ *
+ * `ReceiveByte(unsigned char)` (.text+0xf6b90, 1140 bytes) and
+ * `ReceiveBytes(const unsigned char*, unsigned char)` (.text+0xf7010,
+ * 1261 bytes) are independent, real, byte-for-byte reimplementations of
+ * the SAME running-status/SysEx-boundary/system-common state machine
+ * (`ReceiveBytes` is not a call-through wrapper around `ReceiveByte` in
+ * the real binary -- both are separately compiled, confirmed via two
+ * fully independent disassembly passes) that use
+ * `CheckForCompleteMessage()` (.text+0xf6ac0, 197 bytes) to detect a
+ * fully-accumulated message via `USTGMidiUtils::kChannelMsgLen[7]`/
+ * `kSystemMsgLen[8]` (real `.rodata` tables, values `{3,3,3,3,2,2,3}`/
+ * `{0,2,3,2,0,0,1,1}` -- standard MIDI channel-voice/system-common
+ * message lengths) and flush it to the PRIMARY (+0xf0, channel
+ * messages, resets to length 1 for running-status reuse) or REALTIME
+ * (+0xf8, system-common messages, resets to length 0) embedded
+ * `CSTGMidiQueueWriter`. See src/engine/midi_in_port_serial.cpp's own
+ * header comment for the full real-time-clock-timestamp-ring
+ * (+0x14c..+0x1ac, 8 entries x 12 bytes, indexed by a monotonic counter
+ * at +0x1ac) discovery this file's `HandleRealtimeStatus()` reuses --
+ * the SAME real memory region `CSTGMidiInPortGeneric::Receive()`'s own
+ * `PushRealtimeByte()` (midi_in_port.cpp) already touches, confirming
+ * both port types share one underlying `CSTGMidiInPort` object layout.
+ */
+class CSTGMidiInPortSerial : public CSTGMidiInPort {
+public:
+	void CheckForCompleteMessage();
+	void ReceiveByte(unsigned char b);
+	void ReceiveBytes(const unsigned char *data, unsigned char len);
 };
 
 /*

@@ -160,6 +160,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/front_panel_handlers.o \
            src/engine/karma_chord_trigger.o \
            src/engine/midi_in_port.o \
+           src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
            src/engine/midi_out_port.o \
            src/engine/vm_test_accessors.o
@@ -493,7 +494,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_set_list_eq_init \
          verify/test_controller_info_send_unsolicited_ui_param \
          verify/test_program_bank_init \
-         verify/test_keybed_interface
+         verify/test_keybed_interface \
+         verify/test_midi_in_port_serial
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -622,6 +624,9 @@ verify/test_midi_queue: verify/test_midi_queue.cpp src/engine/midi_queue.cpp inc
 
 verify/test_midi_port_manager: verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_init.cpp src/engine/midi_queue_writer.cpp src/mem/heap_manager.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_heap.h include/oa_heapmanager.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_port_manager.cpp src/engine/midi_port_manager.cpp src/engine/midi_queue.cpp src/engine/midi_queue_init.cpp src/engine/midi_queue_writer.cpp src/mem/heap_manager.cpp -o $@
+
+verify/test_midi_in_port_serial: verify/test_midi_in_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_midi_in_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp -o $@
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@

@@ -841,3 +841,18 @@ unsigned char _ZTV20CSTGIntMIDIClockSync[40];
  * already set by setup_global_resources.cpp; definition (storage) not
  * yet homed anywhere. */
 unsigned char *STGAPIFrontPanelStatus::sInstance;
+
+/* CSTGMidiInPort::StartSysEx()/ReceiveSysExData(unsigned char) --
+ * confirmed real OA.ko-internal symbols (.text+0xf5bd0/0xf5ed0, 368/1297
+ * bytes), confirmed real call targets from the new
+ * CSTGMidiInPortSerial::ReceiveByte()/ReceiveBytes() (batch: physical
+ * MIDI-IN UART parser, src/engine/midi_in_port_serial.cpp). Own body is
+ * a substantial, separate SysEx capture/forward state machine (also
+ * pulls in the not-yet-declared EndSysExScan()/EndSysEx()) --
+ * deliberately deferred no-op stubs, matching this file's own stated
+ * convention. Safe as a no-op for now: with an empty body, incoming
+ * SysEx bytes are silently dropped by the byte parser rather than
+ * captured, but the running-status/system-common message path (this
+ * batch's actual reconstruction target) is entirely unaffected. */
+void CSTGMidiInPort::StartSysEx() { }
+void CSTGMidiInPort::ReceiveSysExData(unsigned char) { }
