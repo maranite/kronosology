@@ -230,6 +230,30 @@ RECONSTRUCTED = {
     "0807ee80",  # CTask::CTask
     "0807bd10",  # CLimiterMan::CLimiterMan
     "0807c410",  # CModule::Add(CTask*)
+
+    # --- Stage 6: breadth sweep, CClientCommServer/CSysExMsgTaskBase follow-up
+    # (2026-07-25). Corrects batch 6's own "no confirmed caller found in a quick
+    # check, lower confidence" verdict on CClientCommServer: a THOROUGH check found
+    # a real, confirmed, boot-path-adjacent caller chain (CKernel::InitUserLayer()
+    # -> CConfigManager::SetupSysex(), upgraded to Tier A here -- was an empty
+    # Tier-B stub -- -> SysExApi->RegisterMessageClient() virtual dispatch ->
+    # CSexServiceTask::RegisterMessageClient() [not reconstructed, out of scope] ->
+    # CClientCommServer::CClientCommServer()). CSysExMsgTaskBase's own real caller
+    # (CDumpTask::CDumpTask, itself constructed by CDumpManMod::Setup(), dispatched
+    # by the already-real CModuleManager::Setup()/AddModule() spine) confirmed the
+    # same way. See include/client_comm_server.h/sysex_msg_task_base.h for the full
+    # writeup, including why most of both classes stay Tier B (a genuinely separate,
+    # un-reconstructed CEvBuffersPool/CEvent event-buffer-pool subsystem for
+    # CClientCommServer; CTask::SetMask()/~CTask()/CTask::Add(COutLink*), all three
+    # a CONCURRENT agent's CTask/CModule-family territory this session, for
+    # CSysExMsgTaskBase).
+    "08056b90",  # CConfigManager::SetupSysex
+    "08173430",  # CClientCommServer::CheckIncomingSexCRCByte
+    "0816f610",  # CClientCommServer::ComputeCRCByte
+    "080a64f0",  # CSysExMsgTaskBase::Exec(CMessage&)
+    "08184ed0",  # CSysExMsgTaskBase::OnSexLinkError (confirmed-empty)
+    "08184ec0",  # CSysExMsgTaskBase::OnReceiveMessage (confirmed-empty)
+    "08184ee0",  # CSysExMsgTaskBase::OnTimeout (confirmed-empty)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

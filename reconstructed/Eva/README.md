@@ -1810,3 +1810,160 @@ same reasoning batch 5 used for the same reason.
 (`CLimiterMan::CLimiterMan`), `0807c410` (`CModule::Add`) under a new "Stage 6:
 breadth sweep, CTask::CTask() reconstruction batch" section. Regenerated: 120 → 123
 of 37,795.
+
+## Stage 6: breadth sweep, `CClientCommServer`/`CSysExMsgTaskBase` follow-up — 2026-07-25
+
+Batch 6 left `CClientCommServer` (26 methods) at "no confirmed caller found in a quick
+check, lower confidence" and `CSysExMsgTaskBase` (14 methods) at "not investigated
+further" — this batch's job was a thorough, definitive follow-up on exactly those two.
+
+### Definitive verdict: both are real and boot-path-adjacent
+
+Ghidra MCP was tried first (`load_binary` against the real `Eva` binary) and again
+timed out after 600s, same as batch 6 — fell back entirely to `objdump -dr -M intel`
+direct call-site tracing against the full disassembly, cross-checked with `nm -C`
+and a direct `.rodata`/`.data` raw-byte read (via `readelf -S` section-offset mapping)
+to resolve two virtual-dispatch call sites batch 6's "quick check" didn't attempt.
+
+**`CClientCommServer`**: batch 6's "quick check" almost certainly just grepped for
+direct (`call <addr>`) callers of the constructor and found none — correct as far as
+it goes (there genuinely are zero direct callers anywhere in the 3.5M-line
+disassembly), but the real caller is a **virtual** dispatch. The full chain, each
+link confirmed by direct disassembly inspection:
+
+```
+CKernel::InitUserLayer()                          (ckernel.cpp, already real)
+  -> CConfigManager::SetupSysex()                 (.text+0x08056b90 -- UPGRADED to
+                                                     Tier A this batch, was an empty
+                                                     Tier-B stub)
+  -> SysExApi->RegisterMessageClient(name, ecb,     a REAL VIRTUAL call through the
+       mode, service)                               already-real `SysExApi` global
+                                                     (mains.cpp), vtable slot +0x30 --
+                                                     confirmed by reading raw bytes at
+                                                     CSysExApiInstance's own vtable
+                                                     (.rodata+0x08e89a58 == slot 12,
+                                                     `_ZN17CSysExApiInstance21
+                                                     RegisterMessageClientE...`)
+  -> CSysExApiInstance::RegisterMessageClient()     tail-jumps (not a real second call
+       (.text+0x0817a440)                           frame -- `jmp`, not `call`) to:
+  -> CSexServiceTask::RegisterMessageClient()       .text+0x08179420, 799 bytes --
+                                                     looks up a named CSysExMsgTaskBase
+                                                     module (Api vtable slot +0x64,
+                                                     RTTI-checked against
+                                                     `CSysExMsgTaskBase::SysName`),
+                                                     then:
+  -> CClientCommServer::CClientCommServer()         .text+0x0816ecc0
+```
+
+Exhaustively checked that this is the *only* real caller: every one of
+`CSysExApiInstance`'s dozen public methods (`AssignSysExID`, `GetSysExID`,
+`CreateCrossLink`, `RegisterSender`, `RegisterReceiver`, etc., not just
+`RegisterMessageClient`) has **zero direct callers** anywhere in the disassembly —
+confirmed this is a virtual-dispatch-only facade (matches `CSysApiInstance::
+RegisterApi`'s own already-documented "real callers, virtual dispatch, direct-call
+grep finds nothing" shape), not a dead API surface.
+
+**`CSysExMsgTaskBase`**: real caller is `CDumpTask::CDumpTask(CModule const&)`
+(.text+0x080d1b10, not itself reconstructed — deep DumpManager protocol logic, out of
+scope), itself called from `CDumpManMod::Setup()` (.text+0x080cf650), dispatched by
+the already-real `CModuleManager::Setup()`'s per-module vtable+8 loop once
+`MMainDumpMan()` (mains.cpp, already Tier A) registers a `CDumpManMod` via the
+already-real `CModuleManager::AddModule()` — the exact same "real, boot-path-adjacent,
+not yet exercised by this reconstruction's own wired vtables" shape batch 6 established
+for `CSTGUnsolMsgHandler`/`CEditor::Setup()`.
+
+### What got reconstructed
+
+- **`CConfigManager::SetupSysex()`** (`src/init/config_manager.cpp`) — Tier A, full
+  real logic: walks `sm_ptSysExModuleInfo`'s own null-name-terminated table (real
+  per-entry layout recovered field-by-field from the disassembly: name, hasSender/
+  hasReceiver flags, `ECommMode`/`EService`, and a byte that's simultaneously an
+  "0xff means skip" flag and `RegisterMessageClient`'s own `ecb` argument), calling
+  `AssignSysExID`/`RegisterSender`/`RegisterReceiver`/`RegisterMessageClient` through
+  a raw-vtable-slot `CSysExApi` facade (`CallVSlot`-style, matching
+  `module_manager.cpp`'s own convention). With this project's own zero-initialized
+  `sm_ptSysExModuleInfo` placeholder (`config_info.cpp`, already Tier A), the first
+  entry's name is already null, so this loop is real but executes zero iterations
+  today — same "real code, currently a no-op pending real config data" category as
+  `CModuleManager::AddModule()` before `mains.cpp` populated `mModules`. The function's
+  other two loops (`sm_ptSysExConnectInfo`/`sm_ptSysExFilterInfo`) are left
+  untranscribed (out of scope — don't affect either target class's reachability, and
+  are also real no-ops today given their own zeroed placeholders).
+- **`CSysExMsgTaskBase`** (new: `include/sysex_msg_task_base.h`,
+  `src/ipc/sysex_msg_task_base.cpp`) — real single-inheritance `: public CTask`. 8 of 14
+  real methods Tier A (`Exec(CMessage&)`'s pure argument-unpack + vtable-slot-0x14
+  redispatch; the 3 real confirmed-empty overrides `OnSexLinkError`/
+  `OnReceiveMessage`/`OnTimeout`; dtor thunks folded into one real body). The
+  remaining 6 (ctor, `SetTimeout`, zero-arg `Exec`, `SendMsg`,
+  `EventToMessage`/`MessageToEvent`) are Tier B — all six have a real, currently
+  unavailable dependency: `CTask::SetMask()`/`SetMask(int)` (task.h explicitly flags
+  both as "NOT-yet-reconstructed", and is a *concurrent* agent's own CTask/CModule
+  territory this session — deliberately not added here to avoid a merge conflict) or
+  the `CSysExMsgClientOutLink`/`CSysExApiInstance`/`CSexServiceTask` output-link chain
+  (a separate, genuinely deep, un-reconstructed link-abstraction subsystem this class's
+  ctor and `SendMsg`/`EventToMessage`/`MessageToEvent` all terminate in). Not guesses —
+  each dependency function's real address/size was looked up and traced before being
+  ruled out of scope.
+- **`CClientCommServer`** (new: `include/client_comm_server.h`,
+  `src/ipc/client_comm_server.cpp`) — 2 of 26 real methods Tier A:
+  `ComputeCRCByte(unsigned char)` and `CheckIncomingSexCRCByte(unsigned char const*,
+  unsigned char)`, both a running XOR checksum over a byte range (GCC-unrolled
+  8-at-a-time / 16-at-a-time-SIMD-then-8-at-a-time in the real binary, collapsed to a
+  clean loop, same license as `omega_ptr_array.cpp`'s own Duff's-device collapses).
+  `CheckIncomingSexCRCByte` doesn't touch `this` at all — confirmed by reading the
+  decompile, every reference is to its two parameters. The other 24 methods (ctor,
+  dtor, and the full IDLE/SENT/WAIT packet-framing state machine) are Tier B: the
+  **constructor alone** pulls in an entire un-reconstructed subsystem
+  (`CEvBuffersPool`/`CEvent`, a fixed-size refcounted event-buffer-pool allocator
+  backing this class's own embedded TX/RX scratch buffer — `CEvBuffersPool::Alloc()`/
+  `Lock()`, 176/508 bytes, not reconstructed), and nearly every other method touches
+  that same embedded buffer, `mOutLink`, `mOwner`, or `mClient`. Real field layout
+  (18 named members, offsets confirmed from the ctor's own decompile) is fully
+  documented in the header even where the ctor doesn't populate them yet.
+
+### Verification
+
+New `verify/test_client_comm_server.cpp` (16 checks) and
+`verify/test_sysex_msg_task_base.cpp` (10 checks). Both use the project's established
+"poke a raw/friend-accessed buffer, skip the real ctor" pattern
+(`test_module_adjust_task_mask.cpp`'s own precedent) since neither class's own Tier-B
+ctor populates the state its Tier-A methods need. `ComputeCRCByte`/
+`CheckIncomingSexCRCByte` are checked against an independent reference XOR-fold loop
+across several buffer sizes (including >8/>16 bytes, to exercise the real unrolled-loop
+boundary) plus explicit corruption cases. `Exec(CMessage&)` is checked against a fake
+single-slot vtable, confirming the real argument mapping (`firstPayloadByte`/`tag`/
+`payload = ptr+1`/`len = (taggedLen-1)&0xff`) and the inverted return convention
+(handler 0 → `Exec` returns -1; handler nonzero → `Exec` returns 0).
+
+One real bug caught and fixed during this batch: both `OnSexLinkError`/
+`OnReceiveMessage`/`OnTimeout` (`CSysExMsgTaskBase`) and `OnReceiveMessage`
+(`CClientCommServer`) were initially declared C++ `virtual` (to document that they're
+real ground-truth vtable overrides) — this immediately segfaulted the KAT, because it
+made `CSysExMsgTaskBase` genuinely polymorphic under the *compiler's own* vtable
+numbering, which collided with `Exec(CMessage&)`'s manually-installed fake vtable
+(built to match *ground truth's* slot numbering) the moment a real C++ virtual call
+(`OnReceiveMessage`) went through the compiler's own dispatch instead. Fixed by
+removing `virtual` from all four — this project's own established convention
+(`task.h`/`module.h`) is a manually-managed raw `void *mVtbl` field, never real C++
+polymorphism, specifically because ground truth's vtable slot numbering never matches
+whatever a real compiler-emitted vtable here would independently choose.
+
+`make`/`make verify`: 0 regressions across every pre-existing verify binary (including
+the concurrent CTask/CModule-family batch's own new tests), both new tests pass
+cleanly. `tools/build_lenny.sh` (real on-image-lib link): `LINK OK`, no new unresolved
+symbols beyond the pre-existing expected set. No live `kronos_vm` boot test — neither
+new class is reachable from this reconstruction's own currently-wired boot path
+(`CModuleManager`'s per-module vtable dispatch is still `EvaVTableStub`-backed
+placeholders, not `CDumpManMod`'s or `CEditor`'s real vtables — same reasoning the
+CTask/CModule batch used for the same underlying reason), so a boot test would show
+zero new signal.
+
+### Manifest delta
+
+`gen_manifest.py`: added `08056b90` (`CConfigManager::SetupSysex`), `08173430`
+(`CClientCommServer::CheckIncomingSexCRCByte`), `0816f610`
+(`CClientCommServer::ComputeCRCByte`), `080a64f0` (`CSysExMsgTaskBase::Exec(CMessage&)`),
+`08184ed0`/`08184ec0`/`08184ee0` (`CSysExMsgTaskBase::OnSexLinkError`/`OnReceiveMessage`/
+`OnTimeout`, confirmed-empty) under a new "Stage 6: breadth sweep,
+CClientCommServer/CSysExMsgTaskBase follow-up" section. Regenerated: 140 → 147 of
+37,795.
