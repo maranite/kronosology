@@ -48,12 +48,29 @@
  * direct RegisterApi() call (the "one real outlier" Stage 3's own README section
  * flagged; turns out not to be a different mechanism at all, just a different calling
  * style for the exact same function).
+ *
+ * AddConstructor(CModuleConstructor*) -- .text+0x0806b530, 22 bytes -- ADDED (Stage 6
+ * breadth sweep, 2026-07-25). Real forwarder to CModuleManager::AddConstructor()
+ * (module_manager.h), exact same 22-byte shape as AddModule()'s own forwarder just
+ * above. Direct byte read of the ground-truth binary's own installed
+ * PTR__CSysApiInstance_08e81008 vtable (file offset 0xE39048 = VA 08e81008+0x40)
+ * confirms the real pointer sitting at slot +0x40 is exactly 0x0806b530 -- i.e. THIS
+ * function is the real target of mains.cpp's RegisterModuleDescriptor(), which
+ * dispatches all 15 of its module descriptors through `dispatchTarget`'s vtable slot
+ * +0x40 (system_api.h). That slot was still wired to the generic EvaVTableStub no-op
+ * (omega_vtables.cpp) before this batch, meaning none of those 15 real, boot-path
+ * `Mains()`-registered descriptors ever reached CModuleManager's mConstructors array
+ * -- same "Tier-B stub leaves a real array permanently empty" bug class as
+ * CModuleManager::AddModule()/mModules (Stage 6 batch 3). Fixed by wiring
+ * PTR__CSysApiInstance_08e81008[16] (byte offset 0x40) to a real forwarder
+ * (omega_vtables.cpp) instead of EvaVTableStub.
  */
 
 #ifndef SYSAPI_INSTANCE_H
 #define SYSAPI_INSTANCE_H
 
 class CModule;
+class CModuleConstructor;
 class CApiBase;
 
 class CSysApiInstance {
@@ -76,6 +93,13 @@ public:
 	 * see module_manager.h.
 	 */
 	void AddModule(CModule *module);
+
+	/* .text+0x0806b530, 22 bytes. Real forwarder to CModuleManager::AddConstructor()
+	 * -- see module_manager.h and this header's own file comment above for why this
+	 * is genuinely boot-path reachable (the real target of Api's vtable slot +0x40,
+	 * mains.cpp's RegisterModuleDescriptor()).
+	 */
+	void AddConstructor(CModuleConstructor *ctor);
 
 	/* .text+0x0806bab0, 1099 bytes -- Tier-B link-stub, not reconstructed (named-API
 	 * registry substrate, genuinely out of scope for this pass).

@@ -33,12 +33,29 @@
  *                               EnableUpdate(int) (unconditional, every call), NOT
  *                               AddModule() -- AddModule() only ever reads it despite
  *                               being the more obvious "topology changed" candidate
+ *
+ * mConstructors (+0x1c..+0x34) is now populated by a real, reconstructed pair of
+ * methods -- AddConstructor()/RemoveConstructor() (Stage 6 breadth sweep, 2026-07-25,
+ * following up on CConfigManager::CreateUserModules()/CreateFMDrivers(),
+ * config_manager.cpp) -- confirming this genuinely IS a second, distinct "module
+ * factory" registry, not the same array as mModules. Its own count/array fields land
+ * at absolute +0x28/+0x30 (mConstructors' own relative +0xc/+0x14, same embedding-
+ * offset derivation as mModules' own +0x10/+0x18), which is exactly what
+ * CreateUserModules() reads directly (`g_poModuleManager+0x28`/`+0x30`) and what
+ * AddConstructor()/RemoveConstructor() operate on via `this+0x28`/`this+0x30`. Real
+ * boot-path producer: mains.cpp's RegisterModuleDescriptor() (all 15 descriptor-shaped
+ * MMainXxx wrappers), via CSysApiInstance::AddConstructor() forwarding through Api's
+ * own vtable slot +0x40 -- see sysapi_instance.h and omega_vtables.cpp for the real
+ * vtable-slot fix this required (that slot was a dead EvaVTableStub no-op before this
+ * batch, so mConstructors, like mModules before batch 3, stayed permanently empty on
+ * every previously-traced boot path).
  */
 
 #ifndef MODULE_MANAGER_H
 #define MODULE_MANAGER_H
 
 class CModule;
+class CModuleConstructor;
 
 class CModuleManager {
 public:
@@ -93,6 +110,32 @@ public:
 	 * directly after Start().
 	 */
 	void EnableUpdate(int enable);
+
+	/* .text+0x0805f660, 812 bytes -- Tier A (Stage 6 breadth sweep, 2026-07-25).
+	 * Operates on mConstructors (+0x1c..+0x34), exact same shape as AddModule()'s own
+	 * operations on mModules: linear by-name scan (real code runs it twice in a row,
+	 * same license as AddModule()'s own collapse -- see module_manager.cpp) for an
+	 * existing constructor sharing the new one's name (CModuleConstructor's own +4
+	 * field); if found, RemoveAtIndex()s the old entry first (mConstructors' own
+	 * mUnknown04 "own/free-on-remove" flag at absolute +0x20 as the callDtorCallback
+	 * argument), then always COmegaPtrArray::Add()s the new constructor. Real
+	 * signature takes CModuleConstructor& (reference); a pointer is used here for the
+	 * same reason as AddModule(). Real caller: CSysApiInstance::AddConstructor()
+	 * (sysapi_instance.h), itself the real target of Api's vtable slot +0x40 --
+	 * see that header's own writeup.
+	 */
+	void AddConstructor(CModuleConstructor *ctor);
+
+	/* .text+0x0805f990, 766 bytes -- Tier A (Stage 6 breadth sweep, 2026-07-25). Same
+	 * by-name-scan-twice shape as AddConstructor() (real body: one scan to confirm a
+	 * match exists, a second identical scan to re-derive the index for
+	 * RemoveAtIndex() -- collapsed to a single scan here, same license), RemoveAtIndex()s
+	 * the match if found, otherwise a no-op. No confirmed real caller on this pass's
+	 * own traced boot path (declared/reconstructed for structural completeness
+	 * alongside AddConstructor(), same as COmegaPtrArray's own RemoveAll()/
+	 * SetAtIndex() precedent of "real method, not currently exercised").
+	 */
+	void RemoveConstructor(CModuleConstructor *ctor);
 };
 
 /* Real raw-blob instance CKernel::CKernel() builds -- see ckernel.cpp. Declared here

@@ -36,18 +36,49 @@
  * bumping past their old 6-slot bound to safely cover the new, higher offsets --
  * same "give headroom" fix already applied to EditApiInstance's own array.
  *
- * Remaining 3 CConfigManager methods (CreateResourceFamilies/CreateUserModules/
- * CreateFMDrivers) are still Tier-B link-stubs -- see their own "not pursued"
- * notes in README.md (CreateResourceFamilies depends on the un-reconstructed CZ
- * string-set container, 247 methods, genuinely deep; CreateUserModules/
- * CreateFMDrivers touch a distinct "module factory array" sub-structure inside
- * CModuleManager -- g_poModuleManager+0x28/+0x30 -- not the same as the already-
- * reconstructed mModules at +0x04/+0x08, and not itself reconstructed yet).
+ * CreateUserModules()/CreateFMDrivers() UPGRADED to Tier A (Stage 6 breadth sweep,
+ * follow-up batch 2026-07-25, on top of CModuleManager::AddConstructor()/
+ * RemoveConstructor(), module_manager.h):
+ *   CConfigManager::CreateUserModules()  .text+0x08056440, 778 bytes
+ *   CConfigManager::CreateFMDrivers()    .text+0x08056760, 204 bytes
+ * Both walk a table of {name, param1, param2} triples (sm_ptCreateInfo/
+ * sm_ptFMDriverInfo) terminated by a null name, looking up a matching "factory"
+ * object by name and invoking its own vtable-slot+8 "Create" method with
+ * (param1, param2, an auto-incrementing per-factory counter). CreateUserModules()
+ * looks its factory up in CModuleManager's own mConstructors array (the "distinct
+ * module factory array sub-structure" this project's README previously flagged as
+ * unreconstructed -- now real, see module_manager.h/.cpp) and, on success, adds the
+ * newly-created module straight into mModules via COmegaPtrArray::Add() (NOT via
+ * CModuleManager::AddModule() -- a real, faithfully-preserved difference: this path
+ * skips AddModule()'s own duplicate-by-name check/removal and host-notify logic).
+ * CreateFMDrivers() looks its factory up through FMApi's own vtable slot +0x2c
+ * instead, and on a successful create additionally registers the new driver through
+ * FMApi's vtable slot +0x30, destroying it (vtable slot+4, the deleting dtor) if
+ * registration reports failure. Two real, faithfully-preserved quirks in both
+ * functions' own error paths, not something to "fix": the "unable to create
+ * instance" error message in each case prints the entry's own param1 field
+ * (`puVar1[1]`/`piVar4[1]` in the original decompile), not the name that was
+ * actually searched for -- see each function body's own comment below.
+ *
+ * Both are real, safe no-ops on this pass's own traced boot path given today's
+ * zero-initialized sm_ptCreateInfo/sm_ptFMDriverInfo placeholders (config_info.cpp):
+ * each table's own first `name` field is null, so the top-level walk loop's own
+ * condition is false on the very first check -- neither function's body (including
+ * the mConstructors/FMApi lookups) ever actually executes, exactly the same "table's
+ * own first field alone gates the whole function" safety property already
+ * established for SetupRouting/MakeConnections/RegisterChunkServer/
+ * LinkRTRouterTracks. CreateResourceFamilies remains a Tier-B link-stub -- depends on
+ * the un-reconstructed CZ string-set container (247 methods), genuinely out of scope
+ * for this pass.
  */
 
 #include "config_manager.h"
 #include "system_api.h"
 #include "tempo.h"
+#include "module_manager.h"
+#include "omega_ptr_array.h"
+
+#include <cstring>
 
 /* Real module-scope global (mains.cpp): `void *SysExApi = 0;`, later pointed at
  * `g_oSysExApiInstance` by CSysExApiInstance's own static constructor
@@ -62,6 +93,13 @@ extern CSystemApi *Api;
 extern void *SeqApi;
 extern void *ChkApi;
 extern void *RTRouterApi;
+
+/* Real module-scope global (mains.cpp): `CSystemApi *FMApi = 0;`, lazily fetched by
+ * MMainLinuxDriver through Api's own vtable slot +0xa0 (mains.cpp) -- the SAME
+ * object CreateFMDrivers() dispatches its own factory-lookup (+0x2c) and
+ * register (+0x30) calls through.
+ */
+extern CSystemApi *FMApi;
 
 namespace {
 
@@ -462,12 +500,151 @@ doneWalk:
 	BPM::SetUpperLimit(info[2]);
 }
 
-/* Tier-B link-stubs -- see this file's own header comment for why (CZ dependency /
- * distinct CModuleManager module-factory sub-structure, not yet reconstructed).
+/* Tier-B link-stub -- CZ string-set container dependency (247 methods), genuinely
+ * out of scope for this pass. See this file's own header comment.
  */
 void CConfigManager::CreateResourceFamilies() {}
-void CConfigManager::CreateUserModules() {}
-void CConfigManager::CreateFMDrivers() {}
+
+/* Real per-entry table shape shared by sm_ptCreateInfo (CreateUserModules()) and
+ * sm_ptFMDriverInfo (CreateFMDrivers()): {name, param1, param2} triples, terminated
+ * by a null name.
+ */
+namespace {
+struct CreateInfoEntry {
+	const char *name;
+	void *param1;
+	void *param2;
+};
+
+/* FMApi's own vtable slot +0x2c ("get named driver factory") -- same raw-vtable-
+ * dispatch idiom as this file's own ApiWarn0/ApiWarn1/ApiAssertCfgMan helpers above. */
+inline void *FMApiGetDriverFactory(const char *name)
+{
+	typedef void *(*Fn)(void *, const char *);
+	void *vtbl = *(void **)FMApi;
+	Fn fn = *(Fn *)((char *)vtbl + 0x2c);
+	return fn(FMApi, name);
+}
+
+/* FMApi's own vtable slot +0x30 ("register a constructed driver"). */
+inline int FMApiRegisterDriver(void *driver, void *arg)
+{
+	typedef int (*Fn)(void *, void *, void *);
+	void *vtbl = *(void **)FMApi;
+	Fn fn = *(Fn *)((char *)vtbl + 0x30);
+	return fn(FMApi, driver, arg);
+}
+} // namespace
+
+/* .text+0x08056440, 778 bytes. Walks sm_ptCreateInfo, looking each entry's name up
+ * in CModuleManager's own mConstructors array (g_poModuleManager+0x28 count /
+ * +0x30 array -- module_manager.h) by linear by-name scan (real code is Duff's-
+ * device-unrolled; collapsed to a plain loop here, same license as
+ * omega_ptr_array.cpp's own collapses). On a match, calls the found
+ * CModuleConstructor's own vtable-slot+8 "Create" method with (param1, param2, an
+ * auto-incrementing per-constructor counter at the constructor object's own +8
+ * field), then -- on success -- adds the newly-created module straight into
+ * mModules via COmegaPtrArray::Add(g_poModuleManager+4, ...), deliberately NOT
+ * through CModuleManager::AddModule() (a real difference in the original
+ * disassembly, preserved as found: this path skips AddModule()'s own duplicate-by-
+ * name check/removal and host-notify logic entirely).
+ */
+void CConfigManager::CreateUserModules()
+{
+	if (sm_ptCreateInfo == 0)
+		return;
+
+	CreateInfoEntry *entry = (CreateInfoEntry *)sm_ptCreateInfo;
+	while (entry->name != 0) {
+		char *mgr = (char *)g_poModuleManager;
+		int count = *(int *)(mgr + 0x28);
+		void **ctorArray = *(void ***)(mgr + 0x30);
+
+		void *found = 0;
+		for (int i = 0; i < count; i++) {
+			const char *ctorName = *(char **)((char *)ctorArray[i] + 4);
+			if (strcmp(entry->name, ctorName) == 0) {
+				found = ctorArray[i];
+				break;
+			}
+		}
+
+		if (found == 0) {
+			ApiWarn1("CConfigManager::CreateUserModules() ERROR: module factory <%s> "
+			         "unavailable.", entry->name);
+		} else {
+			int *ctorObj = (int *)found;
+			int counter = ctorObj[2];
+			typedef void *(*CreateFn)(void *, void *, void *, int);
+			void *ctorVtbl = *(void **)ctorObj;
+			CreateFn create = *(CreateFn *)((char *)ctorVtbl + 8);
+			ctorObj[2] = counter + 1;
+			void *newModule = create(ctorObj, entry->param1, entry->param2, counter);
+
+			if (newModule == 0) {
+				/* Real quirk, preserved as found: the original decompile's own error
+				 * message prints the entry's param1 field here (`puVar1[1]`), not the
+				 * name that was actually searched for (__s1/entry->name) -- not
+				 * "fixed" to use the name instead.
+				 */
+				ApiWarn1("CConfigManager::CreateUserModules() ERROR: unable to create "
+				         "instance of user module <%s>.", entry->param1);
+			} else {
+				((COmegaPtrArray *)(mgr + 4))->Add(newModule);
+			}
+		}
+
+		entry++;
+	}
+}
+
+/* .text+0x08056760, 204 bytes. Same {name, param1, param2}-table-walk shape as
+ * CreateUserModules(), but looks its factory up through FMApi's own vtable slot
+ * +0x2c instead of CModuleManager's mConstructors, and -- on a successful create --
+ * additionally registers the new driver through FMApi's vtable slot +0x30,
+ * destroying it (vtable slot+4, the deleting dtor) if registration reports failure
+ * (return value 0).
+ */
+void CConfigManager::CreateFMDrivers()
+{
+	if (sm_ptFMDriverInfo == 0)
+		return;
+
+	CreateInfoEntry *entry = (CreateInfoEntry *)sm_ptFMDriverInfo;
+	for (; entry->name != 0; entry++) {
+		void *factory = FMApiGetDriverFactory(entry->name);
+		if (factory == 0) {
+			ApiWarn1("ConfigManager::CreateFMDrivers() ERROR: driver factory <%s> "
+			         "unavailable.", entry->name);
+			continue;
+		}
+
+		int *factoryObj = (int *)factory;
+		int counter = factoryObj[2];
+		typedef void *(*CreateFn)(void *, void *, void *, int);
+		void *factoryVtbl = *(void **)factoryObj;
+		CreateFn create = *(CreateFn *)((char *)factoryVtbl + 8);
+		factoryObj[2] = counter + 1;
+		void *driver = create(factoryObj, entry->param1, entry->param2, counter);
+
+		if (driver == 0) {
+			/* Same real quirk as CreateUserModules(): prints param1 (`piVar4[1]`),
+			 * not the name that was actually searched for.
+			 */
+			ApiWarn1("ConfigManager::CreateFMDrivers() ERROR: unable to create "
+			         "instance of driver <%s>.", entry->param1);
+			continue;
+		}
+
+		int registered = FMApiRegisterDriver(driver, entry->param2);
+		if (registered == 0) {
+			typedef void (*DtorFn)(void *);
+			void *driverVtbl = *(void **)driver;
+			DtorFn dtor = *(DtorFn *)((char *)driverVtbl + 4);
+			dtor(driver);
+		}
+	}
+}
 
 /* .text+0x08056d80, 1 byte -- confirmed genuinely empty (`return;`) in the real
  * binary, same "read every one, don't assume" treatment as SetupRouting's own

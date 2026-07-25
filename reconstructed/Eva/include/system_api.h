@@ -7,6 +7,10 @@
  * slots actually exercised by reconstructed code are documented, each at its own call
  * site, since the vtable itself isn't recovered:
  *   +0x40  register a named module descriptor (mains.cpp's RegisterModuleDescriptor)
+ *          -- confirmed (2026-07-25, direct byte read of the ground-truth vtable) to
+ *          be CSysApiInstance::AddConstructor(CModuleConstructor*) (sysapi_instance.h),
+ *          forwarding to CModuleManager::AddConstructor() (module_manager.h). Was a
+ *          dead EvaVTableStub no-op until this batch (omega_vtables.cpp) -- fixed.
  *   +0xb4  register a fully-constructed driver object (MMainPanelDriver/MMainHIDDriver)
  *   +0x7c  exit-requested query (COmegaInterface::ExitRequested, omega_interface.cpp)
  *   +0xa0  fetch a named sub-API, e.g. FMApi (MMainLinuxDriver, mains.cpp)

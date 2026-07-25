@@ -24,6 +24,26 @@
  *
  *   CModuleManager::AddModule()      .text+0x0805efa0, 869 bytes
  *   CModuleManager::EnableUpdate()   .text+0x08061ca0, 74 bytes
+ *
+ * AddConstructor()/RemoveConstructor() added in the same follow-up batch that made
+ * CConfigManager::CreateUserModules()/CreateFMDrivers() real (config_manager.cpp) --
+ * these are the real read/write side of mConstructors, the "distinct module factory
+ * array" sub-structure those two functions needed. Both transcribed from:
+ *
+ *   CModuleManager::AddConstructor()    .text+0x0805f660, 812 bytes
+ *   CModuleManager::RemoveConstructor() .text+0x0805f990, 766 bytes
+ *
+ * Both are the exact same by-name-scan-twice shape as AddModule() (collapsed to one
+ * scan here, same license), operating on mConstructors (+0x1c..+0x34) instead of
+ * mModules (+0x04..+0x1c) -- own count/array/ownFlag fields land at absolute
+ * +0x28/+0x30/+0x20 (see module_manager.h's header comment for the offset
+ * derivation). AddConstructor()'s real boot-path caller is
+ * CSysApiInstance::AddConstructor() (sysapi_instance.h), itself the real target of
+ * Api's vtable slot +0x40 (mains.cpp's RegisterModuleDescriptor(), all 15 descriptor-
+ * shaped MMainXxx wrappers) -- that slot was a dead EvaVTableStub no-op before this
+ * batch (see omega_vtables.cpp), so mConstructors stayed permanently empty on every
+ * previously-traced boot path, same "Tier-B stub leaves a real array dead" bug class
+ * as AddModule()/mModules itself (batch 3).
  */
 
 #include "module_manager.h"
@@ -191,4 +211,61 @@ void CModuleManager::EnableUpdate(int enable)
 			((CSysApiInstance *)SysApiInstance)->WriteMessageToHost(3, 8);
 		}
 	}
+}
+
+void CModuleManager::AddConstructor(CModuleConstructor *ctor)
+{
+	char *self = (char *)this;
+	COmegaPtrArray *constructors = (COmegaPtrArray *)(self + 0x1c);
+
+	int count = *(int *)(self + 0x28);
+	void **array = *(void ***)(self + 0x30);
+	const char *newName = *(char **)((char *)ctor + 4); /* CModuleConstructor::mName */
+
+	/* Same real double-scan shape as AddModule() -- collapsed to a single scan here,
+	 * same license (see module_manager.h).
+	 */
+	int foundIndex = -1;
+	for (int i = 0; i < count; i++) {
+		const char *existingName = *(char **)((char *)array[i] + 4);
+		if (strcmp(newName, existingName) == 0) {
+			foundIndex = i;
+			break;
+		}
+	}
+
+	if (foundIndex >= 0 && array[foundIndex] != 0) {
+		int ownFlag = *(int *)(self + 0x20); /* mConstructors.mUnknown04, absolute +0x20 */
+		constructors->RemoveAtIndex((unsigned)foundIndex, ownFlag);
+	}
+
+	constructors->Add(ctor);
+}
+
+void CModuleManager::RemoveConstructor(CModuleConstructor *ctor)
+{
+	char *self = (char *)this;
+	COmegaPtrArray *constructors = (COmegaPtrArray *)(self + 0x1c);
+
+	int count = *(int *)(self + 0x28);
+	void **array = *(void ***)(self + 0x30);
+	const char *targetName = *(char **)((char *)ctor + 4);
+
+	/* Same real double-scan shape as AddConstructor()/AddModule() -- collapsed to a
+	 * single scan here, same license.
+	 */
+	int foundIndex = -1;
+	for (int i = 0; i < count; i++) {
+		const char *existingName = *(char **)((char *)array[i] + 4);
+		if (strcmp(targetName, existingName) == 0) {
+			foundIndex = i;
+			break;
+		}
+	}
+
+	if (foundIndex < 0 || array[foundIndex] == 0)
+		return;
+
+	int ownFlag = *(int *)(self + 0x20);
+	constructors->RemoveAtIndex((unsigned)foundIndex, ownFlag);
 }

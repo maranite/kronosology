@@ -48,7 +48,11 @@
  *     needs the real slot count so those raw offset reads stay in-bounds. +0xa4 is
  *     confirmed (not just "shape-sized") to be RegisterApi -- mains.cpp's own 8-member
  *     MMainXxx(void) family (ckernel.cpp's InitSystemLayer()) calls it by name
- *     directly rather than through this array, now that the identity is known.
+ *     directly rather than through this array, now that the identity is known. +0x40
+ *     (slot 16) is confirmed (direct byte read of the ground-truth binary's own
+ *     installed vtable) to be CSysApiInstance::AddConstructor() -- wired to the real
+ *     AddConstructorVSlot forwarder (omega_vtables.cpp) instead of EvaVTableStub,
+ *     Stage 6 breadth sweep, 2026-07-25 -- see sysapi_instance.h/module_manager.h.
  *   TNamedPtrArray<CDriverBase>    08e811a8 -> 08e811b8 (next vtable header) = 4 slots
  *   TNamedPtrArray<CApiDescriptor> 08e811c0 -> 08e811e0 (CSystemApi)         = 8 slots
  *     (SysApiInstance's own 2 embedded COmegaPtrArray sub-objects install these --

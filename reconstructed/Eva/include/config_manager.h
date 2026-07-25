@@ -12,6 +12,12 @@
  * CConfigManager::AssignEditServerIDs() (.text+0x080562f0, 334 bytes) is called from
  * CKernel::InitSystemLayer() (src/init/ckernel.cpp) -- declared here too so both call
  * sites share one real class declaration instead of redeclaring it locally (ODR).
+ *
+ * CreateUserModules()/CreateFMDrivers() upgraded to Tier A (Stage 6 breadth sweep,
+ * follow-up 2026-07-25, on top of CModuleManager::AddConstructor()/
+ * RemoveConstructor(), module_manager.h) -- see config_manager.cpp for the
+ * transcribed bodies and why both are safe no-ops given this pass's own
+ * zero-initialized sm_ptCreateInfo/sm_ptFMDriverInfo placeholders (config_info.cpp).
  */
 
 #ifndef CONFIG_MANAGER_H
@@ -35,10 +41,11 @@ public:
 
 	/* CKernel::InitUserLayer()'s own 9-step user-layer bring-up (ckernel.cpp).
 	 * SetupSysex/SetupRouting/MakeConnections/RegisterChunkServer/
-	 * LinkRTRouterTracks/ConfigureSeqTimer are real (Tier A), transcribed from
-	 * their own .text addresses -- see config_manager.cpp's file header for the
-	 * full breakdown. CreateResourceFamilies/CreateUserModules/CreateFMDrivers
-	 * remain Tier-B link-stubs (empty bodies) -- see config_manager.cpp.
+	 * LinkRTRouterTracks/ConfigureSeqTimer/CreateUserModules/CreateFMDrivers are real
+	 * (Tier A), transcribed from their own .text addresses -- see config_manager.cpp's
+	 * file header for the full breakdown. CreateResourceFamilies remains a Tier-B
+	 * link-stub (empty body) -- depends on the un-reconstructed CZ string-set
+	 * container (247 methods), genuinely out of scope for this pass.
 	 */
 	static void ConfigureSeqTimer();
 	static void CreateResourceFamilies();

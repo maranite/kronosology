@@ -329,6 +329,32 @@ RECONSTRUCTED = {
     "08184ef0",  # CSysExMsgTaskBase::~CSysExMsgTaskBase (D1)
     "08184f10",  # non-virtual thunk to CSysExMsgTaskBase::~CSysExMsgTaskBase (D1)
     "08184f70",  # non-virtual thunk to CSysExMsgTaskBase::~CSysExMsgTaskBase (D0)
+
+    # --- Stage 6: breadth sweep, CModuleManager "module factory array" batch
+    # (2026-07-25). Reconstructs the distinct CModuleManager sub-structure
+    # (mConstructors, +0x1c..+0x34, own count/array at absolute +0x28/+0x30) that
+    # the prior "batch 2026-07-25b" above deferred CreateUserModules()/
+    # CreateFMDrivers() for. AddConstructor()/RemoveConstructor() (module_manager.h/
+    # .cpp) are the real read/write side; CSysApiInstance::AddConstructor()
+    # (sysapi_instance.h/.cpp) is the real forwarder mains.cpp's
+    # RegisterModuleDescriptor() reaches through Api's own vtable slot +0x40 --
+    # confirmed by direct byte read of the ground-truth binary's installed
+    # CSysApiInstance vtable (VA 08e81008+0x40 == 0x0806b530), and wired for real in
+    # omega_vtables.cpp (PTR__CSysApiInstance_08e81008[16], previously a dead
+    # EvaVTableStub no-op -- same "Tier-B stub leaves a real array permanently
+    # empty" bug class as CModuleManager::AddModule()/mModules, Stage 6 batch 3).
+    # CreateUserModules()/CreateFMDrivers() themselves (config_manager.cpp) are real,
+    # safe no-ops on this pass's own traced boot path given today's zero-initialized
+    # sm_ptCreateInfo/sm_ptFMDriverInfo placeholders (config_info.cpp) -- each
+    # table's own first name field gates the entire function, same "safe to zero"
+    # property already established for SetupRouting/MakeConnections/
+    # RegisterChunkServer/LinkRTRouterTracks. See module_manager.h/config_manager.cpp
+    # for the full writeup.
+    "0805f660",  # CModuleManager::AddConstructor(CModuleConstructor&)
+    "0805f990",  # CModuleManager::RemoveConstructor(CModuleConstructor&)
+    "0806b530",  # CSysApiInstance::AddConstructor(CModuleConstructor&)
+    "08056440",  # CConfigManager::CreateUserModules
+    "08056760",  # CConfigManager::CreateFMDrivers
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

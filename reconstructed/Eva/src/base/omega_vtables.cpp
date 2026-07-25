@@ -42,6 +42,24 @@ extern "C" void *GetFMApiStub(void *)
 	return SysApiInstance;
 }
 
+/*
+ * FIX (2026-07-25): PTR__CSysApiInstance_08e81008's own slot 16 (byte offset 0x40)
+ * is installed as this real forwarder instead of the generic EvaVTableStub. Direct
+ * byte read of the ground-truth binary's own installed vtable (Eva, file offset
+ * 0xE39048 = VA 08e81008+0x40) confirms the real pointer there is exactly
+ * 0x0806b530 = CSysApiInstance::AddConstructor(CModuleConstructor*)
+ * (sysapi_instance.h). mains.cpp's RegisterModuleDescriptor() dispatches every one
+ * of its 15 real module descriptors through this exact slot; under the old
+ * EvaVTableStub no-op none of them ever reached CModuleManager::AddConstructor(),
+ * so mConstructors (module_manager.h) stayed permanently empty -- same "Tier-B stub
+ * leaves a real array dead" bug class as CModuleManager::AddModule()/mModules
+ * (Stage 6 batch 3).
+ */
+extern "C" void AddConstructorVSlot(void *obj, void *ctor)
+{
+	((CSysApiInstance *)obj)->AddConstructor((CModuleConstructor *)ctor);
+}
+
 extern "C" {
 void *PTR__CHostInterfaceBase_08e80b68[22] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -104,7 +122,7 @@ void *PTR__CSysApiInstance_08e81008[94] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)AddConstructorVSlot, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,

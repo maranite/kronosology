@@ -117,6 +117,11 @@ void CSysApiInstance::AddModule(CModule *module)
 	((CModuleManager *)g_poModuleManager)->AddModule(module);
 }
 
+void CSysApiInstance::AddConstructor(CModuleConstructor *ctor)
+{
+	((CModuleManager *)g_poModuleManager)->AddConstructor(ctor);
+}
+
 void CSysApiInstance::RegisterApi(const char * /*name*/, CApiBase * /*api*/)
 {
 	/* Tier-B link-stub -- .text+0x0806bab0, 1099 bytes. See sysapi_instance.h. */
