@@ -7,6 +7,142 @@
  * OnReceiveSysExBuffer(), OnRxSexWhenInWAIT(), TransmitSexAnswer() -- see their own
  * comments below and the corrected `mState` field entry in the layout comment).
  *
+ * THIRD FOLLOW-UP PASS (same day, 23/26 Tier A now -- only `OnReceiveMessage()`
+ * stays Tier B): `PrepareMsgBuffer()`, `UnprepareBuffer()`, `EventToMessage()`,
+ * `MessageToEvent()`, `Error()`, `OnRxSexWhenInIDLE()`, `OnRxSexWhenInSENT()`,
+ * `OnRxMsgWhenInIDLE()`, and `OnRxMsgWhenInSENT()` are now all real -- transcribed
+ * from the Ghidra decompile export (`Decomp/EVA_Decomp/eva_export/functions`,
+ * ground truth per PLAN.md) rather than hand-traced raw `objdump` this time -- the
+ * byte-packing loops are hand-unrolled to a degree (7-way nested `if`) that made a
+ * Ghidra-decompile cross-check the safer source of truth than re-deriving bit
+ * positions from `objdump -M intel` alone. The prior pass's own prediction that
+ * the message-side/sex-side IDLE/SENT pairs would still be blocked by `Error()`'s
+ * own unreconstructed body turned out to be OVERLY conservative: once
+ * `PrepareMsgBuffer()`/`UnprepareBuffer()`/`Error()` were real, a fresh dependency
+ * check on all 4 found ZERO remaining `CMessage`/`CSexMatrix`-shaped calls in any
+ * of them (confirmed by grepping each decompile's own call list) -- only
+ * `OnReceiveMessage()` itself remains genuinely blocked, since `CMessage` is the
+ * primary parameter type it cannot avoid touching.
+ *
+ * THE WIRE FORMAT (this pass's biggest finding): `PrepareMsgBuffer()`/
+ * `UnprepareBuffer()` are a matched DECODE/ENCODE pair for a MIDI-SysEx-style
+ * 8-to-7-bit-safe framing, but with the flag byte and its 7 payload bytes ordered
+ * flag-FIRST (not flag-last): a "group" is 1 flag byte followed by up to 7 payload
+ * bytes, and `PrepareMsgBuffer()` reconstructs output byte `i` (i=0..6, 0-based
+ * within the group) as `(group[i+1] & 0x7f) | (((flag >> (6-i)) & 1) << 7)` --
+ * i.e. flag bit6 restores payload1's bit7, bit5 restores payload2's, ... bit0
+ * restores payload7's. Confirmed bit-for-bit against the Ghidra decompile's own
+ * literal shift/mask constants for all 7 positions (`bVar2*2&0x80`, `*4&0x80`,
+ * `*8&0x80`, `(bVar2&0xf8)<<4` truncated-to-byte, `*0x20&0x80`, `(bVar2&2)<<6`,
+ * `bVar2<<7` truncated-to-byte -- each one independently verified to isolate
+ * exactly bit 6,5,4,3,2,1,0 of the flag byte respectively). `UnprepareBuffer()` is
+ * the exact inverse: builds the flag byte by left-shifting in each payload byte's
+ * own bit7 as it's consumed, then (for a partial trailing group of `k<7` bytes)
+ * left-justifies the accumulated `k`-bit value by an extra `(7-k)` shift so short
+ * trailing groups still land in the same bit positions a full group would use.
+ * Both directions are reconstructed here as a clean loop (not a transliteration of
+ * the 7-deep nested-if/goto shape either function's own real disassembly has) --
+ * safe because the per-position bit formula was verified from the DECOMPILE's own
+ * explicit values, not inferred from the loop shape.
+ *
+ * `EventToMessage()`/`MessageToEvent()` are the CLinkedEvent<->raw-message
+ * counterparts, layering a fixed 6-byte SysEx header (`F0 <CSexInputTask::
+ * sm_byKorgID=0x42> <device, top bit clear> <CSexInputTask::sm_byKorgItalyID=0x60>
+ * <mEcb> 0x01>`, values confirmed by a direct raw-byte read of
+ * `Decomp/EVA_Decomp/Eva`'s `.rodata+0x8e7bce5..0x8e7bce7`) plus a trailing 0xF7
+ * (SysEx end byte) around a `PrepareMsgBuffer()`/`UnprepareBuffer()` payload.
+ * `EventToMessage()`'s own header-validation checks are REAL and enforcing (a
+ * genuine `return` with no log on mismatch, unlike this file's usual soft
+ * asserts) -- confirmed by reading the decompile's own bare `return 0;` with zero
+ * diagnostic call. `MessageToEvent()` allocates its own fresh event buffer
+ * directly via `CEvBuffersPool::Alloc()` (NOT through this class's own ctor-built
+ * `mEvBuf`/`mEvTag` -- it operates on a caller-supplied `CLinkedEvent*`, same as
+ * `UnprepareBuffer()`), and its final step overwrites the event tag's own
+ * "unknown middle byte" (bits 8-15, the byte every OTHER method in this file only
+ * ever preserves via `& 0xff00`) with a raw byte read from `mClient` (a
+ * `CSysExMsgTaskBase*`) at offset +0x8c -- an out-of-scope field one byte past
+ * where `sysex_msg_task_base.h`'s own reconstruction currently ends (`mOutLink`
+ * at +0x88, 4 bytes, ending the class's currently-modeled layout at exactly
+ * +0x8c) -- see that method's own `.cpp` comment for the resulting caveat (this
+ * one read is against real, but currently unmodeled, memory in a sibling class
+ * this file does not own).
+ *
+ * `Error()` -- real, ~1900 bytes, genuinely a 3-way dispatch on `mode`'s bits 0/1
+ * as the SCOPE section below already predicted, but almost ENTIRELY the SAME
+ * "reacquire mEvBuf lock, mutate, release, [maybe TransmitSysEx()], reacquire,
+ * release" idiom already established by `TXData()`/`TransmitSexAnswer()` above,
+ * repeated (not de-duplicated in ground truth either) up to 3 times depending on
+ * which mode bits are set. Mode bit 0 (`& 1`) triggers a raw vtable-slot dispatch
+ * on `mClient` (slot +0x18, index 6) -- reproduced as a raw pointer-arithmetic
+ * call (matching every `Api`-vtable call site's own style in this file) rather
+ * than including `sysex_msg_task_base.h`, keeping this file decoupled from that
+ * class's own separate reconstruction effort. Mode bit 1 (`& 2`) writes a type=4
+ * "error" marker byte into the event buffer at a fixed offset
+ * (`CSexInputTask::sm_uiSexPropHeaderLen`, the SAME real value of 5 already used
+ * here as `kSexPacketOverhead`) and sends it via `TransmitSysEx()`. Every mode
+ * combination converges on the SAME final reset: `mUnknown0e=0xff`,
+ * `mState0d=0`, `mState=0` (IDLE), `mUnknown08=0`.
+ *
+ * `OnRxSexWhenInIDLE()`/`OnRxSexWhenInSENT()` and `OnRxMsgWhenInIDLE()`/
+ * `OnRxMsgWhenInSENT()` -- the remaining 4 members of the IDLE/SENT/WAIT dispatch
+ * family (`OnRxSexWhenInWAIT()`/`OnRxMsgWhenInWAIT()` were already real from the
+ * prior 2 passes) -- turned out to have ZERO remaining `CMessage`/`CSexMatrix`
+ * dependency once checked fresh against this pass's own newly-real helpers, so all
+ * 4 are reconstructed here too:
+ *   `OnRxSexWhenInIDLE(type,...)` -- type 0 tail-calls `OnRxPacket()` unchanged;
+ *     type 1 either builds+sends a raw echo through `mOutLink->OutMono()` directly
+ *     (when `mModeService` bit 0x20, the checksum-framing bit, is CLEAR -- ground
+ *     truth genuinely reads `OutMono()`'s own return value here, unlike
+ *     `SendMessageToClient()`'s own discard, but this method's own committed
+ *     `void` return -- symbols.csv has no resolved type -- discards it in turn)
+ *     or falls to the shared `Error(0)` tail (bit 0x20 SET, an out-of-protocol
+ *     "raw data when checksums are on" condition); types 2/3/default all take the
+ *     same soft-log-only + `Error(0)` shared tail; type 4 is the ONE case with a
+ *     different `Error()` argument (`Error(1)`).
+ *   `OnRxSexWhenInSENT(type,...)` -- types 0/1 both do a real "reset to IDLE" (the
+ *     SAME `mUnknown0e=0xff`/`mState0d=0`/`mState=0`/`mUnknown08=0` reset `Error()`
+ *     itself performs) then a genuine tail-jmp into `OnRxSexWhenInIDLE()` with the
+ *     SAME `type`/`data`/`len`/`x` this method itself received (confirmed via
+ *     `objdump` -- ground truth's own `jmp` target reuses the caller's original
+ *     argument registers/stack slots unchanged, not re-derived); type 2 (ack)
+ *     resets to IDLE and returns if `data[0]==mState0c`, else falls to a shared
+ *     `Error(0)` "give up" tail; type 3 (retry) resends via `TransmitSysEx()` and
+ *     bumps the retry counter if `data[0]==mState0c && mState0d<5`, else the same
+ *     `Error(0)` tail; type 4 and out-of-range default are BOTH genuine no-ops (no
+ *     log, no `Error()` call at all, confirmed by reading the fallthrough -- a
+ *     real, different tail from every other case in this method). One documented
+ *     dead-code simplification: ground truth's own `if (mUnknown08==1)
+ *     mUnknown08=0;` at the top of cases 0/1/2 is provably dead (every control
+ *     path in those 3 cases unconditionally overwrites `mUnknown08` again before
+ *     returning, whether via this method's own reset or `Error()`'s own shared
+ *     tail) and is omitted; the SAME check in case 3's SUCCESS path is NOT dead
+ *     (it is the ONLY write to `mUnknown08` on that path) and is kept.
+ *   `OnRxMsgWhenInIDLE(data,len,x)` -- packs `data`/`len` into this class's OWN
+ *     embedded event (via `UnprepareBuffer(reinterpret_cast<CLinkedEvent*>(&mEvTag),
+ *     ...)`, starting at a fixed offset depending on `mModeService` bit 0x20:
+ *     `kSexPacketOverhead+1` (6) if clear, `+2` (7) if set) and overwrites the
+ *     tag's own "unknown middle byte" with `x` (same idiom `MessageToEvent()`
+ *     uses). If bit 0x20 is SET (checksum framing requested): backfills a 2-byte
+ *     mini-header at offsets `headerOff-2`/`headerOff-1` (`[0, mState0c+1 mod
+ *     0x80]` -- `mState0c` is incremented here as a real, observable side effect),
+ *     appends a running `ComputeCRCByte()` checksum byte right after the packed
+ *     payload, transitions to SENT (`mState=1`), and sends -- this is the message
+ *     side of the SAME ack/retry state machine `OnRxSexWhenInSENT()` drives. If
+ *     bit 0x20 is CLEAR: backfills a single fixed type=1 byte at `headerOff-1`, no
+ *     checksum, sends fire-and-forget, then does the FULL reset back to IDLE
+ *     (same 4-field reset as `Error()`'s own shared tail) since nothing is
+ *     expected back.
+ *   `OnRxMsgWhenInSENT(data,len,x)` -- much simpler: sets `mUnknown08=1`
+ *     (unconditional, no dead-code caveat here), one reacquire+release cycle
+ *     (idiom), then a genuine tail-jmp into `OnRxMsgWhenInIDLE()` with the SAME
+ *     `data`/`len`/`x` unchanged (same confirmed-via-`objdump` pattern as
+ *     `OnRxSexWhenInSENT()`'s own cases 0/1 above).
+ *
+ * Still deferred after this pass (1/26 Tier B): `OnReceiveMessage(const CMessage&)`
+ * only -- `CMessage` itself remains completely out of scope (forward-declared only,
+ * no field layout established), and this is the one method whose own primary
+ * parameter type IS `CMessage`, so it cannot be reconstructed without that class.
+ *
  * GROUND TRUTH REACHABILITY (the actual point of this pass, correcting Stage 6 batch
  * 6's own "no confirmed caller found in a quick check, lower confidence" verdict on
  * this exact class): the real caller chain is genuine and boot-path-adjacent, fully
@@ -372,22 +508,80 @@ public:
 	 */
 	void TransmitSexAnswer(ESexMsgType type, unsigned char x);
 
-	/* Remaining 12 real methods -- Tier B, real signatures, empty bodies. See
-	 * header comment for the specific, examined reason each one is still deferred
-	 * (packet-escape-byte framing protocol not yet decoded bit-exact, Error()'s
-	 * heavy shared-tail duplication, or CMessage's own internals being out of
-	 * scope).
+	/* .text+0x081706d0, 794 bytes. Tier A -- third follow-up pass, see header
+	 * comment for the full DECODE-direction wire-format writeup. Real return
+	 * value (bool success) is discarded by every real caller traced so far
+	 * (confirmed at OnRxPacket()'s own call site) -- committed as void.
+	 */
+	void PrepareMsgBuffer(unsigned char *buf, unsigned char &len, const unsigned char *data,
+	                       unsigned char dataLen);
+
+	/* .text+0x08170a00, 2763 bytes. Tier A -- third follow-up pass, ENCODE
+	 * direction (see header comment). Operates on a caller-supplied
+	 * `CLinkedEvent*`, not this object's own mEvTag/mEvBuf -- accessed via raw
+	 * offset-0/offset-4 pointer arithmetic (same layout `event.h`'s own
+	 * CEvent/CLinkedEvent establishes), not a real CEvent member access.
+	 */
+	void UnprepareBuffer(CLinkedEvent *ev, const unsigned char *data, unsigned char len,
+	                      unsigned char x);
+
+	/* .text+0x081736f0, 611 bytes. Tier A -- third follow-up pass. REAL,
+	 * enforcing 6-byte SysEx header validation (genuine `return` with no log on
+	 * mismatch -- F0/KorgID/<device>/KorgItalyID/mEcb/0x01), then forwards the
+	 * payload to PrepareMsgBuffer(). Real return value (bool) discarded, same
+	 * convention as PrepareMsgBuffer() itself.
+	 */
+	void EventToMessage(const CLinkedEvent *ev, unsigned char *out, unsigned char &outLen);
+
+	/* .text+0x08173970, 1791 bytes. Tier A -- third follow-up pass. Allocates a
+	 * FRESH event buffer (CEvBuffersPool::Alloc(), not this object's own
+	 * mEvTag/mEvBuf), writes the fixed 6-byte SysEx header + UnprepareBuffer()'s
+	 * packed payload + a trailing 0xF7, then overwrites the tag's own "unknown
+	 * middle byte" with a raw byte read from `mClient` at offset +0x8c -- see
+	 * header comment and this method's own `.cpp` comment for the resulting
+	 * "reads real but currently-unmodeled sibling-class memory" caveat.
+	 */
+	void MessageToEvent(const unsigned char *data, unsigned char len, CLinkedEvent *ev);
+
+	/* .text+0x0816f830, 1902 bytes. Tier A -- third follow-up pass, see header
+	 * comment for the full 3-way mode-bit dispatch writeup.
 	 */
 	void Error(EErrNotifyMode mode);
-	void EventToMessage(const CLinkedEvent *ev, unsigned char *out, unsigned char &outLen);
-	void MessageToEvent(const unsigned char *data, unsigned char len, CLinkedEvent *ev);
-	/* NOT declared C++ `virtual` -- see sysex_msg_task_base.h's own header comment
-	 * for why (this project's raw-`mVtbl`-pointer convention, not real C++
-	 * polymorphism). Real ground-truth vtable slot 0.
+
+	/* .text+0x08172990, 582 bytes. Tier A -- third follow-up pass, see header
+	 * comment. type 0 tail-calls OnRxPacket(); type 1 builds+sends a raw echo
+	 * (mModeService bit 0x20 clear) or falls to Error(0) (bit 0x20 set); types
+	 * 2/3/default -> Error(0); type 4 -> Error(1) (the one case with a different
+	 * argument).
 	 */
-	int OnReceiveMessage(const CMessage &msg);
+	void OnRxSexWhenInIDLE(ESexMsgType type, const unsigned char *data, unsigned char len,
+	                        unsigned char x);
+
+	/* .text+0x08172bf0, 1516 bytes. Tier A -- third follow-up pass, see header
+	 * comment. Types 0/1: real IDLE reset + tail-jmp into OnRxSexWhenInIDLE()
+	 * with the SAME arguments. Type 2 (ack): reset-to-IDLE on data[0]==mState0c,
+	 * else Error(0). Type 3 (retry): resend + bump retry counter on
+	 * data[0]==mState0c && mState0d<5, else Error(0). Type 4 / default: genuine
+	 * no-ops (no log, no Error() call).
+	 */
+	void OnRxSexWhenInSENT(ESexMsgType type, const unsigned char *data, unsigned char len,
+	                        unsigned char x);
+
+	/* .text+0x08171510, 2159 bytes. Tier A -- third follow-up pass, see header
+	 * comment. Packs data/len into this object's OWN embedded event via
+	 * UnprepareBuffer(), then either (mModeService bit 0x20 set) appends a
+	 * sequence+checksum byte pair and transitions to SENT awaiting an ack/retry,
+	 * or (bit 0x20 clear) sends a fixed fire-and-forget marker and resets
+	 * straight back to IDLE.
+	 */
 	void OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len, unsigned char x);
+
+	/* .text+0x08171db0, 591 bytes. Tier A -- third follow-up pass, see header
+	 * comment. Sets mUnknown08=1, one reacquire+release cycle, then a genuine
+	 * tail-jmp into OnRxMsgWhenInIDLE() with the SAME arguments unchanged.
+	 */
 	void OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len, unsigned char x);
+
 	/* .text+0x0816ffd0, 59 bytes. Real return value is 1 (bool `true`) in ground
 	 * truth, but the committed real signature (functions.csv/symbols.csv, no
 	 * return type resolved) is `void` -- same "eax not part of the real
@@ -395,14 +589,15 @@ public:
 	 * body: an unconditional log (Api+0x90, omitted, soft) then Error().
 	 */
 	void OnRxMsgWhenInWAIT(const unsigned char *data, unsigned char len, unsigned char x);
-	void OnRxSexWhenInIDLE(ESexMsgType type, const unsigned char *data, unsigned char len,
-	                        unsigned char x);
-	void OnRxSexWhenInSENT(ESexMsgType type, const unsigned char *data, unsigned char len,
-	                        unsigned char x);
-	void PrepareMsgBuffer(unsigned char *buf, unsigned char &len, const unsigned char *data,
-	                       unsigned char dataLen);
-	void UnprepareBuffer(CLinkedEvent *ev, const unsigned char *data, unsigned char len,
-	                      unsigned char x);
+
+	/* Only remaining Tier B method (real signature, empty body) -- CMessage
+	 * itself is completely out of scope (forward-declared only), and this is
+	 * this class's own primary CMessage-typed entry point. NOT declared C++
+	 * `virtual` -- see sysex_msg_task_base.h's own header comment for why (this
+	 * project's raw-`mVtbl`-pointer convention, not real C++ polymorphism). Real
+	 * ground-truth vtable slot 0.
+	 */
+	int OnReceiveMessage(const CMessage &msg);
 
 	/* .text+0x08e7bc9c, 1 byte. Real static data member. Value not read from the
 	 * binary this pass (no reconstructed code reads it); zero-initialized here.

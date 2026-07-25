@@ -515,6 +515,34 @@ RECONSTRUCTED = {
     "080cf650",  # CDumpManMod::Setup()
     "080cf500",  # CDumpManMod::Config() (confirmed genuinely empty)
     "080cf510",  # CDumpManMod::Start() (confirmed genuinely empty)
+
+    # --- Stage 6: breadth sweep, THIRD CClientCommServer follow-up pass same day
+    # (2026-07-25). Promotes 9 of the 10 methods the second follow-up pass left
+    # Tier B (23/26 Tier A total now -- only OnReceiveMessage(CMessage const&) stays
+    # Tier B, CMessage itself being genuinely out of scope). Transcribed from the
+    # Ghidra decompile export (Decomp/EVA_Decomp/eva_export/functions) rather than
+    # raw objdump this time -- the byte-packing loops are hand-unrolled 7-deep,
+    # which made a decompile cross-check the safer source of truth. Biggest finding:
+    # PrepareMsgBuffer()/UnprepareBuffer() are a matched DECODE/ENCODE pair for a
+    # MIDI-SysEx-style 8-to-7-bit-safe framing (flag byte first, then up to 7
+    # payload bytes per group) -- confirmed bit-for-bit against the decompile's own
+    # literal shift/mask constants for all 7 positions, not guessed. This ALSO
+    # unblocked the other 4 members of the IDLE/SENT/WAIT dispatch family
+    # (OnRxMsgWhenInIDLE/SENT, OnRxSexWhenInIDLE/SENT) that the prior pass predicted
+    # would still need Error()'s own body -- a fresh dependency check found ZERO
+    # remaining CMessage/CSexMatrix-shaped calls in any of them once
+    # PrepareMsgBuffer()/UnprepareBuffer()/Error() were real. See
+    # include/client_comm_server.h's own updated header comment for the full
+    # per-method writeup.
+    "081706d0",  # CClientCommServer::PrepareMsgBuffer(uchar*, uchar&, uchar const*, uchar)
+    "08170a00",  # CClientCommServer::UnprepareBuffer(CLinkedEvent*, uchar const*, uchar, uchar)
+    "081736f0",  # CClientCommServer::EventToMessage(CLinkedEvent const*, uchar*, uchar&)
+    "08173970",  # CClientCommServer::MessageToEvent(uchar const*, uchar, CLinkedEvent*)
+    "0816f830",  # CClientCommServer::Error(EErrNotifyMode)
+    "08172990",  # CClientCommServer::OnRxSexWhenInIDLE(ESexMsgType, uchar const*, uchar, uchar)
+    "08172bf0",  # CClientCommServer::OnRxSexWhenInSENT(ESexMsgType, uchar const*, uchar, uchar)
+    "08171510",  # CClientCommServer::OnRxMsgWhenInIDLE(uchar const*, uchar, uchar)
+    "08171db0",  # CClientCommServer::OnRxMsgWhenInSENT(uchar const*, uchar, uchar)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

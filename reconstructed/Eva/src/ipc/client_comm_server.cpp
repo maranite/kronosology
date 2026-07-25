@@ -38,6 +38,7 @@
 #include "out_link.h"
 
 #include <cstdlib>
+#include <cstring>
 
 namespace {
 
@@ -52,6 +53,17 @@ namespace {
  */
 const unsigned char kSexPacketOverhead = 5;
 const unsigned char kSexMaxLen = 0xff;
+
+/* .rodata+0x8e7bce5/+0x8e7bce6/+0x8e7bce7 in ground truth -- the fixed 6-byte
+ * SysEx header EventToMessage()/MessageToEvent() both build/validate:
+ * `F0 <kSexKorgID> <device, top bit clear> <kSexKorgItalyID> <mEcb> 0x01`.
+ * Confirmed by a direct raw-byte read of Decomp/EVA_Decomp/Eva at those
+ * addresses (0xf0, 0x42, 0x60 respectively) -- CSexInputTask::sm_byStartSex/
+ * sm_byKorgID/sm_byKorgItalyID's own real values, not guessed.
+ */
+const unsigned char kSexStartByte = 0xf0;
+const unsigned char kSexKorgID = 0x42;
+const unsigned char kSexKorgItalyID = 0x60;
 
 } // namespace
 
@@ -169,22 +181,552 @@ unsigned char CClientCommServer::ComputeCRCByte(unsigned char startIndex) const
 	return crc;
 }
 
-/* --- Tier B: still empty, real signatures only -- see header comment. -------- */
+/* --- Tier B: still empty, real signature only -- see header comment. --------- */
 
-void CClientCommServer::Error(EErrNotifyMode) {}
-void CClientCommServer::EventToMessage(const CLinkedEvent *, unsigned char *, unsigned char &) {}
-void CClientCommServer::MessageToEvent(const unsigned char *, unsigned char, CLinkedEvent *) {}
 int CClientCommServer::OnReceiveMessage(const CMessage &) { return 0; }
-void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *, unsigned char, unsigned char) {}
-void CClientCommServer::OnRxMsgWhenInSENT(const unsigned char *, unsigned char, unsigned char) {}
-void CClientCommServer::OnRxSexWhenInIDLE(ESexMsgType, const unsigned char *, unsigned char,
-                                            unsigned char) {}
-void CClientCommServer::OnRxSexWhenInSENT(ESexMsgType, const unsigned char *, unsigned char,
-                                            unsigned char) {}
-void CClientCommServer::PrepareMsgBuffer(unsigned char *, unsigned char &, const unsigned char *,
-                                           unsigned char) {}
-void CClientCommServer::UnprepareBuffer(CLinkedEvent *, const unsigned char *, unsigned char,
-                                          unsigned char) {}
+
+/* --- Tier A: real bodies, THIRD follow-up pass. ------------------------------- */
+
+/* .text+0x081706d0, 794 bytes. DECODE direction -- see header comment for the
+ * full wire-format writeup. Transcribed from the Ghidra decompile export
+ * (PrepareMsgBuffer@081706d0.c), restructured into a clean loop rather than a
+ * transliteration of its 7-deep nested-if/goto shape -- safe because the
+ * per-position bit formula (`(flag >> (6-i)) & 1` feeding output byte i's bit7)
+ * was verified against the decompile's own explicit shift/mask constants for
+ * all 7 positions, not inferred from the loop shape itself.
+ */
+void CClientCommServer::PrepareMsgBuffer(unsigned char *buf, unsigned char &outLen,
+                                           const unsigned char *data, unsigned char dataLen)
+{
+	if (!(mModeService & 0x10)) {
+		/* Raw passthrough: real ground truth requires dataLen strictly less
+		 * than the caller's own capacity (outLen, used here as an IN
+		 * parameter), else returns without writing anything (return 0,
+		 * discarded by every real caller traced so far).
+		 */
+		if (dataLen < outLen) {
+			memcpy(buf, data, dataLen);
+			outLen = dataLen;
+		}
+		return;
+	}
+
+	/* Real soft assert (dataLen<2, Api+0x94) omitted -- non-enforcing; ground
+	 * truth still runs the same decode loop below for dataLen==1 (only
+	 * dataLen==0 short-circuits, which the loop condition itself already
+	 * handles, see below).
+	 */
+	unsigned char outCount = 0;
+	unsigned char idx = 0;
+	while (idx < dataLen) {
+		unsigned char flag = data[idx];
+		unsigned char groupIdx = static_cast<unsigned char>(idx + 1);
+		unsigned char produced = 0;
+		for (; produced < 7 && groupIdx < dataLen;
+		     produced = static_cast<unsigned char>(produced + 1),
+		     groupIdx = static_cast<unsigned char>(groupIdx + 1)) {
+			/* Real ground truth: return (without writing outLen at all) --
+			 * a genuine fatal early exit (buffer too small), unlike this
+			 * file's usual soft asserts.
+			 */
+			if (outLen <= outCount)
+				return;
+			unsigned char bit = static_cast<unsigned char>((flag >> (6 - produced)) & 1);
+			buf[outCount] = static_cast<unsigned char>((data[groupIdx] & 0x7f) |
+			                                             (bit << 7));
+			outCount = static_cast<unsigned char>(outCount + 1);
+		}
+		idx = static_cast<unsigned char>(idx + 1 + produced);
+		if (produced == 0) {
+			/* Trailing lone flag byte with no payload bytes after it -- real
+			 * ground truth logs (Api+0x94, soft) and stops here WITHOUT
+			 * consuming anything else, but still returns success with
+			 * whatever outCount already holds.
+			 */
+			break;
+		}
+	}
+
+	outLen = outCount;
+}
+
+/* .text+0x08170a00, 2763 bytes. ENCODE direction (the inverse of
+ * PrepareMsgBuffer() above) -- see header comment. Operates on a
+ * caller-supplied CLinkedEvent* via raw offset-0 (mTag) / offset-4 (mBuf)
+ * pointer arithmetic, matching event.h's own confirmed CEvent/CLinkedEvent
+ * layout without needing friend access to its protected members.
+ */
+void CClientCommServer::UnprepareBuffer(CLinkedEvent *ev, const unsigned char *data,
+                                          unsigned char len, unsigned char x)
+{
+	int *evTag = reinterpret_cast<int *>(ev);
+	void **evBuf = reinterpret_cast<void **>(reinterpret_cast<char *>(ev) + 4);
+
+	/* Real prologue soft asserts on *evTag's sign/tag-byte/length-vs-x
+	 * (Event.h:0x3c7/0x3da/0x39a, ClientCommServer.cpp:0x21c) omitted --
+	 * purely diagnostic, every branch re-converges on the same *evTag value
+	 * with no effect on the real logic below (the reacquire immediately after
+	 * is a FRESH read/write, independent of anything this chain computed).
+	 */
+	*evTag = static_cast<int>((static_cast<unsigned>(*evTag) & 0xff00u) | 0x8000000au);
+	*evBuf = CEvent::sm_oEvBuffersPool.Lock(*evBuf);
+
+	if (!(mModeService & 0x10)) {
+		/* Raw passthrough encode: real soft capacity assert
+		 * (ClientCommServer.cpp:0x240) omitted -- the memcpy happens
+		 * unconditionally regardless.
+		 */
+		if (*evBuf)
+			memcpy(static_cast<unsigned char *>(*evBuf) + x, data, len);
+		*evTag = static_cast<int>(static_cast<unsigned>(*evTag) |
+		                            ((static_cast<unsigned>(x) + len) << 16));
+	} else {
+		/* Framed encode: groups of 1 flag byte + up to 7 payload bytes,
+		 * flag-FIRST (matching PrepareMsgBuffer()'s own decode order).
+		 */
+		unsigned char groupStart = x;
+		unsigned char idx = 0;
+		while (idx < len) {
+			unsigned char *chunk = static_cast<unsigned char *>(*evBuf);
+			unsigned int flagAcc = 0;
+			unsigned char k = 0;
+			for (; k < 7 && idx < len;
+			     k = static_cast<unsigned char>(k + 1), idx = static_cast<unsigned char>(idx + 1)) {
+				/* Real soft capacity assert (ClientCommServer.cpp:0x22c)
+				 * omitted -- the write happens unconditionally regardless.
+				 */
+				unsigned char pos = static_cast<unsigned char>(groupStart + 1 + k);
+				unsigned char b = data[idx];
+				if (chunk)
+					chunk[pos] = static_cast<unsigned char>(b & 0x7f);
+				flagAcc = (flagAcc << 1) | ((b >> 7) & 1u);
+			}
+			flagAcc <<= (7 - k);
+			if (chunk)
+				chunk[groupStart] = static_cast<unsigned char>(flagAcc & 0x7f);
+			groupStart = static_cast<unsigned char>(groupStart + k + 1);
+		}
+		*evTag = static_cast<int>(static_cast<unsigned>(*evTag) |
+		                            (static_cast<unsigned>(groupStart) << 16));
+	}
+
+	if (*evBuf)
+		*(static_cast<unsigned char *>(*evBuf) - 3) &= 0x7f;
+}
+
+/* .text+0x081736f0, 611 bytes. Real, ENFORCING SysEx-header validation (no
+ * log, genuine early-return on mismatch -- confirmed by reading the
+ * decompile's own bare `return 0;` with zero diagnostic call at each of these
+ * 6 checks), then forwards the payload to PrepareMsgBuffer(). Prologue soft
+ * asserts (tag class-byte range, CEvent::sm_kaeCodeToClass lookup, tag
+ * sign/tag-byte checks) omitted -- purely diagnostic, see file header comment.
+ */
+void CClientCommServer::EventToMessage(const CLinkedEvent *ev, unsigned char *out,
+                                         unsigned char &outLen)
+{
+	const int evTag = *reinterpret_cast<const int *>(ev);
+	const unsigned char *buf =
+	    *reinterpret_cast<unsigned char *const *>(reinterpret_cast<const char *>(ev) + 4);
+
+	if (buf[0] != kSexStartByte) return;
+	if (buf[1] != kSexKorgID) return;
+	if (static_cast<signed char>(buf[2]) < 0) return;
+	if (buf[3] != kSexKorgItalyID) return;
+	if (buf[4] != mEcb) return;
+	if (buf[5] != 1) return;
+
+	unsigned int length = (static_cast<unsigned int>(evTag) & 0x7fffffffu) >> 16;
+	if (length > kSexMaxLen)
+		return;
+
+	/* Real soft assert (length <= kSexPacketOverhead+1) omitted, non-enforcing. */
+	unsigned char dataLen = static_cast<unsigned char>(length - kSexPacketOverhead - 2);
+	PrepareMsgBuffer(out, outLen, buf + 6, dataLen);
+}
+
+/* .text+0x08173970, 1791 bytes. Allocates a FRESH event buffer directly via
+ * CEvBuffersPool::Alloc() (NOT this object's own mEvTag/mEvBuf -- operates on
+ * a caller-supplied CLinkedEvent*, same as UnprepareBuffer() above).
+ */
+void CClientCommServer::MessageToEvent(const unsigned char *data, unsigned char len,
+                                         CLinkedEvent *ev)
+{
+	int *evTag = reinterpret_cast<int *>(ev);
+	void **evBuf = reinterpret_cast<void **>(reinterpret_cast<char *>(ev) + 4);
+
+	/* Real soft assert (incoming *evTag must be 0xf, sm_uiMaxSexPropLen<=0x7fff)
+	 * omitted, non-enforcing.
+	 */
+	*evTag = 0x8000000a;
+	*evBuf = CEvent::sm_oEvBuffersPool.Alloc(kSexMaxLen);
+	/* Real soft asserts on the freshly-Alloc'd chunk's tag/class-byte omitted. */
+	if (*evBuf)
+		*(static_cast<unsigned char *>(*evBuf) - 3) &= 0x7f;
+
+	*evTag = static_cast<int>((static_cast<unsigned>(*evTag) & 0xff00u) | 0x8000000au);
+	*evBuf = CEvent::sm_oEvBuffersPool.Lock(*evBuf);
+
+	/* Fixed 6-byte SysEx header. */
+	if (*evBuf) {
+		unsigned char *buf = static_cast<unsigned char *>(*evBuf);
+		buf[0] = kSexStartByte;
+		buf[1] = kSexKorgID;
+		buf[2] = 0x7f;
+		buf[3] = kSexKorgItalyID;
+		buf[4] = mEcb;
+		buf[5] = 1;
+	}
+
+	/* Real soft capacity assert (>=6) omitted. */
+	*evTag = static_cast<int>(static_cast<unsigned>(*evTag) | 0x00060000u);
+	if (*evBuf)
+		*(static_cast<unsigned char *>(*evBuf) - 3) &= 0x7f;
+
+	UnprepareBuffer(ev, data, len, 6);
+
+	unsigned int packedEnd = (static_cast<unsigned>(*evTag) & 0x7fffffffu) >> 16;
+
+	*evTag = static_cast<int>((static_cast<unsigned>(*evTag) & 0xff00u) | 0x8000000au);
+	*evBuf = CEvent::sm_oEvBuffersPool.Lock(*evBuf);
+
+	if (*evBuf)
+		static_cast<unsigned char *>(*evBuf)[packedEnd & 0xff] = 0xf7;
+	unsigned char newLen = static_cast<unsigned char>((packedEnd + 1) & 0xff);
+
+	/* Real soft capacity assert omitted. */
+	*evTag = static_cast<int>(static_cast<unsigned>(*evTag) |
+	                            (static_cast<unsigned>(newLen) << 16));
+	if (*evBuf)
+		*(static_cast<unsigned char *>(*evBuf) - 3) &= 0x7f;
+
+	/* Real: overwrite the tag's bits8-15 (the "unknown middle byte" every
+	 * other method in this file only ever preserves via `& 0xff00`) with a
+	 * raw byte read from mClient (CSysExMsgTaskBase*) at offset +0x8c --
+	 * an out-of-scope field ONE BYTE PAST where sysex_msg_task_base.h's own
+	 * reconstruction currently ends (mOutLink at +0x88, 4 bytes, so its
+	 * sizeof() there is exactly 0x8c). This read is therefore against real,
+	 * but currently unmodeled, memory in a sibling class this file does not
+	 * own -- reproduced as ground truth's own raw fixed-offset access
+	 * (matching this project's established convention for such cross-class
+	 * reads) rather than pulling in sysex_msg_task_base.h; a KAT cannot
+	 * assert a meaningful expected value for this one byte until that
+	 * class's own reconstruction extends past +0x8c.
+	 */
+	unsigned char clientByte = *(reinterpret_cast<unsigned char *>(mClient) + 0x8c);
+	*evTag = static_cast<int>((static_cast<unsigned>(*evTag) & 0xffff00ffu) |
+	                            (static_cast<unsigned>(clientByte) << 8));
+}
+
+/* .text+0x0816f830, 1902 bytes. Genuinely a 3-way dispatch on `mode`'s bits
+ * 0/1, almost entirely the SAME "reacquire mEvBuf lock, mutate, release,
+ * [maybe TransmitSysEx()], reacquire, release" idiom already established by
+ * TXData()/TransmitSexAnswer() above, repeated up to 3 times (not
+ * de-duplicated in ground truth either) -- see header comment.
+ */
+void CClientCommServer::Error(EErrNotifyMode mode)
+{
+	unsigned int m = static_cast<unsigned int>(mode);
+
+	if (m & 1) {
+		/* Real ground truth: a raw vtable-slot dispatch on mClient
+		 * (CSysExMsgTaskBase*), slot +0x18 (index 6) -- mClient's real class
+		 * is intentionally out of scope in THIS file (see header comment);
+		 * reproduced as a raw pointer-arithmetic call rather than including
+		 * sysex_msg_task_base.h, keeping this file decoupled from that
+		 * class's own separate reconstruction.
+		 */
+		typedef void (*NotifyFn)(void *);
+		void **vtbl = *reinterpret_cast<void ***>(mClient);
+		reinterpret_cast<NotifyFn>(vtbl[6])(mClient);
+	}
+
+	if (m & 2) {
+		/* Reacquire (idiom). */
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+
+		/* Real: write a type=4 "error" marker byte at the fixed
+		 * SysEx-header-length offset (CSexInputTask::sm_uiSexPropHeaderLen,
+		 * the same real value of 5 already used here as kSexPacketOverhead),
+		 * set the tag's length field to headerLen+1, release, and send.
+		 */
+		if (mEvBuf)
+			static_cast<unsigned char *>(mEvBuf)[kSexPacketOverhead] = 4;
+		mEvTag = static_cast<int>(static_cast<unsigned>(mEvTag) |
+		                            ((static_cast<unsigned>(kSexPacketOverhead) + 1) << 16));
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+		mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+
+		/* Reacquire + immediately release again (idiom, matches
+		 * TransmitSexAnswer()'s own trailing cycle).
+		 */
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+		mState0c = 0;
+		mUnknown1c = 0;
+	} else {
+		mState0c = 0;
+		mUnknown1c = 0;
+	}
+
+	/* Shared tail (both branches converge here in ground truth): one more
+	 * reacquire+release cycle, then the final reset.
+	 */
+	mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+	mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+	if (mEvBuf)
+		*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+	mUnknown0e = 0xff;
+	mState0d = 0;
+	mState = 0; /* IDLE */
+	mUnknown08 = 0;
+}
+
+/* .text+0x08172990, 582 bytes. See header comment for the full case-by-case
+ * writeup.
+ */
+void CClientCommServer::OnRxSexWhenInIDLE(ESexMsgType type, const unsigned char *data,
+                                            unsigned char len, unsigned char x)
+{
+	switch (static_cast<unsigned int>(type)) {
+	case 0:
+		/* Real tail-jmp into OnRxPacket() unchanged, same pattern as
+		 * OnRxSexWhenInWAIT()'s own case 0.
+		 */
+		OnRxPacket(data, len, x);
+		return;
+	case 1:
+		/* Real soft assert (len==0, Api+0x94) omitted, non-enforcing. */
+		if (!(mModeService & 0x20)) {
+			/* "Raw data" path (checksum framing not requested for this
+			 * client) -- builds an echo into mTxBuf exactly like
+			 * OnRxPacket()'s own success path, but with no tag/checksum to
+			 * verify (this IS the raw payload already).
+			 */
+			mUnknown1c = static_cast<unsigned char>(mMaxSexPropLen1d - 1);
+			static_cast<unsigned char *>(mTxBuf)[0] = x;
+			PrepareMsgBuffer(static_cast<unsigned char *>(mTxBuf) + 1, mUnknown1c, data, len);
+			mUnknown1c = static_cast<unsigned char>(mUnknown1c + 1);
+
+			/* Real soft asserts (mModeService bit 0x2, mOutLink!=NULL)
+			 * omitted, non-enforcing -- see SendMessageToClient()'s own
+			 * established precedent. Unlike SendMessageToClient(), ground
+			 * truth here genuinely reads OutMono()'s own return value, but
+			 * this method's own committed void signature (symbols.csv has
+			 * no resolved return type) discards it in turn.
+			 */
+			mOutLink->OutMono(mEcb, mTxBuf, mUnknown1c);
+			mUnknown1c = 0;
+			return;
+		}
+		/* mModeService bit 0x20 SET (checksum framing requested) but a raw
+		 * type==1 message arrived anyway -- real soft log only, then
+		 * Error(0).
+		 */
+		Error(eErrNotifyReserved);
+		return;
+	case 4:
+		/* Real soft log only, then Error(1) -- the one case with a
+		 * different EErrNotifyMode argument.
+		 */
+		Error(static_cast<EErrNotifyMode>(1));
+		return;
+	case 2:
+	case 3:
+	default:
+		/* Real soft log only (a different diagnostic string per case, all
+		 * non-enforcing), then Error(0).
+		 */
+		Error(eErrNotifyReserved);
+		return;
+	}
+}
+
+/* .text+0x08172bf0, 1516 bytes. See header comment for the full case-by-case
+ * writeup.
+ */
+void CClientCommServer::OnRxSexWhenInSENT(ESexMsgType type, const unsigned char *data,
+                                            unsigned char len, unsigned char x)
+{
+	switch (static_cast<unsigned int>(type)) {
+	case 0:
+	case 1:
+		/* Real: mUnknown08's own "set to 1 if currently 0" (ground truth's
+		 * own first statement in this case) is provably dead -- this
+		 * method's own reset below unconditionally overwrites mUnknown08
+		 * again with nothing else reading it in between -- omitted (see
+		 * header comment).
+		 */
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+		mUnknown0e = 0xff;
+		mState0d = 0;
+		mState = 0; /* IDLE */
+		mUnknown08 = 0;
+
+		/* Real ground truth: a genuine tail-jmp into OnRxSexWhenInIDLE()
+		 * with the SAME type/data/len/x this method was called with
+		 * (confirmed via objdump -- the real jmp target reuses the
+		 * caller's own original argument registers/stack slots unchanged).
+		 */
+		OnRxSexWhenInIDLE(type, data, len, x);
+		return;
+	case 2:
+		/* Real: ground truth's own "if (mUnknown08==1) mUnknown08=0;" here
+		 * is ALSO provably dead -- both the match branch below (explicit
+		 * unconditional reset) and the mismatch branch (Error()'s own
+		 * shared-tail reset) overwrite it again regardless -- omitted.
+		 */
+		if (data[0] == mState0c) {
+			mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+			mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+			if (mEvBuf)
+				*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+			mUnknown0e = 0xff;
+			mState0d = 0;
+			mState = 0; /* IDLE */
+			mUnknown08 = 0;
+			return;
+		}
+		break;
+	case 3:
+		/* Real, NOT dead here (unlike case 0/1/2 above): this is the ONLY
+		 * write to mUnknown08 on the success (match) path below.
+		 */
+		if (mUnknown08 == 1)
+			mUnknown08 = 0;
+		if (data[0] == mState0c && mState0d < 5) {
+			mState = 1; /* SENT */
+			mState0d = static_cast<unsigned char>(mState0d + 1);
+			mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+			return;
+		}
+		break;
+	case 4:
+		/* Real ground truth: a genuine no-op (no log, no Error() call). */
+		return;
+	default:
+		/* Real soft log only (Api+0x94), then the SAME no-op as case 4. */
+		return;
+	}
+
+	/* Shared "give up" tail for case 2/3's own mismatch/overflow branch: real
+	 * soft log only ("RETRY overflow!!!", Api+0x90), then Error(0).
+	 */
+	Error(eErrNotifyReserved);
+}
+
+/* .text+0x08171510, 2159 bytes. See header comment for the full writeup. */
+void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len,
+                                            unsigned char x)
+{
+	unsigned char headerOff = static_cast<unsigned char>(kSexPacketOverhead + 1); /* 6 */
+	if (mModeService & 0x20)
+		headerOff = static_cast<unsigned char>(kSexPacketOverhead + 2); /* 7 */
+
+	CLinkedEvent *ownEvent = reinterpret_cast<CLinkedEvent *>(&mEvTag);
+	UnprepareBuffer(ownEvent, data, len, headerOff);
+
+	/* Real: overwrite the tag's own "unknown middle byte" (bits8-15) with
+	 * `x`, same idiom MessageToEvent()'s own tail uses.
+	 */
+	mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xffff00ffu) |
+	                            (static_cast<unsigned>(x) << 8));
+
+	if (mModeService & 0x20) {
+		/* Checksum-framed path: append a sequence byte + running checksum,
+		 * transition to SENT, and wait for an ack/retry (this is the
+		 * message side of OnRxSexWhenInSENT()'s own state machine).
+		 */
+		unsigned char crc = ComputeCRCByte(headerOff);
+		mState0c = static_cast<unsigned char>((mState0c + 1) & 0x7f);
+
+		/* Real: capture the tag's current length field BEFORE the reacquire
+		 * below clears bits16-30 -- ground truth's own uVar9=uVar5>>0x10 is
+		 * read from the tag value AS IT STOOD RIGHT HERE, not re-read after
+		 * the reacquire (confirmed by reading the decompile's own variable
+		 * lifetime: uVar5 is captured once, well before its own `*(uint*)
+		 * (this+0x20)=uVar5&0xff00|0x8000000a` reacquire line).
+		 */
+		unsigned int curLen = (static_cast<unsigned>(mEvTag) & 0x7fffffffu) >> 16;
+
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+
+		if (mEvBuf) {
+			unsigned char *buf = static_cast<unsigned char *>(mEvBuf);
+			buf[static_cast<unsigned char>(headerOff - 2)] = 0;
+			buf[static_cast<unsigned char>(headerOff - 1)] = mState0c;
+			buf[curLen & 0xff] = crc;
+		}
+		unsigned int newLen = (curLen + 1) & 0xff;
+		mEvTag = static_cast<int>(static_cast<unsigned>(mEvTag) | (newLen << 16));
+
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+		mState = 1; /* SENT */
+		mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+	} else {
+		/* No-checksum ("raw") path: fixed type=1 marker, no sequence byte,
+		 * fire-and-forget, straight back to IDLE.
+		 */
+		/* Same capture-before-reacquire ordering as the checksum branch above. */
+		unsigned int curLen = ((static_cast<unsigned>(mEvTag) & 0x7fffffffu) >> 16) & 0xff;
+
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+
+		if (mEvBuf)
+			static_cast<unsigned char *>(mEvBuf)[static_cast<unsigned char>(headerOff - 1)] = 1;
+		mEvTag = static_cast<int>(static_cast<unsigned>(mEvTag) | (curLen << 16));
+
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+		mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+
+		mState0c = 0;
+		mUnknown1c = 0;
+
+		/* Shared reacquire+release idiom, then final reset. */
+		mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+		mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+		if (mEvBuf)
+			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+		mUnknown0e = 0xff;
+		mState0d = 0;
+		mState = 0; /* IDLE */
+		mUnknown08 = 0;
+	}
+}
+
+/* .text+0x08171db0, 591 bytes. See header comment. */
+void CClientCommServer::OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len,
+                                            unsigned char x)
+{
+	mUnknown08 = 1;
+
+	/* Reacquire + release idiom (real, unconditional). */
+	mEvTag = static_cast<int>((static_cast<unsigned>(mEvTag) & 0xff00u) | 0x8000000au);
+	mEvBuf = CEvent::sm_oEvBuffersPool.Lock(mEvBuf);
+	if (mEvBuf)
+		*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
+
+	/* Real ground truth: a genuine tail-jmp into OnRxMsgWhenInIDLE() with the
+	 * same data/len/x this method was called with.
+	 */
+	OnRxMsgWhenInIDLE(data, len, x);
+}
 
 /* --- Tier A: real bodies, this follow-up pass. -------------------------------- */
 

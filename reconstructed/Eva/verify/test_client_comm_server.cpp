@@ -55,6 +55,16 @@ struct ClientCommServerTestHooks {
 	static void SetUnknown0e(CClientCommServer &obj, unsigned char v) { obj.mUnknown0e = v; }
 	static void SetModeService(CClientCommServer &obj, unsigned char v) { obj.mModeService = v; }
 	static unsigned char Unknown1c(const CClientCommServer &obj) { return obj.mUnknown1c; }
+
+	/* Added for the third follow-up pass's PrepareMsgBuffer()/UnprepareBuffer()/
+	 * EventToMessage()/MessageToEvent()/Error()/OnRx{Msg,Sex}WhenIn{IDLE,SENT}()
+	 * KATs below -- same convention as the hooks above.
+	 */
+	static void *TxBuf(const CClientCommServer &obj) { return obj.mTxBuf; }
+	static unsigned char State0c(const CClientCommServer &obj) { return obj.mState0c; }
+	static void SetState0c(CClientCommServer &obj, unsigned char v) { obj.mState0c = v; }
+	static unsigned char Unknown08(const CClientCommServer &obj) { return obj.mUnknown08; }
+	static void SetUnknown08(CClientCommServer &obj, int v) { obj.mUnknown08 = v; }
 };
 
 static int g_fail;
@@ -263,13 +273,19 @@ int main()
 			unsigned char pkt[8] = {0x11, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00};
 
 			ClientCommServerTestHooks::SetModeService(ccs, 0x00); /* bit 0x20 clear */
-			ClientCommServerTestHooks::SetState(ccs, 5 /* sentinel, must stay unchanged */);
+			ClientCommServerTestHooks::SetState(ccs, 5 /* sentinel */);
 			int callsBefore = g_ccsTestTransmitSysExCalls;
 			ccs.OnRxPacket(pkt, 8, 0x33);
+			/* Error() is now real (third follow-up pass) -- the real gate still
+			 * blocks dispatch (no TransmitSysEx() call from OnRxPacket() itself),
+			 * but Error(0)'s own real final reset DOES now fire, setting mState
+			 * back to 0 (IDLE) -- updated from this test's original expectation
+			 * of "state stays 5" (written back when Error() was still a stub).
+			 */
 			check("OnRxPacket() with mModeService bit 0x20 clear does NOT dispatch"
-			      " (real early-return gate, Error() is a no-op stub)",
+			      " (real early-return gate), but DOES reach the now-real Error(0)",
 			      g_ccsTestTransmitSysExCalls == callsBefore &&
-			          ClientCommServerTestHooks::State(ccs) == 5);
+			          ClientCommServerTestHooks::State(ccs) == 0);
 
 			/* Now set the gate and mUnknown0e = 0xff ("no active tag yet") so the
 			 * tag-mismatch soft-assert path isn't taken either.
@@ -279,8 +295,10 @@ int main()
 			ClientCommServerTestHooks::SetState(ccs, 5);
 
 			/* len<=2: real "too short" resync path -- does NOT touch
-			 * PrepareMsgBuffer() (still a Tier-B no-op stub), so this exercises
-			 * OnRxPacket()'s own real control flow end to end.
+			 * PrepareMsgBuffer() at all (that only happens on the good-checksum
+			 * success path below), so this exercises OnRxPacket()'s own real
+			 * control flow end to end regardless of PrepareMsgBuffer()'s own
+			 * status.
 			 */
 			callsBefore = g_ccsTestTransmitSysExCalls;
 			ccs.OnRxPacket(pkt, 2, 0x33);
@@ -352,10 +370,16 @@ int main()
 			ClientCommServerTestHooks::SetState(ccs, 5);
 			int callsBefore = g_ccsTestTransmitSysExCalls;
 			ccs.OnRxSexWhenInWAIT(static_cast<CClientCommServer::ESexMsgType>(0), pkt, 2, 0x00);
+			/* Error() is now real -- OnRxPacket()'s own real gate still blocks
+			 * the send, but reaches the now-real Error(0), resetting mState to
+			 * 0 (IDLE) instead of leaving it untouched (updated from this
+			 * test's original expectation, written when Error() was a stub).
+			 */
 			check("OnRxSexWhenInWAIT(type=0) tail-calls OnRxPacket(): same real gate"
-			      " blocks it when mModeService bit 0x20 is clear",
+			      " blocks it when mModeService bit 0x20 is clear (reaches the now-real"
+			      " Error(0))",
 			      g_ccsTestTransmitSysExCalls == callsBefore &&
-			          ClientCommServerTestHooks::State(ccs) == 5);
+			          ClientCommServerTestHooks::State(ccs) == 0);
 
 			ClientCommServerTestHooks::SetModeService(ccs, 0x20);
 			ClientCommServerTestHooks::SetUnknown0e(ccs, 0xff);
@@ -367,8 +391,13 @@ int main()
 			      ClientCommServerTestHooks::State(ccs) == 2 &&
 			          g_ccsTestTransmitSysExCalls == callsBefore + 1);
 
-			/* type 1-4: Error()-only paths (Error() is a Tier-B no-op stub) --
-			 * confirm the dispatch itself doesn't crash and touches no state.
+			/* type 1-4: Error()-only paths. Error() is now real (third
+			 * follow-up pass) -- types 1-3 call Error(0), type 4 calls
+			 * Error(1); neither sets mode bit 1 (`&2`), so TransmitSysEx()
+			 * is never called from here, but Error()'s own real final reset
+			 * DOES fire every time, setting mState back to 0 (IDLE) --
+			 * updated from this test's original "touches no state"
+			 * expectation (written back when Error() was still a stub).
 			 */
 			for (int t = 1; t <= 4; t++) {
 				ClientCommServerTestHooks::SetState(ccs, 9);
@@ -377,17 +406,19 @@ int main()
 				                       0x00);
 				char label[112];
 				snprintf(label, sizeof(label),
-				         "OnRxSexWhenInWAIT(type=%d) dispatches without touching mState/"
-				         "TransmitSysEx (Error() stub)",
+				         "OnRxSexWhenInWAIT(type=%d) dispatches into the now-real Error():"
+				         " mState -> 0 (IDLE), no TransmitSysEx() call",
 				         t);
-				check(label, ClientCommServerTestHooks::State(ccs) == 9 &&
+				check(label, ClientCommServerTestHooks::State(ccs) == 0 &&
 				                  g_ccsTestTransmitSysExCalls == callsBefore);
 			}
 
 			/* type>4: out-of-range, real ground truth returns without even
-			 * calling Error() -- same observable effect as the Error()-stub
-			 * cases above given Error() is a no-op, but structurally a
-			 * different code path (see header comment).
+			 * calling Error() -- genuinely DIFFERENT observable effect from
+			 * the type 1-4 cases above now that Error() is real (state stays
+			 * untouched here, vs. resetting to IDLE above), confirming this
+			 * really is a distinct code path, not just Error()'s own no-op
+			 * shell showing through.
 			 */
 			ClientCommServerTestHooks::SetState(ccs, 9);
 			callsBefore = g_ccsTestTransmitSysExCalls;
@@ -431,6 +462,363 @@ int main()
 			 * same "real but unreachable given the caller's own type" category
 			 * as several other soft-assert-adjacent checks in this file.
 			 */
+		}
+
+		/* --- PrepareMsgBuffer()/UnprepareBuffer() -- third follow-up pass. ----
+		 * Round-trip: UnprepareBuffer() encodes raw bytes into a caller-owned
+		 * CLinkedEvent-shaped buffer, PrepareMsgBuffer() decodes the SAME
+		 * bytes back out of a plain buffer -- self-consistency is a strong
+		 * check for a matched encode/decode pair.
+		 */
+		{
+			ClientCommServerTestHooks::SetModeService(ccs, 0x10); /* framed mode */
+
+			/* A fresh CLinkedEvent-shaped buffer (mTag/mBuf/mNext) backed by a
+			 * REAL pool-allocated chunk -- UnprepareBuffer() calls
+			 * CEvBuffersPool::Lock() on *evBuf internally, which reads/writes
+			 * a real chunk header 4 bytes before the payload pointer; handing
+			 * it a raw stack array (no such header) would make Lock() read
+			 * garbage and potentially return a DIFFERENT pointer than
+			 * expected. Same ctor-established idiom: clear the "just
+			 * allocated" state bit before the first Lock().
+			 */
+			void *poolBuf = CEvent::sm_oEvBuffersPool.Alloc(64);
+			*(static_cast<unsigned char *>(poolBuf) - 3) &= 0x7f;
+			struct { int tag; void *buf; void *next; } fakeEvent;
+			fakeEvent.tag = static_cast<int>(0x8000000a);
+			fakeEvent.buf = poolBuf;
+			fakeEvent.next = 0;
+			CLinkedEvent *ev = reinterpret_cast<CLinkedEvent *>(&fakeEvent);
+
+			/* 10 raw bytes, deliberately including values with bit7 set so the
+			 * framing transform's own bit-restoration is actually exercised.
+			 */
+			unsigned char original[10] = {0x00, 0xff, 0x55, 0xaa, 0x81, 0x40, 0x00, 0xfe, 0x7f, 0x01};
+			ccs.UnprepareBuffer(ev, original, 10, /*x=*/0);
+
+			int *tagWord = reinterpret_cast<int *>(&fakeEvent);
+			unsigned int packedLen = (static_cast<unsigned>(*tagWord) >> 16) & 0xff;
+			check("UnprepareBuffer() 10 bytes -> 2 groups (flag+7, flag+3): packed length"
+			      " == 10 + 2 flag bytes == 12",
+			      packedLen == 12);
+
+			unsigned char decoded[10];
+			memset(decoded, 0xcc, sizeof(decoded));
+			unsigned char decodedLen = sizeof(decoded);
+			ccs.PrepareMsgBuffer(decoded, decodedLen, static_cast<unsigned char *>(fakeEvent.buf),
+			                     static_cast<unsigned char>(packedLen));
+			check("PrepareMsgBuffer(UnprepareBuffer(original)) round-trips: length",
+			      decodedLen == 10);
+			bool roundTripOk = true;
+			for (int i = 0; i < 10; i++)
+				if (decoded[i] != original[i]) roundTripOk = false;
+			check("PrepareMsgBuffer(UnprepareBuffer(original)) round-trips: bytes", roundTripOk);
+
+			/* Raw passthrough (mModeService bit 0x10 clear) on both sides. */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			memset(fakeEvent.buf, 0, 64);
+			fakeEvent.tag = static_cast<int>(0x8000000a);
+			*(static_cast<unsigned char *>(fakeEvent.buf) - 3) &= 0x7f;
+			ccs.UnprepareBuffer(ev, original, 10, /*x=*/3);
+			bool passthroughOk = true;
+			for (int i = 0; i < 10; i++)
+				if (static_cast<unsigned char *>(fakeEvent.buf)[3 + i] != original[i]) passthroughOk = false;
+			check("UnprepareBuffer() raw passthrough (bit 0x10 clear) writes verbatim at offset x",
+			      passthroughOk);
+
+			CEvent::sm_oEvBuffersPool.Free(fakeEvent.buf);
+
+			unsigned char decoded2[10];
+			unsigned char decodedLen2 = 200; /* capacity, strictly > dataLen(10) required */
+			ccs.PrepareMsgBuffer(decoded2, decodedLen2, original, 10);
+			check("PrepareMsgBuffer() raw passthrough (bit 0x10 clear) copies verbatim",
+			      decodedLen2 == 10 && memcmp(decoded2, original, 10) == 0);
+
+			/* Capacity-exceeded fatal early exit: outLen left untouched, no
+			 * write past the (tiny) capacity.
+			 */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x10);
+			unsigned char tiny[4] = {0xaa, 0xaa, 0xaa, 0xaa};
+			unsigned char tinyLen = 0; /* zero capacity -- must fail on the very first write */
+			ccs.PrepareMsgBuffer(tiny, tinyLen, original, 10);
+			check("PrepareMsgBuffer() fatal capacity exit leaves outLen untouched",
+			      tinyLen == 0);
+			check("PrepareMsgBuffer() fatal capacity exit does not write anything",
+			      tiny[0] == 0xaa && tiny[1] == 0xaa);
+		}
+
+		/* --- EventToMessage()/MessageToEvent() -- third follow-up pass. ------
+		 * Round-trip through a freshly Alloc()'d CLinkedEvent (MessageToEvent's
+		 * own allocation strategy), and the REAL enforcing 6-byte header check.
+		 */
+		{
+			struct { int tag; void *buf; void *next; } ev;
+			ev.tag = 0xf; /* MessageToEvent()'s own expected placeholder */
+			ev.buf = 0;
+			ev.next = 0;
+			CLinkedEvent *evPtr = reinterpret_cast<CLinkedEvent *>(&ev);
+
+			unsigned char msg[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+			ccs.MessageToEvent(msg, 6, evPtr);
+
+			int *tagWord = reinterpret_cast<int *>(&ev);
+			check("MessageToEvent() leaves the event owning a buffer (tag negative)",
+			      *tagWord < 0);
+			unsigned char *rawBuf = static_cast<unsigned char *>(ev.buf);
+			check("MessageToEvent() writes the fixed 6-byte SysEx header",
+			      rawBuf[0] == 0xf0 && rawBuf[1] == 0x42 && rawBuf[3] == 0x60 &&
+			          rawBuf[4] == 0x42 /* mEcb */ && rawBuf[5] == 1);
+
+			unsigned char decodedMsg[8];
+			unsigned char decodedMsgLen = sizeof(decodedMsg);
+			ccs.EventToMessage(evPtr, decodedMsg, decodedMsgLen);
+			check("EventToMessage(MessageToEvent(msg)) round-trips: length",
+			      decodedMsgLen == 6);
+			check("EventToMessage(MessageToEvent(msg)) round-trips: bytes",
+			      memcmp(decodedMsg, msg, 6) == 0);
+
+			/* REAL, enforcing header check: corrupt the start-of-sysex byte,
+			 * confirm EventToMessage() returns without touching outLen at all
+			 * (genuine early return, not a soft/logged assert).
+			 */
+			unsigned char savedByte0 = rawBuf[0];
+			rawBuf[0] = 0x00;
+			unsigned char sentinelLen = 0xab;
+			ccs.EventToMessage(evPtr, decodedMsg, sentinelLen);
+			check("EventToMessage() REAL header check rejects a corrupted start-of-sysex byte"
+			      " (outLen left untouched)",
+			      sentinelLen == 0xab);
+			rawBuf[0] = savedByte0;
+
+			CEvent::sm_oEvBuffersPool.Free(ev.buf);
+		}
+
+		/* --- Error() -- third follow-up pass. Real 3-way dispatch on mode's
+		 * bits 0/1; every mode combination converges on the same final reset.
+		 */
+		{
+			ClientCommServerTestHooks::SetState0c(ccs, 0x12); /* sentinel */
+			ClientCommServerTestHooks::SetUnknown0e(ccs, 0x00); /* sentinel, != 0xff */
+			ClientCommServerTestHooks::SetState(ccs, 9); /* sentinel */
+
+			/* mode=0 (neither bit set): no TransmitSysEx() call, but the same
+			 * final reset still runs.
+			 */
+			int callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.Error(static_cast<CClientCommServer::EErrNotifyMode>(0));
+			check("Error(0) does not call TransmitSysEx() (mode bit 1 clear)",
+			      g_ccsTestTransmitSysExCalls == callsBefore);
+			check("Error(0) resets mUnknown0e/mState0d/mState/mUnknown08",
+			      ClientCommServerTestHooks::Unknown0e(ccs) == 0xff &&
+			          ClientCommServerTestHooks::State0d(ccs) == 0 &&
+			          ClientCommServerTestHooks::State(ccs) == 0 &&
+			          ClientCommServerTestHooks::Unknown08(ccs) == 0);
+
+			/* mode=2 (bit 1 set, bit 0 clear): DOES call TransmitSysEx() (the
+			 * type=4 error-marker send), no vtable dispatch on mClient.
+			 */
+			ClientCommServerTestHooks::SetState(ccs, 9);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.Error(static_cast<CClientCommServer::EErrNotifyMode>(2));
+			check("Error(2) calls TransmitSysEx() exactly once (mode bit 1 set)",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1);
+			check("Error(2) resets state the same way as Error(0)",
+			      ClientCommServerTestHooks::State(ccs) == 0 &&
+			          ClientCommServerTestHooks::Unknown08(ccs) == 0);
+
+			/* mode=1 (bit 0 set): real vtable-slot-6 dispatch on mClient (a
+			 * REAL, live CSysExMsgTaskBase instance, real ctor-installed
+			 * vtable) -- exercised for "does not crash" + the same final
+			 * reset, since this class's own file does not know (or need to
+			 * know) what real method lives at that slot.
+			 */
+			ClientCommServerTestHooks::SetState(ccs, 9);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.Error(static_cast<CClientCommServer::EErrNotifyMode>(1));
+			check("Error(1) reaches mClient's real vtable slot 6 without crashing"
+			      " and does not call TransmitSysEx() (mode bit 1 clear)",
+			      g_ccsTestTransmitSysExCalls == callsBefore &&
+			          ClientCommServerTestHooks::State(ccs) == 0);
+		}
+
+		/* --- OnRxSexWhenInIDLE() -- third follow-up pass. --------------------
+		 * type 0 tail-dispatches to OnRxPacket(); type 1 either sends a raw
+		 * echo (bit 0x20 clear) or falls to Error() (bit 0x20 set); types
+		 * 2/3/4/default all reach the now-real Error().
+		 */
+		{
+			unsigned char pkt[8] = {0x22, 1, 2, 3, 4, 5, 6, 7};
+
+			/* type 0: same real gate OnRxPacket() itself has. */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00); /* gate clear */
+			ClientCommServerTestHooks::SetState(ccs, 5);
+			int callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxSexWhenInIDLE(static_cast<CClientCommServer::ESexMsgType>(0), pkt, 8, 0x00);
+			/* OnRxPacket()'s own real gate blocks dispatch (no TransmitSysEx()
+			 * call) but reaches the now-real Error(0), which resets mState to
+			 * 0 (IDLE) -- same "Error() is real now" update as the pre-existing
+			 * OnRxPacket()/OnRxSexWhenInWAIT() tests above.
+			 */
+			check("OnRxSexWhenInIDLE(type=0) tail-dispatches to OnRxPacket()'s own real gate"
+			      " (blocks send, reaches the now-real Error(0))",
+			      g_ccsTestTransmitSysExCalls == callsBefore && ClientCommServerTestHooks::State(ccs) == 0);
+
+			/* type 1, mModeService bit 0x20 CLEAR: raw echo path, builds
+			 * mTxBuf via PrepareMsgBuffer() and calls OutMono() (does not
+			 * crash, mUnknown1c resets to 0 afterward).
+			 */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00); /* bit 0x20 clear */
+			unsigned char rawMsg[3] = {0x10, 0x20, 0x30};
+			ccs.OnRxSexWhenInIDLE(static_cast<CClientCommServer::ESexMsgType>(1), rawMsg, 3, 0x77);
+			check("OnRxSexWhenInIDLE(type=1, bit 0x20 clear) real echo path resets mUnknown1c",
+			      ClientCommServerTestHooks::Unknown1c(ccs) == 0);
+			const unsigned char *txBuf =
+			    static_cast<const unsigned char *>(ClientCommServerTestHooks::TxBuf(ccs));
+			check("OnRxSexWhenInIDLE(type=1, bit 0x20 clear) writes x into mTxBuf[0]",
+			      txBuf[0] == 0x77);
+
+			/* type 1, mModeService bit 0x20 SET: falls to Error(0) instead. */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x20);
+			ClientCommServerTestHooks::SetState(ccs, 9);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxSexWhenInIDLE(static_cast<CClientCommServer::ESexMsgType>(1), rawMsg, 3, 0x00);
+			check("OnRxSexWhenInIDLE(type=1, bit 0x20 set) falls to Error(0): state resets",
+			      ClientCommServerTestHooks::State(ccs) == 0 && g_ccsTestTransmitSysExCalls == callsBefore);
+
+			/* types 2/3/4/default: all real Error() calls. */
+			for (int t = 2; t <= 5; t++) {
+				ClientCommServerTestHooks::SetState(ccs, 9);
+				ccs.OnRxSexWhenInIDLE(static_cast<CClientCommServer::ESexMsgType>(t), pkt, 8, 0x00);
+				char label[80];
+				snprintf(label, sizeof(label), "OnRxSexWhenInIDLE(type=%d) reaches real Error()", t);
+				check(label, ClientCommServerTestHooks::State(ccs) == 0);
+			}
+		}
+
+		/* --- OnRxSexWhenInSENT() -- third follow-up pass. --------------------
+		 * types 0/1 reset-then-redispatch into OnRxSexWhenInIDLE(); type 2/3
+		 * match/mismatch; type 4/default no-ops.
+		 */
+		{
+			unsigned char pkt[8] = {0x33, 1, 2, 3, 4, 5, 6, 7};
+
+			/* type 0: resets to IDLE then redispatches with the SAME type (0)
+			 * into OnRxSexWhenInIDLE(), which itself tail-calls OnRxPacket()
+			 * -- confirm the real gate fires (mModeService bit 0x20 clear ->
+			 * Error(0), state stays IDLE either way here).
+			 */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			ClientCommServerTestHooks::SetState(ccs, 5); /* sentinel, must become IDLE */
+			ClientCommServerTestHooks::SetUnknown08(ccs, 1);
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(0), pkt, 8, 0x00);
+			check("OnRxSexWhenInSENT(type=0) resets mUnknown08 to 0 before redispatch",
+			      ClientCommServerTestHooks::Unknown08(ccs) == 0);
+
+			/* type 2 (ack), match: resets to IDLE. */
+			ClientCommServerTestHooks::SetState0c(ccs, 0x33);
+			ClientCommServerTestHooks::SetState(ccs, 1); /* SENT */
+			ClientCommServerTestHooks::SetUnknown0e(ccs, 0x00);
+			unsigned char matchData[1] = {0x33};
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(2), matchData, 1, 0);
+			check("OnRxSexWhenInSENT(type=2) matching ack resets to IDLE",
+			      ClientCommServerTestHooks::State(ccs) == 0 &&
+			          ClientCommServerTestHooks::Unknown0e(ccs) == 0xff);
+
+			/* type 2, mismatch: falls to Error(0) (same final reset, via the
+			 * shared "give up" tail rather than the match branch's own).
+			 */
+			ClientCommServerTestHooks::SetState0c(ccs, 0x33);
+			ClientCommServerTestHooks::SetState(ccs, 1);
+			unsigned char mismatchData[1] = {0x99};
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(2), mismatchData, 1, 0);
+			check("OnRxSexWhenInSENT(type=2) mismatched ack still resets via Error(0)",
+			      ClientCommServerTestHooks::State(ccs) == 0);
+
+			/* type 3 (retry), match, retry counter under the cap: resends,
+			 * bumps mState0d, stays SENT.
+			 */
+			ClientCommServerTestHooks::SetState0c(ccs, 0x44);
+			ClientCommServerTestHooks::SetState(ccs, 1);
+			unsigned char before0d = ClientCommServerTestHooks::State0d(ccs);
+			int callsBefore = g_ccsTestTransmitSysExCalls;
+			unsigned char retryData[1] = {0x44};
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(3), retryData, 1, 0);
+			check("OnRxSexWhenInSENT(type=3) matching retry resends and bumps mState0d",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1 &&
+			          ClientCommServerTestHooks::State0d(ccs) ==
+			              static_cast<unsigned char>(before0d + 1) &&
+			          ClientCommServerTestHooks::State(ccs) == 1);
+
+			/* type 4 / default: genuine no-ops -- no TransmitSysEx(), no
+			 * state change at all (not even Error()'s own reset).
+			 */
+			ClientCommServerTestHooks::SetState(ccs, 7); /* sentinel, must stay 7 */
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(4), pkt, 8, 0);
+			check("OnRxSexWhenInSENT(type=4) is a genuine no-op (state untouched)",
+			      ClientCommServerTestHooks::State(ccs) == 7 && g_ccsTestTransmitSysExCalls == callsBefore);
+			ccs.OnRxSexWhenInSENT(static_cast<CClientCommServer::ESexMsgType>(9), pkt, 8, 0);
+			check("OnRxSexWhenInSENT(type=9, default) is ALSO a genuine no-op",
+			      ClientCommServerTestHooks::State(ccs) == 7 && g_ccsTestTransmitSysExCalls == callsBefore);
+		}
+
+		/* --- OnRxMsgWhenInIDLE()/OnRxMsgWhenInSENT() -- third follow-up pass.
+		 * Checksum-framed path (mModeService bit 0x20 set): verify the
+		 * appended CRC byte against an independent reference fold. No-checksum
+		 * path (bit 0x20 clear): verify the full reset back to IDLE.
+		 */
+		{
+			unsigned char msg[4] = {0xaa, 0xbb, 0xcc, 0xdd};
+
+			/* No-checksum path: fire-and-forget, full reset to IDLE. */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			ClientCommServerTestHooks::SetState(ccs, 5);
+			int callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxMsgWhenInIDLE(msg, 4, 0x55);
+			check("OnRxMsgWhenInIDLE() no-checksum path sends once and resets to IDLE",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1 &&
+			          ClientCommServerTestHooks::State(ccs) == 0 &&
+			          ClientCommServerTestHooks::Unknown0e(ccs) == 0xff);
+
+			/* Checksum-framed path: verify the appended CRC byte independently
+			 * (XOR fold over the packed payload, same fold ComputeCRCByte()
+			 * itself performs, cross-checked via the existing
+			 * ReferenceComputeCRC() helper above).
+			 */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x20);
+			ClientCommServerTestHooks::SetState(ccs, 5);
+			ClientCommServerTestHooks::SetState0c(ccs, 0x10);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxMsgWhenInIDLE(msg, 4, 0x55);
+			check("OnRxMsgWhenInIDLE() checksum path transitions to SENT and sends once",
+			      ClientCommServerTestHooks::State(ccs) == 1 &&
+			          g_ccsTestTransmitSysExCalls == callsBefore + 1);
+			check("OnRxMsgWhenInIDLE() checksum path bumps mState0c",
+			      ClientCommServerTestHooks::State0c(ccs) == 0x11);
+
+			const unsigned char *evBuf =
+			    static_cast<const unsigned char *>(ClientCommServerTestHooks::EvBuf(ccs));
+			int tag = ClientCommServerTestHooks::EvTag(ccs);
+			unsigned int totalLen = (static_cast<unsigned>(tag) >> 16) & 0xff;
+			/* headerOff = kSexPacketOverhead(5)+2 = 7 for the checksum path. */
+			unsigned char expectCrc = ReferenceComputeCRC(evBuf, static_cast<unsigned char>(totalLen - 1), 7);
+			check("OnRxMsgWhenInIDLE() checksum path appends the correct running-XOR CRC byte",
+			      evBuf[totalLen - 1] == expectCrc);
+			check("OnRxMsgWhenInIDLE() checksum path's 2-byte mini-header: type=0, seq=mState0c",
+			      evBuf[5] == 0 && evBuf[6] == 0x11);
+
+			/* OnRxMsgWhenInSENT(): sets mUnknown08=1, then tail-redispatches
+			 * into OnRxMsgWhenInIDLE() unchanged.
+			 */
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			ClientCommServerTestHooks::SetState(ccs, 5);
+			ClientCommServerTestHooks::SetUnknown08(ccs, 0);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			ccs.OnRxMsgWhenInSENT(msg, 4, 0x66);
+			check("OnRxMsgWhenInSENT() redispatches into OnRxMsgWhenInIDLE(): same real send"
+			      " and reset to IDLE",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1 &&
+			          ClientCommServerTestHooks::State(ccs) == 0);
 		}
 
 		/* ~CClientCommServer() runs at scope exit -- if mEvBuf's chunk header
