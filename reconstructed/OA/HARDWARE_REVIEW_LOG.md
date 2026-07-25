@@ -528,3 +528,43 @@ audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
     confirmed reachable end-to-end from a real front-panel calibration
     menu button press.
   the KorgUsb transport cluster already reconstructed.
+
+- **NEW (2026-07-25 batch): `CUUID::ConvertFromText`** (`src/auth/cuuid_convert.cpp`)
+  and **`CSTGMultisampleBankManager::AccessBank`**
+  (`src/auth/multisample_bank_access.cpp`) -- these two were the actual
+  gate keeping the ALREADY-fully-reconstructed `/proc/.oacmd` `LM:`/`LD:`/
+  `CM:`/`CD:`/`CL:` command handlers (`process_oacmd.cpp`, sec 10.x prior
+  batch) from ever doing anything: `ConvertFromText` previously always
+  returned `false` (every UUID "failed to parse") and `AccessBank`
+  previously always returned null (every bank "not found"), so every one
+  of those five commands unconditionally reported failure regardless of
+  what a real caller sent. Both are now real, disassembly-confirmed
+  bodies (full byte-for-byte walk of `.text+0x46570`/1425B and
+  `.text+0x3dce0`/135B respectively) and host-KAT-verified
+  (`verify/test_cuuid_convert.cpp`, 7 scenarios; `verify/test_multisample_
+  bank_access.cpp`, 5 scenarios). Genuinely unverified against real
+  hardware / not yet closed:
+  - `AccessBank`'s own real callee `FindBankRecord` (`.text+0x3da30`,
+    661 bytes -- a genuine hash-table walk over `CSTGMultisampleBankHashList`,
+    itself backed by another 341-byte `AccessBankRecord`) is deliberately
+    deferred (safe stub returns null), so the "found via UUID hash
+    lookup" path of `AccessBank` still can't actually locate a bank yet --
+    only the ROM-bank fast path (UUID == the internal `kROMBankUUID`
+    constant) is live. `kROMBankUUID`'s real byte content is never
+    written anywhere in this reconstruction (its would-be writer,
+    `StartupInitializeROMBank`, is itself a deliberately deferred no-op
+    stub, `load_global_resources.cpp`), so it is currently all-zero here
+    -- meaning the ROM-bank fast path can only match a real caller who
+    also happens to pass an all-zero UUID, not yet a genuine "this is the
+    factory ROM bank" identity check. End-to-end `AU:`/`LM:` command
+    testing against a real Kronos (front panel or `/proc/.oacmd` shell
+    write) is the natural real-HW confirmation once `FindBankRecord`
+    and/or `StartupInitializeROMBank` are also reconstructed -- not
+    meaningful yet on their own.
+  - `CUUID::ConvertFromText`'s real kernel dependencies (`_ctype`,
+    `simple_strtoul`) are both confirmed genuine `U` kernel exports in
+    ground truth OA.ko and now appear as new unresolved symbols in this
+    project's own OA.ko too (`nm -u`: 116 -> 118) -- expected and
+    unavoidable, not a regression, but never exercised against the real
+    kernel's actual `_ctype` table contents (only a host-side mock table
+    covering the two relevant bits was tested here).

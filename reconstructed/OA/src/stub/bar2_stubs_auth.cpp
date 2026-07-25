@@ -21,7 +21,15 @@ void CSTGMultisampleBank::ClosePCMDataFiles() {}
 bool CSTGMultisampleBank::LoadBankMetaData() { return false; }
 bool CSTGMultisampleBank::LoadDrumSample(unsigned long, bool, unsigned char, bool) { return false; }
 bool CSTGMultisampleBank::LoadMultisample(unsigned long, bool, unsigned char, bool) { return false; }
-void *CSTGMultisampleBankManager::AccessBank(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) { return 0; }
+/* AccessBank promoted to a real body in src/auth/multisample_bank_access.cpp
+ * (2026-07-25) -- its own real callee FindBankRecord (a genuine 661-byte
+ * hash-table walk over CSTGMultisampleBankHashList, itself backed by
+ * another 341-byte AccessBankRecord) is deliberately deferred here, same
+ * sec 10.185 filesystem/storage-adjacent policy as StartupInitializeROMBank/
+ * ScanFileSystem below -- safe default returns null ("bank not
+ * registered"), matching AccessBank's OWN prior behavior for every
+ * non-ROM-bank UUID before this promotion. */
+extern "C" void *CSTGMultisampleBankManager_FindBankRecord(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) { return 0; }
 void *CSTGMultisampleBankManager::AccessBankWithLegacyRAMAlias(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) { return 0; }
 void CSTGMultisampleBankManager::ReleaseBank(CSTGMultisampleBankManager *, const CSTGMultisampleBankUUID *) {}
 void CSTGMultisampleBankManager::CloseAllBankFiles(CSTGMultisampleBankManager *) {}
@@ -44,7 +52,8 @@ void *CSTGKLEG::Run() { return 0; }
 void *CSTGPatch::GetUpComponent() { return 0; }
 bool CSTGPatch::IsUsingAnyUnauthorizedMultisamples() { return false; }
 
-bool CUUID::ConvertFromText(const char *) { return false; }
+/* CUUID::ConvertFromText promoted to a real body in
+ * src/auth/cuuid_convert.cpp (2026-07-25). */
 
 bool CSTGInstalledEXProducts::ReInitialize() { return true; }
 /* Initialize() (batch 52) -- confirmed real, called from

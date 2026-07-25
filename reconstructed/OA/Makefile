@@ -38,6 +38,8 @@ OA-objs := src/auth/klm_manager.o \
            src/auth/verify_auth_string.o \
            src/auth/process_oacmd.o \
            src/auth/oa_cmd_proc.o \
+           src/auth/cuuid_convert.o \
+           src/auth/multisample_bank_access.o \
            src/crypto/blowfish.o \
            src/crypto/moancjsd82.o \
            src/crypto/cb32.o \
@@ -334,6 +336,8 @@ SRC := src/auth/klm_manager.cpp \
        src/auth/verify_auth_string.cpp \
        src/auth/process_oacmd.cpp \
        src/auth/oa_cmd_proc.cpp \
+       src/auth/cuuid_convert.cpp \
+       src/auth/multisample_bank_access.cpp \
        src/crypto/blowfish.cpp \
        src/crypto/moancjsd82.cpp \
        src/crypto/cb32.cpp \
@@ -530,7 +534,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_midi_in_port_serial \
          verify/test_midi_out_port_serial \
          verify/test_midi_korgusb_port \
-         verify/test_calibration_msg_handler
+         verify/test_calibration_msg_handler \
+         verify/test_cuuid_convert \
+         verify/test_multisample_bank_access
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -671,6 +677,12 @@ verify/test_midi_korgusb_port: verify/test_midi_korgusb_port.cpp src/engine/midi
 
 verify/test_calibration_msg_handler: verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp include/oa_calibration.h include/oa_global.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp -o $@
+
+verify/test_cuuid_convert: verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp include/oa_types.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_cuuid_convert.cpp src/auth/cuuid_convert.cpp -o $@
+
+verify/test_multisample_bank_access: verify/test_multisample_bank_access.cpp src/auth/multisample_bank_access.cpp include/oa_types.h include/oa_heap.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_multisample_bank_access.cpp src/auth/multisample_bank_access.cpp -o $@
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
@@ -908,9 +920,10 @@ verify/test_init_module_real_atmel: verify/test_init_module_real_atmel.cpp src/i
 	  src/auth/atmel_primitives.cpp src/auth/atmel_challenge.cpp src/auth/nv2ac_handshake.cpp -o $@
 
 verify/test_klm_authorize_builtins: verify/test_klm_authorize_builtins.cpp src/auth/klm_manager.cpp \
-                          src/stub/bar2_stubs_auth.cpp include/auth.h include/oa_heap.h include/oa_types.h
+                          src/auth/multisample_bank_access.cpp src/stub/bar2_stubs_auth.cpp \
+                          include/auth.h include/oa_heap.h include/oa_types.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_klm_authorize_builtins.cpp src/auth/klm_manager.cpp \
-	  src/stub/bar2_stubs_auth.cpp -o $@
+	  src/auth/multisample_bank_access.cpp src/stub/bar2_stubs_auth.cpp -o $@
 
 clean:
 	rm -f $(OBJ) $(TESTS)
