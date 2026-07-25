@@ -1179,3 +1179,46 @@ anomalies, particularly under heavy multi-voice load where
 `rtwrap_global_*` lock would see genuine contention across the SMP
 Atom's 4 logical CPUs -- something a single-CPU VM sandbox can't
 exercise.
+
+## CSTGUSBMidiAccessoryMidiInPort / CSTGMidiOutPortUSB — generic USB-MIDI accessory plumbing (batch, 2026-07-25)
+
+Real-hardware-verification uncertainty for the newly-reconstructed
+generic-USB-MIDI-class accessory Activate/Deactivate methods
+(`src/engine/midi_usb_accessory_port.cpp`):
+
+- **Not reachable from any real USB-MIDI accessory in this VM-
+  substitution effort at all**, same situation as the KorgUsb transport
+  above: `USBMidiAccessory_SetMidiInClient()`/
+  `USBMidiAccessory_SetDrumPadClient()` are real externs owned by
+  whatever companion module drives the generic-USB-MIDI-class accessory
+  hierarchy (a different module from `KorgUsbAudioVirtualDriver`, not
+  independently identified this pass) -- this project provides no
+  virtual substitute for it, so these methods are disassembly-verified
+  and host-KAT-verified in isolation only, never exercised end-to-end
+  with a live or virtually-responding accessory driver. A real-HW test:
+  with an actual Kronos and a class-compliant USB-MIDI accessory (not
+  Korg's own composite audio+MIDI interface) plugged in, confirm
+  `USBMidiAccessory_SetMidiInClient(&sMidiInClient)` actually gets
+  called on connect and that `CMidiInClient::Receive()` (still
+  unmodeled, see below) correctly forwards received bytes into
+  `CSTGMidiInPortGeneric::Receive()`.
+- **`sMidiInClient`'s own type (`CMidiInClient`) and the
+  `sUSBMidiAccessoryMidiInPort` singleton it hard-redirects into are
+  deliberately NOT modeled this pass** -- only `sMidiInClient`'s address
+  is used (to register/unregister with the companion module), never its
+  behavior. If a future session reconstructs `CMidiInClient::Receive()`,
+  real-HW testing would need to confirm actual USB-MIDI-class IN
+  traffic reaches the engine via this exact redirect path.
+- **The 2 confirmed different-in-kind blockers this batch left alone
+  are unchanged and still real dead ends in ground truth itself, not
+  gaps here**: `CSTGMidiOutPortUSB::CanSendRealTime()`/`CanSendRegular()`/
+  `SendRealTime()`/`SendSingleByte()` all resolve to `__cxa_pure_virtual`
+  in this class's own vtable (confirmed via `readelf -r`, no concrete
+  override exists anywhere in OA.ko) -- calling any of them on a real,
+  unmodified `CSTGMidiOutPortUSB` instance would fault on real hardware
+  too, so no real-HW test can ever exercise them differently than a
+  crash. `CSTGDrumPadClient::CanReceiveTriggerEvent()`/
+  `ReceiveTriggerEvent()` remain blocked by genuine linker-adjacency
+  aliasing (fields accessed via addresses relocated against
+  `CSTGDrumPadInterface::sInstance+N`) -- not reproducible in a
+  clean-room rebuild regardless of real-HW access.
