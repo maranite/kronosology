@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * file_opener_events.cpp  -  CSTGFileOpener::AddPlaybackEvent(CSTGAudioEvent*,
- * unsigned int)/AddRecordEvent(CSTGAudioEvent*, unsigned int) (batch 51).
+ * unsigned int)/AddRecordEvent(CSTGAudioEvent*, unsigned int) (batch 51),
+ * plus CSTGFileOpener::Initialize() (batch 63) and the `sEventListMap`
+ * global it populates.
  *
  * Deliberately its own dedicated TU, separate from managers.cpp (which owns
  * CSTGFileOpener's ctor/sInstance) -- matches this project's established
  * per-concern-file convention (e.g. playback_buffer_events.cpp vs.
- * managers.cpp for CSTGPlaybackBuffer). No new global storage is defined
- * here, only methods, so linking this file alongside managers.cpp (which
- * DOES define `CSTGFileOpener::sInstance`) is safe wherever both are needed
- * -- confirmed via a project-wide grep (no verify/ .cpp file references
- * AddPlaybackEvent/AddRecordEvent before this batch, so there is no stale
- * mock to remove).
+ * managers.cpp for CSTGPlaybackBuffer). This file DOES now define its own
+ * global storage (`sEventListMap`, added batch 63) -- confirmed via a
+ * project-wide grep that no other TU defines it, so linking this file
+ * alongside managers.cpp remains safe.
  *
  * Ground-truthed via objdump -dr against
  * /home/share/Decomp/OA.ko_Decomp/OA.ko:
@@ -61,6 +61,7 @@
  */
 
 #include "oa_engine.h"
+#include "oa_bank_memory.h"
 
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigned long)v; }
@@ -106,4 +107,69 @@ void CSTGFileOpener::AddRecordEvent(CSTGAudioEvent *event, unsigned int index)
 	unsigned char *self = (unsigned char *)this;
 	unsigned char *lane = self + index * 0x10 + 0x100;
 	FileOpenerEnqueue(self, lane, event);
+}
+
+/* Global 33-entry table of pointers to CSTGFileOpener's own event-lane ring
+ * structs, populated below. Confirmed real symbol name `sEventListMap` via
+ * `objdump -dr` relocations (R_386_32 against every map-write instruction
+ * in Initialize()) -- see oa_engine.h for the full derivation. */
+unsigned char *sEventListMap[33];
+
+/*
+ * CSTGFileOpener::Initialize() (batch 63, `.text+0x119f90`, 1364 bytes).
+ * Ground-truthed via `objdump -dr`: fully mechanical, no branches, no
+ * conditionals -- a straight-line sequence of `CSTGBankMemory::
+ * AllocAligned` calls populating this object's 34 total ring-shaped
+ * regions (see oa_engine.h's class comment for the complete field-by-field
+ * derivation). Reconstructed here as a loop over the 32 regular "A"/"B"
+ * lanes plus two tail blocks for the fallback lane and the object's own
+ * command ring, rather than 34 unrolled call sites -- confirmed
+ * behaviorally equivalent (no field is read before being written anywhere
+ * in the real function, so the real code's interleaved instruction order,
+ * a compiler-scheduling artifact, carries no observable semantics beyond
+ * what's captured here).
+ *
+ * Lane shape (all 34 regions, 16 bytes each): +0x0 base ptr (zeroed by the
+ * ctor, set here), +0x4 write idx / +0x8 read idx (both left zeroed by the
+ * ctor, untouched here), +0xc capacity (left untouched by the ctor, set
+ * here to `byteSize/4` for every lane except the object's own command ring
+ * at +0x210, which uses `byteSize/8` -- matching that ring's own confirmed
+ * 8-byte `status:1 byte, ptr:4 bytes` record shape, ProcessCommands()).
+ */
+void CSTGFileOpener::Initialize()
+{
+	unsigned char *self = (unsigned char *)this;
+
+	/* 16 "A" lanes (this+0x00..0xf0, sEventListMap[0..15]) paired with 16
+	 * "B" lanes (this+0x100..0x1f0, sEventListMap[16..31]) -- same 0x324-
+	 * byte (804-byte, 201x 4-byte-element) AllocAligned size throughout. */
+	for (unsigned int i = 0; i < 16; i++) {
+		unsigned char *aLane = self + i * 0x10;
+		unsigned char *bLane = self + 0x100 + i * 0x10;
+
+		*(unsigned int *)(aLane + 0xc) = 0xc9;	/* 0x324/4 */
+		*(unsigned int *)(aLane + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0x324, 0x10));
+
+		*(unsigned int *)(bLane + 0xc) = 0xc9;	/* 0x324/4 */
+		*(unsigned int *)(bLane + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0x324, 0x10));
+
+		sEventListMap[i]      = aLane;
+		sEventListMap[16 + i] = bLane;
+	}
+
+	/* 33rd lane: the fixed fallback lane at +0x200 (already documented by
+	 * AddPlaybackEvent()/AddRecordEvent() above), same 4-byte-element
+	 * shape, a bigger 0xd24-byte (3364-byte, 841x) allocation. */
+	unsigned char *fallback = self + 0x200;
+	*(unsigned int *)(fallback + 0xc) = 0x349;	/* 0xd24/4 */
+	*(unsigned int *)(fallback + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0xd24, 0x10));
+	sEventListMap[32] = fallback;
+
+	/* The object's own ProcessCommands() ring at +0x210 -- NOT part of
+	 * sEventListMap (different element size, a genuine command queue, not
+	 * an "event list"). 0x8348-byte (33608-byte) allocation, 8-byte
+	 * elements -> capacity 0x1069 (4201). */
+	unsigned char *ownRing = self + 0x210;
+	*(unsigned int *)(ownRing + 0xc) = 0x1069;	/* 0x8348/8 */
+	*(unsigned int *)(ownRing + 0x0) = ToU32(CSTGBankMemory::AllocAligned(0x8348, 0x10));
 }

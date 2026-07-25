@@ -1027,6 +1027,42 @@ public:
  * current producer index" to "a dereferenced field of a caller-supplied
  * CSTGFileOpener*", confirmed via register-level tracing, not assumed to
  * be a clean 0..15 channel number.
+ *
+ * `Initialize()` (batch 63, `.text+0x119f90`, 1364 bytes) is now real too
+ * -- see src/engine/file_opener_events.cpp. Fully mechanical, every field
+ * traced via `objdump -dr`: populates the "A" lanes (`this+0x00..0xf0`,
+ * indices 0-15), the "B" lanes (`this+0x100..0x1f0`, indices 16-31), the
+ * `+0x200` fallback lane (a 33rd lane of the same 4-field-ring shape,
+ * already documented above), and the class's own `ProcessCommands()` ring
+ * at `+0x210` (base/write/read/capacity at `+0x210/+0x214/+0x218/+0x21c`,
+ * matching the ctor comment). Every base-ptr field is set via
+ * `CSTGBankMemory::AllocAligned(0x324, 0x10)` (804 bytes) for all 32 A/B
+ * lanes and the fallback lane's own alloc is `AllocAligned(0xd24, 0x10)`
+ * (3364 bytes) -- EVERY capacity field is simply `byteSize/4` (0xc9=201
+ * for the 0x324 lanes, 0x349=841 for the 0xd24 fallback lane), i.e. a
+ * plain 4-byte-per-event-pointer element size throughout, matching
+ * `AddPlaybackEvent`'s own `base[writeIdx] = event` shape exactly -- NOT
+ * an "off-by-one pre-declare the next buffer" pattern as an earlier batch
+ * speculated; that read of the disassembly was wrong, the field really is
+ * always "this lane's own byteSize/4", just written earlier in program
+ * order for the fallback lane than for the paired A/B lanes. The class's
+ * OWN ring at `+0x210` is different: `AllocAligned(0x8348, 0x10)` (33608
+ * bytes) with capacity `0x1069` (4201) = `0x8348/8`, i.e. 8-byte elements
+ * -- matching `ProcessCommands()`'s own already-documented `status:1
+ * byte, ptr:4 bytes` (rounded to 8) record shape, not the 4-byte event-
+ * pointer shape the other 33 lanes use.
+ *
+ * A global 33-entry pointer table, `sEventListMap` (confirmed real
+ * symbol name via relocation, `.bss`, 132 bytes = 33*4), is ALSO
+ * populated here: `sEventListMap[i]` = `&(this+0x10*i)` for i=0..15 (the
+ * A lanes' own struct addresses), `sEventListMap[0x10+i]` = `&(this+
+ * 0x100+0x10*i)` for i=0..15 (the B lanes), and `sEventListMap[32]` =
+ * `&(this+0x200)` (the fallback lane) -- i.e. pointers to the RING
+ * STRUCTS themselves (not their `AllocAligned`-returned buffers), giving
+ * some other not-yet-reconstructed caller generic index-based access to
+ * all 33 event lanes. The `+0x210` own-ring is deliberately NOT in this
+ * table (different element size, a genuinely separate command queue, not
+ * an "event list").
  */
 class CSTGFileOpener {
 public:
@@ -1035,11 +1071,17 @@ public:
 	void AddPlaybackEvent(CSTGAudioEvent *event, unsigned int index);
 	void AddRecordEvent(CSTGAudioEvent *event, unsigned int index);
 	void ProcessCommands();
-	/* Confirmed real (called from CSTGEngine::Initialize(), sec 10.58),
-	 * body not reconstructed in this pass. */
-	void Initialize();
+	void Initialize();	/* real now, batch 63 -- see file_opener_events.cpp */
 	unsigned char _unrecovered[544];
 };
+
+/* sEventListMap: global 33-entry table of pointers to CSTGFileOpener's own
+ * event-lane ring structs, populated by CSTGFileOpener::Initialize() (see
+ * that class's comment above for the full derivation). Declared `extern
+ * "C"` per this project's established convention for plain (non-mangled)
+ * global symbols confirmed via relocation (oa_atmel.h's `mode`, sec
+ * 10.??). */
+extern "C" unsigned char *sEventListMap[33];
 
 /*
  * CSTGFileCloser/CSTGHDRFileReader/CSTGHDRFileWriter/CSTGStreamingFileReader/

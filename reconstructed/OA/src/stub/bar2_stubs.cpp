@@ -138,7 +138,8 @@ void CSTGEffectManager::Initialize() {}
  * blocked on three still-unreconstructed DSP callees. */
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGMonitorMixer::RunMonitors() {}
-void CSTGFileOpener::Initialize() {}
+/* CSTGFileOpener::Initialize() is real now, batch 63 -- see
+ * src/engine/file_opener_events.cpp. */
 void CSTGFileOpener::ProcessCommands() {}
 void CSTGFileCloser::ProcessCommands() {}
 /* CSTGHDRFileReader::Initialize()/CSTGStreamingFileReader::Initialize()

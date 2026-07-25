@@ -682,11 +682,11 @@ verify/test_hdr_manager_init: verify/test_hdr_manager_init.cpp src/engine/hdr_ma
 verify/test_hdr_sampler_commands: verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_sampler_commands.cpp src/engine/hdr_sampler_commands.cpp -o $@
 
-verify/test_file_opener_events: verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp include/oa_engine.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp -o $@
+verify/test_file_opener_events: verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp include/oa_engine.h include/oa_bank_memory.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_opener_events.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp -o $@
 
-verify/test_hdr_playback_commands: verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_daemons.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp -o $@
+verify/test_hdr_playback_commands: verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_daemons.h include/oa_bank_memory.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_hdr_playback_commands.cpp src/engine/hdr_playback_commands.cpp src/engine/file_opener_events.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_controller_rt_data_set_assignment: verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_set_assignment.cpp src/engine/controller_rt_data_set_assignment.cpp src/engine/cc_info_table.cpp -o $@
