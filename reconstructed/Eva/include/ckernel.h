@@ -35,6 +35,20 @@ public:
 	 * omega_interface.h's existing _func_int_char_ptr-adjacent convention of not
 	 * yet giving CSystemApi/CSysApiInstance a reconstructed relationship) --
 	 * callers (Mains(), the MMainXxx family) cast it to CSystemApi* themselves.
+	 *
+	 * ABI note (verified 2026-07-25 against every real caller's own disassembly --
+	 * COmegaInterface::GetSysApi() at 0804e0a0, InitSystemLayer's/InitUserLayer's own
+	 * call sites in COmegaInterface::Init() at 0804e0f0, OmegaInitThread at 0804dd10):
+	 * every one of this method's 3 real call sites pushes an extra stack dword --
+	 * mKernel (Omega+8), the one live CKernel instance -- as if calling a genuine
+	 * non-static `this`-taking method, even though this class is declared `static`
+	 * here. Confirmed harmless: this function's own body (and InitSystemLayer's /
+	 * InitUserLayer's) never reads that slot -- both operate purely on fixed global
+	 * addresses (SysApiInstance, g_poScheduler/g_poModuleManager/etc., see
+	 * ckernel.cpp), so the caller-pushed dword is genuinely dead. Kept declared
+	 * `static` here (byte-identical stack layout isn't behaviorally load-bearing
+	 * under cdecl when the extra arg is never dereferenced) rather than threading a
+	 * decorative, always-ignored `CKernel*` through every declaration.
 	 */
 	static void *GetSysApi();
 
@@ -48,13 +62,23 @@ public:
 	 */
 	static void InitSystemLayer();
 
-	/* .text+0x0805e630, 169 bytes -- not yet reconstructed (Stage 4+). Called once
-	 * per scheduling-signal wakeup from OmegaSchedulingThread (omega_threads.cpp).
+	/* .text+0x0805e630, 169 bytes -- Tier A, reconstructed in ckernel.cpp (Stage 4).
+	 * Called once per scheduling-signal wakeup from OmegaSchedulingThread
+	 * (omega_threads.cpp) -- this one genuinely does take and dereference `this`
+	 * (this+4/this+8, the embedded timer vector), unlike GetSysApi/InitSystemLayer/
+	 * InitUserLayer above/below -- re-verified instruction-by-instruction against
+	 * the real disassembly 2026-07-25, no discrepancies found. Stale comment
+	 * ("not yet reconstructed") fixed while re-verifying this file for that pass.
 	 */
 	void Exec();
 
-	/* .text+0x0805dcf0, 273 bytes -- not yet reconstructed (Stage 4+). Called once
-	 * from OmegaInitThread (omega_threads.cpp).
+	/* .text+0x0805dcf0, 273 bytes -- Tier A, reconstructed in ckernel.cpp (Stage 4).
+	 * Called once from OmegaInitThread (omega_threads.cpp), which -- like
+	 * InitSystemLayer's own call site -- passes mKernel as a dead, unread stack
+	 * argument (see GetSysApi's ABI note above; same finding applies here, verified
+	 * against the real disassembly 2026-07-25). Re-verified call-order faithful
+	 * against the real 273-byte body, no discrepancies found. Stale comment ("not
+	 * yet reconstructed") fixed while re-verifying this file for that pass.
 	 */
 	static void InitUserLayer();
 
