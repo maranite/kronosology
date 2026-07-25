@@ -129,12 +129,9 @@ void *PTR__CTracer_08e81468[3] = {
 void *PTR__CLevelManagerArray_08e80c28[4] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
-void *PTR__CLevelManager_08e80e50[20] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+/* Real boundary is 3 slots -- see omega_vtables.h's header comment on this symbol. */
+void *PTR__CLevelManager_08e80e50[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 void *PTR__TNamedPtrArray_08e80ea8[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -360,5 +357,36 @@ void *PTR__CEditor_08f29bac[3] = {
 void *PTR__CEditor_08f29bc0[5] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+/* CAlphaKeybIfcTask's own real 3-vtable cluster (Stage 6 breadth sweep,
+ * 2026-07-25 -- CEditor::Setup()'s "ALPHAKEYBOARD=Yes" fan-out target,
+ * reconstructed standalone/unwired to avoid touching editor.cpp/editor.h
+ * during the concurrent dedicated CEditor batch -- see alpha_keyb_ifc_task.h).
+ * All 3 groups confirmed by a direct .rodata dword read at 0x08f25ae0
+ * (offset-to-top/typeinfo/slots, repeated per this-adjustment group), same
+ * discipline as CEditor's own 3-vtable cluster immediately above:
+ *   primary   (this+0,    offset-to-top 0)     08f25ae8..08f25afc = 6 slots
+ *   secondary (this+0x08, offset-to-top -8)    08f25b08..08f25b10 = 3 slots
+ *             -- this is CTask's own "mIfcThunk" field (task.h +0x08),
+ *             specialized per-class instead of the generic
+ *             EvaDataPlaceholder_08e82144 identity
+ *   tertiary  (this+0x80, offset-to-top -0x80) 08f25b1c..08f25b28 = 4 slots
+ *             -- the real CIfcUnknown-adjusted sub-object CTask::RegisterIfc()
+ *             is called against (CTask::CTask()'s own +0x80 install)
+ * All 3 install-only in this reconstruction (CAlphaKeybIfcTask is not wired
+ * into any reconstructed caller yet), same EvaVTableStub treatment as every
+ * other undecoded vtable in this file.
+ */
+void *PTR__CAlphaKeybIfcTask_08f25ae8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CAlphaKeybIfcTask_08f25b08[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CAlphaKeybIfcTask_08f25b1c[4] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
 };
 }

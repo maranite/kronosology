@@ -184,7 +184,20 @@ extern void *PTR__CDummyMsgInput_08e80c80[3];
 extern void *PTR__CNamedObjectBase_08e81378[2];
 extern void *PTR__CTracer_08e81468[3];
 extern void *PTR__CLevelManagerArray_08e80c28[4];
-extern void *PTR__CLevelManager_08e80e50[20];
+/* Verified 2026-07-25 (Eva full-state re-verification pass): ground truth's real
+ * CLevelManager vtable is only 3 slots (dtor-complete @0817ccb0, dtor-deleting
+ * @0817cd20, ExecMsg @0805e7d0) before RTTI data (_ZTS/_ZTI13CLevelManager) begins
+ * at 08e80e5c -- confirmed via objdump -s .rodata byte read. StopForMessage/
+ * ResumeAfterMessage/RunLevel are real CLevelManager methods but NOT virtual (no
+ * vtable slot backs them -- called directly). The array was previously declared
+ * [20], which happened to still end exactly on the next class's real vtable
+ * boundary (08e80ea0) but wrongly modeled 17 bytes of RTTI/next-header data as
+ * placeholder vtable slots. Harmless in practice (only ever used as
+ * `*(void**)lm = PTR__CLevelManager_08e80e50` in scheduler.cpp, an address-only
+ * assignment, never indexed past slot 0), but corrected to [3] to match the real
+ * boundary and avoid misleading future indexed access.
+ */
+extern void *PTR__CLevelManager_08e80e50[3];
 extern void *PTR__TNamedPtrArray_08e80ea8[3];
 extern void *PTR__TPtrArray_08e80bc8[4];
 extern void *PTR__CSysApiInstance_08e81008[94];
@@ -243,6 +256,14 @@ extern void *PTR__CMessageInput_08e80c68[1];
  * code.
  */
 extern void *PTR__CSysExMsgTaskBase_08e84c28[13];
+
+/* CAlphaKeybIfcTask's own real 3-vtable cluster (Stage 6 breadth sweep,
+ * 2026-07-25) -- see omega_vtables.cpp's own comment for the full byte-read
+ * derivation. alpha_keyb_ifc_task.h/.cpp are the only consumers.
+ */
+extern void *PTR__CAlphaKeybIfcTask_08f25ae8[6];
+extern void *PTR__CAlphaKeybIfcTask_08f25b08[3];
+extern void *PTR__CAlphaKeybIfcTask_08f25b1c[4];
 extern int   EvaDataPlaceholder_08e84c50;
 
 /* CEditServer's own real vtable (edit_server.h, Stage 6 breadth sweep,
