@@ -698,7 +698,11 @@ void CSTGVoiceAllocator::StealVoiceList(void *) {}
  * src/engine/smoother_ctor.cpp. Initialize() reconstructed for real, sec
  * 10.86 -- see src/engine/smoother_init.cpp. */
 /* CSTGSmoother::CancelAllSmoothers() is real now, sec 10.154 -- see
- * src/engine/smoother_cancel.cpp. */
+ * src/engine/smoother_cancel.cpp. CSTGSmoother::FinalizeAllSmoothers()
+ * is real now too, batch 61 -- see src/engine/smoother_finalize_all.cpp
+ * (confirmed a hybrid of CancelAllSmoothers()'s own unlink/free-list-push/
+ * buffer-zero logic plus FinalizeSmoother(node, true)'s own dispatch
+ * call, both already-real siblings). */
 /* Sec 10.95's own confirmed-real, deliberately deferred externs.
  * CSTGPerformanceVars::SetIsDying() is real now, batch 19 -- see
  * src/engine/performance_vars_set_is_dying.cpp (also its own three
@@ -707,7 +711,6 @@ void CSTGVoiceAllocator::StealVoiceList(void *) {}
  * SetIsDying(CSTGPerformanceVars*), all real too, plus four further
  * confirmed-real, deliberately deferred externs that call needs,
  * stubbed below). */
-void CSTGSmoother::FinalizeAllSmoothers() {}
 void CSTGPerformanceVars::EnterActivatingState() {}
 /* Three of the four batch-19 OnPerformanceDeactivate externs are real now:
  *   - CSTGAudioInput::OnPerformanceDeactivate() (batch 20) -- see

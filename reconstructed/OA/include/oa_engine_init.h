@@ -887,8 +887,10 @@ struct CSTGSmoother {
 	void CancelAllSmoothers();
 
 	/* FinalizeAllSmoothers() (sec 10.95, confirmed via relocation from
-	 * CSTGGlobal::PreprocessPerformanceChange) confirmed real,
-	 * deliberately deferred extern -- own body not reconstructed. */
+	 * CSTGGlobal::PreprocessPerformanceChange) is real now, batch 61 --
+	 * see src/engine/smoother_finalize_all.cpp for the full derivation
+	 * (a confirmed hybrid of CancelAllSmoothers()'s own unlink/free-list
+	 * logic plus FinalizeSmoother(node, true)'s own dispatch call). */
 	void FinalizeAllSmoothers();
 
 	/*

@@ -80,6 +80,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/smoother_ctor.o \
            src/engine/smoother_cancel.o \
            src/engine/smoother_finalize.o \
+           src/engine/smoother_finalize_all.o \
            src/engine/controller_rt_data_init.o \
            src/engine/controller_rt_data_ctor.o \
            src/engine/slot_voice_data_ctor.o \
@@ -330,6 +331,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/smoother_ctor.cpp \
        src/engine/smoother_cancel.cpp \
        src/engine/smoother_finalize.cpp \
+       src/engine/smoother_finalize_all.cpp \
        src/engine/controller_rt_data_ctor.cpp \
        src/engine/slot_voice_data_ctor.cpp \
        src/engine/alias_bank_convert.cpp \
@@ -442,6 +444,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_alias_bank_convert verify/test_waveseq_generator \
          verify/test_audio_bus_manager verify/test_program_slot_ctor \
          verify/test_sequence_ctor verify/test_smoother_cancel verify/test_smoother_finalize \
+         verify/test_smoother_finalize_all \
          verify/test_controller_rt_data_ctor verify/test_slot_voice_data_ctor \
          verify/test_sampling_interface_ctor \
          verify/test_channel_values verify/test_hdr_record_track \
@@ -651,6 +654,9 @@ verify/test_smoother_cancel: verify/test_smoother_cancel.cpp src/engine/smoother
 
 verify/test_smoother_finalize: verify/test_smoother_finalize.cpp src/engine/smoother_finalize.cpp include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_finalize.cpp src/engine/smoother_finalize.cpp -o $@
+
+verify/test_smoother_finalize_all: verify/test_smoother_finalize_all.cpp src/engine/smoother_finalize_all.cpp include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_smoother_finalize_all.cpp src/engine/smoother_finalize_all.cpp -o $@
 
 verify/test_controller_rt_data_ctor: verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp include/oa_global.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_ctor.cpp src/engine/controller_rt_data_ctor.cpp -o $@
