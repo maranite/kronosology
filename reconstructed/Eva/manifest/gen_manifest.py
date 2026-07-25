@@ -169,6 +169,18 @@ RECONSTRUCTED = {
     "0805ea10",  # CLevelManager::RunLevel
     "08055f20",  # CTaskBuffer::SendBuffer
     "08055ec0",  # CTaskBuffer::~CTaskBuffer
+
+    # --- Stage 6: breadth sweep, batch 4 (2026-07-25) -- CCommDriver::setupfifoname()
+    # upgraded Tier-B -> Tier A (directly on the primary boot path: main() ->
+    # CCommDriver::getInstance(argv) -> ctor -> setupfifoname()), plus its own
+    # Eva_IsSimulation()/Eva_IsSimulationSVGA() dependencies, split into their own
+    # TU (src/init/app_mode.cpp). See README.md's "Stage 6: breadth sweep, batch 4"
+    # section, including the real no-NULL-check crash bug found in setupfifoname()
+    # and the survey findings for CEditor::CPanelIfcTask/USTGAPILCDControl/CKernel
+    # (all confirmed to have no further genuinely-reachable methods).
+    "08e4f310",  # CCommDriver::setupfifoname
+    "0804cd30",  # Eva_IsSimulation
+    "0804cd40",  # Eva_IsSimulationSVGA
 }
 
 # CTask itself is NOT in RECONSTRUCTED (no ctor implemented) -- CTask::CTask()

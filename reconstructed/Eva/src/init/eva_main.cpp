@@ -13,6 +13,7 @@
  * CCommDriver::getInstance overload-ordering hazard.
  */
 
+#include "app_mode.h"
 #include "comm_driver.h"
 #include "lcd_control.h"
 #include "omega_interface.h"
@@ -25,10 +26,13 @@
 #include <sched.h>
 #include <pthread.h>
 
-/* Real global, set by the argv[0]-basename check below; read by the "else" branch
- * to avoid re-setting hardware margins if somehow re-entered with mode already set.
+/* s_eAppMode is set by the argv[0]-basename check below; read by the "else"
+ * branch to avoid re-setting hardware margins if somehow re-entered with mode
+ * already set. Real storage + the Eva_IsSimulation()/Eva_IsSimulationSVGA()
+ * accessors now live in their own TU (src/init/app_mode.cpp) -- see
+ * app_mode.h's header comment for why (keeps them off this file's own
+ * verify/-excluded object).
  */
-static int s_eAppMode = 0;
 
 /* Real handler (.text+0x0804cd10, 17 bytes) -- installed via signal(SIGINT, Ouch)
  * after COmegaInterface::Init() returns (see README.md point 8 for why that ordering

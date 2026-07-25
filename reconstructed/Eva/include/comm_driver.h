@@ -16,8 +16,33 @@
  *                                caller of this overload implicitly assumes
  *                                getInstance(argv) already ran.
  *
- * CCommDriver's own constructor body (what it actually does with argv) is Stage 2 --
- * not yet reconstructed, declared here only as far as getInstance() needs.
+ * setupfifoname(argv) -- upgraded from Tier-B stub to Tier A (Stage 6 breadth
+ * sweep, 2026-07-25; .text+0x08e4f310, 681 bytes). Real per-argv-entry parser:
+ * splits each "NAME=VALUE"-shaped argv string on '=' and, for exactly 3 real
+ * names (NKS4_LCDFIFO / NKS4_EVENTSFIFO / NKS4_COMMANDSFIFO), conditionally
+ * (gated on Eva_IsSimulation()/Eva_IsSimulationSVGA(), see app_mode.h) strdup's
+ * the value into mLcdFifoPath/mEventFifoPath/mCommandFifoPath. Falls back to 3
+ * real hardcoded default paths ("/tmp/evaclientfifo"/"/tmp/evaeventfifo"/
+ * "/tmp/evacommandfifo") for any field still null after the argv scan, again
+ * gated the same way per-field (the real per-class comment in comm_driver.cpp
+ * has the exact gating asymmetry -- LCD/COMMAND check only Eva_IsSimulation(),
+ * EVENT checks either simulation flag).
+ *
+ * REAL BUG, CONFIRMED AT THE RAW-DISASSEMBLY LEVEL (not a decompiler artifact --
+ * `8e4f3b6: call strchr@plt` / `8e4f3bb: movb $0x0,(%eax)` with no intervening
+ * test/je): every argv entry is unconditionally strchr()'d for '=' and the
+ * result is dereferenced with NO NULL CHECK. Any argv entry that lacks '='
+ * (e.g. argv[0], the program's own path/name) segfaults inside this function,
+ * before CCommDriver does anything else -- i.e. before Eva has opened a single
+ * fifo. Since real hardware demonstrably runs Eva successfully, real production
+ * argv must contain at least one "NAME=VALUE"-shaped entry; this project could
+ * not locate the real launch wrapper (inside the encrypted Eva.img, not present
+ * in any extracted rootfs on this share) to confirm what it actually passes.
+ * Flagged here, not "fixed" -- adding a NULL check the real binary doesn't have
+ * would misrepresent the real function's own (crash-prone) contract. Any live
+ * kronos_vm boot test of this reconstruction MUST invoke Eva with at least one
+ * argv entry containing '=' (a real, not-fabricated input shape) to avoid
+ * tripping this real bug -- see README.md's Stage 6 writeup.
  */
 
 #ifndef COMM_DRIVER_H
@@ -27,9 +52,7 @@ class CCommDriver {
 public:
 	/* .text+0x08e4f5d0, 242 bytes -- reconstructed (see comm_driver.cpp). Opens 3
 	 * fifo paths setupfifoname() fills in (LCD/Command/Event); any that stays null
-	 * is silently skipped (real behavior, not a bug -- setupfifoname() itself is a
-	 * Tier-B link-stub in this pass, so all 3 stay null and the ctor becomes a
-	 * real, faithfully-derived no-op given that specific input).
+	 * is silently skipped (real behavior, not a bug).
 	 */
 	CCommDriver(char **argv);
 
@@ -39,12 +62,22 @@ public:
 private:
 	static CCommDriver *singleton;
 
+	/* .text+0x08e4f310, 681 bytes -- real, Tier A. See this header's own top
+	 * comment for the full behavior writeup and the real no-NULL-check bug.
+	 */
+	void setupfifoname(char **argv);
+
 	char *mLcdFifoPath;    /* +0x00 */
 	char *mEventFifoPath;  /* +0x04 */
 	char *mCommandFifoPath; /* +0x08 */
 	int   mLcdFd;           /* +0x0c */
 	int   mEventFd;          /* +0x10 */
 	int   mCommandFd;        /* +0x14 */
+
+	/* Friend accessor for verify/test_comm_driver.cpp -- same extraction
+	 * pattern already used by ustg_user_api.h/level_manager_array.h.
+	 */
+	friend struct CommDriverTestHooks;
 };
 
 #endif /* COMM_DRIVER_H */

@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **Batch 3 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), and now `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3, upgraded from Tier-B — see "Stage 6: breadth sweep, batch 3" below for the safety-critical vtable/CFileMan-CResMan fixes this required once `AddModule()` actually populates `mModules`). 116 of 37,795 functions reconstructed — still one small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **Batch 4 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), and now `CCommDriver::setupfifoname()` — the real argv-parsing body behind `main()`'s own `CCommDriver::getInstance(argv)` call, previously a Tier-B stub (batch 4 — see "Stage 6: breadth sweep, batch 4" below, including a survey confirming `CEditor::CPanelIfcTask`/`USTGAPILCDControl`/`CKernel` have no further genuinely-reachable methods, and a real crash-bug finding in the reconstructed function itself). 119 of 37,795 functions reconstructed — still one small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -1324,3 +1324,157 @@ End closing
 ```
 
 Zero crashes, zero regressions from the previously-established clean-exit trace.
+
+## Stage 6: breadth sweep, batch 4 — 2026-07-25
+
+Per this session's own follow-on `/goal` directive (survey `CEditor::CPanelIfcTask`/
+`USTGAPILCDControl`/`CKernel` for further genuinely-reachable methods; if none, broaden to
+the next tractable candidate on the boot path). **Note on scope**: a separate, concurrent
+agent was working the `CTask`/`CLimiterMan`/`CScheduler`/`CModule`/`CTaskBuffer`/
+`CLevelManager` family at the same time (batch 3, `CModuleManager::AddModule()`/
+`EnableUpdate()`) — this pass deliberately stayed out of that territory; none of the files
+touched below overlap with it.
+
+### Survey: `CEditor::CPanelIfcTask`, `USTGAPILCDControl`, `CKernel` — no further genuinely-reachable methods
+
+All 3 confirmed via direct `nm -C` on the real binary (full method list) cross-checked
+against a full `objdump -dr -C` disassembly of the real binary for call-site xrefs (faster
+than a `rg`-over-37,795-tiny-files scan on this share's CIFS mount, which timed out
+repeatedly — a real environment note worth keeping for future surveys of this kind: dump
+the whole binary once with `objdump -d -C --no-show-raw-insn` and `grep`/`rg` that single
+~136 MB text file instead of scanning the decompile export's per-function file tree).
+
+- **`CEditor::CPanelIfcTask`** has 24 other real methods beyond `SetMargin`
+  (`GetMargin`, `SetupPanelInterface`, `OnButtonEvent`/`OnEncoderEvent`/`OnAnalogEvent`/
+  `OnTouchPanelEvent`, `SetLEDStatus` ×4 overloads, `SetAllLED`, `ShortBeep`/
+  `ShortBeepPolite`, `EnterDiagnostics`, `Exec`/`Exec(CMessage&)`, ctor/dtor, ...) — but its
+  own real constructor (`.text+0x0824b7e0`, takes `CEditor const&, PegScreen*`) has **zero
+  callers anywhere in the 37,795-function export**, confirmed by grepping the full
+  disassembly for call-sites targeting that address. Since nothing ever constructs a
+  `CPanelIfcTask` instance in this reconstruction's own reachable call graph, every
+  instance method on the class (including the already-reconstructed `SetMargin`, which is
+  only ever called as a bare static-style call in `main()`, never through a real instance)
+  is unreachable via a real object. Not pursued — same "real but currently unreachable"
+  status already established for `OmegaExitThread`/`CCommDriver::getInstance()`'s
+  no-arg-overload/`USTGUserAPI::Disconnect()`.
+- **`USTGAPILCDControl`** has 10 other real methods beyond `LoadStoredSettings`
+  (`ResetToInit`, `SetContrast`, `SetRGBLevel`, `SetColorTemp`, `SetPadDrive2`,
+  `SetBlackLevel`, `SetAllRGBLevels`, `SaveCurrentSettings`, `SetBacklightBrightness`,
+  `SetSpreadSpectrumClock`) — all 9 called ones (9 of the 10 have at least 1 real call
+  site; `SetAllRGBLevels` has zero) share a **single real caller**:
+  `CESGlobalTask::SetLCDCalibration(unsigned char, unsigned char const*)`
+  (`.text+0x08c66150`) — which itself has **zero callers anywhere in the export**. Real,
+  but two hops deep into unreachable Peg/CForm UI territory (`CESGlobalTask` is the
+  `ESGlobal` edit-server mode class `Mains()`'s own `MMainESGlobal` registration shim
+  installs a name/vtable-swap placeholder for, never a real constructed instance in this
+  reconstruction). Not pursued.
+- **`CKernel`** has 5 other real methods beyond the already-reconstructed
+  `CKernel`/`~CKernel`/`InitSystemLayer`/`GetSysApi`/`Exec`/`InitUserLayer`/
+  `AddGlobalObject`/`RemoveGlobalObject`: `CreateTimer`, `StartTimer`, `StopTimer`,
+  `KillTimer`, `Close`. All 5 have **zero callers anywhere in the 37,795-function
+  export**, confirmed the same way. `Close()` in particular was worth checking
+  specifically (a natural guess for something `COmegaInterface::Close()`/shutdown might
+  call) — it does not; `COmegaInterface::Close()`'s own real body is just `s_bRunning = 0`
+  (Stage 1), and nothing else calls `CKernel::Close()` either. Not pursued.
+
+This is the same shape of finding Stage 3 already established for `OmegaExitThread`: real,
+correctly-named, correctly-signatured methods that simply have no path to them from
+anywhere in this binary's own call graph as captured by the static export. Per the task's
+own fallback instruction, broadened the search to the next tractable candidate still on
+the actual boot path.
+
+### `CCommDriver::setupfifoname()` upgraded Tier-B -> Tier A (`.text+0x08e4f310`, 681 bytes)
+
+Found by re-reading every remaining Tier-B stub comment across `src/`/`include/` for one
+sitting directly on an already-reconstructed real call path (same selection method batch
+1's own "next candidates" note recommended) — `comm_driver.h`'s own header comment
+already flagged this one: `main()` -> `CCommDriver::getInstance(argv)` -> ctor ->
+`setupfifoname(argv)`, i.e. directly on the primary boot path, not a peripheral one.
+
+Real per-argv-entry parser: splits each `"NAME=VALUE"`-shaped `argv[]` string on `=` and,
+for exactly 3 real names, conditionally assigns the value to one of `CCommDriver`'s 3
+fifo-path fields:
+
+| Name | Field | Gate |
+|---|---|---|
+| `NKS4_LCDFIFO` | `mLcdFifoPath` (+0x00) | `Eva_IsSimulation()` only |
+| `NKS4_EVENTSFIFO` | `mEventFifoPath` (+0x04) | `Eva_IsSimulation() \|\| Eva_IsSimulationSVGA()` |
+| `NKS4_COMMANDSFIFO` | `mCommandFifoPath` (+0x08) | `Eva_IsSimulation()` only |
+
+Any field still null after the whole `argv[]` scan falls back to one of 3 real hardcoded
+default paths (`"/tmp/evaclientfifo"`/`"/tmp/evaeventfifo"`/`"/tmp/evacommandfifo"`,
+sizes cross-checked byte-for-byte against the real `new[]` allocation sizes in the
+decompile, `0x13`/`0x12`/`0x14`) — **gated by the exact same per-field simulation check**,
+not unconditionally. This means, confirmed the hard way (a segfault in this pass's own
+first KAT run, caused by a wrong test assumption, not a code bug): **in real hardware mode
+(`Eva_IsSimulation()` and `Eva_IsSimulationSVGA()` both false), all 3 fields stay `NULL`
+forever, argv values and all** — `CCommDriver` is effectively simulator-only. On real
+hardware its constructor becomes a real, faithfully-derived total no-op (all 3 fds stay
+`-1`), consistent with this project's own already-established finding that real-hardware
+IPC goes through the separate `USTGUserAPI`/`/dev/rtf*` substrate instead (Stage 1/2/4).
+
+**Real bug, confirmed at the raw-disassembly level (not a decompiler artifact)**: every
+`argv[]` entry is unconditionally `strchr()`'d for `'='` and the result is dereferenced
+with **no NULL check** (`8e4f3b6: call strchr@plt` / `8e4f3bb: movb $0x0,(%eax)`, no
+intervening `test`/`je`). Any `argv[]` entry lacking `'='` — including `argv[0]` itself,
+the program's own name/path, which this function processes like any other entry —
+segfaults here, before `CCommDriver` opens a single fifo. Since real hardware
+demonstrably runs Eva successfully, real production `argv` must contain at least one
+`"NAME=VALUE"`-shaped entry; this project could not locate Eva's real launch wrapper to
+confirm what it actually passes (it lives inside the encrypted `Eva.img`, not present in
+any extracted rootfs on this share — `docs/workflow/deploying_patches.md`/
+`boot_optimization_analysis.md` both just say `exec /korg/Eva/Eva`, which may be a
+paraphrase rather than the literal invocation). Flagged, not "fixed" — adding a NULL
+check the real binary doesn't have would misrepresent the function's own contract. **Any
+live `kronos_vm` boot test of this reconstruction from here on must invoke Eva with at
+least one `argv` entry containing `'='`** to avoid tripping this real bug; this batch did
+not perform a live boot test for exactly this reason (no confirmed-real invocation line to
+test against) — left for a future pass once/if the real launch wrapper is found.
+
+`Eva_IsSimulation()`/`Eva_IsSimulationSVGA()` (`.text+0x0804cd30`/`0x0804cd40`, 13 bytes
+each — real, trivial `return s_eAppMode == N;` accessors) were split out of
+`eva_main.cpp` into their own new TU, `src/init/app_mode.cpp` — not because of any
+real-binary reason, but because the Makefile's `verify` target deliberately excludes
+`objs/init/eva_main.o` from every KAT binary's link (it owns `main()`/`Ouch()`, which would
+otherwise collide with each test's own `main()`); keeping the real global (`s_eAppMode`)
+and its 2 accessors in their own TU lets every `verify/` KAT link against the real
+accessors like any other reconstructed function, rather than needing a second, fake
+definition. `include/app_mode.h` is the new shared declaration point.
+
+### Verification
+
+`verify/test_comm_driver.cpp` (new, 12/12 checks) drives the real `setupfifoname()`
+directly via a friend hook (`CommDriverTestHooks`, same extraction pattern as
+`ustg_user_api.h`/`level_manager_array.h`) on raw, non-constructed `CCommDriver` storage
+-- bypassing the real ctor's own `open()` calls entirely, since they're irrelevant to the
+function under test and would just spam stderr with "fifo open error" against nonexistent
+host paths. `Eva_IsSimulation()`/`Eva_IsSimulationSVGA()` are the real accessors (linked
+from `objs/init/app_mode.o`), driven by writing `s_eAppMode` directly, exactly like
+`main()`'s own argv[0]-basename detection does. Every synthetic `argv[]` array in this test
+deliberately includes at least one `'='`-bearing entry and omits any bare program-name-
+style entry, for the same reason documented above -- confirmed real hardware/simulation
+gating asymmetry for all 3 fields across hardware mode, plain simulation mode, and
+SVGA-only simulation mode (EVENT is the only field also
+gated on the SVGA flag), plus the unrecognized-argv-key no-op case.
+
+Two real test-writing bugs caught and fixed while developing this KAT (both instructive,
+kept in the header comments): (1) the first draft included a bare `argv[0]`-style entry
+with no `'='` in every test array, immediately tripping the real crash bug above — fixed
+by removing it, not by adding a NULL check to the function under test; (2) the first draft
+assumed hardware mode falls back to the 3 hardcoded defaults, which is wrong -- the
+default-assignment gates require simulation mode too, so hardware mode leaves all 3
+fields `NULL` (a real finding, not a test framework quirk).
+
+`make` (12/12 new checks, 0 regressions across the other 4 verify binaries + the
+concurrent agent's own `test_module_manager_add_module`) and `tools/build_lenny.sh`
+(`LINK OK`, real on-image-lib link) both clean. Manifest 116 -> 119 reconstructed
+(`08e4f310`/`0804cd30`/`0804cd40`). No live `kronos_vm` boot test this batch -- see the
+real-bug writeup above for why.
+
+**Next candidates for a future batch**: locate Eva's real launch wrapper (inside the
+encrypted `Eva.img`) to confirm the actual production `argv`, which would resolve the open
+question above and unblock a safe live boot test of this specific reconstruction. Beyond
+that, continue the same "Tier-B stub already sitting on an already-reconstructed real call
+path" search method across the rest of `src/`/`include/` -- `CErrorHandler::EnableUpdate()`
+(`.text+0x0805afb0`) and `CSysApiInstance::EnableMultiTask()`/`WriteMessageToHost()` are
+both real, on-boot-path-adjacent Tier-B stubs not yet investigated for tractability.
