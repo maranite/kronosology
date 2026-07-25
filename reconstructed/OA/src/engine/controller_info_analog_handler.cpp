@@ -237,6 +237,354 @@ const unsigned char CSTGControllerRTData::kControllerLockFlagTable[11] = {
 	0x00, 0x01, 0x06, 0x02, 0x04, 0x08, 0x09, 0x0e, 0x0a, 0x0c, 0x10,
 };
 
+/* ---------------------------------------------------------------------
+ * Batch 68 (2026-07-25): six more of the 13 previously-deferred
+ * `AnalogXxxHandler` callees reconstructed for real -- confirmed
+ * genuinely hardware/UI (not DSP) via full disassembly of ALL 13
+ * remaining candidates (not just these six): `AnalogJoystickXHandler`,
+ * `AnalogAftertouchHandler`, and the "Ext"/"RTK" knob+slider mode-
+ * dispatch pairs (`AnalogKnobExtHandler`/`AnalogSliderExtHandler`,
+ * `AnalogKnobRTKHandler`/`AnalogSliderRTKHandler`). The other SEVEN
+ * (`AnalogTempoHandler`, both SetListEQ handlers, both "TA"/Tone-Adjust
+ * handlers, both "AIn"/Audio-Input handlers) are CONFIRMED DSP this
+ * pass (not just carried forward as suspected) -- see oa_global.h's own
+ * updated comment on the full 13-item list for the disassembly evidence
+ * (a genuine `CSTGToneAdjust`/`CSTGFrontPanelSmoothers` virtual dispatch
+ * in each, both entirely new and substantial unmodeled DSP-parameter
+ * class hierarchies) -- deliberately left as plain deferred externs,
+ * no bodies here.
+ *
+ * `ApplyRTKCurve` -- both `AnalogKnobRTKHandler`/`AnalogSliderRTKHandler`
+ * share this exact "RTK" (Real Time Knob) bipolar curve: a flat 64
+ * (center) dead-zone for raw values in [482,542], `127 - floor(raw *
+ * 0.13049793243408203)` below it, `floor((1024-raw) * 0.13257262110710144)`
+ * above it. The four float constants (`.rodata.cst4+0x294/0x298/0x29c/
+ * 0x2a0/0x2a4`, five slots total) were extracted BYTE-EXACT via a
+ * Python struct.unpack script reading the real OA.ko file directly (not
+ * hand-transcribed), matching this project's established "script, don't
+ * hand-transcribe" table-extraction discipline. This is genuine FPU
+ * math (the real function uses x87 `fild`/`fmul`/`fisttp`) -- this file
+ * needs the SAME `-mhard-float -msse2 -mfpmath=sse` per-object Makefile
+ * override the other genuine-float TUs in this project already use;
+ * SSE rounding vs the original's x87 sequence is not guaranteed
+ * bit-identical, matching this project's established tolerance
+ * elsewhere (e.g. `lfo_tables.cpp`) for float DSP-adjacent curves
+ * compiled this way.
+ */
+static unsigned int ApplyRTKCurve(unsigned short raw)
+{
+	const float kLow = 482.0f;
+	const float kHigh = 542.0f;
+	const float kMax = 1024.0f;
+	const float kLowScale = 0.13049793243408203f;
+	const float kHighScale = 0.13257262110710144f;
+
+	if ((float)raw < kLow)
+		return (unsigned int)(127 - (int)(raw * kLowScale));
+	if ((float)raw <= kHigh)
+		return 0x40;
+	return (unsigned int)(int)((kMax - (float)raw) * kHighScale);
+}
+
+/* Shared MIDI-send tail for AnalogJoystickXHandler's two identical real
+ * call sites (`.text+0x98b20`/`0x98b80`) -- reads `CPitchBendFilter`'s
+ * OWN state (its `Filter()` call is what set these, not this function)
+ * and sends a 5-byte Pitch Bend message `{0xe0|channel, lsb, msb, 1,
+ * 0xff}` via the established `CSTGMidiPortManager::sInstance+0x208`
+ * embedded `CSTGMidiQueueWriter`. The `0xff` terminator (vs the note-
+ * on/off family's `0xfe`) matches a 2-data-byte MIDI message; `0xfe`
+ * matches 3-data-byte (front_panel_handlers.cpp's own note-on/off,
+ * `0x90`/`0x80`, DOES send 2 data bytes -- terminator byte's exact
+ * meaning is not independently confirmed beyond "differs by message
+ * shape", flagged in HARDWARE_REVIEW_LOG.md). */
+static void SendPitchBendFromFilterState(CSTGControllerRTData::CPitchBendFilter *filt)
+{
+	unsigned char msg[5];
+	msg[0] = (unsigned char)(filt->channel | 0xe0);
+	msg[1] = (unsigned char)(filt->value & 0x7f);
+	msg[2] = (unsigned char)((filt->value >> 7) & 0x7f);
+	msg[3] = 1;
+	msg[4] = 0xff;
+	CSTGMidiQueueWriter *writer = (CSTGMidiQueueWriter *)
+		((unsigned char *)CSTGMidiPortManager::sInstance + 0x208);
+	writer->Write(msg, 5, false);
+}
+
+/* AnalogAftertouchHandler(a, b) -- `.text+0x98260`, 160 bytes. Confirmed
+ * real: `a` (param2) unused (only its low byte is stashed into two raw
+ * `CSTGControllerRTData` fields, `+0x1c` always and `+0x1f` only on the
+ * not-locked path -- neither independently named, see
+ * HARDWARE_REVIEW_LOG.md). `b` (param3, the raw 10-bit aftertouch ADC
+ * reading, only its low byte is actually used) drives the send. Locked
+ * (kControllerLockFlagTable bit 0 set): STGAPI echo write only, no MIDI
+ * send. Not locked: sends a 2-byte MIDI Channel Pressure message
+ * `{0xd0|channel, value}` via the SAME `CSTGMidiPortManager::
+ * sInstance+0x208` embedded writer `global.cpp`'s `SendGlobalMidiMessage`
+ * already established, channel from `CSTGGlobal::sInstance+0x6b9` (the
+ * SAME field `UpdateMIDIChannel` writes). The STGAPI echo write
+ * (`STGAPI_OFF_ANALOG_ECHO_ATOUCH`, already an established constant)
+ * happens on BOTH paths. */
+void CSTGControllerInfo::AnalogAftertouchHandler(unsigned short a, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+
+	rtdBytes[0x1c] = (unsigned char)a;
+
+	unsigned char lockFlags =
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x15]] |
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x14]] |
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x16]];
+
+	if (!(lockFlags & 0x10)) {
+		rtdBytes[0x1f] = (unsigned char)a;
+
+		unsigned char channel = ((unsigned char *)CSTGGlobal::sInstance)[0x6b9];
+		unsigned char msg[5];
+		msg[0] = (unsigned char)(channel | 0xd0);
+		msg[1] = (unsigned char)a;
+		msg[2] = 0;
+		msg[3] = 1;
+		msg[4] = 0xff;
+		CSTGMidiQueueWriter *writer = (CSTGMidiQueueWriter *)
+			((unsigned char *)CSTGMidiPortManager::sInstance + 0x208);
+		writer->Write(msg, 5, false);
+	}
+
+	*(unsigned short *)((unsigned char *)STGAPIFrontPanelStatus::sInstance + STGAPI_OFF_ANALOG_ECHO_ATOUCH) = b;
+}
+
+/* AnalogJoystickXHandler(a, b) -- `.text+0x98a60`, 416 bytes. Confirmed
+ * real: `a` (param2) unused -- only `b` (param3, the raw 10-bit ADC
+ * reading) matters, echoed raw to `STGAPI_OFF_ANALOG_ECHO_VECX`
+ * (0xfe, the SAME already-established constant device-5 VectorX also
+ * uses -- confirmed real, not a naming collision). Locked
+ * (kControllerLockFlagTable bit 0): plain return, no echo, no send at
+ * all (UNLIKE Aftertouch above, which still echoes when locked).
+ *
+ * Curve: exact center (`b==0x200`) -> `0x2000` (14-bit pitch-bend
+ * center); within 0x200 of the max end (`0x3ff-b <= 0x200`) -> coarse
+ * linear `((0x3ff-b)<<4) & 0xfff0`; otherwise -> a GCC signed-division-
+ * by-constant idiom (magic multiplier `0x80402011`), translated here
+ * LITERALLY instruction-for-instruction (not algebraically simplified)
+ * to guarantee bit-exact results regardless of the actual intended
+ * divisor -- matches this project's established "recognize but
+ * literally transcribe" treatment of compiler division-by-constant
+ * patterns.
+ *
+ * All three curve paths funnel into the SAME real 2-call sequence
+ * (confirmed via control-flow tracing, not assumed): call
+ * `CPitchBendFilter::Filter(curved)`; if true, send a Pitch Bend
+ * message reading the filter's own post-call state (`SendPitchBend
+ * FromFilterState` above); THEN unconditionally call `Filter(curved)`
+ * a SECOND time (same object, same value) and send again if that
+ * ALSO returns true. `CPitchBendFilter::Filter`'s own body is not
+ * reconstructed (deferred extern, like `CJumpCatch`/`CPedalFilter`) --
+ * why it can accept/reject the identical repeated call is unknown,
+ * flagged in HARDWARE_REVIEW_LOG.md. */
+void CSTGControllerInfo::AnalogJoystickXHandler(unsigned short, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+
+	unsigned char lockFlags =
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x15]] |
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x14]] |
+		CSTGControllerRTData::kControllerLockFlagTable[(unsigned char)(signed char)rtdBytes[0x16]];
+	if (lockFlags & 1)
+		return;
+
+	*(unsigned short *)((unsigned char *)STGAPIFrontPanelStatus::sInstance + STGAPI_OFF_ANALOG_ECHO_VECX) = b;
+
+	unsigned int curved;
+	if (b == 0x200) {
+		curved = 0x2000;
+	} else {
+		unsigned short dist = (unsigned short)(0x3ff - b);
+		if (dist <= 0x200) {
+			curved = ((unsigned int)dist << 4) & 0xfff0;
+		} else {
+			/* literal translation of the real GCC magic-multiply
+			 * division idiom -- see header comment. */
+			int t = (int)(((unsigned int)dist << 13) - dist - 0x3ffe00);
+			long long prod = (long long)t * (long long)(int)0x80402011;
+			int hi = (int)(prod >> 32);
+			hi += t;
+			hi >>= 8;
+			int sign = t >> 31;
+			hi -= sign;
+			hi += 0x2000;
+			curved = (unsigned short)hi;
+		}
+	}
+
+	CSTGControllerRTData::CPitchBendFilter *filt = CSTGControllerRTData::PitchBendFilter();
+	if (filt->Filter((unsigned short)curved))
+		SendPitchBendFromFilterState(filt);
+	if (filt->Filter((unsigned short)curved))
+		SendPitchBendFromFilterState(filt);
+}
+
+/* AnalogKnobExtHandler(idx, a, b) -- `.text+0x9a1d0`, 240 bytes.
+ * AnalogSliderExtHandler(idx, a, b) -- `.text+0x9a500`, 240 bytes.
+ * Confirmed real (byte-identical shape between the two, only the
+ * per-index `CJumpCatch` array base/stride and the assignment-table
+ * base/stride differ): `b` (param3) entirely unused on both. "Ext"
+ * mode knobs/sliders are reassignable per active Ext "set"
+ * (`CSTGGlobal+0x29cc0c8`) to any MIDI CC, via the ALREADY-established
+ * `UpdateExtKnobCCAssign`/`UpdateExtSliderCCAssign` write targets
+ * (`+0x29ca3c8`/stride 8 for knobs, `+0x29cbc48`/stride 9 for sliders --
+ * this reconstruction independently re-derives and CONFIRMS both, not
+ * just reuses them from memory).
+ *
+ * busy2 (`CSTGControllerRTData+0x2f` bit 1) SET: re-sync path -- look up
+ * the current CC assignment for this index in the active set; 0xff
+ * means unassigned (no-op, return); else read that CC's committed
+ * value from `CSTGCCInfo::sCCInfoTable[cc*10]` (the established "b0"
+ * field), write it into the per-index `CJumpCatch` array's own
+ * "target" byte (+2) if in 7-bit range, `UpdateStatus()`, then send
+ * `SendExtModeKnobEvent`/`SendExtModeSliderEvent(idx, ccValue, true)`.
+ *
+ * busy2 CLEAR: live-movement path -- gate `a` (the raw knob/slider
+ * movement) through the per-index `CJumpCatch::CheckPosition(a, true)`;
+ * if true (physical position has caught up), send the event with the
+ * RAW `a` value (not looked up from CCInfoTable).
+ *
+ * Per-index `CJumpCatch` array bases (stride 3, confirmed distinct from
+ * the fixed single-instance `CJumpCatch()` accessor at `+0x84` used by
+ * the direct-index handlers above): knobs `+0x54`, sliders `+0x6c` --
+ * the SAME slider base `AnalogSliderRTKHandler` below also uses (one
+ * shared per-slider-index jump-catch array across modes), separate from
+ * the knob RTK array (also `+0x54`, shared with Ext -- knobs and
+ * sliders each have their OWN one shared array, not per-mode-per-index
+ * arrays).
+ */
+void CSTGControllerInfo::AnalogKnobExtHandler(unsigned int idx, unsigned short a, unsigned short)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	CSTGControllerRTData::CJumpCatch *jc =
+		(CSTGControllerRTData::CJumpCatch *)(rtdBytes + 0x54 + idx * 3);
+
+	if (rtdBytes[0x2f] & 2) {
+		unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+		unsigned char extSet = g[0x29cc0c8];
+		unsigned char cc = *(g + 0x29ca3c8 + (unsigned int)extSet * 8 + idx);
+		if (cc == 0xff)
+			return;
+		unsigned char ccValue = CSTGCCInfo::sCCInfoTable[(unsigned int)cc * 10];
+		if (ccValue <= 0x7f)
+			rtdBytes[0x54 + idx * 3 + 2] = ccValue;
+		jc->UpdateStatus();
+		SendExtModeKnobEvent((int)idx, ccValue, true);
+		return;
+	}
+
+	if (jc->CheckPosition((unsigned short)a, true))
+		SendExtModeKnobEvent((int)idx, a, true);
+}
+
+void CSTGControllerInfo::AnalogSliderExtHandler(unsigned int idx, unsigned short a, unsigned short)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	CSTGControllerRTData::CJumpCatch *jc =
+		(CSTGControllerRTData::CJumpCatch *)(rtdBytes + 0x6c + idx * 3);
+
+	if (rtdBytes[0x2f] & 2) {
+		unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+		unsigned char extSet = g[0x29cc0c8];
+		unsigned char cc = *(g + 0x29cbc48 + (unsigned int)extSet * 9 + idx);
+		if (cc == 0xff)
+			return;
+		unsigned char ccValue = CSTGCCInfo::sCCInfoTable[(unsigned int)cc * 10];
+		if (ccValue <= 0x7f)
+			rtdBytes[0x6c + idx * 3 + 2] = ccValue;
+		jc->UpdateStatus();
+		SendExtModeSliderEvent((int)idx, ccValue, true);
+		return;
+	}
+
+	if (jc->CheckPosition((unsigned short)a, true))
+		SendExtModeSliderEvent((int)idx, a, true);
+}
+
+/* AnalogKnobRTKHandler(idx, a, b) -- `.text+0x99670`, 288 bytes.
+ * AnalogSliderRTKHandler(idx, a, b) -- `.text+0x986b0`, 288 bytes.
+ * Confirmed real: `a` (param2) unused on BOTH -- the actual knob/slider
+ * value read is `b` (param3, the raw ADC reading), converted through
+ * the shared `ApplyRTKCurve` bipolar curve above. "RTK" (Real Time
+ * Knob) controls are FIXED hardwired Karma CC sources (`index+0x14`,
+ * an `eKarmaCCNo`), unlike the reassignable Ext-mode handlers above --
+ * no per-set CC lookup here.
+ *
+ * The KNOB and SLIDER variants are NOT symmetric past the shared curve
+ * (confirmed via disassembly, not assumed): Knob RTK's busy2 SET path
+ * is a plain `ResetRTKModeKnob(idx)` call with NO curve computation at
+ * all (the branch is taken before the curve code even runs); its
+ * busy2-CLEAR path gates the curve through `CJumpCatch::CheckPosition`
+ * (array base `+0x54`, SAME array `AnalogKnobExtHandler` above uses)
+ * then calls `SetRTKModeKnob`. Slider RTK ALWAYS computes the curve
+ * first, then on busy2 SET writes it into the per-index array's own
+ * `+1` byte (a DIFFERENT field than Ext's own `+2` -- `CJumpCatch`
+ * apparently has (at least) two independently-used mutable byte
+ * fields), `UpdateStatus()`s, and sends a FIXED center value (0x40) via
+ * `SendKarmaCCToKG`, not the just-computed curve; busy2 CLEAR gates the
+ * curve through `CheckPosition` (array base `+0x6c`, SAME array
+ * `AnalogSliderExtHandler` above uses) and sends the REAL curve value.
+ *
+ * `SetRTKModeKnob`'s real mangled signature (`...Ettb14eSTGMidiSourceb`,
+ * 5 params: u16, u16, bool, eSTGMidiSource, bool) has a GCC IPA-CP
+ * function CLONE at this call site (`.clone.11`) that appears to pass
+ * only 2 of the 3 trailing args explicitly -- the third is presumably
+ * constant-propagated into the clone body itself. This reconstruction
+ * calls the FULL original signature with `true`/`1`/`true` for all
+ * three trailing slots (matching this project's established "source=1
+ * at every observed call site" inference elsewhere) -- the exact third
+ * value is NOT independently confirmed, flagged in
+ * HARDWARE_REVIEW_LOG.md. `SetRTKModeKnob`/`ResetRTKModeKnob` are
+ * themselves deferred externs (own bodies not reconstructed), so this
+ * ambiguity has no effect on this project's own compiled behavior. */
+void CSTGControllerInfo::AnalogKnobRTKHandler(unsigned int idx, unsigned short, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+
+	if (rtdBytes[0x2f] & 2) {
+		ResetRTKModeKnob((unsigned short)idx);
+		return;
+	}
+
+	unsigned int curved = ApplyRTKCurve(b);
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	CSTGControllerRTData::CJumpCatch *jc =
+		(CSTGControllerRTData::CJumpCatch *)(rtdBytes + 0x54 + idx * 3);
+	if (!jc->CheckPosition((unsigned short)curved, g[0x6af] != 0))
+		return;
+	SetRTKModeKnob((unsigned short)idx, (unsigned short)curved, true, 1, true);
+}
+
+void CSTGControllerInfo::AnalogSliderRTKHandler(unsigned int idx, unsigned short, unsigned short b)
+{
+	CSTGControllerRTData *rtd = CSTGControllerRTData::sInstance;
+	unsigned char *rtdBytes = (unsigned char *)rtd;
+	unsigned int curved = ApplyRTKCurve(b);
+	CSTGControllerRTData::CJumpCatch *jc =
+		(CSTGControllerRTData::CJumpCatch *)(rtdBytes + 0x6c + idx * 3);
+
+	if (rtdBytes[0x2f] & 2) {
+		rtdBytes[0x6c + idx * 3 + 1] = (unsigned char)curved;
+		jc->UpdateStatus();
+		rtd->SendKarmaCCToKG((int)(idx + 0x14), 0x40);
+		return;
+	}
+
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+	if (!jc->CheckPosition((unsigned short)curved, g[0x6af] != 0))
+		return;
+	rtd->SendKarmaCCToKG((int)(idx + 0x14), (unsigned char)curved);
+}
+
 /* AnalogRibbonZHandler(a, b) -- `.text+0x97790`, 16 bytes. Confirmed
  * real: literal `ret`, no-op both parameters, matching
  * `AnalogControllerHandler`'s own already-established note that

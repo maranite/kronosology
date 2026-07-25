@@ -804,3 +804,64 @@ controllers through their full range while watching real MIDI CC output
 touch-position readback, to confirm this reconstruction's per-field
 semantics (especially the ribbon "lock flag" gating and the vector
 "assignment" sentinel check) match observed behavior.
+
+---
+
+## CSTGControllerInfo AnalogXxxHandler family — 6 more now real (batch 68, 2026-07-25): pitch-bend double-Filter-call, MIDI terminator byte, echo-slot naming collision, GCC clone signature
+
+Uncertain (four distinct items, all in `AnalogJoystickXHandler`/
+`AnalogAftertouchHandler`/`AnalogKnobRTKHandler`):
+
+1. **`CPitchBendFilter::Filter()` called TWICE per invocation with the
+   SAME curved value in every real code path.** The control flow is
+   traced exactly from disassembly (not assumed), but WHY a stateful
+   filter object accepts/rejects the identical repeated call -- and
+   whether real hardware ever actually sends two Pitch Bend MIDI
+   messages per joystick sample as a result -- is unknown, since
+   `Filter()`'s own body is a deliberately deferred extern (matching
+   `CJumpCatch`/`CPedalFilter`'s existing treatment). If this doubles
+   real Pitch Bend MIDI traffic, a hardware capture would show it as
+   two near-simultaneous `0xEn` messages per joystick move.
+
+2. **MIDI message terminator byte's exact meaning is inferred, not
+   confirmed.** `AnalogJoystickXHandler`'s Pitch Bend send (2 data
+   bytes) and `AnalogAftertouchHandler`'s Channel Pressure send (1 data
+   byte, second byte padded 0) both end their 5-byte
+   `CSTGMidiQueueWriter::Write()` buffer with `0xff`, while the
+   pre-existing Note-On/Off sends (3 data bytes,
+   `front_panel_handlers.cpp`) use `0xfe`. This reconstruction's working
+   hypothesis -- terminator encodes real MIDI message byte-length, not
+   independently confirmed against a third distinct byte-length case --
+   is stated in the code comments as inferred, not established.
+
+3. **`AnalogJoystickXHandler`'s own internal echo write target
+   (`STGAPI_OFF_ANALOG_ECHO_VECX`, raw offset `0xfe`) is confirmed via
+   direct disassembly of THIS function, and is NOT the same offset the
+   existing `STGAPI_OFF_ANALOG_ECHO_JOYX` constant (`0x100`) names for
+   device 1 -- that other constant comes from `AnalogControllerHandler`'s
+   own SEPARATE busy-flag-SET dispatcher echo table (a different call
+   site entirely). Both are real, both are correctly reproduced, but the
+   existing constant naming (established in an earlier batch, before
+   this function's own body was ever disassembled) makes it look like a
+   naming collision/error at first glance. Left as-is with a code
+   comment pointing here rather than renamed, since renaming
+   `STGAPI_OFF_ANALOG_ECHO_VECX` could break `AnalogVectorXHandler`'s
+   own already-verified real busy-path use of the same constant name.
+
+4. **`AnalogKnobRTKHandler`'s call to `SetRTKModeKnob`** targets a GCC
+   IPA-CP function clone (`.clone.11`) that appears to pass only 2 of
+   the real 5-parameter signature's 3 trailing args explicitly at this
+   call site -- this reconstruction fills the third with `true`
+   (inferred from this project's own "constant true/1 at every observed
+   call site" pattern elsewhere, not independently confirmed for this
+   specific parameter). Since `SetRTKModeKnob` itself is a deferred
+   extern with no reconstructed body, this has no effect on this
+   project's own compiled behavior, only on the accuracy of the
+   documented call-site values.
+
+Real-HW test that would help: move the physical joystick X-axis through
+a large, fast swing while sniffing the real MIDI output stream, to see
+whether one or two Pitch Bend messages appear per hardware sample
+(resolves item 1); compare the exact byte sequence for a Pitch Bend vs
+a Channel Pressure vs a Note-On send side by side to test the
+"terminator = byte length" hypothesis (item 2).

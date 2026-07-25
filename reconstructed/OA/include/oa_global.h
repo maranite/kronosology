@@ -260,7 +260,12 @@ public:
 	 * (src/engine/front_panel_handlers.cpp) pass `this =
 	 * CSTGControllerRTData::sInstance` (this class's OWN singleton, not
 	 * the `CSTGGlobal+0x10` embedded sub-object). Real `eKarmaCCNo` enum
-	 * not modeled -- plain `int` (project convention).
+	 * not modeled -- plain `int` (project convention). ALSO confirmed
+	 * real (batch 68) via relocation from `AnalogKnobRTKHandler`/
+	 * `AnalogSliderRTKHandler`'s own "RTK" [Real Time Knob -- fixed
+	 * hardwired knobs/sliders that always drive a specific Karma CC
+	 * number, `index+0x14`] terminal call -- same function, a second
+	 * independent confirmation, no new declaration needed.
 	 */
 	void SendKarmaCCToKG(int ccNo, unsigned char value);
 
@@ -472,6 +477,34 @@ public:
 	static CPedalFilter *PedalFilter()
 	{
 		return (CPedalFilter *)((unsigned char *)sInstance + 0xc);
+	}
+
+	/*
+	 * CPitchBendFilter (batch 68, reconstructing `AnalogJoystickXHandler`)
+	 * -- a nested sub-object confirmed embedded at
+	 * `CSTGControllerRTData::sInstance+0x10` (the ONLY call site computes
+	 * `this+0x10` before calling `Filter`, SAME "declare the shape,
+	 * defer the body" idiom as `CJumpCatch`/`CPedalFilter` above).
+	 * `Filter(unsigned short)` (real mangled `...CPitchBendFilter6FilterEt`)
+	 * returns bool, deliberately deferred extern -- own body not
+	 * reconstructed. Its TWO internal fields ARE modeled (unlike
+	 * CJumpCatch/CPedalFilter) because `AnalogJoystickXHandler` reads
+	 * them back directly after a true result: `channel` (byte, +0x0,
+	 * OR'd with 0xe0 to build a MIDI Pitch Bend status byte -- Filter's
+	 * own side effect sets this, never written by the caller) and
+	 * `value` (unsigned short, +0x2, the filter's own current 14-bit
+	 * output, split into 7-bit LSB/MSB for the MIDI data bytes).
+	 * `PitchBendFilter()` is a convenience accessor, not a real symbol.
+	 */
+	struct CPitchBendFilter {
+		unsigned char channel;	/* +0x0, unconfirmed name -- see comment above */
+		unsigned char _pad1;	/* +0x1 */
+		unsigned short value;	/* +0x2, unconfirmed name -- see comment above */
+		bool Filter(unsigned short newValue);
+	};
+	static CPitchBendFilter *PitchBendFilter()
+	{
+		return (CPitchBendFilter *)((unsigned char *)sInstance + 0x10);
 	}
 
 	/*
@@ -2532,6 +2565,29 @@ struct CSTGControllerInfo {
 	void SendExtModeSliderEvent(int fader, unsigned int value, bool notify);
 
 	/*
+	 * SendExtModeKnobEvent(eMixerKnob, unsigned int, bool) (batch 68,
+	 * confirmed real via relocation from `AnalogKnobExtHandler`'s own
+	 * two call sites -- the knob-side sibling of `SendExtModeSliderEvent`
+	 * above) -- deliberately deferred extern, own body not reconstructed.
+	 * Real `eMixerKnob` enum modeled as `int` (project convention).
+	 */
+	void SendExtModeKnobEvent(int knobIndex, unsigned int value, bool notify);
+
+	/*
+	 * SetRTKModeKnob(unsigned short, unsigned short, bool,
+	 * eSTGMidiSource, bool) / ResetRTKModeKnob(unsigned short) (batch 68,
+	 * confirmed real via relocation from `AnalogKnobRTKHandler`'s own two
+	 * call sites) -- deliberately deferred externs, own bodies not
+	 * reconstructed. `SetRTKModeKnob`'s call site is a GCC IPA-CP clone
+	 * (`.clone.11`) that appears to only pass 2 of its 3 trailing args
+	 * explicitly -- see controller_info_analog_handler.cpp's own header
+	 * comment for the caveat on the third. Real `eSTGMidiSource` enum
+	 * modeled as `int` (project convention).
+	 */
+	void SetRTKModeKnob(unsigned short idx, unsigned short value, bool a, int midiSource, bool b);
+	void ResetRTKModeKnob(unsigned short idx);
+
+	/*
 	 * The 22 real `AnalogXxxHandler(unsigned int, unsigned short,
 	 * unsigned short)` / `AnalogXxxHandler(unsigned short, unsigned
 	 * short)` per-continuous-controller handlers `AnalogControllerHandler`
@@ -2548,25 +2604,49 @@ struct CSTGControllerInfo {
 	 * `AnalogVectorYHandler`, `AnalogFootPedalHandler`,
 	 * `AnalogFootSwitchHandler`, `AnalogDamperHandler`,
 	 * `AnalogValueSliderHandler` -- see
-	 * controller_info_analog_handler.cpp's own per-function comments. The
-	 * remaining THIRTEEN are still confirmed real, deliberately deferred
+	 * controller_info_analog_handler.cpp's own per-function comments.
+	 *
+	 * Batch 68 reconstructed SIX more of the remaining thirteen for real
+	 * (also genuinely hardware/UI, disassembly-confirmed): the physical
+	 * `AnalogJoystickXHandler` (pitch-bend curve + `CPitchBendFilter`) and
+	 * `AnalogAftertouchHandler` (channel-pressure MIDI send), plus the
+	 * "Ext"/"RTK" knob+slider mode-dispatch pairs `AnalogKnobExtHandler`/
+	 * `AnalogSliderExtHandler` (reuse the already-real `UpdateExtKnobCCAssign`/
+	 * `UpdateExtSliderCCAssign` assignment tables, `+0x29ca3c8`/stride 8
+	 * and `+0x29cbc48`/stride 9) and `AnalogKnobRTKHandler`/
+	 * `AnalogSliderRTKHandler` ("Real Time Knob" -- fixed hardwired
+	 * knobs/sliders always driving a Karma CC number, `index+0x14`, via
+	 * the new deferred `SendKarmaCCToKG` extern). See
+	 * controller_info_analog_handler.cpp's own per-function comments.
+	 *
+	 * The remaining SEVEN are confirmed real, deliberately deferred
 	 * externs (own bodies not reconstructed) -- real ground-truth
 	 * addresses/sizes (`.text`, from `nm -C`/section-boundary diffing):
-	 * `AnalogJoystickXHandler` (0x98a60, 416B), `AnalogAftertouchHandler`
-	 * (0x98260, 160B), `AnalogTempoHandler` (0x97cc0, 304B -- confirmed
-	 * DSP, a float tempo-curve conversion, SAME one `HandleValueKnobDevice`'s
-	 * own `ApplyValueKnobTempoCurve` stub already flags),
-	 * `AnalogKnobSetListEQHandler` (0x97b00, 144B), `AnalogSliderSetListEQHandler`
-	 * (0x98500, 432B -- both confirmed DSP, EQ-curve math, matching
-	 * `ApplyValueKnobEQCurve`'s own note), `AnalogSliderAInHandler`
-	 * (0x97b90, 304B), `AnalogKnobTAHandler` (0x98300, 512B),
-	 * `AnalogSliderRTKHandler` (0x986b0, 288B), `AnalogSliderTAHandler`
-	 * (0x987d0, 656B), `AnalogKnobRTKHandler` (0x99670, 288B),
-	 * `AnalogKnobExtHandler` (0x9a1d0, 240B), `AnalogSliderExtHandler`
-	 * (0x9a500, 240B), `AnalogKnobAInHandler` (0x9efb0, 672B) -- each
-	 * presumably comparable in scope to the `CSTGKeybedInterface`
-	 * per-mode handlers, a future batch's worth of work on its own
-	 * (~3900 bytes combined, not "individually small").
+	 * `AnalogTempoHandler` (0x97cc0, 304B -- confirmed DSP, a float
+	 * tempo-curve conversion, SAME one `HandleValueKnobDevice`'s own
+	 * `ApplyValueKnobTempoCurve` stub already flags),
+	 * `AnalogKnobSetListEQHandler` (0x97b00, 144B),
+	 * `AnalogSliderSetListEQHandler` (0x98500, 432B -- both confirmed
+	 * DSP, EQ-curve math, matching `ApplyValueKnobEQCurve`'s own note),
+	 * `AnalogKnobTAHandler` (0x98300, 512B), `AnalogSliderTAHandler`
+	 * (0x987d0, 656B -- both batch-68 DISASSEMBLY-CONFIRMED DSP: "TA" =
+	 * Tone Adjust, both dispatch through a virtual call into
+	 * `CSTGToneAdjust::UpdateFrontPanelKnob(CSTGProgramSlot*,
+	 * CFrontPanelValue const&)` on a per-slot object resolved from
+	 * `CSTGGlobal+0x684`/`+0x2977b1f`, a genuinely new and substantial
+	 * DSP-parameter-update class hierarchy -- this CONFIRMS, rather than
+	 * just carries forward, Candidate 5's own original "read more like
+	 * DSP-parameter-update handlers than pure hardware I/O" caveat),
+	 * `AnalogSliderAInHandler` (0x97b90, 304B), `AnalogKnobAInHandler`
+	 * (0x9efb0, 672B -- both batch-68 DISASSEMBLY-CONFIRMED DSP: "AIn" =
+	 * Audio Input mixer, both dispatch into a new, substantial,
+	 * function-pointer-driven `CSTGFrontPanelSmoothers` real-time
+	 * parameter-smoothing class -- `AudioInSmootherOutputArguments`
+	 * ctor, `AudioInParamSmootherOutput`, `SetFPISmoother` -- squarely
+	 * audio-signal-path DSP, not hardware I/O). None of these seven are
+	 * "individually small" despite some short byte counts; all share the
+	 * same disproportionate-new-DSP-scope shape as the already-rejected
+	 * Candidate 3 (`CSTGCX3RotaryV2::GetFrontPanelRotaryStatus`).
 	 *
 	 * The knob/slider "adjustment" table field (the pointer-to-member
 	 * representation's second dword) is confirmed ZERO for every one of

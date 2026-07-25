@@ -31,12 +31,14 @@ static unsigned char g_rtdBuf[0x100];
 static unsigned char g_globalBuf[0x29cd000]; /* covers the highest offset this file
 					       * uses (CSTGGlobal+0x29cc4dc) with headroom */
 static unsigned char g_frontPanelBuf[STGAPI_FRONTPANEL_SIZE];
+static unsigned char g_midiPortMgrBuf[0x300];
 
 CSTGControllerRTData *CSTGControllerRTData::sInstance = (CSTGControllerRTData *)g_rtdBuf;
 CSTGGlobal *CSTGGlobal::sInstance = (CSTGGlobal *)g_globalBuf;
 unsigned char *STGAPIFrontPanelStatus::sInstance = g_frontPanelBuf;
 unsigned char CSTGCCInfo::sCCInfoTable[1200];
 unsigned char CSTGCCInfo::sNumVoiceModelCCs;
+CSTGMidiPortManager *CSTGMidiPortManager::sInstance = (CSTGMidiPortManager *)g_midiPortMgrBuf;
 
 static void ResetFixtures()
 {
@@ -44,6 +46,7 @@ static void ResetFixtures()
 	memset(g_globalBuf, 0, sizeof(g_globalBuf));
 	memset(g_frontPanelBuf, 0, sizeof(g_frontPanelBuf));
 	memset(CSTGCCInfo::sCCInfoTable, 0, sizeof(CSTGCCInfo::sCCInfoTable));
+	memset(g_midiPortMgrBuf, 0, sizeof(g_midiPortMgrBuf));
 }
 
 /* ---- CJumpCatch mocks ---- */
@@ -123,16 +126,22 @@ void CSTGControllerInfo::SendExtModeSliderEvent(int fader, unsigned int value, b
  * HandleFootPedalChange, ProcessJoystickY, CPedalFilter::Filter)
  * instead of a generic call-counter stub for the handler itself.
  */
-DEF_HANDLER2(AnalogJoystickXHandler)
-DEF_HANDLER2(AnalogAftertouchHandler)
+/* AnalogJoystickXHandler/AnalogAftertouchHandler/AnalogKnobExtHandler/
+ * AnalogSliderExtHandler/AnalogKnobRTKHandler/AnalogSliderRTKHandler are
+ * now REAL (batch 68) -- see the new mocks below for their OWN deferred
+ * callees (CPitchBendFilter::Filter, CSTGMidiQueueWriter::Write,
+ * SendExtModeKnobEvent, SendKarmaCCToKG, SetRTKModeKnob/
+ * ResetRTKModeKnob) instead of a generic call-counter stub for the
+ * handler itself. AnalogTempoHandler/AnalogSliderTAHandler/
+ * AnalogSliderAInHandler/AnalogSliderSetListEQHandler/AnalogKnobTAHandler/
+ * AnalogKnobAInHandler/AnalogKnobSetListEQHandler remain confirmed DSP
+ * (batch 68 disassembly-confirmed, not just carried forward) -- still
+ * plain call-counter mocks.
+ */
 DEF_HANDLER2(AnalogTempoHandler)
-DEF_HANDLER3(AnalogSliderExtHandler)
-DEF_HANDLER3(AnalogSliderRTKHandler)
 DEF_HANDLER3(AnalogSliderTAHandler)
 DEF_HANDLER3(AnalogSliderAInHandler)
 DEF_HANDLER3(AnalogSliderSetListEQHandler)
-DEF_HANDLER3(AnalogKnobExtHandler)
-DEF_HANDLER3(AnalogKnobRTKHandler)
 DEF_HANDLER3(AnalogKnobTAHandler)
 DEF_HANDLER3(AnalogKnobAInHandler)
 DEF_HANDLER3(AnalogKnobSetListEQHandler)
@@ -179,6 +188,62 @@ bool CSTGControllerRTData::CPedalFilter::Filter(unsigned char value)
 	return g_pedalFilterReturn;
 }
 
+/* ---- new mocks for the 6 newly-real handlers' own deferred callees (batch 68) ---- */
+static int g_pitchBendFilterCalls; static unsigned short g_lastPitchBendFilterValue;
+static bool g_pitchBendFilterReturn; static unsigned char g_pitchBendFilterChannel;
+static unsigned short g_pitchBendFilterOutValue;
+bool CSTGControllerRTData::CPitchBendFilter::Filter(unsigned short newValue)
+{
+	g_pitchBendFilterCalls++;
+	g_lastPitchBendFilterValue = newValue;
+	/* real Filter() mutates its own object's state as a side effect;
+	 * the mock reproduces that via test-controlled fixture values. */
+	channel = g_pitchBendFilterChannel;
+	value = g_pitchBendFilterOutValue;
+	return g_pitchBendFilterReturn;
+}
+
+static int g_midiWriteCalls; static unsigned char g_lastMidiMsg[5]; static unsigned int g_lastMidiLen;
+void CSTGMidiQueueWriter::Write(const unsigned char *data, unsigned int length, bool)
+{
+	g_midiWriteCalls++;
+	g_lastMidiLen = length;
+	for (unsigned int i = 0; i < length && i < 5; i++)
+		g_lastMidiMsg[i] = data[i];
+}
+
+static int g_extKnobEventCalls; static int g_lastKnobIndex; static unsigned int g_lastKnobValue; static bool g_lastKnobNotify;
+void CSTGControllerInfo::SendExtModeKnobEvent(int knobIndex, unsigned int value, bool notify)
+{
+	g_extKnobEventCalls++;
+	g_lastKnobIndex = knobIndex;
+	g_lastKnobValue = value;
+	g_lastKnobNotify = notify;
+}
+
+static int g_karmaCCCalls; static int g_lastKarmaCCNo; static unsigned char g_lastKarmaCCValue;
+void CSTGControllerRTData::SendKarmaCCToKG(int karmaCCNo, unsigned char value)
+{
+	g_karmaCCCalls++;
+	g_lastKarmaCCNo = karmaCCNo;
+	g_lastKarmaCCValue = value;
+}
+
+static int g_setRTKKnobCalls; static unsigned short g_lastSetRTKIdx, g_lastSetRTKValue;
+void CSTGControllerInfo::SetRTKModeKnob(unsigned short idx, unsigned short value, bool, int, bool)
+{
+	g_setRTKKnobCalls++;
+	g_lastSetRTKIdx = idx;
+	g_lastSetRTKValue = value;
+}
+
+static int g_resetRTKKnobCalls; static unsigned short g_lastResetRTKIdx;
+void CSTGControllerInfo::ResetRTKModeKnob(unsigned short idx)
+{
+	g_resetRTKKnobCalls++;
+	g_lastResetRTKIdx = idx;
+}
+
 static void ResetCounters()
 {
 	g_checkPositionCalls = g_updateStatusCalls = g_unsolCalls = g_setAssignCalls = 0;
@@ -186,17 +251,23 @@ static void ResetCounters()
 	g_checkPositionReturn = false;
 	g_editKnobReturn = g_editSliderReturn = false;
 #define RESET_COUNTER(name) g_##name##_calls = 0;
-	RESET_COUNTER(AnalogJoystickXHandler)
-	RESET_COUNTER(AnalogAftertouchHandler) RESET_COUNTER(AnalogTempoHandler)
-	RESET_COUNTER(AnalogSliderExtHandler) RESET_COUNTER(AnalogSliderRTKHandler)
+	RESET_COUNTER(AnalogTempoHandler)
 	RESET_COUNTER(AnalogSliderTAHandler) RESET_COUNTER(AnalogSliderAInHandler)
-	RESET_COUNTER(AnalogSliderSetListEQHandler) RESET_COUNTER(AnalogKnobExtHandler)
-	RESET_COUNTER(AnalogKnobRTKHandler) RESET_COUNTER(AnalogKnobTAHandler)
+	RESET_COUNTER(AnalogSliderSetListEQHandler)
+	RESET_COUNTER(AnalogKnobTAHandler)
 	RESET_COUNTER(AnalogKnobAInHandler) RESET_COUNTER(AnalogKnobSetListEQHandler)
 #undef RESET_COUNTER
 	g_sendCCToKG2Calls = g_sendCCToKG3Calls = 0;
 	g_footSwitchCalls = g_footPedalCalls = g_processJoystickYCalls = 0;
 	g_pedalFilterCalls = 0; g_pedalFilterReturn = false;
+	g_pitchBendFilterCalls = 0; g_pitchBendFilterReturn = false;
+	g_pitchBendFilterChannel = 0; g_pitchBendFilterOutValue = 0;
+	g_midiWriteCalls = 0; g_lastMidiLen = 0;
+	memset(g_lastMidiMsg, 0, sizeof(g_lastMidiMsg));
+	g_extKnobEventCalls = 0;
+	g_karmaCCCalls = 0;
+	g_setRTKKnobCalls = 0;
+	g_resetRTKKnobCalls = 0;
 }
 
 int main()
@@ -214,16 +285,19 @@ int main()
 	check_eq("knob-busy: id=knobIndex", g_lastId, 1);
 	check_eq("knob-busy: value=param2", g_lastValue, 0x55);
 	check_eq("knob-busy: source", g_lastSource, 1);
-	check_eq("knob-busy: no mode dispatch", g_AnalogKnobExtHandler_calls, 0);
+	check_eq("knob-busy: no mode dispatch", g_checkPositionCalls, 0);
 
 	/* --- knob mode dispatch (device 12 = knobIndex 4, mode 4 = Ext) --- */
 	ResetFixtures(); ResetCounters();
 	g_rtdBuf[0x2b] = 4;
+	g_checkPositionReturn = true;
 	self.AnalogControllerHandler(12, 0x11, 0x2222);
-	check_eq("knob-mode4: Ext handler calls", g_AnalogKnobExtHandler_calls, 1);
-	check_eq("knob-mode4: idx", (long)g_AnalogKnobExtHandler_idx, 4);
-	check_eq("knob-mode4: a=param2", g_AnalogKnobExtHandler_a, 0x11);
-	check_eq("knob-mode4: b=param3", g_AnalogKnobExtHandler_b, 0x2222);
+	check_eq("knob-mode4: CheckPosition calls", g_checkPositionCalls, 1);
+	check_eq("knob-mode4: CheckPosition position=a(raw)", g_lastPosition, 0x11);
+	check_eq("knob-mode4: Ext event calls", g_extKnobEventCalls, 1);
+	check_eq("knob-mode4: idx=knobIndex", (long)g_lastKnobIndex, 4);
+	check_eq("knob-mode4: value=a(raw)", (long)g_lastKnobValue, 0x11);
+	check_eq("knob-mode4: notify=true", g_lastKnobNotify, true);
 	check_eq("knob-mode4: no unsol", g_unsolCalls, 0);
 
 	/* --- knob edit-in-context true (device 8) --- */
@@ -232,16 +306,19 @@ int main()
 	g_editKnobReturn = true;
 	self.AnalogControllerHandler(8, 0, 0);
 	check_eq("knob-edit-true: edit calls", g_editKnobCalls, 1);
-	check_eq("knob-edit-true: no mode dispatch", g_AnalogKnobExtHandler_calls, 0);
+	check_eq("knob-edit-true: no mode dispatch", g_checkPositionCalls, 0);
 
-	/* --- knob edit-in-context false falls through to mode dispatch --- */
+	/* --- knob edit-in-context false falls through to mode dispatch (RTK) --- */
 	ResetFixtures(); ResetCounters();
 	*(unsigned int *)(g_globalBuf + 0x29cc4dc) = 1;
 	g_editKnobReturn = false;
 	g_rtdBuf[0x2b] = 5; /* RTK */
+	g_checkPositionReturn = true;
 	self.AnalogControllerHandler(8, 7, 9);
 	check_eq("knob-edit-false: edit calls", g_editKnobCalls, 1);
-	check_eq("knob-edit-false: falls through to RTK", g_AnalogKnobRTKHandler_calls, 1);
+	check_eq("knob-edit-false: falls through to RTK, SetRTKModeKnob calls", g_setRTKKnobCalls, 1);
+	check_eq("knob-edit-false: RTK idx=knobIndex", g_lastSetRTKIdx, 0);
+	check_eq("knob-edit-false: RTK curved value (b=9, low branch)", g_lastSetRTKValue, 126);
 
 	/* --- slider busy-notify (device 17 = sliderIndex 1) --- */
 	ResetFixtures(); ResetCounters();
@@ -257,19 +334,55 @@ int main()
 	check_eq("slider-mode8: SetListEQ calls", g_AnalogSliderSetListEQHandler_calls, 1);
 	check_eq("slider-mode8: idx", (long)g_AnalogSliderSetListEQHandler_idx, 4);
 
-	/* --- fixed 1-7: JoystickX normal dispatch --- */
+	/* --- fixed 1-7: JoystickX real body, exact center, both Filter calls
+	 * false -> no MIDI send. --- */
 	ResetFixtures(); ResetCounters();
 	self.AnalogControllerHandler(1, 0x10, 0x200);
-	check_eq("joystickX: calls", g_AnalogJoystickXHandler_calls, 1);
-	check_eq("joystickX: a=param2", g_AnalogJoystickXHandler_a, 0x10);
-	check_eq("joystickX: b=param3", g_AnalogJoystickXHandler_b, 0x200);
+	check_eq("joystickX-center: echo=b (STGAPI+0xfe, confirmed real -- see HARDWARE_REVIEW_LOG.md)",
+		 *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_VECX), 0x200);
+	check_eq("joystickX-center: Filter calls (both attempts, both false)", g_pitchBendFilterCalls, 2);
+	check_eq("joystickX-center: Filter arg=0x2000 (exact center)", g_lastPitchBendFilterValue, 0x2000);
+	check_eq("joystickX-center: no MIDI send", g_midiWriteCalls, 0);
 
-	/* --- fixed 1-7 busy: JoystickX UI echo --- */
+	/* --- JoystickX locked: plain return, no echo, no Filter calls. --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x14] = 1; g_rtdBuf[0x15] = 1; g_rtdBuf[0x16] = 1; /* table[1]=1 -> &1 nonzero -> locked */
+	self.AnalogJoystickXHandler(0, 0x200);
+	check_eq("joystickX-locked: no echo write", *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_VECX), 0);
+	check_eq("joystickX-locked: no Filter calls", g_pitchBendFilterCalls, 0);
+
+	/* --- JoystickX far-from-center curve, first Filter() true -> sends
+	 * immediate, then second Filter() also true -> sends again. --- */
+	ResetFixtures(); ResetCounters();
+	g_pitchBendFilterReturn = true;
+	g_pitchBendFilterChannel = 3;
+	g_pitchBendFilterOutValue = 0x1234;
+	self.AnalogJoystickXHandler(0, 0);
+	check_eq("joystickX-far: Filter calls (both true)", g_pitchBendFilterCalls, 2);
+	check_eq("joystickX-far: MIDI sends (both branches fire)", g_midiWriteCalls, 2);
+	check_eq("joystickX-far: msg[0]=0xe0|channel", g_lastMidiMsg[0], 0xe0 | 3);
+	check_eq("joystickX-far: msg[1]=value&0x7f", g_lastMidiMsg[1], 0x1234 & 0x7f);
+	check_eq("joystickX-far: msg[2]=(value>>7)&0x7f", g_lastMidiMsg[2], (0x1234 >> 7) & 0x7f);
+	check_eq("joystickX-far: msg[3]=1", g_lastMidiMsg[3], 1);
+	check_eq("joystickX-far: msg[4]=0xff (2-data-byte terminator)", g_lastMidiMsg[4], 0xff);
+	check_eq("joystickX-far: msg len=5", (long)g_lastMidiLen, 5);
+
+	/* --- JoystickX near-center linear branch (dist<=0x200): b=0x300,
+	 * dist=0x3ff-0x300=0xff, curved=(0xff<<4)&0xfff0=0xff0. --- */
+	ResetFixtures(); ResetCounters();
+	g_pitchBendFilterReturn = false;
+	self.AnalogJoystickXHandler(0, 0x300);
+	check_eq("joystickX-nearcenter: Filter arg=(dist<<4)&0xfff0", g_lastPitchBendFilterValue, 0xff0);
+
+	/* --- fixed 1-7 busy (dispatcher-level, unrelated to AnalogJoystickXHandler's
+	 * own internal STGAPI+0xfe echo above): device 1-7 busy&8 path echoes to
+	 * the SEPARATE per-device JOYX slot and returns before ever reaching the
+	 * real per-device handler. --- */
 	ResetFixtures(); ResetCounters();
 	g_rtdBuf[0x2f] = 0x8;
 	self.AnalogControllerHandler(1, 0, 0x2ab);
 	check_eq("joystickX-busy: echo value", *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_JOYX), 0x2ab);
-	check_eq("joystickX-busy: no real handler call", g_AnalogJoystickXHandler_calls, 0);
+	check_eq("joystickX-busy: no real handler call", g_pitchBendFilterCalls, 0);
 
 	/* --- fixed 1-7 busy: RibbonZ has no echo write (just verify no crash) --- */
 	ResetFixtures(); ResetCounters();
@@ -570,6 +683,137 @@ int main()
 	self.AnalogControllerHandler(0x1e, 0, 0);
 	check_eq("dev1e-param2zero: newValue=0", g_lastNewValue, 0);
 	check_eq("dev1e-param2zero: rtd[5] stored", g_rtdBuf[5], 0);
+
+	/* --- AnalogAftertouchHandler: not locked, sends Channel Pressure. --- */
+	ResetFixtures(); ResetCounters();
+	g_globalBuf[0x6b9] = 5; /* MIDI channel */
+	self.AnalogAftertouchHandler(0x40, 0x2ab);
+	check_eq("aftertouch-unlocked: rtd[0x1c]=(u8)a (always)", g_rtdBuf[0x1c], 0x40);
+	check_eq("aftertouch-unlocked: rtd[0x1f]=(u8)a (not-locked path)", g_rtdBuf[0x1f], 0x40);
+	check_eq("aftertouch-unlocked: MIDI send calls", g_midiWriteCalls, 1);
+	check_eq("aftertouch-unlocked: msg[0]=0xd0|channel", g_lastMidiMsg[0], 0xd0 | 5);
+	check_eq("aftertouch-unlocked: msg[1]=(u8)a", g_lastMidiMsg[1], 0x40);
+	check_eq("aftertouch-unlocked: msg[3]=1", g_lastMidiMsg[3], 1);
+	check_eq("aftertouch-unlocked: msg[4]=0xff (2-data-byte terminator)", g_lastMidiMsg[4], 0xff);
+	check_eq("aftertouch-unlocked: echo=b(raw)",
+		 *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_ATOUCH), 0x2ab);
+
+	/* --- AnalogAftertouchHandler: locked (bit 0x10) -- echo still
+	 * happens, but no MIDI send, and rtd[0x1f] is NOT touched (only
+	 * rtd[0x1c], which is unconditional). --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x14] = 10; g_rtdBuf[0x15] = 10; g_rtdBuf[0x16] = 10; /* table[10]=0x10 -> &0x10 nonzero -> locked */
+	self.AnalogAftertouchHandler(0x40, 0x2ab);
+	check_eq("aftertouch-locked: rtd[0x1c] still set", g_rtdBuf[0x1c], 0x40);
+	check_eq("aftertouch-locked: rtd[0x1f] NOT set", g_rtdBuf[0x1f], 0);
+	check_eq("aftertouch-locked: no MIDI send", g_midiWriteCalls, 0);
+	check_eq("aftertouch-locked: echo still happens",
+		 *(unsigned short *)(g_frontPanelBuf + STGAPI_OFF_ANALOG_ECHO_ATOUCH), 0x2ab);
+
+	/* --- AnalogKnobExtHandler direct: busy2 SET, CC assigned in-range. --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2; /* busy2 */
+	g_globalBuf[0x29cc0c8] = 1; /* active ext set = 1 */
+	g_globalBuf[0x29ca3c8 + 1 * 8 + 3] = 20; /* knob idx=3, set=1 -> assigned CC 20 */
+	CSTGCCInfo::sCCInfoTable[20 * 10] = 0x55;
+	self.AnalogKnobExtHandler(3, 0, 0);
+	check_eq("knobExt-busy2: UpdateStatus calls", g_updateStatusCalls, 1);
+	check_eq("knobExt-busy2: Ext event calls", g_extKnobEventCalls, 1);
+	check_eq("knobExt-busy2: idx=3", (long)g_lastKnobIndex, 3);
+	check_eq("knobExt-busy2: value=ccDefault", (long)g_lastKnobValue, 0x55);
+	check_eq("knobExt-busy2: jumpcatch array target (+0x54+idx*3+2) stored",
+		 g_rtdBuf[0x54 + 3 * 3 + 2], 0x55);
+
+	/* --- AnalogKnobExtHandler direct: busy2 SET, CC unassigned (0xff)
+	 * -> silent return. --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2;
+	g_globalBuf[0x29ca3c8 + 3] = 0xff; /* set=0, idx=3 */
+	self.AnalogKnobExtHandler(3, 0, 0);
+	check_eq("knobExt-busy2-unassigned: no Ext event", g_extKnobEventCalls, 0);
+	check_eq("knobExt-busy2-unassigned: no UpdateStatus", g_updateStatusCalls, 0);
+
+	/* --- AnalogKnobExtHandler direct: busy2 CLEAR, CheckPosition false
+	 * -> no event. --- */
+	ResetFixtures(); ResetCounters();
+	g_checkPositionReturn = false;
+	self.AnalogKnobExtHandler(2, 0x30, 0);
+	check_eq("knobExt-clear-false: CheckPosition calls", g_checkPositionCalls, 1);
+	check_eq("knobExt-clear-false: no Ext event", g_extKnobEventCalls, 0);
+
+	/* --- AnalogSliderExtHandler direct: busy2 SET, CC assigned. --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2;
+	g_globalBuf[0x29cc0c8] = 0;
+	g_globalBuf[0x29cbc48 + 0 * 9 + 2] = 30; /* slider idx=2, set=0 -> CC 30 */
+	CSTGCCInfo::sCCInfoTable[30 * 10] = 0x22;
+	self.AnalogSliderExtHandler(2, 0, 0);
+	check_eq("sliderExt-busy2: SendExtModeSliderEvent calls", g_sliderEventCalls, 1);
+	check_eq("sliderExt-busy2: fader=idx", g_lastFader, 2);
+	check_eq("sliderExt-busy2: value=ccDefault", (long)g_lastSliderValue, 0x22);
+	check_eq("sliderExt-busy2: jumpcatch array target (+0x6c+idx*3+2) stored",
+		 g_rtdBuf[0x6c + 2 * 3 + 2], 0x22);
+
+	/* --- AnalogSliderExtHandler direct: busy2 CLEAR, CheckPosition true. --- */
+	ResetFixtures(); ResetCounters();
+	g_checkPositionReturn = true;
+	self.AnalogSliderExtHandler(1, 0x60, 0);
+	check_eq("sliderExt-clear-true: SendExtModeSliderEvent calls", g_sliderEventCalls, 1);
+	check_eq("sliderExt-clear-true: value=a(raw)", (long)g_lastSliderValue, 0x60);
+
+	/* --- AnalogKnobRTKHandler direct: busy2 SET -> plain
+	 * ResetRTKModeKnob(idx), no curve computed at all. --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2;
+	self.AnalogKnobRTKHandler(5, 0, 0x999 /* would be a huge, invalid curve input if used */);
+	check_eq("knobRTK-busy2: ResetRTKModeKnob calls", g_resetRTKKnobCalls, 1);
+	check_eq("knobRTK-busy2: idx", g_lastResetRTKIdx, 5);
+	check_eq("knobRTK-busy2: no CheckPosition (curve never computed)", g_checkPositionCalls, 0);
+	check_eq("knobRTK-busy2: no SetRTKModeKnob", g_setRTKKnobCalls, 0);
+
+	/* --- AnalogKnobRTKHandler direct: busy2 CLEAR, mid dead-zone
+	 * (b=500, in [482,542]) -> curved=0x40, CheckPosition false -> no send. --- */
+	ResetFixtures(); ResetCounters();
+	g_checkPositionReturn = false;
+	self.AnalogKnobRTKHandler(0, 0, 500);
+	check_eq("knobRTK-clear-midband: CheckPosition arg=0x40 (dead zone)", g_lastPosition, 0x40);
+	check_eq("knobRTK-clear-midband-false: no SetRTKModeKnob", g_setRTKKnobCalls, 0);
+
+	/* --- AnalogKnobRTKHandler direct: busy2 CLEAR, high branch
+	 * (b=1023 -> curved=floor((1024-1023)*0.13257262110710144)=0),
+	 * CheckPosition true -> SetRTKModeKnob(idx, curved). --- */
+	ResetFixtures(); ResetCounters();
+	g_checkPositionReturn = true;
+	g_globalBuf[0x6af] = 1;
+	self.AnalogKnobRTKHandler(7, 0, 1023);
+	check_eq("knobRTK-clear-high: CheckPosition flag=Global[0x6af]!=0", g_lastFlag, true);
+	check_eq("knobRTK-clear-high: CheckPosition arg=0 (high branch)", g_lastPosition, 0);
+	check_eq("knobRTK-clear-high: SetRTKModeKnob calls", g_setRTKKnobCalls, 1);
+	check_eq("knobRTK-clear-high: idx", g_lastSetRTKIdx, 7);
+	check_eq("knobRTK-clear-high: value=curved", g_lastSetRTKValue, 0);
+
+	/* --- AnalogSliderRTKHandler direct: busy2 SET -> writes curve into
+	 * jumpcatch array +1, UpdateStatus, SendKarmaCCToKG with FIXED 0x40
+	 * (NOT the curve value). --- */
+	ResetFixtures(); ResetCounters();
+	g_rtdBuf[0x2f] = 2;
+	self.AnalogSliderRTKHandler(4, 0, 500 /* mid dead-zone -> curved=0x40 */);
+	check_eq("sliderRTK-busy2: array+1 stores curve", g_rtdBuf[0x6c + 4 * 3 + 1], 0x40);
+	check_eq("sliderRTK-busy2: UpdateStatus calls", g_updateStatusCalls, 1);
+	check_eq("sliderRTK-busy2: SendKarmaCCToKG calls", g_karmaCCCalls, 1);
+	check_eq("sliderRTK-busy2: karmaCCNo=idx+0x14", g_lastKarmaCCNo, 4 + 0x14);
+	check_eq("sliderRTK-busy2: value=FIXED 0x40 (not curve)", g_lastKarmaCCValue, 0x40);
+
+	/* --- AnalogSliderRTKHandler direct: busy2 CLEAR, low branch
+	 * (b=0 -> curved=127-floor(0*scale)=127), CheckPosition true ->
+	 * SendKarmaCCToKG with the REAL curve value. --- */
+	ResetFixtures(); ResetCounters();
+	g_checkPositionReturn = true;
+	self.AnalogSliderRTKHandler(6, 0, 0);
+	check_eq("sliderRTK-clear-low: CheckPosition arg=127 (low branch, b=0)", g_lastPosition, 127);
+	check_eq("sliderRTK-clear-low: SendKarmaCCToKG calls", g_karmaCCCalls, 1);
+	check_eq("sliderRTK-clear-low: karmaCCNo=idx+0x14", g_lastKarmaCCNo, 6 + 0x14);
+	check_eq("sliderRTK-clear-low: value=curve(127)", g_lastKarmaCCValue, 127);
 
 	/* --- out of range: silent no-op --- */
 	ResetFixtures(); ResetCounters();

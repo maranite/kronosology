@@ -316,6 +316,12 @@ CFLAGS_front_panel_handlers.o := -mhard-float -msse2 -mfpmath=sse
 # -msoft-float default, same reasoning as every sibling override above.
 CFLAGS_calibration_msg_handler.o := -mhard-float -msse2 -mfpmath=sse
 
+# Batch 68 (2026-07-25): AnalogKnobRTKHandler/AnalogSliderRTKHandler's
+# shared ApplyRTKCurve() does genuine plain-C float multiply/compare to
+# reproduce the real x87 bipolar RTK curve -- same reasoning as every
+# sibling override above.
+CFLAGS_controller_info_analog_handler.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
