@@ -492,3 +492,39 @@ audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
   forward-declared (type-checking only). Deliberately NOT pursued this
   batch -- a whole separate future session's worth of work, bigger than
   the KorgUsb transport cluster already reconstructed.
+- **NEW (2026-07-25 batch): `CSTGCalibrationMsgHandler`** (front-panel/
+  keybed analog-controller calibration state machine -- JSX/JSY
+  joystick, vector joystick, touch screen, ribbon controller,
+  half-damper pedal, aftertouch), `src/init/calibration_msg_handler.cpp`.
+  All 24 real methods reconstructed and host-KAT-verified (19
+  scenarios, `verify/test_calibration_msg_handler.cpp`); decompile
+  fidelity spot-checked against raw `objdump -dr` for 6 of the 24
+  functions (see file header for the list), including the real
+  18-entry `.rodata` jump table behind `HandleKeybedCalibrationResult`.
+  Genuinely unverified against real hardware:
+  - `sCalibrationOp` values 0x1/0x2 (real, confirmed by the jump
+    table's own distinct entries for them) have no setter anywhere in
+    this project -- plausibly written by `CSTGKeybedInterface`'s own
+    not-yet-reconstructed serial-receive ack path before it calls
+    `HandleKeybedCalibrationResult`. The state-1/state-2 REPLY behavior
+    is reconstructed faithfully; what actually DRIVES the transition
+    into those two states is not.
+  - The half-damper polarity auto-detect timing thresholds (0x1d/0x1e
+    "ticks", per `GetSTGTickCount()`) are reproduced verbatim from the
+    disassembly but never exercised against a real half-damper pedal's
+    actual sample-arrival cadence -- the host KAT drives
+    `GetSTGTickCount()` synthetically.
+  - `PushMessage` (the "solicited command reply" sibling of the
+    already-real `PushUnsolicitedMessage`) is declared extern only, not
+    reconstructed -- this cluster's 12-byte reply packets are built
+    correctly but never actually delivered anywhere in a real boot; a
+    real-HW round-trip test isn't meaningful until `PushMessage` itself
+    (or whatever `/proc/.oacmd`-style consumer reads its output) is
+    reconstructed.
+  - No caller anywhere in this project currently reaches any of these
+    24 functions (the real dispatch path is presumably a generic
+    `*MsgHandler`-family message router this project hasn't
+    reconstructed) -- confirmed correct in isolation via KAT, not yet
+    confirmed reachable end-to-end from a real front-panel calibration
+    menu button press.
+  the KorgUsb transport cluster already reconstructed.

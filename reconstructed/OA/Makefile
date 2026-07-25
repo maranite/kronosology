@@ -165,7 +165,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/midi_out_port.o \
            src/engine/midi_out_port_serial.o \
            src/engine/midi_korgusb_port.o \
-           src/engine/vm_test_accessors.o
+           src/engine/vm_test_accessors.o \
+           src/init/calibration_msg_handler.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -304,6 +305,13 @@ CFLAGS_midi_port_manager.o := -mhard-float -msse2 -mfpmath=sse
 # override at the time they were added.
 CFLAGS_front_panel_handlers.o := -mhard-float -msse2 -mfpmath=sse
 
+# Calibration end-handlers (JSX/JSY/Vector/RibbonX/HalfDamper/Aftertouch)
+# all do genuine plain-C float division to derive the panel's stored
+# calibration-curve scale factors -- would otherwise pull in
+# unresolvable libgcc soft-float helpers under the kernel's own
+# -msoft-float default, same reasoning as every sibling override above.
+CFLAGS_calibration_msg_handler.o := -mhard-float -msse2 -mfpmath=sse
+
 $(obj)/%.o: $(src)/%.cpp
 	$(CXX) $(c_flags) -x c++ -c -o $@ $<
 
@@ -430,7 +438,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/performance_vars_manager_init.cpp \
        src/engine/tone_adjust_descriptors.cpp \
        src/engine/init_performances.cpp \
-       src/engine/sequence_combi_init.cpp
+       src/engine/sequence_combi_init.cpp \
+       src/init/calibration_msg_handler.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -520,7 +529,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_keybed_interface \
          verify/test_midi_in_port_serial \
          verify/test_midi_out_port_serial \
-         verify/test_midi_korgusb_port
+         verify/test_midi_korgusb_port \
+         verify/test_calibration_msg_handler
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -658,6 +668,9 @@ verify/test_midi_out_port_serial: verify/test_midi_out_port_serial.cpp src/engin
 
 verify/test_midi_korgusb_port: verify/test_midi_korgusb_port.cpp src/engine/midi_korgusb_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp include/oa_global.h include/oa_engine.h include/oa_engine_init.h include/oa_internal.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_midi_korgusb_port.cpp src/engine/midi_korgusb_port.cpp src/engine/midi_out_port_serial.cpp src/engine/midi_in_port_serial.cpp src/engine/midi_queue.cpp src/engine/midi_queue_writer.cpp src/engine/midi_queue_writer_byte.cpp -o $@
+
+verify/test_calibration_msg_handler: verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp include/oa_calibration.h include/oa_global.h include/oa_setup_global_resources.h include/oa_keybed_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_calibration_msg_handler.cpp src/init/calibration_msg_handler.cpp -o $@
 
 verify/test_audio_input_mixer: verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_audio_input_mixer.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
