@@ -34,7 +34,12 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`), and a dedicated `CEditor` batch (15 direct methods + ctor/dtor, real multiple-inheritance vtable cluster, new self-contained `CParameterString` class -- see that section for the full `Setup()` fan-out analysis and what's deferred). 363 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`), and a dedicated `CEditor` batch (15 direct methods + ctor/dtor, real multiple-inheritance vtable cluster, new self-contained `CParameterString` class -- see that section for the full `Setup()` fan-out analysis and what's deferred), and (see "Stage 6: CEditable/CAlphaKeybIfcTask" below) a
+standalone `CEditable`/`CAlphaKeybIfcTask` batch re-investigating one of `CEditor::
+Setup()`'s two previously-deferred fan-out targets. 382 of 37,795 functions
+reconstructed (per a fresh `manifest/gen_manifest.py` regen — this count has run
+somewhat ahead of this summary line between batches; treat the regenerated number as
+authoritative) — still a small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -2446,3 +2451,109 @@ reconstructed list -- both only partially reconstructed (their real
 `CTask::CTask()` base-construction statement, not the rest of the real body),
 same "stays pending, Tier B" treatment already established for partial ctors
 elsewhere in this file. Regenerated: 339 → 363 of 37,795.
+
+## Stage 6: CEditable / CAlphaKeybIfcTask — 2026-07-25
+
+Broad-survey batch, run concurrently alongside a dedicated `CEditor`/
+`CPanelIfcTask` pass and a full clean-room verification pass (see that pass's
+own `d6683d8` commit, which caught a real oversized `PTR__CLevelManager_08e80e50`
+vtable array — see that commit message). This batch deliberately avoided
+touching `editor.cpp`/`editor.h`/`panel_ifc_task.*` to stay out of the other
+two passes' way, and surveyed three specific leads instead.
+
+**`CBDApiInstance` re-checked, confirmed a genuine dead end.** The prior
+survey's "no boot-path caller found" verdict was checked harder this round,
+specifically for virtual-dispatch-only callers (the technique that found
+`CClientCommServer`). Traced its one plausible real caller,
+`RegisterLoader(CBatchDiskMan*)` (`.text+0x08243980`) — zero call sites
+anywhere in the 37,795-function export, confirmed by grepping every decompile
+for the mangled symbol, not just `CBDApiInstance`'s own file. Follow-on: is
+`CBatchDiskMan` itself (the class `RegisterLoader` would register) reachable?
+No — its own constructor (`CBatchDiskMan::CBatchDiskMan(char const*, char
+const*)`, one of `Mains()`'s 15 registration-shim family members via
+`MMainBatchDiskMan`) is, like 13 of that family's other 14 siblings, never
+actually invoked on this project's traced boot path (only the generic
+`CNamedObjectBase`-shaped descriptor placeholder + `CBatchDiskManConstructor`
+vtable get installed — see `mains.cpp`'s own Stage 3 note). A genuinely
+tractable-looking small class (`CBatchDiskMan` itself uses the already-real
+`CParameterString`/`CModule::Add()`/`CEditServer` machinery and would be about
+as easy as `CEditor` was), but not currently reachable by any path this
+reconstruction has traced — left unreconstructed, a confirmed negative result
+rather than a gap in this search.
+
+**`CEditor::Setup()`'s two previously-deferred fan-out targets, re-examined.**
+`CChunkServerTask` turns out to be a NESTED class (`CEditor::CChunkServerTask`,
+confirmed via its own mangled name, `_ZN7CEditor16CChunkServerTask...`) — same
+territory as `CEditor`/`CPanelIfcTask` itself, so correctly left untouched this
+pass regardless of its own tractability (its `CChunkServer` base, 21 methods,
+does look small). `CAlphaKeybIfcTask` is NOT nested (`_ZN17CAlphaKeybIfcTask...`,
+no `CEditor::` prefix) — genuinely separate territory, and turned out fully
+tractable. See `include/alpha_keyb_ifc_task.h`/`src/editor/alpha_keyb_ifc_task.cpp`
+and the new `include/editable.h`/`src/editor/editable.cpp` (`CEditable`, the
+small non-polymorphic descriptor-registration mixin it embeds) for the full
+per-method writeup. Both classes' ctor/dtor + `CEditable`'s own 2 real methods
+are Tier A; `CAlphaKeybIfcTask::ProcessCode` (963 bytes, genuine per-keycode
+dispatch depth) stays Tier B, same bar as `CEditor::CMainTask::Exec()`.
+
+Deliberately reconstructed **standalone and NOT wired into `CEditor::Setup()`**
+— wiring it in would mean editing `editor.cpp`/`editor.h`, exactly the files
+the concurrent dedicated `CEditor` pass owns this session. A future pass, once
+that territory is free, can wire `CEditor::Setup()`'s already-fully-traced
+"ALPHAKEYBOARD=Yes" branch to actually construct one of these. No live
+`kronos_vm` boot-test signal expected from this batch for the same reason.
+
+**Vtable note**: `CAlphaKeybIfcTask` has a real 3-vtable GCC multiple-
+inheritance-style cluster (primary + 2 this-adjusted secondary slots, at
+`this+0` / `this+0x08` / `this+0x80`), confirmed by a direct `.rodata` dword
+read at `0x08f25ae0` (6/3/4 real slots respectively) rather than inferred —
+same "always verify vtable size with a raw byte read" discipline this project
+has needed repeatedly. Modeled in the C++ source as real single inheritance
+from `CTask` (matching `CEditor::CMainTask`'s own precedent) plus two extra
+raw member fields for the non-polymorphic `CEditable` sub-object and the bare
+`CIfcUnknown`-adjusted vtable slot — not real C++ multiple inheritance, same
+convention `CEditor` itself already established for its own extra sub-objects.
+
+**Concurrent-edit note, worth flagging explicitly**: `omega_vtables.h`/`.cpp`
+(this batch's own 3 new vtable arrays) ended up committed as part of the
+concurrent verification pass's `d6683d8` (a commit nominally just about the
+`CLevelManager` vtable-size fix) rather than this batch's own commit — a
+shared-working-directory side effect (that pass's own broad `git add`/commit
+step picked up this batch's already-edited, not-yet-committed files). Content
+is correct and verified (see below); only the attribution/commit boundary is
+off. Flagged here rather than silently re-committing the same lines again.
+
+### Verification
+
+New `verify/test_alpha_keyb_ifc_task.cpp` (10 checks): `CEditable::
+AddDescriptorsMap()`'s sentinel-scan end to end through a real `CEditServer`
+(register 2 real rows + a sentinel, confirm both real rows are independently
+reachable via `CEditServer::Get()`), `CAlphaKeybIfcTask`'s ctor (real `CTask`
+base construction, all 3 vtable-identity installs, the real `owner+0x38`
+address arithmetic `CEditable` ends up holding) and dtor. One real KAT-authoring
+correction worth its own note: the dtor test's first draft wrongly asserted
+`CAlphaKeybIfcTask`'s OWN vtable/`mIfcThunk` identities survive after
+`~CAlphaKeybIfcTask()` returns — false: ground truth's own disassembly shows
+the derived dtor writes those identities and then unconditionally calls
+`CTask::~CTask()`, whose own final acts (task.cpp steps 6/8) overwrite both
+right back to `CMessageInput`/`CObjectBase` identities. The derived writes are
+real and faithfully transcribed, just immediately superseded — same "written,
+then overwritten by the inherited cleanup" shape already documented for other
+classes in this project; the test now asserts the real final state instead.
+
+`make objs`: clean, no warnings from the new files. `make verify`: this
+batch's own new binary passes 10/10; pre-existing `test_client_comm_server`
+has 6 failures — confirmed via `git stash` against the unmodified HEAD that
+these are pre-existing (present with or without this batch's changes), not a
+regression this batch introduced. `tools/build_lenny.sh` (real on-image ABI):
+`LINK OK`.
+
+### Manifest delta
+
+`gen_manifest.py`: added 4 functions (`CEditable::CEditable`, `CEditable::
+AddDescriptorsMap`, `CAlphaKeybIfcTask::CAlphaKeybIfcTask`, `CAlphaKeybIfcTask::
+~CAlphaKeybIfcTask` [D1]) plus a documentation-only note recording the
+`CBDApiInstance` negative-result re-check (no new addresses — nothing there is
+reconstructed). Regenerated: 378 → 382 of 37,795 (HEAD was already at 378 via
+the concurrent verification pass's own commits, ahead of this file's own
+stale "363" summary-line count from earlier today — see the Stage 6 table row
+above, now corrected to point at the regenerated number as authoritative).

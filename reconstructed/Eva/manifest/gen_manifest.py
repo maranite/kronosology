@@ -719,7 +719,33 @@ RECONSTRUCTED = {
     "080b8fc0",  # CParameterString::GetParamStr(char const*)
     "080b9020",  # CParameterString::DecToInt(char const*&)
     "080b90f0",  # CParameterString::HexToInt(char const*&)
+
+    # CEditable + CAlphaKeybIfcTask (Stage 6 breadth sweep, 2026-07-25 --
+    # editable.h/.cpp, alpha_keyb_ifc_task.h/.cpp). CAlphaKeybIfcTask is one of
+    # CEditor::Setup()'s "ALPHAKEYBOARD=Yes" fan-out targets, previously flagged
+    # "NOT tractable" by the dedicated CEditor batch above -- re-investigated and
+    # found genuinely tractable (CEditable is a real, top-level, non-nested class,
+    # not part of the CEditor namespace). Reconstructed standalone, deliberately
+    # NOT wired into editor.cpp/editor.h to avoid the concurrent CEditor/
+    # CPanelIfcTask work this session -- see alpha_keyb_ifc_task.h's own header
+    # comment. ProcessCode (08245960, 963 bytes) stays a Tier-B stub (genuine
+    # per-keycode dispatch depth, same bar as CEditor::CMainTask::Exec()).
+    "0806e310",  # CEditable::CEditable(CEditServer*)
+    "0806e320",  # CEditable::AddDescriptorsMap(CObjectBase*, SDescriptor*, bool)
+    "08245e10",  # CAlphaKeybIfcTask::CAlphaKeybIfcTask(CEditor const&)
+    "08245d40",  # CAlphaKeybIfcTask::~CAlphaKeybIfcTask() [D1]
 }
+
+# CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
+# (IsPreloadRunning x2/IsBusy/RegisterLoader/dtor x2, .text+0x08243830..0x082455e0)
+# stay NOT in RECONSTRUCTED. RegisterLoader(CBatchDiskMan*) (08243980) -- the one
+# method with a plausible real caller -- was checked directly: zero call sites found
+# anywhere in the 37,795-function export (confirmed by grepping every decompile for
+# the mangled symbol, not just BDApiInstance's own file), and CBatchDiskMan's own
+# constructor is itself never invoked on this project's traced boot path either
+# (same "registered as a module descriptor, never actually instantiated" status as
+# 13 of Mains()'s other 15 registration-shim modules -- see mains.cpp's own Stage 3
+# note). A confirmed, thorough negative result, not a gap in this search.
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
 # stub only (real signature, empty body): genuinely deep dedup-scan +
