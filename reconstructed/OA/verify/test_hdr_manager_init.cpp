@@ -36,6 +36,11 @@ static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
  * exercises the call paths that would need them populated. */
 CSTGFileCloser *CSTGFileCloser::sInstance;
 unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
+/* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
+ * Initialize() are real too (batch 58) -- same rationale as
+ * sGlobalBusSet above; this test never exercises either call path but
+ * still links audio_input_mixer.cpp whole. */
+unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
 
 /*

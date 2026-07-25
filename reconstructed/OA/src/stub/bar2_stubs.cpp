@@ -537,13 +537,12 @@ void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
  * there too, alongside it, matching the CSTGFrontPanelSmoothers/
  * CSTGHDRMiniModel "home sInstance with the real ctor" precedent). Its
  * own four newly-discovered confirmed-real, deliberately deferred
- * sub-object Initialize()/ctor dependencies (CSTGAudioInputMixerBase's
- * own ctor, CSTGAudioInputMixer::Initialize, CSTGMasterLRMixer::
- * Initialize, CSTGEffectRackVars::Initialize, CSetListEQ::Initialize)
- * are declared in oa_global.h and given safe no-op bodies right below. */
-CSTGAudioInputMixerBase::CSTGAudioInputMixerBase() {}
-void CSTGAudioInputMixer::Initialize(unsigned int) {}
-void CSTGMasterLRMixer::Initialize(unsigned int) {}
+ * sub-object Initialize()/ctor dependencies. CSTGAudioInputMixerBase's
+ * own ctor, CSTGAudioInputMixer::Initialize(), CSTGMasterLRMixer::
+ * Initialize(), and CSTGAudioInputMixerBase::SetSendBuses() are all real
+ * now, batch 58 -- see src/engine/audio_input_mixer.cpp.
+ * CSTGEffectRackVars::Initialize/CSetListEQ::Initialize remain deferred,
+ * stubbed below. */
 void CSTGEffectRackVars::Initialize(CSTGPerformanceVars *) {}
 void CSetListEQ::Initialize(unsigned int) {}
 /* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now, sec 10.150 -- see

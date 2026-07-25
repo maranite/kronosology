@@ -7,14 +7,21 @@
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <sys/mman.h>
 #include "oa_global.h"
 #include "oa_engine.h"
+#include "oa_bank_memory.h"
 
 static void *mmap32(unsigned long size)
 {
 	return mmap(0, size, PROT_READ | PROT_WRITE,
 		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+}
+
+static unsigned char *FromU32ForTest(unsigned int v)
+{
+	return (unsigned char *)(unsigned long)v;
 }
 
 static int g_fail;
@@ -43,6 +50,11 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * real and references it directly -- not linked from
  * audio_bus_manager.cpp in this test binary, own local storage. */
 unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
+/* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
+ * Initialize() are real too (batch 58) -- same rationale as
+ * sGlobalBusSet above, own local storage, not linked from
+ * audio_bus_manager.cpp in this test binary. */
+unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
 
 /* Raw vtable-slot-3 target SetFXCtrlBus/SetHDRBus both dispatch through
  * (matching the project's established raw-vtable-dispatch convention,
@@ -200,6 +212,143 @@ int main(void)
 		 * never be reached in practice -- not tested here for exactly
 		 * that reason (there is no real busType/value combination that
 		 * reaches it). */
+	}
+
+	printf("[5] CSTGAudioInputMixerBase ctor -- installs a non-null vtable ptr "
+	       "(+0x0), zeroes _gap4[0]/mixerStateArray32, leaves busChangeArray32 "
+	       "(+0xc) untouched (batch 58)\n");
+	{
+		unsigned char raw[0x10];
+		memset(raw, 0xCC, sizeof(raw));
+		CSTGAudioInputMixerBase *obj = new (raw) CSTGAudioInputMixerBase();
+		check_eq("vtable ptr installed (non-null/non-poison)",
+			 (unsigned int)(*(unsigned int *)raw != 0 &&
+					*(unsigned int *)raw != 0xCCCCCCCC),
+			 1);
+		/*
+		 * `_gap4[0]` is NOT checked for == 0 here: on the real 32-bit
+		 * target it genuinely is (a separate 4-byte field, ground
+		 * truth's own `movb $0x0,0x4(%eax)`) -- but on this 64-bit
+		 * host, `raw[4]` is simultaneously byte 4 of the 8-byte
+		 * vtable pointer the line above already confirmed is
+		 * installed (there is no daylight between "the pointer's own
+		 * significant bits" and "_gap4" once a real pointer needs all
+		 * 8 bytes; the ctor's own header comment in
+		 * audio_input_mixer.cpp covers this write-ordering tradeoff
+		 * in full). Asserting `raw[4]==0` here would be asserting a
+		 * property of THIS PARTICULAR ASLR slide, not of the ctor.
+		 */
+		check_eq("mixerStateArray32 zeroed", (unsigned int)*(unsigned int *)(raw + 8), 0);
+		check_eq("busChangeArray32 (+0xc) left UNTOUCHED (still poison)",
+			 (unsigned int)*(unsigned int *)(raw + 0xc), 0xCCCCCCCC);
+
+		(void)obj;
+	}
+
+	printf("[6] CSTGAudioInputMixer::Initialize -- fixed 6-entry base "
+	       "Initialize() + confirmed sGlobalBusSet[2,3,4,5,10,11] index "
+	       "overwrite + SetSendBuses() tail call (batch 58)\n");
+	{
+		/*
+		 * Deliberately does NOT go through the real ctor here (unlike
+		 * [5] above): CSTGAudioInputMixerBase::Initialize()'s own
+		 * confirmed-real `_gap4[0] = (unsigned char)count` write would
+		 * clobber part of the vtable pointer the ctor installs, on
+		 * THIS 64-bit host ONLY (both fields alias the same 8 bytes a
+		 * host `void*` needs -- see the ctor's own header comment in
+		 * audio_input_mixer.cpp; the real 32-bit target has no such
+		 * hazard, `_gap4` there is a genuinely separate 4-byte field).
+		 * Manual raw-object setup instead, matching sections [1]-[4]'s
+		 * own established "vtable poked in directly, ctor never
+		 * called" convention, sidesteps this test-only aliasing issue
+		 * entirely.
+		 */
+		unsigned char *pool = (unsigned char *)mmap32(0x200000);
+		CSTGBankMemory::Initialize(pool, 0x200000);
+
+		/*
+		 * CSTGAudioInputMixer::Initialize() always calls the base
+		 * Initialize() with the FIXED constant 6 (ground truth, not
+		 * caller-controlled -- see oa_global.h's own comment), which
+		 * writes `_gap4[0] = 6`. On this 64-bit host that byte sits
+		 * INSIDE the vtable pointer's own significant bits (offset+4,
+		 * bits 32-39 of the full 8-byte host pointer -- there is no
+		 * genuinely separate 4-byte "gap" once a real pointer needs
+		 * all 8 bytes; only the real 32-bit target has one). Rather
+		 * than fight that, this test places the vtable at a FIXED
+		 * address whose own byte 4 is ALREADY 6 -- so the real,
+		 * ground-truth-faithful `_gap4[0] = 6` write becomes a true
+		 * no-op against an already-correct pointer, instead of a
+		 * corruption. (`0x600000000` = `6 << 32`.)
+		 */
+		void **vtable6 = (void **)mmap((void *)0x610000000UL, 4 * sizeof(void *),
+						PROT_READ | PROT_WRITE,
+						MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+		vtable6[3] = (void *)VtableSlot3Target;
+
+		alignas(CSTGAudioInputMixer) unsigned char raw[64];
+		memset(raw, 0, sizeof(raw));
+		*(void ***)raw = vtable6;
+
+		CSTGAudioInputMixer *mixer6 = (CSTGAudioInputMixer *)raw;
+		mixer6->Initialize(99); /* count is stored but never read by the real body */
+		check_eq("channelCountByte stores the (unused) count argument",
+			 mixer6->channelCountByte, 99);
+
+		unsigned char *mixerArr6 = FromU32ForTest(mixer6->mixerStateArray32);
+		static const unsigned int kExpectIdx[6] = { 2, 3, 4, 5, 10, 11 };
+		int ok = 1;
+		for (int i = 0; i < 6; i++) {
+			unsigned int got = *(unsigned int *)(mixerArr6 + i * 0x90 + 0x60);
+			unsigned int want = (unsigned int)(unsigned long)
+				(CSTGAudioBusManager::sGlobalBusSet + kExpectIdx[i] * 0x80);
+			if (got != want)
+				ok = 0;
+		}
+		check_eq("all six entries' +0x60 overwritten with sGlobalBusSet[2,3,4,5,10,11]",
+			 (unsigned int)ok, 1);
+
+		/* SetSendBuses() ran as part of Initialize(): both vtable-slot-3
+		 * results (args 0x32/0x34, VtableSlot3Target echoes arg+0x1000)
+		 * should be broadcast into every one of the six entries'
+		 * +0x70/+0x74 fields. */
+		int broadcastOk = 1;
+		for (int i = 0; i < 6; i++) {
+			unsigned int *e = (unsigned int *)(mixerArr6 + i * 0x90);
+			if (e[0x70 / 4] != 0x32 + 0x1000 || e[0x74 / 4] != 0x34 + 0x1000)
+				broadcastOk = 0;
+		}
+		check_eq("SetSendBuses() broadcast +0x70=0x1032/+0x74=0x1034 to all six entries",
+			 (unsigned int)broadcastOk, 1);
+	}
+
+	printf("[7] CSTGMasterLRMixer::Initialize -- confirmed +0x10/+0x14 "
+	       "sEffectThreadBusSets pointers (index*120+118 / index*120+12) "
+	       "(batch 58)\n");
+	{
+		unsigned char raw[0x18];
+		memset(raw, 0, sizeof(raw));
+		CSTGMasterLRMixer *lr = (CSTGMasterLRMixer *)raw;
+
+		lr->Initialize(0);
+		unsigned int want10_0 = (unsigned int)(unsigned long)
+			(CSTGAudioBusManager::sEffectThreadBusSets + 118 * 0x80);
+		unsigned int want14_0 = (unsigned int)(unsigned long)
+			(CSTGAudioBusManager::sEffectThreadBusSets + 12 * 0x80);
+		check_eq("index=0: +0x10 == &sEffectThreadBusSets[118]",
+			 *(unsigned int *)(raw + 0x10), want10_0);
+		check_eq("index=0: +0x14 == &sEffectThreadBusSets[12]",
+			 *(unsigned int *)(raw + 0x14), want14_0);
+
+		lr->Initialize(1);
+		unsigned int want10_1 = (unsigned int)(unsigned long)
+			(CSTGAudioBusManager::sEffectThreadBusSets + (120 + 118) * 0x80);
+		unsigned int want14_1 = (unsigned int)(unsigned long)
+			(CSTGAudioBusManager::sEffectThreadBusSets + (120 + 12) * 0x80);
+		check_eq("index=1: +0x10 == &sEffectThreadBusSets[120+118]",
+			 *(unsigned int *)(raw + 0x10), want10_1);
+		check_eq("index=1: +0x14 == &sEffectThreadBusSets[120+12]",
+			 *(unsigned int *)(raw + 0x14), want14_1);
 	}
 
 	printf("=========================================================\n");

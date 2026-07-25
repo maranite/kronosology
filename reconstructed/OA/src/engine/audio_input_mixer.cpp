@@ -34,6 +34,94 @@ static unsigned int ToU32(void *p)
 	return (unsigned int)(unsigned long)p;
 }
 
+/*
+ * Placeholder vtable for CSTGAudioInputMixerBase (batch 58) -- own real
+ * target NOT identified in ground truth (matches this project's
+ * established "reconstruct the caller, defer the vtable slot" pattern,
+ * e.g. sec 10.157's `_ZTV9CSTGVoice`). UNLIKE that precedent, slot 3 here
+ * genuinely IS dispatched by already-real code (SetFXCtrlBus/SetHDRBus/
+ * SetSendBuses below) reachable from CSTGAudioInput::UpdateFXControlBus/
+ * UpdateHDRBus once a performance activates -- so it is populated with a
+ * safe, non-crashing stand-in (returns 0) rather than left zero-filled.
+ *
+ * A plain `void*[6]` struct (not a `ToU32`'d packed byte array) so that
+ * `sizeof(void*)` -- and therefore this table's own total size and the
+ * "+8" vtable-ptr convention's actual byte offset -- naturally matches
+ * whichever target this file is compiled for: 24 bytes/4-byte slots on
+ * the real 32-bit kernel build (byte-identical to ground truth's own
+ * confirmed `nm -S` size for `_ZTV23CSTGAudioInputMixerBase`), or a
+ * host-native 48-byte/8-byte-slot table for this file's own KAT -- both
+ * self-consistent with the SAME `(*(void***)this)[3]`-style raw
+ * dispatch SetFXCtrlBus/SetHDRBus/SetSendBuses already use, since the
+ * ctor below only ever hands out `&slot0`, never a hardcoded byte offset.
+ */
+namespace {
+struct AudioInputMixerBaseVtable {
+	void *offsetToTop;
+	void *rtti;
+	void *slot0;
+	void *slot1;
+	void *slot2;
+	void *slot3;
+};
+int AudioInputMixerBaseVtableSlot3Placeholder(void *, int) { return 0; }
+AudioInputMixerBaseVtable g_audioInputMixerBaseVtable = {
+	0, 0, 0, 0, 0,
+	(void *)&AudioInputMixerBaseVtableSlot3Placeholder,
+};
+} /* anonymous namespace */
+
+/*
+ * CSTGAudioInputMixerBase::CSTGAudioInputMixerBase() (batch 58,
+ * `.text+0x68a60`, 18 bytes) confirmed: installs the vtable pointer
+ * (real ground truth: `vtable-for-CSTGAudioInputMixerBase + 8`, the
+ * established Itanium-ABI convention this project already uses
+ * elsewhere), zeroes `_gap4[0]` and `mixerStateArray32`. `busChangeArray32`
+ * (`+0xc`) is confirmed NOT touched by this ctor at all -- left exactly
+ * as-is, a real quirk faithfully preserved.
+ */
+CSTGAudioInputMixerBase::CSTGAudioInputMixerBase()
+{
+	/*
+	 * Deliberately NOT `vtablePtr32 = ToU32(...)`: `SetFXCtrlBus`/
+	 * `SetHDRBus`/`SetSendBuses` all dispatch slot 3 via `*(void***)this`
+	 * -- a full HOST-NATIVE (8-byte) pointer read on this file's own
+	 * 64-bit KAT build, matching test_audio_input_mixer.cpp's own
+	 * established "vtable ptr is the one deliberate exception to the
+	 * packed-32-bit-field convention" precedent (see that file's own
+	 * header comment). Writing through `*(void**)this` here lets
+	 * `sizeof(void*)` do the right thing on BOTH targets natively: a
+	 * genuine 4-byte store into `vtablePtr32` alone on the real 32-bit
+	 * kernel build (byte-identical to ground truth's own `movl
+	 * $vtable+8,(%eax)`), or a full 8-byte store spanning
+	 * `vtablePtr32`+`_gap4[0..3]` on this 64-bit host KAT build (the ONLY
+	 * way a real host pointer to `g_audioInputMixerBaseVtable` can
+	 * round-trip through the SAME dispatch code the real target uses).
+	 *
+	 * ORDER NOTE (found via a real host KAT segfault, not by inspection):
+	 * `_gap4[0] = 0` is written BEFORE the vtable-pointer store below --
+	 * on the real 32-bit target this is unobservable either way (the two
+	 * writes touch disjoint 4-byte fields there, matching ground truth's
+	 * own final byte state regardless of order). On this 64-bit HOST KAT
+	 * build there IS no separate "gap" once a real pointer needs all 8
+	 * bytes, so GCC correctly treats `_gap4[0] = 0` as a dead store
+	 * (fully overwritten by the very next line) and elides it entirely
+	 * -- meaning `_gap4[0]`'s own OBSERVED host value after this ctor
+	 * runs is really just byte 4 of whatever ASLR slide
+	 * `g_audioInputMixerBaseVtable` landed at that run, not 0.
+	 * test_audio_input_mixer.cpp's own ctor KAT deliberately does NOT
+	 * assert `_gap4[0]==0` for exactly this reason (see its own comment
+	 * there). `CSTGAudioInputMixerBase::Initialize()` (batch 22, already
+	 * real) independently OVERWRITES `_gap4[0]` with its own `count`
+	 * argument regardless, on both targets -- so nothing downstream of
+	 * this ctor ever actually depends on `_gap4[0]`'s ctor-time value
+	 * surviving anyway.
+	 */
+	_gap4[0] = 0;
+	*(void **)this = (void *)&g_audioInputMixerBaseVtable.slot0;
+	mixerStateArray32 = 0;
+}
+
 /* STGAPIOutToBusType[26]/STGAPIOutToPhysBusId[26] (sec 10.150, confirmed
  * real .rodata, 0x68 bytes each, indexed by the caller's own
  * eSTGAPIBusIDOut `value`) -- used by SetOutputBus. */
@@ -141,6 +229,70 @@ void CSTGAudioInputMixerBase::SetHDRBus(unsigned int busIndex, int value)
 		*(int *)(entry + 0x54) = 0;
 		*(int *)(entry + 0x58) = 0;
 	}
+}
+
+/*
+ * SetSendBuses() (batch 58, `.text+0x68c50`, 96 bytes) confirmed:
+ * dispatches slot 3 with fixed args `0x32`/`0x34` ONCE each (results
+ * cached in registers, not recomputed per entry), then broadcasts both
+ * results into every one of the `count` (`_gap4[0]`) mixerStateArray
+ * entries' own `+0x70`/`+0x74` fields. A real do-while: the loop body
+ * always runs at least once if `count != 0` (checked before entry), so
+ * modeled here as a plain `for` -- behaviorally identical.
+ */
+void CSTGAudioInputMixerBase::SetSendBuses()
+{
+	typedef int (*Fn)(void *, int);
+	Fn fn = ((Fn *)(*(void ***)this))[3];
+	int val70 = fn(this, 0x32);
+	int val74 = fn(this, 0x34);
+
+	unsigned char count = _gap4[0];
+	unsigned char *mixerArr = FromU32(mixerStateArray32);
+	for (unsigned int i = 0; i < count; i++) {
+		unsigned char *entry = mixerArr + i * 0x90;
+		*(int *)(entry + 0x70) = val70;
+		*(int *)(entry + 0x74) = val74;
+	}
+}
+
+/*
+ * CSTGAudioInputMixer::Initialize(unsigned int) (batch 58, `.text+0x68800`,
+ * 117 bytes) confirmed -- see this method's own declaration comment in
+ * oa_global.h for the full derivation (fixed 6-entry base Initialize()
+ * call, six confirmed `sGlobalBusSet` index overwrites, SetSendBuses()
+ * tail call).
+ */
+void CSTGAudioInputMixer::Initialize(unsigned int count)
+{
+	channelCountByte = (unsigned char)count;
+
+	unsigned char *mixerArr = CSTGAudioInputMixerBase::Initialize(6);
+
+	static const unsigned int kBusIndex[6] = { 2, 3, 4, 5, 10, 11 };
+	for (int i = 0; i < 6; i++) {
+		unsigned char *entry = mixerArr + i * 0x90;
+		*(unsigned int *)(entry + 0x60) =
+			ToU32(CSTGAudioBusManager::sGlobalBusSet + kBusIndex[i] * 0x80);
+	}
+
+	SetSendBuses();
+}
+
+/*
+ * CSTGMasterLRMixer::Initialize(unsigned int) (batch 58, `.text+0xc09a0`,
+ * 25 bytes) confirmed, branch-free -- see this method's own declaration
+ * comment in oa_global.h for the full derivation.
+ */
+void CSTGMasterLRMixer::Initialize(unsigned int index)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int off = index * 120 * 0x80;
+
+	*(unsigned int *)(base + 0x10) =
+		ToU32(CSTGAudioBusManager::sEffectThreadBusSets + off + 118 * 0x80);
+	*(unsigned int *)(base + 0x14) =
+		ToU32(CSTGAudioBusManager::sEffectThreadBusSets + off + 12 * 0x80);
 }
 
 /*

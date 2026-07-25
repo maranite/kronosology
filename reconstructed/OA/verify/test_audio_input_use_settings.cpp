@@ -63,6 +63,9 @@ unsigned char CSTGPerformanceVarsManager::sInstance[12];
  * real and references it directly -- not linked from
  * audio_bus_manager.cpp in this test binary, own local storage. */
 unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
+/* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
+ * Initialize() are real too (batch 58), same rationale. */
+unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
 
 /* Storage for the CSTGGlobal singleton pointer OnPerformanceDeactivate()
  * reads its `+0x680`/`+0x67f` fields through (batch 20). A plain buffer is

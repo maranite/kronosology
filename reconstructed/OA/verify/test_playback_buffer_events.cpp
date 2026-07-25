@@ -88,6 +88,9 @@ float gAllMinusHeadroom[4] = {  99.0f,  99.0f,  99.0f,  99.0f };
 unsigned char *STGAPIFrontPanelStatus::sInstance;
 template<> TSTGArrayManager<CSTGRecordBuffer> *TSTGArrayManager<CSTGRecordBuffer>::sInstance = 0;
 unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
+/* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
+ * Initialize() are real too (batch 58), same rationale. */
+unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
 /* TSTGArrayManager<T>::sInstance's own generic (non-specialized) template
  * definition lives only in engine_init.cpp (not linked here) -- this file
  * links managers.cpp/playback_buffer_events.cpp directly and needs its

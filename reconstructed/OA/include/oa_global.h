@@ -1657,11 +1657,26 @@ public:
 	 * src/engine/performance_vars_manager_init.cpp; `new (mgr)
 	 * CSTGAudioInputMixer()` there compiles down to a direct call to
 	 * THIS base ctor, no separate derived-class ctor symbol, since
-	 * `CSTGAudioInputMixer` below declares no ctor of its own). Own
-	 * body not reconstructed this pass -- confirmed real, deliberately
-	 * deferred, safe no-op (whatever it writes at `+0x0`/`+0x8`/`+0xc`
-	 * is immediately overwritten by the caller anyway, see that file's
-	 * own header comment).
+	 * `CSTGAudioInputMixer` below declares no ctor of its own). Real now,
+	 * batch 58 -- see src/engine/audio_input_mixer.cpp: `.text+0x68a60`,
+	 * 18 bytes, trivial (`vtablePtr32 = &vtable+8; _gap4[0] = 0;
+	 * mixerStateArray32 = 0;` -- `busChangeArray32` at `+0xc` is
+	 * deliberately left UNTOUCHED, a confirmed real quirk, not an
+	 * oversight; both `+0x8`/`+0xc` are unconditionally overwritten by the
+	 * very next `Initialize()` call anyway per that method's own header
+	 * comment above). This ctor installing a REAL, non-null vtable pointer
+	 * matters: `SetFXCtrlBus`/`SetHDRBus`/`SetSendBuses` (all real, sec
+	 * 10.150/batch 58) dispatch raw indirect calls through this object's
+	 * OWN vtable slot 3 -- with the previous `{}` stub body, any object
+	 * constructed by this ctor left `vtablePtr32` at whatever raw memory
+	 * the allocator happened to provide (very plausibly zero), a live
+	 * NULL-function-pointer-call hazard on the very first
+	 * `CSTGAudioInput::UpdateFXControlBus`/`UpdateHDRBus` reaching an
+	 * activated performance. See audio_input_mixer.cpp's own header
+	 * comment for the vtable's own construction (own real target for slot
+	 * 3 NOT identified -- a safe zero-returning placeholder is used,
+	 * matching this project's established deferred-vtable-slot
+	 * convention).
 	 */
 	CSTGAudioInputMixerBase();
 
@@ -1707,6 +1722,17 @@ public:
 	 * class's `Initialize` is not virtual and has exactly one caller in
 	 * this project, so the widened signature is contained. */
 	unsigned char *Initialize(unsigned int count);
+
+	/*
+	 * SetSendBuses() (batch 58, `.text+0x68c50`, 96 bytes) confirmed:
+	 * dispatches the SAME raw vtable slot 3 as SetFXCtrlBus/SetHDRBus
+	 * TWICE, with fixed constant args `0x32`/`0x34` (results NOT
+	 * per-bus-index -- computed once, then broadcast into EVERY entry's
+	 * `+0x70`/`+0x74` fields, `count` = `_gap4[0]` entries). Called by
+	 * `CSTGAudioInputMixer::Initialize()` below after its own six
+	 * per-entry `+0x60` overwrites.
+	 */
+	void SetSendBuses();
 };
 
 /*
@@ -1716,7 +1742,7 @@ public:
  * freshly-allocated `CSTGPerformanceVars` object emits a direct call to
  * `CSTGAudioInputMixerBase::CSTGAudioInputMixerBase()` -- no separate
  * derived-ctor symbol appears anywhere in the relocation table, so this
- * class adds NO members/ctor of its own (a trivial single, non-virtual
+ * class adds NO ctor of its own (a trivial single, non-virtual
  * public-inheritance forwarding, matching what the compiler would emit
  * for exactly this declaration). Its own `Initialize(unsigned int)` is a
  * GENUINELY SEPARATE, not-yet-disassembled method from the already-real
@@ -1724,13 +1750,26 @@ public:
  * via its own distinct mangled symbol, `_ZN19CSTGAudioInputMixer10InitializeEj`
  * (19-char class name, no "Base" suffix -- i.e. NOT inherited/reused,
  * a real override/shadow with its own object code elsewhere in
- * OA_real.ko). Called with `this = mgr` (the enclosing
- * `CSTGPerformanceVars*` itself) and `arg1 = i` (the same 0/1
- * double-buffer slot index `CSTGPerformanceVarsManager::Initialize()`'s
- * own outer loop uses throughout). Confirmed real, deliberately
- * deferred: own DSP/mixer-init body not reconstructed this pass.
+ * OA_real.ko).
+ *
+ * Real now, batch 58 -- see src/engine/audio_input_mixer.cpp:
+ * `.text+0x68800`, 117 bytes. Confirmed: this class DOES add one field of
+ * its own, `+0x10` (a byte, right after the base class's own 16-byte
+ * layout) -- the incoming `count` argument truncated to a byte, stored
+ * but never subsequently READ by this function itself (its own real loop
+ * below is a fixed, hardcoded 6 iterations, independent of `count`).
+ * Calls `CSTGAudioInputMixerBase::Initialize(this, 6)` (a FIXED constant
+ * 6, NOT the passed-through `count` -- confirmed real, not a
+ * simplification), then overwrites six of the freshly-populated
+ * `mixerStateArray` entries' own `+0x60` field (each entry's own default
+ * "bus 32" send-bus pointer, per `Initialize()`'s own class comment
+ * above) with `&sGlobalBusSet[2]`/`[3]`/`[4]`/`[5]`/`[10]`/`[11]`
+ * respectively (a real, confirmed non-linear index sequence -- verbatim,
+ * not derivable from a simple formula), then calls `SetSendBuses()`.
  */
 struct CSTGAudioInputMixer : public CSTGAudioInputMixerBase {
+	unsigned char channelCountByte;	/* +0x10, confirmed real, write-only */
+
 	void Initialize(unsigned int count);
 };
 
@@ -1741,11 +1780,26 @@ struct CSTGAudioInputMixer : public CSTGAudioInputMixerBase {
  * there itself). Its own `Initialize(unsigned int)` is called with
  * `this = mgr+0x2140`, `arg1 = i` -- the SAME per-slot index argument
  * as `CSTGAudioInputMixer::Initialize`/`CSetListEQ::Initialize` above/
- * below. Own layout/body not reconstructed this pass -- confirmed real,
- * deliberately deferred.
+ * below.
+ *
+ * Real now, batch 58 -- see src/engine/audio_input_mixer.cpp:
+ * `.text+0xc09a0`, 25 bytes, branch-free. Confirmed real fields (raw byte
+ * offsets, own struct declares none -- this class is only ever accessed
+ * via a raw cast onto `mgr+0x2140`, matching the `CSTGAudioInput`/
+ * `CSTGAudioInputMixerBase` established convention):
+ *   +0x10  pointer into `CSTGAudioBusManager::sEffectThreadBusSets`,
+ *          slot `index*120 + 118` of the double-buffered array (matches
+ *          `audio_bus_manager.cpp`'s own established
+ *          `curBufIdx*120*0x80` stride convention)
+ *   +0x14  pointer into the SAME array, slot `index*120 + 12` -- the
+ *          confirmed "current master bus" slot `audio_bus_manager.cpp`'s
+ *          own header comment already names (`&sEffectThreadBusSets
+ *          [curBufIdx*120 + 12]`, i.e. this IS that same pointer, now
+ *          confirmed to be cached here by `Initialize()` rather than
+ *          recomputed each time).
  */
 struct CSTGMasterLRMixer {
-	void Initialize(unsigned int count);
+	void Initialize(unsigned int index);
 };
 
 struct CSTGAudioInput {
