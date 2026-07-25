@@ -190,6 +190,35 @@ RECONSTRUCTED = {
     # of the module's own tasks' +0x4c mask byte -- the same gate byte/bit
     # CLevelManager::RunLevel() (batch 2) checks. See module.h/module.cpp.
     "0807c640",  # CModule::AdjustTaskMask
+
+    # --- Stage 6: breadth sweep, batch 6 (2026-07-25) -- CSTGUnsolMsgHandler, a
+    # whole 30-method class found 100% unclaimed by a broad nm -C class-inventory
+    # sweep (same technique that found OA.ko's CSTGControlMsgHandler). Real,
+    # non-zero-caller entry point confirmed by disassembly: constructed inside
+    # CEditor::CPanelIfcTask::CPanelIfcTask (.text+0x0824b7e0, itself called from
+    # CEditor::Setup(), dispatched by CModuleManager::Setup()'s per-module virtual
+    # call). 18 of the class's 30 real methods reconstructed (ctor, both real
+    # destructor-shaped functions, HandleMessage()'s dispatch table, EndHandling(),
+    # SendValueSlider/Encoder, EnterGlobalObjectEdit, 8 confirmed-empty no-ops);
+    # the remaining 12 are genuinely deep per-subsystem STG message handlers,
+    # Tier-B link-stubs. See include/stg_unsol_msg_handler.h.
+    "0891c090",  # CSTGUnsolMsgHandler::CSTGUnsolMsgHandler
+    "089b9e30",  # CSTGUnsolMsgHandler::~CSTGUnsolMsgHandler (complete-object, "ResetVTable")
+    "089b9e40",  # CSTGUnsolMsgHandler::~CSTGUnsolMsgHandler (deleting, "DeletingDtor")
+    "089162e0",  # CSTGUnsolMsgHandler::HandleMessage
+    "0891c290",  # CSTGUnsolMsgHandler::EndHandling
+    "0891c1f0",  # CSTGUnsolMsgHandler::SendValueSlider
+    "0891c240",  # CSTGUnsolMsgHandler::SendValueEncoder
+    "0891c3c0",  # CSTGUnsolMsgHandler::EnterGlobalObjectEdit
+    "0891c1c0",  # CSTGUnsolMsgHandler::Initialize (confirmed-empty)
+    "0891c1d0",  # CSTGUnsolMsgHandler::InitializeForSong (confirmed-empty)
+    "0891c1e0",  # CSTGUnsolMsgHandler::BeginHandling (confirmed-empty)
+    "08916230",  # CSTGUnsolMsgHandler::TestControlMsgHandler (confirmed-empty, static)
+    "08916240",  # CSTGUnsolMsgHandler::ASKMsgHandler (confirmed-empty, static)
+    "08916250",  # CSTGUnsolMsgHandler::CalibrationMsgHandler (confirmed-empty, static)
+    "08916260",  # CSTGUnsolMsgHandler::FrontPanelMsgHandler (confirmed-empty, static)
+    "08916270",  # CSTGUnsolMsgHandler::KLMMsgHandler (confirmed-empty, static)
+    "0824cc30",  # CEditor::CPanelIfcTask::GetMargin (real companion to SetMargin, added while re-touching this header)
 }
 
 # CTask itself is NOT in RECONSTRUCTED (no ctor implemented) -- CTask::CTask()

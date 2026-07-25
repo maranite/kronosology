@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **Batch 4 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), and now `CCommDriver::setupfifoname()` — the real argv-parsing body behind `main()`'s own `CCommDriver::getInstance(argv)` call, previously a Tier-B stub (batch 4 — see "Stage 6: breadth sweep, batch 4" below, including a survey confirming `CEditor::CPanelIfcTask`/`USTGAPILCDControl`/`CKernel` have no further genuinely-reachable methods, and a real crash-bug finding in the reconstructed function itself). 119 of 37,795 functions reconstructed — still one small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **Batch 6 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), and now `CSTGUnsolMsgHandler` — a whole 30-method unsolicited-STGMessage-dispatcher class found 100% unclaimed by a broad `nm -C` sweep, 18 methods reconstructed (batch 6 — see "Stage 6: breadth sweep, batch 6" below). 137 of 37,795 functions reconstructed — still a small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -1478,3 +1478,116 @@ that, continue the same "Tier-B stub already sitting on an already-reconstructed
 path" search method across the rest of `src/`/`include/` -- `CErrorHandler::EnableUpdate()`
 (`.text+0x0805afb0`) and `CSysApiInstance::EnableMultiTask()`/`WriteMessageToHost()` are
 both real, on-boot-path-adjacent Tier-B stubs not yet investigated for tractability.
+
+## Stage 6: breadth sweep, batch 6 — 2026-07-25
+
+A broad `nm -C` class-inventory sweep against the real binary (2921 classes with 5+
+methods each, filtered against `functions.csv`/`symbols.csv` and cross-referenced for
+`grep -rl <Class> src include` misses) — the same technique that found OA.ko's
+`CSTGControlMsgHandler` (51 methods, 100% unclaimed) and its 24-method NKS4 event pump
+earlier this session. Candidates surveyed, most explicitly deferred as UI/storage-shaped
+and out of this pass's own boot-path/system/IPC scope:
+
+| Class | Methods | Verdict |
+|---|---|---|
+| `CSTGUnsolMsgHandler` | 30 | **Pursued** — IPC message dispatcher, real confirmed boot-path-adjacent caller (see below) |
+| `CDDriverIO` | 84 | Skipped — SCSI/CD-ROM optical-drive command set, storage-subsystem depth matching this project's existing `CFileMan`/`CResMan` out-of-scope calls |
+| `CControlSurface` | 162 | Skipped — sampled several methods; UI-control-shaped (knobs/sliders/graph widgets), not system/IPC |
+| `CDriverTaskBase` | 30 | Skipped — storage driver base class, same depth class as `CDDriverIO`; also risks touching `CModule`/`CTask` territory (ctor takes `CFileMan*`/`COutLinkMono*`) that two concurrent passes this session own |
+| `CPoller` | 29 | Skipped — front-panel analog/button/LED client-registration task; genuinely IPC/system-shaped and tempting, but its own ctor is `CPoller(CModule const&, char const*)`, i.e. directly inside the `CModule`/`CTask` family a concurrent agent is actively reconstructing this session — deliberately left alone per this task's own scoping instruction |
+| `CClientCommServer` | 26 | Skipped — sampled; no real caller found in a quick xref check, lower confidence than `CSTGUnsolMsgHandler`'s confirmed one |
+| `CSysExMsgTaskBase` | 14 | Skipped — not investigated further this batch, noted for a future pass |
+
+`CSTGUnsolMsgHandler` — Eva's dispatcher for unsolicited `STGMessage`s arriving from
+OA.ko (`include/stg_unsol_msg_handler.h`, `src/ipc/stg_unsol_msg_handler.cpp`,
+`verify/test_stg_unsol_msg_handler.cpp`). Real, non-zero-caller entry point confirmed by
+disassembly, not guessed: the one constructor call site (`objdump`-confirmed `call
+891c090 <_ZN19CSTGUnsolMsgHandlerC1EPN7CEditor13CPanelIfcTaskE>`) is inside
+`CEditor::CPanelIfcTask::CPanelIfcTask(CEditor const&, PegScreen*)`
+(`.text+0x0824b7e0`), itself called from `CEditor::Setup()` (`.text+0x08249b60`),
+dispatched by `CModuleManager::Setup()`'s own already-reconstructed per-module virtual
+call (`src/base/module_manager.cpp`) — i.e. this class sits directly on the (nominal)
+module-Setup boot path, not off in unreached UI territory, even though `CPanelIfcTask`
+itself is not reconstructed (its real ctor pulls in `CTask`/`COutLinkMono`, explicitly
+left to the concurrent `CModule`/`CTask` pass — see below).
+
+**Real class layout** confirmed from the ctor's own decompile, cross-checked against
+`CPanelIfcTask`'s own `malloc(0x98)` call site for the object (0x98 = 152 bytes, exact
+match): vtable ptr, owner `CEditor::CPanelIfcTask*`, a 17-entry `{code* fn; int adj}`
+dispatch table (one slot per `STGMessage` subtype 0..16 — **a newly confirmed fact
+about `STGMessage`'s own layout**: its offset+4 field is this subtype index, not
+previously documented in `ustg_user_api.h`'s own opaque-`STGMessage` note), a sentinel
+dword, and 2 trailing flag bytes. 18 of the class's 30 real methods are Tier A
+(faithful): the ctor, both real destructor-shaped functions (kept as plainly-named
+methods, not real C++ destructors, matching this project's established "manual vtable
+swap, no `virtual` keyword" convention — `COmegaPtrArray`/`CModule`/`CScheduler`),
+`HandleMessage()` (the real dispatcher, including the generic both-cases Itanium
+ptr-to-member-function dispatch code, faithfully transcribed even though the
+vtable-offset branch is dead given this ctor's own even-address-only data),
+`EndHandling()`, `SendValueSlider()`/`SendValueEncoder()`, `EnterGlobalObjectEdit()`,
+and 8 confirmed-by-reading-every-one genuinely empty `return;` bodies already present
+in the shipped binary (5 of them real `static`/cdecl methods, not instance methods —
+a real, harmless calling-convention quirk given they're still stored in and called
+through the same two-argument instance-dispatch slots as the 15 real instance
+handlers). The remaining 12 slots (`ControlMsgHandler`/`GlobalMsgHandler`/
+`CombiMsgHandler`/etc., 340–4886 bytes each) are genuinely deep per-subsystem STG
+message processing reaching into `CCombi`/`CProg`/`CGlobal`/effect-slot/voice-model
+state — Tier-B link-stubs.
+
+**Two small, low-risk additions to the already-owned `CEditor::CPanelIfcTask` class**
+(`include/panel_ifc_task.h`, only `SetMargin` previously reconstructed): `GetMargin()`
+(real Tier A companion read, no bounds check on the read side unlike `SetMargin`'s
+write-side check — preserved as found) and `OnAnalogEvent()`/`OnEncoderEvent()` (real
+signatures confirmed directly via `nm -C` — note the real parameter type is
+`CPanelOut::SAnalogEvt const*`/`CPanelOut::SEncoderEvt const*`, under a *different*
+class's namespace than `CEditor`, not guessed — Tier-B link-stubs, since
+`CPanelIfcTask`'s own instance layout/vtable/constructor still aren't reconstructed).
+Declaring these as genuine non-static C++ member functions (rather than free functions
+bound via an `asm()` label to the real mangled symbol, considered and rejected) gets
+the correct implicit-`this`-as-first-stack-argument call shape for free on this
+SysV/Itanium ABI, with zero hand-verified-calling-convention risk.
+
+**A real, worth-flagging correction to a concurrent pass's own verdict**: `CTask::CTask()`
+does have a caller — `CPanelIfcTask`'s own ctor (`CTask::CTask(this, param_1,
+"PanelIfcTask", 3, 1, 0x804b)`) — contradicting `include/task_buffer.h`'s existing note
+that it doesn't. Left for the `CModule`/`CTask` pass to reconcile (out of this batch's
+own scope, per this task's explicit instruction to stay away from that family); flagged
+here rather than silently working around it.
+
+**ABI mechanics worth documenting for future dispatch-table reconstructions**: filling
+the raw `{code*, adj}` table entries for 12 real non-virtual instance member functions
+with distinct parameter shapes (`const STGMessage&` vs plain `STGMessage&`) can't use a
+single pointer-to-member typedef; done here via a small union-based helper
+(`AddrOfConstRefHandler`/`AddrOfRefHandler`) that extracts the low word of the Itanium
+2-word `{ptr, adj}` member-function-pointer representation — reliable for non-virtual
+members on this exact ABI, same "trust the ABI, do the raw thing" license already used
+for this project's `CallVSlot1/2` helpers and the manual vtable-swap idiom. The 5 real
+`static` handlers need no such trick (plain function-pointer-to-`void*` casts).
+
+Real constants confirmed by direct raw-byte read of the binary's own `.rodata`
+(`readelf -l` to map VA→file offset, then read 4 bytes), not asserted from the
+decompile's opaque `DAT_` names alone: `_DAT_08ea8534` = `1023.0f`, `_DAT_08f29a40` =
+`127.0f` — `HandleMessage()`/`SendValueSlider()`'s own slider-value scale factor,
+converting a 0..127 range up to 0..1023.
+
+### Verification
+
+`verify/test_stg_unsol_msg_handler.cpp` (18/18 checks) — a friend hook
+(`StgUnsolMsgHandlerTestHooks`, same extraction convention as `ustg_user_api.h`) peeks
+the real ctor's dispatch-table wiring and independently re-derives each handler's
+expected raw address the same ABI-level way the ctor itself does, confirming the
+subtype→handler mapping is correct (not just "doesn't crash"); a garbage
+(`0xdeadbeef`) message pointer is passed to all 8 confirmed-empty handlers to catch any
+future accidental dereference; `HandleMessage()`'s out-of-range (17) subtype bounds
+check is exercised directly.
+
+`make` (18/18 new checks, 0 regressions across every other verify binary) and
+`tools/build_lenny.sh` (`LINK OK`, real on-image-lib link against
+`RestoreDVD_SystemMNT`) both clean. Manifest 119 → 137 reconstructed.
+
+**Next candidates for a future batch**: `CClientCommServer`/`CSysExMsgTaskBase` (see
+survey table above) warrant a proper xref check rather than this batch's quick sample.
+Once the concurrent `CModule`/`CTask` pass lands a real `CTask`, revisit whether
+`CEditor::CPanelIfcTask`'s own constructor becomes tractable (it would make this
+class's boot-path caller fully real end to end, not just "real address, not-yet-owned
+base class").
