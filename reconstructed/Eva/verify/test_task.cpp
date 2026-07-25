@@ -41,6 +41,7 @@
 #include "module.h"
 #include "level_manager_array.h"
 #include "system_api.h"
+#include "out_link.h"
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -55,6 +56,18 @@ struct TaskTestHooks {
 	static unsigned short Period(const CTask &t) { return t.mPeriod; }
 	static unsigned short Countdown(const CTask &t) { return t.mCountdown; }
 	static int ScopeId(const CTask &t) { return t.mScopeId; }
+	/* mOutLinks lives at CTask+0x0c (task.h); its own embedded COmegaPtrArray
+	 * mCount field is at that array's own +0x0c, i.e. absolute CTask+0x18.
+	 */
+	static int OutLinksCount(const CTask &t)
+	{
+		return *(const int *)((const unsigned char *)&t + 0x18);
+	}
+	static void *OutLinkAt(const CTask &t, int i)
+	{
+		void **arr = *(void ***)((const unsigned char *)&t + 0x0c + 0x14);
+		return arr[i];
+	}
 };
 
 struct ModuleTestHooks {
@@ -296,6 +309,30 @@ int main(void)
 		      "reconstruction, CTask::Add(COutLink*) not reconstructed)",
 		      g_notifyOutLinkCalls == 0);
 	}
+	printf("[6] CTask::Add(COutLink*) (Eva CSysExMsgClientOutLink follow-up pass, "
+	       "2026-07-25) -- real tail-jmp trace, task.h header comment\n");
+	{
+		CModule m("OutLinkAddModule");
+		CTask t(m, "OutLinkAddTask", 0, 0, 0x804b);
+		COutLink link(t, "TestLink", COutLink::eDirectionOut, 0x1234, 1);
+
+		check("mOutLinks starts empty", TaskTestHooks::OutLinksCount(t) == 0);
+
+		g_notifyModuleCalls = 0;
+		g_lastNotifiedModule = 0;
+
+		t.Add(&link);
+
+		check("mOutLinks count 0 -> 1", TaskTestHooks::OutLinksCount(t) == 1);
+		check("mOutLinks[0] == &link", TaskTestHooks::OutLinkAt(t, 0) == (void *)&link);
+		check("exactly one +0x12c notification (same slot CModule::Add(CTask*) "
+		      "uses, confirmed real disassembly trace)",
+		      g_notifyModuleCalls == 1);
+		check("notified module == the task's OWN owner module (&m), not the task "
+		      "itself -- the tail-jmp overwrites the args with (Api, mOwnerModule)",
+		      g_lastNotifiedModule == &m);
+	}
+
 	printf("(no crash / no leak under a plain run -- CTask objects in every "
 	       "earlier check above were also genuinely destructed at scope exit "
 	       "by the same real ~CTask(), not just this last block's `dying`)\n");

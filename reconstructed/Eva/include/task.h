@@ -165,11 +165,24 @@
  * every COmegaPtrArray-family slot+8 "free element" callback) resolves to
  * `EvaVTableStub` in this reconstruction's own placeholder tables (omega_vtables.cpp)
  * -- functionally inert here (confirmed: none of these arrays hold live elements in
- * any KAT this batch wrote, since nothing populates mOutLinks/mLimiterMan's own
- * TVector -- `CTask::Add(COutLink*)`/`CLimiterMan::RegisterLimiter()` are both real
- * ground-truth methods, neither reconstructed, out of scope), but the vtbl-swap
- * sequence itself is transcribed byte-order-faithfully regardless, matching this
- * project's general standard for every other reconstructed ctor/dtor.
+ * any KAT this batch wrote, since nothing populates mLimiterMan's own TVector --
+ * `CLimiterMan::RegisterLimiter()` is a real ground-truth method, not reconstructed,
+ * out of scope; `mOutLinks` CAN now be populated, see `Add(COutLink*)` below), but the
+ * vtbl-swap sequence itself is transcribed byte-order-faithfully regardless, matching
+ * this project's general standard for every other reconstructed ctor/dtor.
+ *
+ * `CTask::Add(COutLink*)` (.text+0x0807e870, 59 bytes) is Tier A this pass (Eva
+ * CSysExMsgClientOutLink follow-up, 2026-07-25) -- real body confirmed via direct
+ * `objdump -dr` reading (Ghidra's own decompile mis-resolved the tail call as a
+ * zero-argument indirect call, "could not recover jumptable"): `mOutLinks.Add(link)`
+ * (COmegaPtrArray::Add, already real, omega_ptr_array.h) followed by a TAIL JUMP
+ * (`jmp`, not `call`+`ret`) into `(*Api)[0x12c/4]`, overwriting this function's own
+ * incoming argument stack slots with `(Api, mOwnerModule)` first -- i.e. the exact SAME
+ * `NotifyModuleFn(void*, CModule*)` call `CModule::Add(CTask*)` already makes through
+ * this identical slot (module.cpp), just triggered from the COutLink-registration path
+ * instead of the CTask-registration path. Confirms system_api.h's own "+0x12c: real
+ * meaning not decoded" note is a single, consistent call site shape used from at least
+ * two different real callers now.
  *
  * **CPoller surveyed, NOT pursued this batch** (batch 6 flagged it as "genuinely
  * tempting... directly in the CModule/CTask family", deliberately deferred for
@@ -197,6 +210,7 @@
 
 class CModule;
 class CIfcUnknown;
+class COutLink;
 
 class CTask {
 public:
@@ -224,6 +238,16 @@ public:
 
 	/* .text+0x0807ec90, 472 bytes. Tier B -- see header comment. */
 	void RegisterIfc(CIfcUnknown *ifc);
+
+	/* .text+0x0807e870, 59 bytes. Tier A -- see header comment / .cpp. Real
+	 * return value is whatever the tail-called Api notification itself returns
+	 * (a genuine `jmp`, not `call`+`ret` -- see header comment); this function's
+	 * committed signature is `void` since its own real caller
+	 * (`CSysExMsgTaskBase::CSysExMsgTaskBase()`, sysex_msg_task_base.cpp) discards
+	 * it as a bare statement, same "eax not part of the real contract" category
+	 * as several other methods in this project (e.g. `CClientCommServer::TXData()`).
+	 */
+	void Add(COutLink *link);
 
 private:
 	void          *mVtbl;

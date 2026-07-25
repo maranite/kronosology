@@ -436,6 +436,37 @@ RECONSTRUCTED = {
     "08173210",  # CClientCommServer::OnReceiveSysExBuffer
     "08172320",  # CClientCommServer::OnRxPacket
     "08170090",  # CClientCommServer::TransmitSexAnswer
+
+    # --- Stage 6: CSysExMsgClientOutLink follow-up pass (2026-07-25). Reconstructs
+    # the real COutLink/COutLinkMono/CSysExMsgOutLink/CSysExMsgClientOutLink output-
+    # link family (out_link.h/.cpp) -- the subsystem the prior CClientCommServer/
+    # CSysExMsgTaskBase passes both deferred as "genuinely separate, un-reconstructed"
+    # (client_comm_server.h/sysex_msg_task_base.h). CTask::Add(COutLink*) (task.h/
+    # .cpp) is real too -- confirmed via direct objdump -dr reading after Ghidra's own
+    # decompile mis-resolved its tail-jmp as a zero-argument indirect call; it's the
+    # SAME Api vtable slot 0x12c notification CModule::Add(CTask*) already uses,
+    # just triggered from the COutLink-registration path. This unblocks the final 3
+    # CSysExMsgTaskBase methods (SendMsg/EventToMessage/MessageToEvent, all 14/14
+    # Tier A now) and gives CSexServiceTask::TransmitSysEx()/COutLinkMono::OutMono()
+    # their real bodies where CClientCommServer::SendMessageToClient() calls through
+    # (client_comm_server.h's own counting-stub placeholder for OutMono() removed).
+    # CSexServiceTask::TransmitSysEx() itself stays a minimal stub (client_comm_server.
+    # cpp) -- its only real dependency, CSexInputTask::TransmitSysEx(), is a 1374-byte
+    # CSexMatrix routing engine, a genuinely disproportionate sub-effort of its own,
+    # documented but not pursued. CSysExApiInstance::{EventToMessage,MessageToEvent}
+    # (sysex_msg_task_base.cpp) are likewise minimal linkage-only counting stubs -- the
+    # class itself (config_manager.cpp's own earlier CSysExApi survey) is out of scope.
+    "0807e870",  # CTask::Add(COutLink*)
+    "0807cb20",  # COutLink::COutLink(CTask const&, char const*, EDirection, ushort, int)
+    "0807d1f0",  # COutLink::TestResult(EMessageResult, CLink*)
+    "0807d2e0",  # COutLinkMono::COutLinkMono(CTask const&, char const*, EDirection, ushort)
+    "0807d3c0",  # COutLinkMono::OutMono(ushort, void*, ushort)
+    "080a69f0",  # CSysExMsgOutLink::CSysExMsgOutLink(CTask const&, char const*)
+    "080a5aa0",  # CSysExMsgClientOutLink::CSysExMsgClientOutLink(CTask const&)
+    "080a5ad0",  # CSysExMsgClientOutLink::SendMessage(uchar, uchar const*, uchar)
+    "080a6730",  # CSysExMsgTaskBase::SendMsg(uchar const*, uchar)
+    "080a68c0",  # CSysExMsgTaskBase::EventToMessage(CLinkedEvent const*, uchar*, uchar&)
+    "080a6970",  # CSysExMsgTaskBase::MessageToEvent(uchar const*, uchar, CLinkedEvent*)
 }
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-

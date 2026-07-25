@@ -18,6 +18,21 @@
 #include "sysex_msg_task_base.h"
 #include "module.h"
 #include "system_api.h"
+#include "out_link.h"
+
+/* CSysExApiInstance::{EventToMessage,MessageToEvent} counting-stub instrumentation --
+ * see sysex_msg_task_base.cpp's own comment for why they're minimal stubs.
+ */
+extern int g_smtbTestEventToMessageCalls;
+extern int g_smtbTestMessageToEventCalls;
+extern unsigned char g_smtbTestLastCommId;
+
+/* Friend accessor -- reads mOutLink so the ctor's real ECanTransmit branch can be
+ * checked. Same convention as client_comm_server.h's ClientCommServerTestHooks.
+ */
+struct SysExMsgTaskBaseTestHooks {
+	static CSysExMsgClientOutLink *OutLink(const CSysExMsgTaskBase &t) { return t.mOutLink; }
+};
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -187,6 +202,46 @@ int main()
 	check("~CSysExMsgTaskBase() ran without crashing and fired the base "
 	      "~CTask()'s own +0x140 destroy notification exactly once",
 	      g_destroyCalls == 1);
+
+	printf("[ctor ECanTransmit==1] real CSysExMsgClientOutLink construction + "
+	       "CTask::Add() (Eva CSysExMsgClientOutLink follow-up pass, 2026-07-25)\n");
+	{
+		CModule owner2("SysExOwnerModule2");
+		CSysExMsgTaskBase noLinkTask(owner2, /*canTransmit=*/0, 0);
+		check("canTransmit=0: mOutLink stays NULL",
+		      SysExMsgTaskBaseTestHooks::OutLink(noLinkTask) == 0);
+
+		CSysExMsgTaskBase linkedTask(owner2, /*canTransmit=*/1, 0);
+		check("canTransmit=1: mOutLink is now a real, non-NULL "
+		      "CSysExMsgClientOutLink*",
+		      SysExMsgTaskBaseTestHooks::OutLink(linkedTask) != 0);
+
+		printf("[SendMsg] real forward to mOutLink->SendMessage() -- an "
+		       "empty-mLinks link returns error 5, so SendMsg() returns false\n");
+		unsigned char data[2] = {0xaa, 0xbb};
+		check("SendMsg() returns false (mOutLink's own mLinks starts empty, "
+		      "OutMono()'s real 'no destination registered' early-out)",
+		      linkedTask.SendMsg(data, 2) == false);
+
+		printf("[EventToMessage/MessageToEvent] real forward to the "
+		       "CSysExApiInstance counting stub\n");
+		g_smtbTestEventToMessageCalls = 0;
+		g_smtbTestMessageToEventCalls = 0;
+		g_smtbTestLastCommId = 0;
+
+		unsigned char outBuf[4];
+		unsigned char outLen = 0;
+		linkedTask.EventToMessage(0, outBuf, outLen);
+		check("EventToMessage() forwards exactly once",
+		      g_smtbTestEventToMessageCalls == 1);
+		check("EventToMessage() passes this task's own mCommId (0xff, ctor's "
+		      "'uninitialized' sentinel, never set by any reconstructed caller)",
+		      g_smtbTestLastCommId == 0xff);
+
+		linkedTask.MessageToEvent(data, 2, 0);
+		check("MessageToEvent() forwards exactly once",
+		      g_smtbTestMessageToEventCalls == 1);
+	}
 
 	printf(g_fail ? "%d check(s) FAILED\n" : "all checks passed\n", g_fail);
 	return g_fail ? 1 : 0;

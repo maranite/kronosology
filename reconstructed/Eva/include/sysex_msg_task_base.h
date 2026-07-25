@@ -37,13 +37,13 @@
  *                  by Exec()
  *     +0x84  mCommId        byte, the comm/sysex-id this task answers to; ctor sets
  *                            0xff ("uninitialized") unconditionally
- *     +0x88  mOutLink       COutLink* -- real ctor conditionally constructs a
- *                            CSysExMsgClientOutLink (client_comm_server.h family, out
- *                            of scope, see .cpp) and calls the not-yet-reconstructed
- *                            `CTask::Add(COutLink*)` (a DIFFERENT overload from the
- *                            already-real `CModule::Add(CTask*)`, module.h) when
- *                            ECanTransmit requests it; this pass always stores 0 here
- *                            instead (documented deviation, see sysex_msg_task_base.cpp)
+ *     +0x88  mOutLink       CSysExMsgClientOutLink* -- NOW real (Eva CSysExMsgClientOutLink
+ *                            follow-up pass, 2026-07-25, out_link.h): when
+ *                            ECanTransmit requests it, the real ctor mallocs a
+ *                            CSysExMsgClientOutLink(*this) and registers it via the
+ *                            now-real `CTask::Add(COutLink*)` (task.h); otherwise 0.
+ *                            The previous pass's documented deviation ("always stores
+ *                            0 regardless of canTransmit") is fixed.
  *
  * Real vtable (PTR__CSysExMsgTaskBase_08e84c28 primary + a secondary at +0x8e84c50,
  * both installed by the ctor/dtor now that they're reconstructed -- omega_vtables.h)
@@ -54,38 +54,53 @@
  * in ground truth, dead in this reconstruction's own current call graph" category as
  * task.h's own CTask note).
  *
- * Tier A (11 of 14 real ground-truth entries -- Stage 6 SetMask/~CTask batch,
- * 2026-07-25, promotes 6 of these from Tier B now that `CTask::SetMask()`/
- * `CTask::~CTask()` exist, task.h):
+ * Tier A (14 of 14 real ground-truth entries -- CSysExMsgClientOutLink follow-up
+ * pass, 2026-07-25, promotes the final 3 now that `CSysExMsgClientOutLink`/
+ * `CTask::Add(COutLink*)` exist, out_link.h/task.h):
  *   Exec(CMessage&), OnSexLinkError(), OnReceiveMessage(uchar,uchar,uchar const*,uchar),
- *   OnTimeout() -- unchanged from the prior pass (self-contained, no SetMask/~CTask
+ *   OnTimeout() -- unchanged from the prior pass (self-contained, no further
  *   dependency).
- *   CSysExMsgTaskBase() ctor -- NOW real for the `mMask & 0x08` -> `SetMask(1)` branch
- *     and the vtable-pair install; the ECanTransmit==1 branch (malloc a
- *     CSysExMsgClientOutLink, call `CTask::Add(COutLink*)`) is STILL not modeled --
- *     unrelated dependency, see Tier B below.
- *   SetTimeout(ushort) -- NOW real, including the real fixed-point period computation
+ *   CSysExMsgTaskBase() ctor -- fully real now: the `mMask & 0x08` -> `SetMask(1)`
+ *     branch and vtable-pair install (Stage 6 SetMask/~CTask batch), PLUS (this pass)
+ *     the ECanTransmit==1 branch: malloc(0x38) + placement-construct a real
+ *     `CSysExMsgClientOutLink(*this)`, register it via the now-real
+ *     `CTask::Add(COutLink*)` (task.h). The previous pass's documented deviation
+ *     ("mOutLink stays 0 regardless of canTransmit") is fixed.
+ *   SetTimeout(ushort) -- real, including the real fixed-point period computation
  *     and both SetMask() tail-calls (see .cpp); 2 real Api diagnostic-only calls
  *     (vtbl+0x94) are not modeled, matching Exec(CMessage&)'s own established
  *     precedent for that same undecoded slot -- they don't affect control flow.
- *   Exec() -- NOW real, including the real timeout-elapsed check and the raw
+ *   Exec() -- real, including the real timeout-elapsed check and the raw
  *     slot+0x1c redispatch (see .cpp).
- *   ~CSysExMsgTaskBase() -- NOW real: reinstalls both own vtable identities, then
- *     calls the now-real `CTask::~CTask()`.
+ *   ~CSysExMsgTaskBase() -- real: reinstalls both own vtable identities, then
+ *     calls the now-real `CTask::~CTask()`. Ground truth does NOT free `mOutLink`
+ *     here (confirmed by reading the real dtor byte-for-byte) -- a real latent leak
+ *     in the original binary, faithfully reproduced, not a bug in this
+ *     reconstruction.
+ *   SendMsg(uchar const*, uchar) -- NOW real (this pass): reads `mCommId` (a soft,
+ *     omitted assert fires if it's still 0xff, "uninitialized"), then
+ *     `mOutLink->SendMessage(mCommId, data, len)` (out_link.h, real), returns
+ *     `result == 0`.
+ *   EventToMessage(const void*, uchar*, uchar&) -- NOW real: 2 soft, omitted bounds/
+ *     class-code asserts (both non-enforcing, ground truth always falls through
+ *     regardless -- confirmed by reading both branch targets), then forwards to
+ *     `CSysExApiInstance::EventToMessage(mCommId, ev, out, outLen)` -- a DIRECT
+ *     (non-virtual, real-address) call into a genuinely separate, un-reconstructed
+ *     sibling class (`g_oSysExApiInstance`, mains.cpp's own existing byte-blob
+ *     singleton); given a minimal linkage-only counting stub below (same
+ *     "first real caller of a new external symbol" pattern client_comm_server.cpp
+ *     already established for CSexServiceTask/COutLinkMono).
+ *   MessageToEvent(uchar const*, uchar, void*) -- NOW real: no asserts at all,
+ *     pure forward to `CSysExApiInstance::MessageToEvent(mCommId, data, len, ev)`,
+ *     same stub as above.
  *
- * Tier B (blocked on CURRENTLY-OUT-OF-SCOPE real dependencies, not guessed):
- *   CSysExMsgTaskBase()'s ECanTransmit==1 branch, SendMsg(uchar const*,uchar),
- *     EventToMessage(...), MessageToEvent(...) -- all terminate in
- *     `CSysExMsgClientOutLink`/`CSexServiceTask`, which themselves sit on top of
- *     `CSysExMsgOutLink`/`COutLinkMono`/`COutLink` -- a genuinely separate,
- *     un-reconstructed output-link subsystem shared broadly across Eva's message
- *     routing, matching the same "pulls in a further out-of-scope subsystem, defer"
- *     bar task.h's own RegisterIfc()/CPoller precedent already set for this project.
- *     Unrelated to SetMask/~CTask -- promoting those didn't unblock this branch.
- *   `HAL_GetSystemTime()`/`HAL_GetScheduleInterval()` (SetTimeout()/Exec()'s own real
- *     dependencies) stay file-local Tier-B stubs (sysex_msg_task_base.cpp), matching
- *     ckernel.cpp's own established per-file HAL-stub convention -- neither is
- *     reconstructed anywhere in this project yet.
+ * `HAL_GetSystemTime()`/`HAL_GetScheduleInterval()` (SetTimeout()/Exec()'s own real
+ * dependencies) stay file-local Tier-B stubs (sysex_msg_task_base.cpp), matching
+ * ckernel.cpp's own established per-file HAL-stub convention -- neither is
+ * reconstructed anywhere in this project yet. `CSysExApiInstance::
+ * {EventToMessage,MessageToEvent}` stay minimal counting stubs (see .cpp) -- the
+ * class itself (a dozen-plus-method facade, config_manager.cpp's own earlier
+ * survey) is genuinely out of scope.
  */
 
 #ifndef SYSEX_MSG_TASK_BASE_H
@@ -95,6 +110,28 @@
 
 class CModule;
 class CMessage;
+class CLinkedEvent;
+class CSysExMsgClientOutLink;
+
+/* Forward-declared with only the two real methods this class calls -- the class
+ * itself (a dozen-plus-method facade over `g_oSysExApiInstance`, mains.cpp's own
+ * existing byte-blob singleton) is genuinely out of scope, same status
+ * config_manager.cpp's own earlier `CSysExApi` survey already gave it. Real C++
+ * signatures confirmed via `nm -C Eva`:
+ *   CSysExApiInstance::EventToMessage(unsigned char, CLinkedEvent const*,
+ *     unsigned char*, unsigned char&)  -- .text+0x0817a1a0
+ *   CSysExApiInstance::MessageToEvent(unsigned char, unsigned char const*,
+ *     unsigned char, CLinkedEvent*)    -- .text+0x0817a0f0
+ * (both real, direct, non-virtual call targets in ground truth -- not vtable
+ * dispatch, unlike SysExApi's own facade methods).
+ */
+class CSysExApiInstance {
+public:
+	void EventToMessage(unsigned char commId, const CLinkedEvent *ev, unsigned char *out,
+	                      unsigned char &outLen);
+	void MessageToEvent(unsigned char commId, const unsigned char *data, unsigned char len,
+	                      CLinkedEvent *ev);
+};
 
 class CSysExMsgTaskBase : public CTask {
 public:
@@ -106,10 +143,9 @@ public:
 	enum ECanTransmit { eCanTransmit = 1 };
 	enum ENeedsTimeout { eNeedsTimeout = 1 };
 
-	/* .text+0x080a65e0, 268 bytes. Tier A for the vtable-pair install and the
-	 * `mMask & 0x08` -> `SetMask(1)` branch; the ECanTransmit==1 branch
-	 * (CSysExMsgClientOutLink construction + CTask::Add) is still NOT modeled,
-	 * see header comment / .cpp.
+	/* .text+0x080a65e0, 268 bytes. Tier A, fully real (this pass adds the
+	 * ECanTransmit==1 branch: CSysExMsgClientOutLink construction + CTask::Add,
+	 * see header comment / .cpp).
 	 */
 	CSysExMsgTaskBase(const CModule &owner, int canTransmit, int needsTimeout);
 
@@ -126,19 +162,14 @@ public:
 	/* .text+0x080a65a0, 57 bytes. Tier A -- see header comment / .cpp. */
 	void Exec();
 
-	/* .text+0x080a6730, 133 bytes. Tier B -- needs CSysExMsgClientOutLink::
-	 * SendMessage(), see header comment.
-	 */
+	/* .text+0x080a6730, 133 bytes. Tier A -- see header comment / .cpp. */
 	bool SendMsg(const unsigned char *data, unsigned char len);
 
-	/* .text+0x080a68c0, 170 bytes. Tier B -- needs CSysExApiInstance::
-	 * EventToMessage() (-> CSexServiceTask, out of scope), see header comment.
-	 */
-	void EventToMessage(const void *linkedEvent, unsigned char *out, unsigned char &outLen);
+	/* .text+0x080a68c0, 170 bytes. Tier A -- see header comment / .cpp. */
+	void EventToMessage(const CLinkedEvent *ev, unsigned char *out, unsigned char &outLen);
 
-	/* .text+0x080a6970, 61 bytes. Tier B -- same reason as EventToMessage().
-	 */
-	void MessageToEvent(const unsigned char *data, unsigned char len, void *linkedEvent);
+	/* .text+0x080a6970, 61 bytes. Tier A -- see header comment / .cpp. */
+	void MessageToEvent(const unsigned char *data, unsigned char len, CLinkedEvent *ev);
 
 	/* .text+0x08184ed0/0x08184ec0/0x08184ee0, 1/3/1 bytes -- real, genuinely empty
 	 * `return;` bodies in the shipped binary (confirmed by reading each decompile
@@ -171,7 +202,14 @@ private:
 	unsigned int  mTimeoutTicks; /* +0x80, SetTimeout()'s own raw value, read back
 	                               * by Exec() */
 	unsigned char mCommId;       /* +0x84 */
-	void         *mOutLink;      /* +0x88, always 0 this pass -- see header comment */
+	CSysExMsgClientOutLink *mOutLink; /* +0x88, real when ECanTransmit requests it,
+	                                    * else 0 -- see header comment */
+
+	/* Friend accessor for verify/test_sysex_msg_task_base.cpp -- reads mOutLink so
+	 * the ctor's real ECanTransmit branch can be checked without a public
+	 * accessor. Same convention as client_comm_server.h's ClientCommServerTestHooks.
+	 */
+	friend struct SysExMsgTaskBaseTestHooks;
 };
 
 #endif /* SYSEX_MSG_TASK_BASE_H */

@@ -233,6 +233,31 @@ extern int   EvaDataPlaceholder_08e84c50;
  */
 extern void *PTR__CEditServer_08e817b0[7];
 extern void *PTR__TPtrArray_08e817e8[3];
+
+/* COutLink/COutLinkMono/CSysExMsgOutLink/CSysExMsgClientOutLink family (Eva Stage 6
+ * follow-up, 2026-07-25 -- client_comm_server.h/sysex_msg_task_base.h's own
+ * CSysExMsgClientOutLink batch: CTask::Add(COutLink*)'s own real dependency chain,
+ * COutLinkMono::OutMono() reconstructed for real this same pass). All 4 confirmed via
+ * `nm -C Eva`'s own "vtable for X" symbol (X's PTR__ address = that symbol + 8, same
+ * Itanium-ABI tell already used for CObjectBase/CIfcUnknown/CMessageInput above), slot
+ * counts by the same next-vtable-or-typeinfo-boundary methodology as the rest of this
+ * file:
+ *   COutLinkMono   08e82040 -> 08e82060 (COutLink)                    = 6 slots
+ *   COutLink       08e82060 -> 08e82080 (typeinfo cluster)            = 6 slots
+ *   TPtrArray<CLink> 08e820d0 -> 08e820e4 (typeinfo cluster)          = 3 slots
+ *     (COutLink's own embedded COmegaPtrArray sub-object -- confirmed real class name
+ *     `CLink`, i.e. the descriptor COutLinkMono::OutMono() writes through via its own
+ *     `this+0x34` pointer is a `CLink*`, out of scope, see client_comm_server.h)
+ *   CSysExMsgClientOutLink 08e84b00 -> 08e84b20 (CSysExMsgOutLink)    = 8 slots
+ *   CSysExMsgOutLink       08e84b20 -> 08e84b40 (CSysExClientOutLink) = 8 slots
+ * All install-only, same status as this file's other entries -- no reconstructed code
+ * dispatches through any of them.
+ */
+extern void *PTR__COutLinkMono_08e82048[6];
+extern void *PTR__COutLink_08e82068[6];
+extern void *PTR__TPtrArray_08e820d8[3];
+extern void *PTR__CSysExMsgClientOutLink_08e84b08[8];
+extern void *PTR__CSysExMsgOutLink_08e84b28[8];
 }
 
 #endif /* OMEGA_VTABLES_H */

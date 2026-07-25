@@ -93,6 +93,22 @@ CTask::CTask(const CModule &owner, const char *name, int level, int scheduleFlag
 	RegisterIfc(reinterpret_cast<CIfcUnknown *>(mLimiterMan));
 }
 
+void CTask::Add(COutLink *link)
+{
+	/* Real: `mOutLinks.Add(link)` (already real, omega_ptr_array.h) then a genuine
+	 * tail-jmp into `(*Api)[0x12c/4]` with `(Api, mOwnerModule)` -- the exact SAME
+	 * `NotifyModuleFn` call `CModule::Add(CTask*)` makes through this identical
+	 * slot (module.cpp) -- see task.h header comment for the full disassembly
+	 * trace that established this.
+	 */
+	((COmegaPtrArray *)mOutLinks)->Add(link);
+
+	typedef void (*NotifyModuleFn)(void *, const CModule *);
+	void *apiVtbl = *(void **)Api;
+	NotifyModuleFn notifyModule = *(NotifyModuleFn *)((char *)apiVtbl + 0x12c);
+	notifyModule(Api, mOwnerModule);
+}
+
 void CTask::RegisterIfc(CIfcUnknown *)
 {
 	/* Tier B link-stub. Real body: dedup-scan mRegisteredIfcs (keyed by the passed
