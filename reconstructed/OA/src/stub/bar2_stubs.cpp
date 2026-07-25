@@ -86,6 +86,23 @@ extern "C" void OA_VoiceModel_Piano_ProcessAudioRate(void *, unsigned int) {}
 extern "C" void OA_VoiceModel_EP_Initialize(void *) {}
 extern "C" void OA_VoiceModel_EP_ProcessSubRate(void *, unsigned int) {}
 extern "C" void OA_VoiceModel_EP_ProcessAudioRate(void *, unsigned int) {}
+/*
+ * CSTGPianoModel::RescanPianoTypes() (batch 60 investigation,
+ * `.text+0x1f57e0`, 365 bytes) -- deliberately left stubbed, a "small
+ * byte count, disproportionate new-class scope" case (same class of call
+ * as batch 43's CIFXEffectSlot cluster / batch 57's UpdateGlobalTune):
+ * a per-piano-type filesystem scan loop (128 iterations) that touches
+ * FOUR brand-new classes this project has never declared --
+ * `CSTGPianoTypes` (`ReadPianoTypeInfo`/`GetPianoTypeFileName`/
+ * `AddPianoType`), `CFileStream::Exists`, `CSTGPianoModelPatch::
+ * LoadPianoType`, and `CPianoOsc::CopyMultisampleInfo` -- plus a raw
+ * vtable dispatch (`call *0xd8(%edx)`) on a not-yet-typed sub-object,
+ * and a `CSTGHeapManager::sInstance`-relative real-filesystem-path
+ * genuine SSD file I/O (`CSTGBankMemory::AllocAligned` + a second raw
+ * vtable dispatch at `call *0x44(%ecx)`). Out of scope for a single
+ * stub-sweep pick -- a future batch with more time budget for new-class
+ * work should start here.
+ */
 void CSTGPianoModel::RescanPianoTypes() {}
 
 /* ---- Engine subsystem managers (engine.cpp, sec 10.13/10.58) ---- */
@@ -543,9 +560,27 @@ void CSTGMidiDispatcher::ResetAllControllers(unsigned char, bool) {}
  * own ctor, CSTGAudioInputMixer::Initialize(), CSTGMasterLRMixer::
  * Initialize(), and CSTGAudioInputMixerBase::SetSendBuses() are all real
  * now, batch 58 -- see src/engine/audio_input_mixer.cpp.
- * CSTGEffectRackVars::Initialize remains deferred, stubbed below.
  * CSetListEQ::Initialize() is real now, batch 59 -- see
- * src/engine/set_list_eq_init.cpp. */
+ * src/engine/set_list_eq_init.cpp.
+ *
+ * CSTGEffectRackVars::Initialize(CSTGPerformanceVars*) (batch 60
+ * investigation, `.text+0xd0aa0`, 424 bytes) -- deliberately left
+ * stubbed, a "small byte count, disproportionate new-class scope" case:
+ * fourteen calls into THREE brand-new classes this project has never
+ * declared -- `STGIFXSlotParams::Initialize(CSTGPerformanceVars*,
+ * eSTGBusID, eSTGBusID)` (12x, at confirmed real per-slot offsets
+ * `+0x0/+0x210/+0x420/.../+0x1cf0`, stride 0x210), `STGMFXSlotParams::
+ * Initialize(...)` (2x, `+0x1a30`/`+0x1a30`... actually `+0x18c0`/
+ * `+0x1a30`), and `STGEffectSlotVars::Initialize(...)` (2x, `+0x1ba0`/
+ * `+0x1cf0`). All fourteen calls are regparm(3) `this`/`owner`/`busId1`
+ * plus a fourth stack arg `busId2` -- confirmed real per-call constant
+ * bus-ID pairs, not derived. Out of scope for a single stub-sweep pick
+ * (three new classes' own `Initialize()` bodies would each need their
+ * own investigation) -- a future batch with more time budget for
+ * new-class work should start here; the call-site offsets/bus-ID pairs
+ * above are already fully extracted, no need to re-disassemble this
+ * caller from scratch.
+ */
 void CSTGEffectRackVars::Initialize(CSTGPerformanceVars *) {}
 /* CSTGPlaybackEvent::CSTGPlaybackEvent() is real now, sec 10.150 -- see
  * src/engine/engine_init.cpp. Needs its own confirmed 40-byte vtable
