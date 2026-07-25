@@ -1708,6 +1708,77 @@ void CSTGHDRFileWriter::Initialize()
 	*(unsigned int *)base = ToU32(CSTGBankMemory::AllocAligned(0x948, 0x10));
 }
 
+/*
+ * CSTGHDRFileWriter::ProcessCommands() (`.text+0x11c560`, 152 bytes,
+ * 2026-07-25). Was long documented as blocked by "an unrecovered vtable
+ * or pointer-to-member-function table" (one of a 5-sibling cluster) --
+ * fresh disassembly found it's actually a plain fixed-slot vtable
+ * dispatch, same idiom as `CSTGFileOpener`/`CSTGFileCloser::
+ * ProcessCommands()` above/`file_opener_events.cpp`.
+ *
+ * Drains this object's own `+0x0`/`+0x4`/`+0x8`/`+0xc` ring (base/
+ * producer idx/consumer idx/capacity) -- same field layout as
+ * `CSTGSamplingDaemon::ProcessCommands()` above. 8-byte records, but a
+ * 16-bit tag `+0x0` (confirmed via the real `movzx eax, word ptr [ecx]`
+ * / `cmp ax, N`, unlike every sibling's 8-bit tag) and a 4-byte payload
+ * pointer `+0x4`.
+ *
+ * tag==0: pushes `{payload, 0}` onto `CSTGFileCloser::sInstance`'s own
+ * `+0x00` ring (same target/shape as `CSTGSamplingDaemon`'s tag==0 and
+ * `CSTGFileOpener`'s tag==2 above) -- no vtable call.
+ * tag==1: appends `payload` directly to `TSTGArrayManager<CSTGRecordBuffer>::
+ * sInstance`'s `bucketArray[writeCursor]`, advances `writeCursor` mod
+ * `modulus` (same target/shape as `CSTGSamplingDaemon`'s own tag==1
+ * above) -- no vtable call.
+ * tag==2: BOTH a raw vtable dispatch (slot 6, `call [vtbl+0x18]`) on the
+ * payload AND (confirmed via the real fallthrough, not a separate
+ * branch) the same `CSTGFileCloser::sInstance` push as tag==0.
+ * Any other tag: real, faithfully-preserved no-op.
+ */
+void CSTGHDRFileWriter::ProcessCommands()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int producerIdx = *(unsigned int *)(base + 0x4);
+	unsigned int consumerIdx = *(unsigned int *)(base + 0x8);
+
+	while (producerIdx != consumerIdx) {
+		unsigned int capacity = *(unsigned int *)(base + 0xc);
+		unsigned int nextIdx = (consumerIdx + 1) % capacity;
+		unsigned char *entry = FromU32(*(unsigned int *)(base + 0x0)) + consumerIdx * 8;
+
+		*(unsigned int *)(base + 0x8) = nextIdx;
+
+		unsigned short tag = *(unsigned short *)(entry + 0);
+		unsigned char *payload = FromU32(*(unsigned int *)(entry + 4));
+		bool pushToFileCloser = false;
+
+		if (tag == 0) {
+			pushToFileCloser = true;
+		} else if (tag == 1) {
+			TSTGArrayManager<CSTGRecordBuffer> *mgr = TSTGArrayManager<CSTGRecordBuffer>::sInstance;
+			((unsigned int *)FromU32(mgr->bucketArray))[mgr->writeCursor] = ToU32(payload);
+			mgr->writeCursor = (mgr->writeCursor + 1) % mgr->modulus;
+		} else if (tag == 2) {
+			typedef void (*VtableSlot6Fn)(void *);
+			void **vtable = *(void ***)payload;
+			((VtableSlot6Fn)vtable[6])(payload);
+			pushToFileCloser = true;
+		}
+
+		if (pushToFileCloser) {
+			unsigned char *fc = (unsigned char *)CSTGFileCloser::sInstance;
+			unsigned int fcCursor = *(unsigned int *)(fc + 0x4);
+			unsigned char *fcEntry = FromU32(*(unsigned int *)(fc + 0x0)) + fcCursor * 8;
+			*(unsigned int *)(fcEntry + 0) = ToU32(payload);
+			*(unsigned int *)(fcEntry + 4) = 0;
+			*(unsigned int *)(fc + 0x4) = (fcCursor + 1) % *(unsigned int *)(fc + 0xc);
+		}
+
+		producerIdx = *(unsigned int *)(base + 0x4);
+		consumerIdx = *(unsigned int *)(base + 0x8);
+	}
+}
+
 void CSTGSamplingDaemon::Initialize()
 {
 	unsigned char *base = (unsigned char *)this;
@@ -1729,6 +1800,72 @@ void CSTGFileCloser::Initialize()
 	*(unsigned int *)base = ToU32(CSTGBankMemory::AllocAligned(0x8fd0, 0x10));
 	*(unsigned int *)(base + 0x1c) = 0x11fa;
 	*(unsigned int *)(base + 0x10) = ToU32(CSTGBankMemory::AllocAligned(0x8fd0, 0x10));
+}
+
+/*
+ * CSTGFileCloser::ProcessCommands() (`.text+0x119b40`, 136 bytes,
+ * 2026-07-25). Was long documented as blocked by "an unrecovered vtable
+ * or pointer-to-member-function table" (one of a 5-sibling cluster) --
+ * fresh disassembly found it's actually a plain fixed-slot vtable
+ * dispatch on an untyped payload object, same idiom as
+ * `CSTGEffectRackVars::UpdateDModRoutings()` (`global.cpp`). (Its
+ * siblings `CSTGHDRFileReader`/`CSTGStreamingFileReader::
+ * ProcessCommands()` genuinely DO dispatch through a real not-yet-
+ * recovered `TSTGArrayManager<T>::indexArray` lookup table and remain
+ * blocked -- see bar2_stubs.cpp.)
+ *
+ * Drains this object's OWN SECOND embedded ring at `+0x10`/`+0x14`/
+ * `+0x18`/`+0x1c` (base/write idx/read idx/capacity) -- a completely
+ * separate ring from the FIRST one at `+0x00`/`+0x04`/`+0x08`/`+0x0c`
+ * that `CSTGSamplingDaemon`/`CSTGFileOpener`/`CSTGHDRFileWriter::
+ * ProcessCommands()` all push into via `CSTGFileCloser::sInstance` (see
+ * those functions' own comments) -- this method only ever WRITES to that
+ * first ring (tag==1, below), never reads it back, confirming two
+ * genuinely independent rings share this one 32-byte object, not one
+ * ring read two ways. 8-byte records: 1-byte tag `+0x0`, 4-byte payload
+ * pointer `+0x4`.
+ *
+ * tag==0: a plain raw vtable dispatch (slot 3, `call [vtbl+0xc]`) on the
+ * payload -- no state-field write first (unlike every other tag==0/1/2
+ * handler in this sibling cluster).
+ * tag==1: `payload->fieldAt(0xc) = 3`, then re-enqueues `{payload, 0}`
+ * onto THIS object's OWN first ring at `+0x00` (a self-referential
+ * producer step; some other, not-yet-reconstructed method drains it).
+ * Any other tag: real, faithfully-preserved no-op.
+ */
+void CSTGFileCloser::ProcessCommands()
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int writeIdx = *(unsigned int *)(base + 0x14);
+	unsigned int readIdx = *(unsigned int *)(base + 0x18);
+
+	while (writeIdx != readIdx) {
+		unsigned int capacity = *(unsigned int *)(base + 0x1c);
+		unsigned int nextIdx = (readIdx + 1) % capacity;
+		unsigned char *entry = FromU32(*(unsigned int *)(base + 0x10)) + readIdx * 8;
+
+		*(unsigned int *)(base + 0x18) = nextIdx;
+
+		unsigned char tag = entry[0];
+		unsigned char *payload = FromU32(*(unsigned int *)(entry + 4));
+
+		if (tag == 0) {
+			typedef void (*VtableSlot3Fn)(void *);
+			void **vtable = *(void ***)payload;
+			((VtableSlot3Fn)vtable[3])(payload);
+		} else if (tag == 1) {
+			*(unsigned int *)(payload + 0xc) = 3;
+
+			unsigned int ownCursor = *(unsigned int *)(base + 0x4);
+			unsigned char *ownEntry = FromU32(*(unsigned int *)(base + 0x0)) + ownCursor * 8;
+			*(unsigned int *)(ownEntry + 0) = ToU32(payload);
+			*(unsigned int *)(ownEntry + 4) = 0;
+			*(unsigned int *)(base + 0x4) = (ownCursor + 1) % *(unsigned int *)(base + 0xc);
+		}
+
+		writeIdx = *(unsigned int *)(base + 0x14);
+		readIdx = *(unsigned int *)(base + 0x18);
+	}
 }
 
 /*

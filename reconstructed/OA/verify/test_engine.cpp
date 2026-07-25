@@ -139,9 +139,10 @@ void CSTGHDRManager::ProcessRecordCommands()     { log_call("HDRManager::Process
 void CSTGHDRManager::ProcessSamplerCommands()    { log_call("HDRManager::ProcessSamplerCommands"); }
 void CSTGMonitorMixer::RunMonitors()             { log_call("RunMonitors"); }
 void CSTGFileOpener::ProcessCommands()           { log_call("FileOpener::ProcessCommands"); }
-void CSTGFileCloser::ProcessCommands()           { log_call("FileCloser::ProcessCommands"); }
+/* CSTGFileCloser::ProcessCommands()/CSTGHDRFileWriter::ProcessCommands()
+ * are real now (2026-07-25, see managers.cpp, which this test links
+ * directly) -- no mock bodies here any more, would collide at link time. */
 void CSTGHDRFileReader::ProcessCommands()        { log_call("HDRFileReader::ProcessCommands"); }
-void CSTGHDRFileWriter::ProcessCommands()        { log_call("HDRFileWriter::ProcessCommands"); }
 void CSTGStreamingFileReader::ProcessCommands()  { log_call("StreamingFileReader::ProcessCommands"); }
 /* CSTGCDWorker::ProcessCommands() is real now (sec 10.158, see
  * managers.cpp) -- no mock body here any more. Test [4] below constructs
@@ -509,13 +510,20 @@ int main(void)
 	check_log("RunFileDaemonSynchronization",
 		  "HDRManager::ProcessPlaybackCommands;HDRManager::ProcessRecordCommands;"
 		  "HDRManager::ProcessSamplerCommands;FileOpener::ProcessCommands;"
-		  "HDRFileReader::ProcessCommands;HDRFileWriter::ProcessCommands;"
-		  "FileCloser::ProcessCommands;StreamingFileReader::ProcessCommands;"
+		  "HDRFileReader::ProcessCommands;"
+		  "StreamingFileReader::ProcessCommands;"
 		  /* CDWorker::ProcessCommands() and CSTGSamplingDaemon::
 		   * ProcessCommands() are both real now (sec 10.158/10.160) -- `cdw`
 		   * and `sd` are freshly, really-constructed just above
 		   * (producer==consumer==0 for both), so they're both genuine
-		   * silent no-ops here, no log entries expected for either. */
+		   * silent no-ops here, no log entries expected for either.
+		   * CSTGFileCloser::ProcessCommands()/CSTGHDRFileWriter::
+		   * ProcessCommands() are both real now too (2026-07-25, see
+		   * managers.cpp) -- `fc`/`hfw` are freshly, really-constructed
+		   * above (their own real ctors zero both write and read indices
+		   * of every ring they own), so they're genuine silent no-ops
+		   * here too, same treatment, no log entries expected for
+		   * either. */
 		  "");
 
 	printf("[5] CSTGEngine destructor's exact confirmed teardown order\n");

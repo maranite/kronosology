@@ -45,6 +45,11 @@ static void *mmap32(unsigned long size)
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
 
 CSTGFileOpener *CSTGFileOpener::sInstance;
+/* CSTGFileCloser::sInstance needs its own local storage too, same reason
+ * -- file_opener_events.cpp's now-real CSTGFileOpener::ProcessCommands()
+ * (2026-07-25) references it, even though this file's own tests never
+ * call ProcessCommands() (only AddPlaybackEvent/AddRecordEvent). */
+CSTGFileCloser *CSTGFileCloser::sInstance;
 
 /* ---- CSTGPlaybackBuffer::SetCurrentReadEvent/RemoveEvent call-tracking mocks ---- */
 struct CallLog {

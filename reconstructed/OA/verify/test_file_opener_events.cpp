@@ -3,7 +3,8 @@
  * test_file_opener_events.cpp  -  host-side known-answer tests for
  * CSTGFileOpener::AddPlaybackEvent(CSTGAudioEvent*, unsigned int)/
  * AddRecordEvent(CSTGAudioEvent*, unsigned int) (batch 51), plus
- * CSTGFileOpener::Initialize() (batch 63).
+ * CSTGFileOpener::Initialize() (batch 63) and ProcessCommands()
+ * (2026-07-25).
  *
  * Links src/engine/file_opener_events.cpp + src/mem/bank_memory.cpp (only
  * Initialize() needs the latter, via CSTGBankMemory::AllocAligned() --
@@ -27,6 +28,22 @@ static void *mmap32(unsigned long size)
 		    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
 }
 static unsigned int ToU32(void *p) { return (unsigned int)(unsigned long)p; }
+
+/* Fixed-slot vtable dispatch targets for CSTGFileOpener::ProcessCommands()
+ * (2026-07-25) -- same idiom as CSTGEffectRackVars::UpdateDModRoutings()
+ * (global.cpp): a plain vtable slot call on an untyped payload object, not
+ * the "unrecovered PTM table" this function was long documented as
+ * blocked by. */
+static int g_slot2Calls;
+static void Slot2Handler(void *) { g_slot2Calls++; }
+static int g_slot4Calls;
+static void Slot4Handler(void *) { g_slot4Calls++; }
+/* CSTGFileCloser::sInstance's own real storage lives in managers.cpp (not
+ * linked here) -- this file needs its own local definition, same "give it
+ * its own local storage" treatment already established elsewhere in this
+ * project (e.g. test_managers.cpp's own TSTGArrayManager<CSTGRecordBuffer>::
+ * sInstance). */
+CSTGFileCloser *CSTGFileCloser::sInstance;
 
 static int g_fail;
 static void check_eq(const char *label, unsigned int got, unsigned int want)
@@ -191,6 +208,75 @@ int main(void)
 		 * (Initialize only ever writes +0x0 and +0xc of each lane). */
 		check_eq("A lane 0 writeIdx untouched (still 0xcccccccc)",
 			 *(unsigned int *)(opMem + 0x4), 0xcccccccc);
+	}
+
+	printf("[6] CSTGFileOpener::ProcessCommands(): tag 0/1/2 + an unhandled tag\n");
+	{
+		/* Drains this object's own command ring at +0x210 (Initialize()'s
+		 * "ownRing" above). Four entries: [0] tag==0 (vtable slot 2,
+		 * payload+0xc=2), [1] tag==1 (vtable slot 4, payload+0xc=4,
+		 * +0x10=1), [2] tag==2 (payload+0xc=3, push {payload,0} onto
+		 * CSTGFileCloser::sInstance's +0x00 ring, no vtable call),
+		 * [3] tag==5 (unhandled -- real, faithfully-preserved no-op). */
+		unsigned char *opMem = (unsigned char *)mmap32(0x300);
+		memset(opMem, 0, 0x300);
+		unsigned char *ringBuf = (unsigned char *)mmap32(0x1000);
+		memset(ringBuf, 0, 0x1000);
+		unsigned char *payload0 = (unsigned char *)mmap32(0x20);
+		unsigned char *payload1 = (unsigned char *)mmap32(0x20);
+		unsigned char *payload2 = (unsigned char *)mmap32(0x20);
+		unsigned char *payload3 = (unsigned char *)mmap32(0x20);
+		memset(payload0, 0xcc, 0x20);
+		memset(payload1, 0xcc, 0x20);
+		memset(payload2, 0xcc, 0x20);
+		memset(payload3, 0xcc, 0x20);
+
+		void *vtbl[5] = { 0, 0, (void *)&Slot2Handler, 0, (void *)&Slot4Handler };
+		*(void **)payload0 = vtbl;
+		*(void **)payload1 = vtbl;
+
+		unsigned char *ring = opMem + 0x210;
+		ringBuf[0 * 8 + 0] = 0;
+		*(unsigned int *)(ringBuf + 0 * 8 + 4) = ToU32(payload0);
+		ringBuf[1 * 8 + 0] = 1;
+		*(unsigned int *)(ringBuf + 1 * 8 + 4) = ToU32(payload1);
+		ringBuf[2 * 8 + 0] = 2;
+		*(unsigned int *)(ringBuf + 2 * 8 + 4) = ToU32(payload2);
+		ringBuf[3 * 8 + 0] = 5;
+		*(unsigned int *)(ringBuf + 3 * 8 + 4) = ToU32(payload3);
+
+		*(unsigned int *)(ring + 0x0) = ToU32(ringBuf);
+		*(unsigned int *)(ring + 0xc) = 0x10;	/* capacity */
+		*(unsigned int *)(ring + 0x4) = 4;	/* write idx: 4 entries */
+		*(unsigned int *)(ring + 0x8) = 0;	/* read idx */
+
+		unsigned char fcMem[32];
+		memset(fcMem, 0, 32);
+		unsigned char *fcRing = (unsigned char *)mmap32(0x1000);
+		*(unsigned int *)(fcMem + 0x0) = ToU32(fcRing);
+		*(unsigned int *)(fcMem + 0xc) = 0x10;
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcMem;
+
+		g_slot2Calls = 0;
+		g_slot4Calls = 0;
+		CSTGFileOpener *opener = (CSTGFileOpener *)opMem;
+		opener->ProcessCommands();
+
+		check_eq("read idx (+0x218) advanced to 4", *(unsigned int *)(ring + 0x8), 4);
+		check_eq("tag==0: vtable slot 2 called exactly once", g_slot2Calls, 1);
+		check_eq("tag==0: payload0's own +0xc field set to 2", *(unsigned int *)(payload0 + 0xc), 2);
+		check_eq("tag==1: vtable slot 4 called exactly once", g_slot4Calls, 1);
+		check_eq("tag==1: payload1's own +0xc field set to 4", *(unsigned int *)(payload1 + 0xc), 4);
+		check_eq("tag==1: payload1's own +0x10 field set to 1", *(unsigned int *)(payload1 + 0x10), 1);
+		check_eq("tag==2: payload2's own +0xc field set to 3", *(unsigned int *)(payload2 + 0xc), 3);
+		check_eq("tag==2: CSTGFileCloser ring cursor (+0x4) advanced to 1",
+			 *(unsigned int *)(fcMem + 0x4), 1);
+		check_eq("tag==2: CSTGFileCloser ring entry[0] dword0 == payload2",
+			 ((unsigned int *)fcRing)[0], ToU32(payload2));
+		check_eq("tag==2: CSTGFileCloser ring entry[0] dword4 == 0",
+			 ((unsigned int *)fcRing)[1], 0);
+		check_eq("tag==5 (unhandled): payload3's own +0xc field left untouched (still 0xcc pattern)",
+			 *(unsigned int *)(payload3 + 0xc), 0xcccccccc);
 	}
 
 	printf("======================================================\n");

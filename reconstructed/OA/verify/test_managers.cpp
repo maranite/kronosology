@@ -186,6 +186,15 @@ static void check_eq(const char *label, unsigned int got, unsigned int want)
 	g_fail++;
 }
 
+/* Fixed-slot vtable dispatch targets for CSTGFileCloser::ProcessCommands()/
+ * CSTGHDRFileWriter::ProcessCommands() (2026-07-25) -- both call through a
+ * plain vtable slot on an untyped payload object, same idiom as
+ * CSTGEffectRackVars::UpdateDModRoutings() (global.cpp). */
+static int g_fileCloserSlot3Calls;
+static void FileCloserSlot3Handler(void *) { g_fileCloserSlot3Calls++; }
+static int g_hdrFileWriterSlot6Calls;
+static void HdrFileWriterSlot6Handler(void *) { g_hdrFileWriterSlot6Calls++; }
+
 static void check_float(const char *label, float got, float want)
 {
 	if (got == want) {
@@ -1257,6 +1266,126 @@ int main(void)
 
 		delete[] fcBuf;
 		delete mgr;
+	}
+
+	printf("\n[29] CSTGFileCloser::ProcessCommands() (2026-07-25)\n");
+	{
+		/* Drains this object's OWN SECOND ring (+0x10/+0x14/+0x18/+0x1c),
+		 * a completely independent ring from the +0x00 one test [28]
+		 * pushes into via CSTGFileCloser::sInstance. Two entries:
+		 * [0] tag==0 (plain vtable slot-3 dispatch, no state-field
+		 * write), [1] tag==1 (payload+0xc=3, re-enqueues {payload,0}
+		 * onto this object's own +0x00 ring). */
+		unsigned char *ringB = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *ringA = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							      MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload0 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload1 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(payload0, 0xcc, 0x20);
+		memset(payload1, 0xcc, 0x20);
+
+		void *vtbl[4] = { 0, 0, 0, (void *)&FileCloserSlot3Handler };
+		*(void **)payload0 = vtbl;
+
+		ringB[0 * 8 + 0] = 0;
+		*(unsigned int *)(ringB + 0 * 8 + 4) = ToU32(payload0);
+		ringB[1 * 8 + 0] = 1;
+		*(unsigned int *)(ringB + 1 * 8 + 4) = ToU32(payload1);
+
+		unsigned char fcMem[32];
+		memset(fcMem, 0, 32);
+		*(unsigned int *)(fcMem + 0x10) = ToU32(ringB);
+		*(unsigned int *)(fcMem + 0x1c) = 0x10;	/* ringB capacity */
+		*(unsigned int *)(fcMem + 0x14) = 2;		/* ringB write: 2 entries */
+		*(unsigned int *)(fcMem + 0x0) = ToU32(ringA);
+		*(unsigned int *)(fcMem + 0xc) = 0x10;		/* ringA capacity */
+
+		g_fileCloserSlot3Calls = 0;
+		CSTGFileCloser *fc = (CSTGFileCloser *)fcMem;
+		fc->ProcessCommands();
+
+		check_eq("consumer index (+0x18) advanced to 2", *(unsigned int *)(fcMem + 0x18), 2);
+		check_eq("tag==0: vtable slot 3 called exactly once", g_fileCloserSlot3Calls, 1);
+		check_eq("tag==1: payload1's own +0xc field set to 3", *(unsigned int *)(payload1 + 0xc), 3);
+		check_eq("tag==1: own ring (+0x00) writeIdx advanced to 1", *(unsigned int *)(fcMem + 0x4), 1);
+		check_eq("tag==1: own ring entry[0] dword0 == payload1", ((unsigned int *)ringA)[0], ToU32(payload1));
+		check_eq("tag==1: own ring entry[0] dword4 == 0", ((unsigned int *)ringA)[1], 0);
+	}
+
+	printf("\n[30] CSTGHDRFileWriter::ProcessCommands() (2026-07-25)\n");
+	{
+		/* Own +0x0/+0x4/+0x8/+0xc ring, 8-byte records but a 16-bit tag
+		 * @+0x0 (unlike every sibling's 8-bit tag). Three entries:
+		 * [0] tag==0 (push to CSTGFileCloser::sInstance's +0x00 ring,
+		 * no vtable call), [1] tag==1 (push to
+		 * TSTGArrayManager<CSTGRecordBuffer>::sInstance.bucketArray, no
+		 * vtable call), [2] tag==2 (vtable slot-6 dispatch PLUS the
+		 * same CSTGFileCloser push as tag==0). */
+		unsigned char *ring = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload0 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload1 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		unsigned char *payload2 = (unsigned char *)mmap(0, 0x20, PROT_READ | PROT_WRITE,
+								 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		memset(payload0, 0xcc, 0x20);
+		memset(payload1, 0xcc, 0x20);
+		memset(payload2, 0xcc, 0x20);
+
+		void *vtbl[7] = { 0, 0, 0, 0, 0, 0, (void *)&HdrFileWriterSlot6Handler };
+		*(void **)payload2 = vtbl;
+
+		*(unsigned short *)(ring + 0 * 8 + 0) = 0;
+		*(unsigned int *)(ring + 0 * 8 + 4) = ToU32(payload0);
+		*(unsigned short *)(ring + 1 * 8 + 0) = 1;
+		*(unsigned int *)(ring + 1 * 8 + 4) = ToU32(payload1);
+		*(unsigned short *)(ring + 2 * 8 + 0) = 2;
+		*(unsigned int *)(ring + 2 * 8 + 4) = ToU32(payload2);
+
+		unsigned char hwMem[20];
+		memset(hwMem, 0, 20);
+		*(unsigned int *)(hwMem + 0x0) = ToU32(ring);
+		*(unsigned int *)(hwMem + 0xc) = 0x10;	/* capacity */
+		*(unsigned int *)(hwMem + 0x4) = 3;	/* producer: 3 entries */
+
+		unsigned char *fcBuf2 = new unsigned char[32];
+		memset(fcBuf2, 0, 32);
+		CSTGFileCloser::sInstance = (CSTGFileCloser *)fcBuf2;
+		unsigned char *fcRing = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+							       MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		*(unsigned int *)(fcBuf2 + 0x0) = ToU32(fcRing);
+		*(unsigned int *)(fcBuf2 + 0xc) = 0x10;
+
+		TSTGArrayManager<CSTGRecordBuffer> *mgr2 = new TSTGArrayManager<CSTGRecordBuffer>();
+		memset(mgr2, 0, sizeof(*mgr2));
+		TSTGArrayManager<CSTGRecordBuffer>::sInstance = mgr2;
+		unsigned char *bucketArr = (unsigned char *)mmap(0, 0x1000, PROT_READ | PROT_WRITE,
+								  MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+		mgr2->bucketArray = ToU32(bucketArr);
+		mgr2->writeCursor = 0;
+		mgr2->modulus = 97;
+
+		g_hdrFileWriterSlot6Calls = 0;
+		CSTGHDRFileWriter *hw = (CSTGHDRFileWriter *)hwMem;
+		hw->ProcessCommands();
+
+		check_eq("consumer index (+0x8) advanced to 3", *(unsigned int *)(hwMem + 0x8), 3);
+		check_eq("tag==2: vtable slot 6 called exactly once", g_hdrFileWriterSlot6Calls, 1);
+		check_eq("CSTGFileCloser ring cursor (+0x4) advanced to 2 (tag0+tag2 both push)",
+			 *(unsigned int *)(fcBuf2 + 0x4), 2);
+		check_eq("CSTGFileCloser ring entry[0] == payload0 (from tag==0)",
+			 ((unsigned int *)fcRing)[0], ToU32(payload0));
+		check_eq("CSTGFileCloser ring entry[1] == payload2 (from tag==2)",
+			 ((unsigned int *)fcRing)[2], ToU32(payload2));
+		check_eq("tag==1: TSTGArrayManager writeCursor advanced to 1", mgr2->writeCursor, 1);
+		check_eq("tag==1: bucketArray[0] == payload1", ((unsigned int *)bucketArr)[0], ToU32(payload1));
+
+		delete[] fcBuf2;
+		delete mgr2;
 	}
 
 	printf("=====================================================\n");

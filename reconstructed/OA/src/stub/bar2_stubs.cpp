@@ -139,17 +139,32 @@ void CSTGEffectManager::Initialize() {}
 void CSTGHDRManager::ProcessHDRRecord() {}
 void CSTGMonitorMixer::RunMonitors() {}
 /* CSTGFileOpener::Initialize() is real now, batch 63 -- see
- * src/engine/file_opener_events.cpp. */
-void CSTGFileOpener::ProcessCommands() {}
-void CSTGFileCloser::ProcessCommands() {}
+ * src/engine/file_opener_events.cpp. CSTGFileOpener::ProcessCommands()
+ * is real now too, batch 64ish (2026-07-25) -- see the same file. This
+ * REVISES the older "unrecovered vtable/PTM table" blocking note that
+ * used to cover all five file-daemon ProcessCommands() siblings: fresh
+ * disassembly found this one (and CSTGFileCloser's/CSTGHDRFileWriter's,
+ * below/managers.cpp) is actually a plain fixed-slot vtable dispatch on
+ * an untyped payload object, the same already-established idiom as
+ * CSTGEffectRackVars::UpdateDModRoutings() (oa_global.h) -- not a real
+ * PTM/function-pointer table at all. */
+/* CSTGFileCloser::ProcessCommands() is real now too, same batch -- see
+ * managers.cpp (right after CSTGFileCloser::Initialize()). */
 /* CSTGHDRFileReader::Initialize()/CSTGStreamingFileReader::Initialize()
- * are real now too, sec 10.151 -- see managers.cpp. Their own
- * ProcessCommands() siblings are still deferred (each dispatches
- * through a further not-yet-recovered ring-buffer/vtable-callback
- * pattern, same class of scope as CSTGHDRManager's own three still-
- * deferred sub-methods above). */
+ * are real now too, sec 10.151 -- see managers.cpp.
+ * CSTGHDRFileWriter::ProcessCommands() is real now too, same batch as
+ * CSTGFileOpener/CSTGFileCloser above -- see managers.cpp.
+ * CSTGHDRFileReader::ProcessCommands()/CSTGStreamingFileReader::
+ * ProcessCommands() remain genuinely blocked -- re-disassembled fresh
+ * this batch and confirmed DIFFERENT from their three now-real siblings:
+ * both dispatch through `TSTGArrayManager<T>::sInstance->indexArray`, a
+ * REAL per-command-type lookup table (indexed by a small integer decoded
+ * from the record) whose own populated CONTENTS are not yet recovered --
+ * a genuine not-yet-recovered function-pointer table, not just a fixed
+ * vtable slot. Needs the table's real contents transcribed (same class
+ * of future data-recovery push as CSTGParamDescriptor/sCCInfoTable)
+ * before these two can be reconstructed for real. */
 void CSTGHDRFileReader::ProcessCommands() {}
-void CSTGHDRFileWriter::ProcessCommands() {}
 void CSTGStreamingFileReader::ProcessCommands() {}
 /* USTGHDRUtils::ConvertWaveToSTGSamples() is real now, batch 26 -- see
  * src/engine/wave_sample_convert.cpp. Convert44100WaveToSTGSamples()
@@ -168,11 +183,15 @@ unsigned long USTGHDRUtils::Convert44100WaveToSTGSamples(float *, bool, bool, ch
  * CSTGHDRCircularBuffer, a brand-new fully-reconstructed class -- see
  * oa_engine.h). */
 /* CSTGSamplingDaemon::ProcessCommands() is real now, sec 10.160 -- see
- * managers.cpp (right after CSTGCDWorker::ProcessCommands()). Its own
- * FIVE siblings (CSTGFileCloser/CSTGHDRFileReader/CSTGHDRFileWriter/
- * CSTGStreamingFileReader::ProcessCommands()) all still dispatch through
- * a not-yet-recovered vtable or pointer-to-member-function table and
- * remain deliberately stubbed below. */
+ * managers.cpp (right after CSTGCDWorker::ProcessCommands()). Of its
+ * former FIVE deferred siblings, THREE (CSTGFileOpener/CSTGFileCloser/
+ * CSTGHDRFileWriter::ProcessCommands()) are real now too (batch 64ish,
+ * 2026-07-25 -- see file_opener_events.cpp/managers.cpp) -- fresh
+ * disassembly found a plain fixed-slot vtable dispatch, not the PTM
+ * table this note used to assume. The remaining TWO (CSTGHDRFileReader/
+ * CSTGStreamingFileReader::ProcessCommands()) really do dispatch through
+ * a not-yet-recovered `TSTGArrayManager<T>::indexArray`-based per-command
+ * lookup table and remain deliberately stubbed below. */
 /* CSTGMidiPortManager::Initialize() is real now, sec 10.230/
  * MASTER_REFERENCE -- see src/engine/midi_port_manager.cpp (the root fix
  * for the CSTGMidiQueueWriter::Write() ringCtl-NULL crash).
