@@ -34,7 +34,7 @@ Eva/
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
 | 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
-| 6. Breadth sweep | **First batch done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` reconstructed for real (previously Tier-B no-ops that left `CLevelManagerArray` permanently empty) — `CScheduler`'s own per-tick level-dispatch substrate is now genuinely live, confirmed via `verify/test_level_manager_array.cpp` (15/15 checks) and a fresh live `kronos_vm` boot (same clean `Start closing`/`End closing` exit as 4c, now with real `OmegaSchedulingThread`s actually ticking it). See "Stage 6: breadth sweep" below. 37,696 of 37,795 functions still `pending` — this is one small, deliberately-scoped slice, not a broad sweep yet |
+| 6. Breadth sweep | **Batch 3 done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), and now `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3, upgraded from Tier-B — see "Stage 6: breadth sweep, batch 3" below for the safety-critical vtable/CFileMan-CResMan fixes this required once `AddModule()` actually populates `mModules`). 116 of 37,795 functions reconstructed — still one small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 
@@ -1226,3 +1226,101 @@ either.** Not started, and per this survey, correctly so — this is a real, ~15
 thousands-of-function UI toolkit that would only matter once actual `CFormXxx` mode UIs
 are in scope, which they explicitly aren't (PLAN.md's own "UI feature completeness is
 not in scope" boundary).
+
+## Stage 6: breadth sweep, batch 3 — 2026-07-25
+
+Follows directly from batch 2's own leftover candidate: `module_manager.cpp`'s
+`AddModule()`/`EnableUpdate()` were the last 2 Tier-B stubs in `CModuleManager`
+(`Setup`/`Config`/`AdjustTaskMask`/`Start` were already Tier A). Both have real
+boot-path callers (`mains.cpp`'s 8 `MMainXxx` registration shims call `AddModule()`
+via `CSysApiInstance::AddModule()`; `ckernel.cpp`'s `InitSystemLayer()` calls
+`EnableUpdate(1)` directly), so `mModules`/`mTopologyChanged` were staying
+permanently at their construction-time zero values — the exact same "real caller,
+dead Tier-B stub" shape batch 1 found in `CLevelManagerArray::Add()`/`Find()`.
+
+**`AddModule()`** (`.text+0x0805efa0`, 869 bytes): real body performs a by-name
+linear scan over `mModules` (the decompile renders it as the same scan twice in a
+row — an existence check, then a second pass to re-derive the index for
+`RemoveAtIndex()` — collapsed to one scan here per this project's established
+Duff's-device-collapse license, since nothing mutates `mModules` between the two
+real passes). If a module sharing the new module's `mName` is already registered,
+it's `RemoveAtIndex()`'d first (using `mModules`' own `mUnknown04` field as
+`RemoveAtIndex`'s `callDtorCallback` argument — a genuine re-registration-by-name
+mechanism), then the new module is always `Add()`'d, `mBusy` is cleared, and the
+host is conditionally notified if `mStarted`+`mTopologyChanged` are both set.
+
+**`EnableUpdate()`** (`.text+0x08061ca0`, 74 bytes): confirmed as the real
+(previously-flagged-as-"not traced") setter of `mTopologyChanged` — unconditional
+on every call; if `enable != 0`, also clears `mBusy` and conditionally notifies the
+host if `mStarted` is set.
+
+### Safety-critical follow-on, not just documentation
+
+Making `AddModule()` real means `CModuleManager::Setup()`/`Config()`/`Start()` (both
+already Tier A) now genuinely walk a populated `mModules` and dispatch through every
+registered module's vtable — previously provably dead code (batch 2's own
+`omega_vtables.cpp` comment: "never actually dispatched through by any reconstructed
+code ... since `CModuleManager::AddModule()` is a Tier-B stub"). Two live crash risks
+this exposes were found and fixed in the same pass:
+
+1. **6 of `mains.cpp`'s derived-module vtable placeholders were bare, always-NULL
+   scalar globals**, not slot arrays (`void *PTR__CEditMan_08e85ea8;` etc.) —
+   harmless while `Setup()`/`Config()`/`Start()` never actually dispatched through
+   them, a live NULL-pointer-call crash the moment they do (`ckernel.cpp` calls
+   `MMainEditMan()` then `Setup()`/`Config()` immediately after — the very first
+   thing `InitSystemLayer()` does). Upgraded to real `EvaVTableStub`-backed arrays,
+   sized via this project's established `symbols.csv`-boundary methodology:
+   `CEditMan`/`CSeqTimer`/`CSysEx`/`CChunkMan`/`CDumpManMod` = 7 slots each (matching
+   `CModule`'s own base count), `CMessagePort` (`CViewBase`'s real vtable) = 13 slots
+   (real extra virtuals beyond `CModule`'s 7, not individually decoded).
+2. **`CFileMan`/`CResMan` were modeled as independent stub classes with no `CModule`
+   base** (`class CFileMan { public: CFileMan() {} };`), leaving their malloc'd
+   buffer's `+4` "name" slot uninitialized. `AddModule()`'s real by-name scan
+   dereferences that slot unconditionally the moment any other module is already
+   registered (true for both — `EditMan`/`Viewer`/`SeqTimer` register first) —
+   `strcmp(garbage_or_NULL, existingName)`, a near-certain crash (guaranteed if the
+   fresh page happens to come back zeroed, since `strcmp(NULL, ...)` dereferences
+   NULL). Both real ctors take no name argument (`functions.csv`:
+   `CFileMan::CFileMan()`/`CResMan::CResMan()`), which only makes sense if each
+   really does chain into `CModule`'s own base ctor with a hardcoded name literal —
+   fixed by deriving both from `CModule` and calling `CModule("FileMan")`/
+   `CModule("ResMan")` (placeholder name content, not decoded — same "unfaithful
+   placeholder name doesn't change this pass's own control flow" license already
+   used for `CEditMan_SysName` etc.).
+
+### Verification
+
+New `verify/test_module_manager_add_module.cpp` (13 checks): plain append on an
+empty `mModules`, a second distinct-name append, by-name dedup-and-replace, `mBusy`
+clearing, `EnableUpdate()`'s gating behavior, and — the safety-critical case —
+`Setup()`/`Config()` dispatching through a genuinely-populated `mModules` without
+crashing. All 5 verify binaries pass (13 new + all pre-existing). `make` + `make
+verify` clean; `tools/build_lenny.sh` real-links against the on-image target libs
+(`LINK OK`).
+
+Live `kronos_vm` re-boot (existing `/root/eva_boot_test_20260722` scratch dir on
+the `kronosvm` sandbox — no VM/telnet ports were bound at the time, so the
+recipe's default ports were reused rather than shifted; freshly rebuilt Eva binary
+deployed into the image's `/korg/rw/Eva` via a loop mount of partition 6) reproduced
+the full, identical boot trace end to end, now genuinely exercising the fixed
+`AddModule()`/`Setup()`/`Config()`/`AdjustTaskMask()`/`Start()`/`EnableUpdate()`
+chain inside `init system layer`:
+
+```
+Eva will run on CPU 2
+begin omega init
+create new kernel
+host buf init
+set config info
+init system layer
+mains
+done with mains
+create init thread
+start timing thread
+done with omega init
+end omega init
+Start closing
+End closing
+```
+
+Zero crashes, zero regressions from the previously-established clean-exit trace.
