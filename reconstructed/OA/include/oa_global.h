@@ -2246,13 +2246,21 @@ struct CSTGControllerInfo {
 	 * SendUnsolicitedUIParam(unsigned int, unsigned int, long,
 	 * eSTGMidiSource) (sec 10.126, confirmed via relocation from
 	 * CSTGControllerRTData::OnExtModePlayMuteSwitchAssignChange/
-	 * OnExtModeSelectSwitchAssignChange) confirmed real, deliberately
-	 * deferred extern -- own body not reconstructed. Confirmed STATIC
-	 * (no implicit `this`): both real call sites use all 3 registers
-	 * (eax/edx/ecx) plus one stack slot for the 4 explicit parameters,
-	 * with nothing left over for a `this` pointer. Real `eSTGMidiSource`
-	 * enum modeled as `int` (project convention for not-independently-
-	 * defined enums).
+	 * OnExtModeSelectSwitchAssignChange). Confirmed STATIC (no implicit
+	 * `this`): both real call sites use all 3 registers (eax/edx/ecx)
+	 * plus one stack slot for the 4 explicit parameters, with nothing
+	 * left over for a `this` pointer. Real `eSTGMidiSource` enum
+	 * modeled as `int` (project convention for not-independently-defined
+	 * enums).
+	 *
+	 * Real now, batch 60 -- see
+	 * src/engine/controller_info_send_unsolicited_ui_param.cpp:
+	 * `.text+0x945d0`, 516 bytes. A 4-way message-building dispatch onto
+	 * the already-real `PushUnsolicitedMessage()` -- see that file's own
+	 * header comment for the full per-path derivation (including a raw
+	 * vtable-slot dispatch on a not-independently-typed sub-object,
+	 * matching `CSTGEffectRackVars::UpdateDModRoutings`'s own established
+	 * "raw vtable-slot call" idiom).
 	 */
 	static void SendUnsolicitedUIParam(unsigned int paramId, unsigned int value,
 					    long arg3, int midiSource);

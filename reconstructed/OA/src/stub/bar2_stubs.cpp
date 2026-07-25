@@ -301,7 +301,9 @@ void CSTGParamsOwner::UseDefaults() {}
  * too, sec 10.161 -- see src/engine/global.cpp + the new
  * src/engine/cc_info_table.cpp (CSTGCCInfo::sCCInfoTable). */
 void CSTGControllerRTData::OnExtModeSetChange() {}
-void CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int, long, int) {}
+/* CSTGControllerInfo::SendUnsolicitedUIParam(unsigned int, unsigned int,
+ * long, int) is real now, batch 60 -- see
+ * src/engine/controller_info_send_unsolicited_ui_param.cpp. */
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
 /* CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) -- confirmed
  * real, deliberately deferred (own body not reconstructed), per
