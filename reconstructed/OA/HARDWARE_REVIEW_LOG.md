@@ -865,3 +865,87 @@ whether one or two Pitch Bend messages appear per hardware sample
 (resolves item 1); compare the exact byte sequence for a Pitch Bend vs
 a Channel Pressure vs a Note-On send side by side to test the
 "terminator = byte length" hypothesis (item 2).
+
+---
+
+## SCalibrationData::InitAll() — compiled-in calibration defaults (batch, 2026-07-25)
+
+Uncertain:
+
+1. **Semantics of the 0x00-0x1f "generic curve table" and the 0x9c-0xbc
+   "touch screen" field group are not independently confirmed.** Every
+   OTHER field group in this function (JoystickX/Y, Ribbon, Vector
+   joystick, Half-damper, Aftertouch, LCD control) matches a named
+   offset this project already established elsewhere (`calibration_msg_
+   handler.cpp`'s `Start*Calibration` methods, or the shared
+   `0xc4-0xe7` "LCD control" block). These two groups have no such
+   cross-reference anywhere else in this project; their field-by-field
+   values are transcribed faithfully from disassembly, but what each
+   individual value MEANS (e.g. is 0x9c really a corner-detection pixel
+   margin? is the 0x00-0x1f table really shared/reused for something
+   other than "drum pad defaults" despite matching InitDrumPads' own
+   byte layout almost exactly?) is not established.
+2. **The "LCD control" gain (a 1.0f float at +0xc8) and range fields
+   (several 0xff/0xffff words) are inferred to be contrast/brightness
+   calibration from their position (same struct region `SetLCDBrightness`
+   presumably also touches) and shape (a unity gain + saturating
+   ranges), not confirmed against `CSTGControlMsgHandler::
+   SetLCDBrightness`'s own body (not reconstructed in this pass).**
+3. **The known, still-open structural discrepancy flagged in
+   `setup_global_resources.cpp`'s own comment at this call site**:
+   ground truth calls `InitAll()` then falls through into the SAME
+   kind-branch/`SetupNKS4Calibration` code this project's `if
+   (calLoaded)` block already runs -- i.e. real hardware exercises that
+   code on BOTH the calibration-file-loaded and calibration-file-missing
+   paths, this project's reconstruction currently only does so on the
+   loaded path. Deliberately left unfixed this pass (see that file's
+   own comment for why) -- a real remaining gap, not an oversight.
+
+Real-HW test that would help: delete/rename `/korg/rw/Calibration/
+Calibration.img` on a real unit and reboot, then check whether the
+front panel's joystick/ribbon/vector-joystick/damper/aftertouch/touch
+screen controls and LCD contrast/brightness come up at sane (if
+uncalibrated-feeling) defaults rather than being dead/garbage, and
+whether `CSTGControlMsgHandler::SetLCDBrightness`'s real UI behavior
+matches this pass's "unity gain, 0xff/0xffff range" interpretation of
+the 0xc4-0xe7 block.
+
+---
+
+## CPowerOffTimer — Auto Power Off inactivity timer, 7 methods (batch, 2026-07-25)
+
+Uncertain:
+
+1. **Three of DoTimerTick()'s four tick-suppression gate fields have no
+   independently-confirmed real name/purpose**, only a raw offset and a
+   plausible guess from context: `STGAPIFrontPanelStatus+0x109c`
+   ("power-off inhibited", maybe set by an in-progress footswitch/pedal
+   calibration or a modal dialog), and `CSTGGlobal::sInstance+0x6a8`
+   being in `{1,2}` (an unidentified transient system mode -- e.g.
+   save/load in progress). The 4th gate (`CSTGMessageProcessor
+   ::sInstance+0x48`) reuses an offset this project already confirmed
+   elsewhere as a "messages/UI busy" flag, so that one is on firmer
+   ground.
+2. **DoTimerTick() itself is not yet wired to a real periodic timer
+   source anywhere in this project** -- it is a confirmed-real,
+   reconstructed function with no confirmed-real caller yet found (the
+   real RTAI/Linux timer tick that drives it was not located in this
+   pass). Its behavior is verified in isolation (KAT) but never
+   exercised end-to-end.
+3. **The exact real-world "lead time" UX is inferred from the numbers,
+   not observed**: e.g. a unit with panel-type table value 1200s (20
+   min) gets a 120s warning lead, matching the <=1800s bucket, but
+   whether the front panel actually shows a "powering off in X seconds"
+   countdown, a blinking LED, or something else when state transitions
+   to 2 (warning) or 3 (critical) is not confirmed -- `PushUnsolicited
+   Message()`'s own UI-side consumer for subtypes 0x27/0x28/0x29 is
+   outside OA.ko (EVA or the front-panel firmware) and not examined in
+   this pass.
+
+Real-HW test that would help: sit a real unit idle (no keypresses,
+knob turns, or MIDI activity) for its full configured timeout and
+observe what actually happens on screen/LEDs at the warning threshold
+and at expiry, to confirm the 0x27/0x28/0x29 message subtypes map to
+the interpretation above; separately, trigger a long save/load
+operation and confirm the countdown visibly pauses/resets (tests
+Begin/EndLongProcess and the CSTGGlobal+0x6a8 gate).
