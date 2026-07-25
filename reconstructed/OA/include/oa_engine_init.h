@@ -659,8 +659,35 @@ struct CSTGMidiOutPort {
 	void BumpTimers();
 
 	/*
+	 * ReadNextMessage(unsigned char*, unsigned int) -- CONFIRMED real
+	 * member of THIS class (`_ZN15CSTGMidiOutPort15ReadNextMessageEPhj`,
+	 * `.text+0xf84a0`, 191 bytes) -- hosted here (unlike the 5 methods
+	 * below) because it does NOT call any of the still-pure vtable
+	 * slots, only `CSTGMidiQueueMessageReader::ReadMessage()` (a
+	 * different class entirely), so there is no non-virtual-dispatch
+	 * hazard in declaring it on the base. Round-robins q1/q2/q3 up to 3
+	 * times (or polls the current slot once, unadvanced, mid-SysEx) via
+	 * the shared `PollNextRegularMessage()` helper (midi_out_port_
+	 * serial.cpp) and RETURNS whatever `ReadMessage()` returned (0 if no
+	 * slot had data, else the message length copied into `buf`) --
+	 * confirmed via raw disassembly that `eax` is NOT clobbered between
+	 * the last `ReadMessage()` call and this function's own `ret` on
+	 * every path. CORRECTED (candidate-3/KorgUsb batch): previously
+	 * modeled as `void`, declared on `CSTGMidiOutPortSerial`, and
+	 * discarding this return value -- true for every CALLER within
+	 * `CSTGMidiOutPortSerial` itself (which never calls this exact
+	 * function, only its own separate `ProcessRegularMessage()`
+	 * override), but WRONG once `CSTGMidiOutPortKorgUsb::
+	 * ProcessRegularMessage()` (midi_korgusb_port.cpp) is confirmed via
+	 * its own disassembly to call this SAME base-class function and use
+	 * the returned length to know how many bytes to copy into its own
+	 * ring buffer.
+	 */
+	unsigned int ReadNextMessage(unsigned char *buf, unsigned int bufLen);
+
+	/*
 	 * NOTE on ProcessNormal()/ProcessNKS4TestMode()/GenerateActiveSensing()/
-	 * ProcessRealTimeMessage()/ReadNextMessage(): all 5 are CONFIRMED
+	 * ProcessRealTimeMessage(): all 4 are CONFIRMED
 	 * real members of THIS class in the actual binary (vtable slots
 	 * 4-8, dispatched through the real vtable at runtime). They are
 	 * declared on `CSTGMidiOutPortSerial` below instead of here,
@@ -820,7 +847,7 @@ public:
 
 	/*
 	 * ProcessNormal()/ProcessNKS4TestMode()/GenerateActiveSensing()/
-	 * ProcessRealTimeMessage()/ReadNextMessage() -- all 5 CONFIRMED real
+	 * ProcessRealTimeMessage() -- all 4 CONFIRMED real
 	 * members of the BASE class `CSTGMidiOutPort` in the actual binary
 	 * (vtable slots 4-8's own dispatch is exercised FROM these methods'
 	 * bodies, not the other way around); declared here instead purely
@@ -829,12 +856,14 @@ public:
 	 * ordinary non-virtual same-class calls -- see the base class's own
 	 * header comment for why. Bodies match the real disassembly exactly
 	 * regardless of which C++ class hosts the declaration.
+	 * (`ReadNextMessage()` moved to the base `CSTGMidiOutPort` class
+	 * itself -- see that class's own comment; it needs none of this
+	 * treatment and is inherited here unchanged.)
 	 */
 	int ProcessNormal();
 	void ProcessNKS4TestMode();
 	void GenerateActiveSensing();
 	bool ProcessRealTimeMessage();
-	void ReadNextMessage(unsigned char *buf, unsigned int bufLen);
 };
 
 /*
@@ -851,6 +880,108 @@ public:
  * Total 9 bytes, NO padding (confirmed: `CSTGMidiQueueMessageReader`
  * below places its own next field immediately at +9).
  */
+
+/*
+ * CSTGMidiOutPortKorgUsb -- the transmit (Korg-USB-audio-composite-
+ * interface) half of the KorgUsb MIDI transport (survey candidate 3,
+ * midi_korgusb_port.cpp). Full raw `objdump -dr` transcription of the
+ * whole cluster: `.text+0x340650` (ctor, 113 bytes) through
+ * `.text+0x340850` (`Output()`, 214 bytes), plus the free-function pump
+ * `STGMidiOutPortKorgUsb_*` (`.text+0x340300`-`0x340bc8`).
+ *
+ * CONFIRMED real via `.rel.rodata._ZTV22CSTGMidiOutPortKorgUsb` (9
+ * slots, IDENTICAL shape to the base `CSTGMidiOutPort` vtable): dtor
+ * still pure; `BumpTimers()` resolves to address 0 in the relocation
+ * table, i.e. NOT overridden -- inherits the base's own real 14-byte
+ * comdat body unchanged; every other slot (`Activate`/`Deactivate`/
+ * `CanSendRealTime`/`CanSendRegular`/`ProcessRegularMessage`/
+ * `SendRealTime`/`SendSingleByte`) IS overridden.
+ *
+ * Unlike `CSTGMidiInPort` (oa_engine.h), the base `CSTGMidiOutPort`
+ * class DOES carry an explicit, CONFIRMED-correct `vtable` field and
+ * its whole declared field list sums to exactly the documented 0x40
+ * bytes with no hidden gap -- so (unlike the InPort side) ordinary C++
+ * inheritance + explicitly-sized fields below is safe and used
+ * throughout this class. Added fields, all CONFIRMED via the ctor's
+ * own `rep stos` zero-fills and the 4 methods that read/write them
+ * (`RealtimeInput`/`Input`/`RealtimeOutput`/`Output`/`SendRealTime`/
+ * `SendSingleByte`/`ProcessRegularMessage`/`CanSendRealTime`/
+ * `CanSendRegular`), two independent 1024-byte ring buffers -- one for
+ * realtime bytes (fed by `SendRealTime()`/`RealtimeInput()`, drained by
+ * `RealtimeOutput()`), one for regular/running-status-free messages
+ * (fed by `SendSingleByte()`/`Input()`/`ProcessRegularMessage()`,
+ * drained by `Output()`) -- each with its own write/read cursor pair,
+ * wrapping at 0x400 via `cmovae`, mirroring `CanSendRealTime()`/
+ * `CanSendRegular()`'s own "free space > 3 bytes" gate (0x400 minus the
+ * wrapped write-minus-read distance):
+ *   +0x40  korgUsbPortIndex (byte) -- ctor's own 1st param
+ *          (`eKorgUsbMidiPort`, 0 or 1 for the pair's two instances);
+ *          passed as the `portId` arg to every `KorgUsbRealtimeMidi*`/
+ *          `KorgUsbMidi*` companion-module call this class makes.
+ *   +0x41..+0x440  realtimeRing[0x400]
+ *   +0x444/+0x448  realtimeWriteIdx / realtimeReadIdx
+ *   +0x44c..+0x84b  regularRing[0x400]
+ *   +0x84c/+0x850  regularWriteIdx / regularReadIdx
+ * Total added size 0x814 bytes; combined with the base's own 0x40,
+ * `CSTGMidiOutPortKorgUsb`'s real total size is exactly 0x854 bytes --
+ * CONFIRMED independently by `CKorgUsbAudioDriverMidiPorts`'s own ctor
+ * placing its 2nd pair's embedded instance exactly 0x854 bytes after
+ * the 1st (`.text+0x340139`/`0x34018d`, midi_korgusb_port.cpp).
+ *
+ * `RealtimeOutput()`/`Output()` both drain up to
+ * `KorgUsb{Realtime}MidiOutputCanSend(portId)` bytes per call (clamped;
+ * if the ring holds MORE than the companion module says it can accept
+ * right now, `STGMidiOutPortKorgUsb_ScheduleFromLinux()` is called
+ * first to arrange a retry) into a local on-stack staging buffer, then
+ * hand that batch to `KorgUsb{Realtime}MidiOutput(portId, buf, count)`
+ * in one call -- byte-copy loop with the SAME wraparound idiom as the
+ * ring-push methods. Both bodies also contain a real but PROVABLY
+ * UNREACHABLE `jle` branch (stale-EFLAGS artifact from an earlier `cmp
+ * ..,0` two instructions back, testing a quantity already known
+ * positive at that point) that would skip the copy entirely and call
+ * the companion output function with an uninitialized buffer pointer --
+ * confirmed dead by disassembly, NOT reproduced (this project's
+ * established convention: note genuinely-dead compiler artifacts rather
+ * than encode unreachable behavior).
+ *
+ * `ShouldActivate() const` -- same real-but-unreachable `return true;`
+ * as the InPort side (own un-merged comdat, zero xrefs).
+ */
+class CSTGMidiOutPortKorgUsb : public CSTGMidiOutPort {
+public:
+	unsigned char korgUsbPortIndex;      /* +0x40 */
+	unsigned char realtimeRing[0x400];   /* +0x41..+0x440 */
+	unsigned char _pad441[3];            /* +0x441..+0x443, alignment */
+	unsigned int  realtimeWriteIdx;      /* +0x444 */
+	unsigned int  realtimeReadIdx;       /* +0x448 */
+	unsigned char regularRing[0x400];    /* +0x44c..+0x84b */
+	unsigned int  regularWriteIdx;       /* +0x84c */
+	unsigned int  regularReadIdx;        /* +0x850 */
+
+	/* Ctor params: korgUsbPort (`eKorgUsbMidiPort`, 0/1), stgPort
+	 * (`eSTGMidiPort`, passed straight through to the base ctor),
+	 * flagsInit (base ctor's own 2nd param). Both enums modeled as
+	 * plain `int`, matching this project's existing `CSTGMidiOutPort`/
+	 * `CSTGMidiInPort` convention of not inventing a fully-named enum
+	 * for an unconfirmed value set. */
+	CSTGMidiOutPortKorgUsb(int korgUsbPort, int stgPort, unsigned int flagsInit);
+
+	void Activate(CSTGMidiQueue *q3);
+	void Deactivate();
+	bool CanSendRealTime() const;
+	bool CanSendRegular() const;
+	void SendRealTime(unsigned char b);
+	void SendSingleByte(unsigned char b);
+	bool ProcessRegularMessage();
+
+	void RealtimeInput(const unsigned char *data, unsigned int len);
+	void Input(const unsigned char *data, unsigned int len);
+	void RealtimeOutput();
+	void Output();
+
+	bool ShouldActivate() const { return true; }
+};
+
 struct CSTGMidiQueueReader {
 	void Read(unsigned char *dest, unsigned int count);
 };
@@ -910,6 +1041,134 @@ struct CSTGMidiQueueMessageReader {
 	 */
 	unsigned int ReadSysEx(unsigned char *buf, unsigned int bufLen, unsigned int alreadyWritten);
 };
+
+/*
+ * CKorgUsbAudioDriverMidiPorts -- the top-level KorgUsb MIDI transport
+ * singleton (survey candidate 3, midi_korgusb_port.cpp). CONFIRMED real
+ * via full `objdump -dr` of its ctor (`.text+0x3400f0`, 170 bytes),
+ * `CMidiPortPair::Connect()`/`Disconnect()` (`.text+0x3401a0`/`0x340210`),
+ * and `ProcessOutput()` (`.text+0x340260`, 154 bytes) -- plus the
+ * compiler-generated static initializer for the real global
+ * `sInstance` (`_GLOBAL__I__ZN28CKorgUsbAudioDriverMidiPorts9sInstanceE`,
+ * `.text+0x340380`) which duplicates the ctor's own logic against
+ * absolute addresses; not separately reconstructed, the ordinary
+ * static-`sInstance`-with-a-real-ctor pattern already used elsewhere in
+ * this project (e.g. `CSTGAudioDriverInterfaceKorgUsb::sInstance`,
+ * managers.cpp) produces byte-identical observable behavior.
+ *
+ * Holds exactly 2 `CMidiPortPair`s (an embedded receive-side
+ * `CSTGMidiInPortKorgUsb` + transmit-side `CSTGMidiOutPortKorgUsb`,
+ * always constructed/torn-down together) back to back:
+ *   pair[0] at +0x000, pair[1] at +0xb48 (CONFIRMED: ctor's own 2nd
+ *   `lea eax,[ebx+0xb48]` and every one of `ProcessOutput()`'s stride-
+ *   0xb48-apart field reads).
+ * Each `CMidiPortPair` (0xb48 = 2888 bytes) is NOT modeled as a nested
+ * C++ struct (deliberately, matching `CSTGMidiInPortKorgUsb`'s own
+ * "don't trust compiler layout across this InPort/OutPort boundary"
+ * reasoning above) -- its 2 named sub-objects sit at fixed raw byte
+ * offsets from the pair's own base:
+ *   +0x00  selfPtr (packed u32) -- the pair's OWN address, written by
+ *          the ctor and passed to the companion module as the
+ *          `InputCallback` thunk's implicit context.
+ *   +0x04  callbackFnPtr (packed u32) -- always
+ *          `&CMidiPortPair::InputCallback`, a fixed thunk (below), not
+ *          actually invoked anywhere within OA.ko itself -- the
+ *          companion USB module calls back through it asynchronously
+ *          when a real USB MIDI packet arrives from hardware.
+ *   +0x08  embedded `CSTGMidiInPortKorgUsb` (0x2e9 bytes: base
+ *          `CSTGMidiInPort`'s own 0x2e8 + 1 added `midiPortIndex` byte
+ *          at object-relative +0x2e8, i.e. absolute pair-relative
+ *          +0x2f0 -- CONFIRMED, the ctor writes 0/1 there for the 2
+ *          pairs) -- ends at +0x2f1, then 3 bytes natural alignment
+ *          padding to +0x2f4.
+ *   +0x2f4  embedded `CSTGMidiOutPortKorgUsb` (0x854 bytes, see that
+ *          class's own header comment) -- ends exactly at +0xb48, the
+ *          next pair's own base, with ZERO trailing padding (CONFIRMED:
+ *          this project's own field-by-field sum for that class, cross-
+ *          checked against the ctor's 2nd-pair placement).
+ * Total `CKorgUsbAudioDriverMidiPorts` size: 2 * 0xb48 = 0x1690 bytes
+ * (5776).
+ *
+ * Ctor params for the 2 pairs (CONFIRMED via raw register loads at each
+ * of the 2 `CSTGMidiInPort`/`CSTGMidiOutPortKorgUsb` sub-ctor call
+ * sites): pair0 = {korgUsbPort=0, stgPort=0, inPortFlagsInit=1,
+ * outPortFlagsInit=0}, pair1 = {korgUsbPort=1, stgPort=1,
+ * inPortFlagsInit=1, outPortFlagsInit=0}.
+ */
+class CKorgUsbAudioDriverMidiPorts {
+public:
+	unsigned char storage[2 * 0xb48];
+
+	static CKorgUsbAudioDriverMidiPorts sInstance;
+
+	CKorgUsbAudioDriverMidiPorts();
+
+	/* Raw sub-object accessors -- see the class comment for why these
+	 * are offset-based rather than nested C++ members. `pairIdx` is 0
+	 * or 1. */
+	CSTGMidiInPortKorgUsb  *InPort(int pairIdx)  { return (CSTGMidiInPortKorgUsb *)(storage + pairIdx * 0xb48 + 0x08); }
+	CSTGMidiOutPortKorgUsb *OutPort(int pairIdx) { return (CSTGMidiOutPortKorgUsb *)(storage + pairIdx * 0xb48 + 0x2f4); }
+
+	/*
+	 * CMidiPortPair::Connect()/Disconnect() -- CONFIRMED real
+	 * (`.text+0x3401a0`, 94 bytes / `.text+0x340210`, 66 bytes), called
+	 * from `CSTGMidiInPortKorgUsb::Activate()`/`Deactivate()` with
+	 * `this` = the pair's OWN base address (InPort object address - 8).
+	 * Connect(): if the companion module is NOT yet initialized for
+	 * this port index (`KorgUsbMidiInitialized(idx)`), call
+	 * `KorgUsbMidiInitialize(idx, 0x400, 0x400, pairBase)` first (the 2
+	 * 0x400 args plausibly size the companion module's OWN internal
+	 * buffers -- same magic constant as this class's own ring sizes,
+	 * not independently confirmed to be related). Either way, then
+	 * ensure the LOCAL output pump is running
+	 * (`STGMidiOutPortKorgUsb_Initialized()` / `_Initialize()`).
+	 * Disconnect(): symmetric teardown, LOCAL pump first
+	 * (`STGMidiOutPortKorgUsb_Initialized()`/`_Done()`), then the
+	 * companion module (`KorgUsbMidiInitialized(idx)`/`KorgUsbMidiDone(idx)`).
+	 */
+	static void Connect(unsigned char *pairBase);
+	static void Disconnect(unsigned char *pairBase);
+
+	/*
+	 * InputCallback(void *ctx, USBMidiPacket pkt) -- CONFIRMED real but
+	 * genuinely never called from anywhere within OA.ko itself (own
+	 * un-merged comdat, zero xrefs in this binary -- the companion USB
+	 * module is the only real caller, reached only with actual USB MIDI
+	 * hardware attached). A pure thunk: adjusts `this` by +8 (pair base
+	 * -> embedded InPort) and forwards, UNTOUCHED, into
+	 * `CSTGMidiInPortUSB::ReceivePacket(USBMidiPacket)` -- see that
+	 * (deliberately-deferred) method's own declaration, oa_engine.h.
+	 */
+	static void InputCallback(void *ctx, USBMidiPacket pkt);
+
+	/*
+	 * ProcessOutput() -- CONFIRMED real (`.text+0x340260`, 154 bytes).
+	 * For EACH of the 2 pairs: if that pair's OutPort `flags` bit1
+	 * (active, base `CSTGMidiOutPort::flags`) is set, drain
+	 * `RealtimeOutput()` if its realtime ring has pending bytes and
+	 * `Output()` if its regular ring does. `STGMidiOutPortKorgUsb_
+	 * Output()` (below) is an independently-compiled duplicate of this
+	 * SAME logic against the fixed `sInstance` address rather than a
+	 * generic `this` -- modeled as a thin call-through here, producing
+	 * IDENTICAL observable behavior (this project's established
+	 * "compiler inlined a known-address singleton call" convention).
+	 */
+	void ProcessOutput();
+};
+
+/*
+ * STGMidiOutPortKorgUsb_* -- the RTAI-real-time-domain-to-Linux-domain
+ * deferred-work pump for CKorgUsbAudioDriverMidiPorts::ProcessOutput()
+ * (full derivation + real addresses in midi_korgusb_port.cpp's own
+ * header comment). Declared here (not just file-local in that .cpp) so
+ * both it and its own KAT can see the same real symbols.
+ */
+void STGMidiOutPortKorgUsb_Output();
+int  STGMidiOutPortKorgUsb_Initialized();
+void STGMidiOutPortKorgUsb_Initialize();
+void STGMidiOutPortKorgUsb_Done();
+void STGMidiOutPortKorgUsb_ScheduleFromRTAI();
+void STGMidiOutPortKorgUsb_ScheduleFromLinux();
 
 /*
  * CSTGChannelValues (confirmed real via 3 relocations from

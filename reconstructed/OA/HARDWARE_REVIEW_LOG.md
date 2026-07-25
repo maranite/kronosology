@@ -317,3 +317,142 @@ DIN-MIDI-IN byte-parser cluster (`src/engine/midi_in_port_serial.cpp`):
   structure -- no real-HW scenario is expected to exercise it, since
   0xF8-0xFF are always intercepted earlier as realtime bytes before
   ever reaching the data-byte accumulation path.
+
+---
+
+## CSTGMidiOutPort/CSTGMidiOutPortSerial — physical MIDI-OUT UART driver (new cluster, 2026-07-25)
+
+Real-hardware-verification uncertainty for the output-side counterpart
+to the MIDI-IN cluster above (`src/engine/midi_out_port_serial.cpp`):
+
+- **The UART hardware transmit path is provably DEAD in this exact
+  firmware image, not just "no known caller."** Unlike every other
+  "no known live caller" caveat in this log (where the gap is this
+  project's own reconstruction not yet reaching the call site),
+  `CSTGMidiOutPortSerial`'s own real vtable
+  (`.rel.rodata._ZTV21CSTGMidiOutPortSerial`) has its 2 trailing slots
+  (`CanTransmitHardware()`/`TransmitHardwareByte()`) still resolving to
+  `__cxa_pure_virtual` in OA.ko ITSELF -- confirmed via relocation, not
+  inferred. `nm -C OA.ko_Decomp/OA.ko` was searched for any further
+  class deriving from `CSTGMidiOutPortSerial` or providing symbols
+  matching either name; none exists anywhere in the binary. This means
+  on REAL hardware, if this exact code path (`CanSendRealTime()`/
+  `CanSendRegular()`/`SendRealTime()`/`SendSingleByte()`, all 4
+  confirmed real, all 4 forwarding to these 2 slots) were ever actually
+  invoked, it would hit a kernel `BUG()`, not silently do nothing. A
+  real-HW test that would help: with a serial-port MIDI cable connected
+  to a real Kronos and something driving `CSTGMidiPortManager::
+  ProcessMidiOutPorts()`'s own port loop, confirm whether physical
+  DIN MIDI-OUT genuinely never transmits on real hardware (matching
+  this dead-code finding), or whether some other, not-yet-discovered
+  companion module patches this vtable's trailing 2 slots at runtime
+  (e.g. STGEnabler.ko or similar, by analogy with several other
+  runtime-patched-vtable patterns already documented elsewhere in this
+  project) -- the two outcomes are currently indistinguishable from
+  static analysis of OA.ko alone.
+- **CSTGMidiPortManager::ProcessMidiOutPorts()** (the presumed real
+  caller of `ProcessNormal()`/`GenerateActiveSensing()`/
+  `ProcessNKS4TestMode()`, `.text+0xf5590`, confirmed real via `nm`)
+  is NOT reconstructed by this batch -- it's the missing link between
+  `init_module()`'s own boot path and this cluster ever running at all.
+  Until it's reconstructed, this whole cluster remains unreachable from
+  this project's own boot trace, same class of gap as the MIDI-IN
+  cluster's own UART-ISR caller.
+- **`ProcessRegularMessage()`'s exact `state` value semantics (0/1/2)
+  are translated literally from disassembly, not fully named** -- the
+  transcription is disassembly-exact (independently `objdump -dr`
+  cross-checked byte-for-byte against the Ghidra decompile, including
+  the register-dropped byte-index computation the initial decompile
+  pass missed), but WHY the real firmware structures running-status
+  compression as a byte-cursor-into-msgBuf rather than a simpler
+  boolean isn't independently confirmed from any string/comment in the
+  binary. A real-HW test: capture real DIN MIDI-OUT traffic (were the
+  dead-vtable finding above ever found to be wrong) for a
+  rapid-repeated-Note-On sequence and confirm the status byte is
+  genuinely omitted on repeats within the 75-tick/50ms window, matching
+  this reconstruction's own running-status-compression behavior.
+- **`resolve_heap_handle()`'s formula is a re-derivation, not a shared
+  call to the project's own already-existing `local_heap_region()`**
+  (see midi_out_port_serial.cpp's own header comment for why) --
+  algebraically identical per both functions' own confirmed
+  disassembly, but if `CSTGHeapManager`'s live-boot "captured value"
+  workaround (documented in oa_heapmanager.h/setup_global_resources.cpp)
+  is ever found to apply to THIS call path too (Activate() running
+  before heap state is fully live at boot), this function would need
+  the same workaround. Not expected (Activate() is presumed to run well
+  after heap bring-up, unlike the sec 10.219-10.221 CSTGEngine-ctor
+  timing this workaround was built for), but not independently
+  confirmed against a live boot trace either.
+
+---
+
+## CKorgUsbAudioDriverMidiPorts / CSTGMidiOutPortKorgUsb — KorgUsb MIDI transport (new cluster, 2026-07-25)
+
+Real-hardware-verification uncertainty for the KorgUsb-composite-USB-
+audio-interface MIDI transport (`src/engine/midi_korgusb_port.cpp`):
+
+- **Not reachable from any Korg USB hardware in this VM-substitution
+  effort at all.** This entire cluster's actual I/O happens through a
+  companion module (`KorgUsbMidiInitialize`/`Initialized`/`Done`,
+  `KorgUsbRealtimeMidiOutput{,CanSend}`, `KorgUsbMidiOutput{,CanSend}`)
+  that OA.ko calls but this project does not implement -- the existing
+  `reconstructed/KorgUsbAudioVirtualDriver/` project's own
+  `korgusbaudio_stub.cpp` implements a DIFFERENT, smaller symbol set
+  (`KorgUsbAudioInitialize`/etc, the AUDIO side) and, for the 3
+  MIDI-specific symbols it DOES already stub
+  (`KorgUsbMidiInitialize`/`Initialized`/`Done`), does so with a
+  confirmed WRONG argument count (zero args, vs this file's
+  disassembly-confirmed real ABI of `idx`/`idx,bufA,bufB,userdata`/
+  `idx`). This is a real ABI mismatch in a separate, already-complete
+  project -- flagged here, NOT fixed (out of this task's scope; see
+  midi_korgusb_port.cpp's own file-header comment for the full
+  derivation). A real-HW test: with an actual Kronos and a USB-MIDI
+  accessory / class-compliant MIDI-over-USB peer connected, confirm
+  whether `KorgUsbMidiInitialize()` is ever actually called with a
+  live USB MIDI endpoint present (this project cannot exercise that at
+  all without a real or virtually-responding companion module matching
+  the real ABI).
+- **`STGMidiOutPortKorgUsb_OutputThread()`'s own body is disassembly-
+  transcribed but never actually EXECUTED by any KAT** (an unbounded
+  kernel thread loop -- this project's established convention for
+  daemon-thread bodies, matching `test_daemon_lifecycle.cpp`'s own
+  treatment of `SetupDaemon`'s spawned thread entry points). Its
+  individual real kernel primitives (`daemonize`/`stg_sched_scheduler`/
+  `prepare_to_wait`/`schedule_timeout`/`finish_wait`/`complete`/
+  `complete_and_exit`) are each independently confirmed via raw
+  disassembly and exercised in isolation by the surrounding
+  `Initialize()`/`Done()`/`ScheduleFromRTAI()`/`ScheduleFromLinux()`
+  KATs, but the thread body's own control flow (the `sSRQPending`/
+  `sLinuxPending`/`sThreadKeepRunning` 3-flag state machine, including
+  the confirmed-real "`sLinuxPending` is set but never cleared, so the
+  thread free-runs on every timer tick forever once it's ever fired
+  once" quirk) has not been exercised end-to-end. A real-HW test: with
+  the ABI-mismatch above independently resolved, trigger a burst of
+  MIDI-out traffic large enough to exceed the companion module's
+  `CanSend()` throttle at least once, then confirm the thread keeps
+  draining the ring on a ~4-jiffy cadence afterward rather than only
+  reacting to further explicit `ScheduleFromRTAI()`/`ScheduleFromLinux()`
+  calls.
+- **`CSTGMidiInPort::Activate(CSTGMidiQueue*)`/`Deactivate()`
+  (.text+0xf5830/0xf5820) are declared but deliberately NOT implemented**
+  this batch (disproportionate separate MIDI-IN queue-wiring cluster,
+  parallel to but independent from the already-real
+  `CSTGMidiOutPort::Activate()`) -- `CSTGMidiInPortKorgUsb::Activate()`/
+  `Deactivate()` call them as real, confirmed direct call targets, but
+  their own bodies are no-op stubs in production code
+  (`bar2_stubs.cpp`). This means on real hardware, activating the
+  KorgUsb MIDI-IN port would currently do LESS than the real firmware
+  (no queue wiring at all) even once the companion-module ABI mismatch
+  above is fixed. A real-HW test is not meaningful until this gap is
+  closed; flagged here purely so it isn't mistaken for "fully wired."
+- **The embedded `CSTGExtMIDIClockSync` sub-object at `CSTGMidiInPort`
+  +0x108** (discovered this batch via the newly-reconstructed
+  `CSTGMidiInPort::CSTGMidiInPort()` ctor's own vtable-pointer write,
+  `&_ZTV20CSTGExtMIDIClockSync+8`) is a genuinely new structural finding
+  -- a third MIDI-clock-sync-family object, parallel to the
+  already-reconstructed `CSTGIntMIDIClockSync` (oa_engine_init.h) --
+  not reproduced by this batch's minimal ctor (writes 0 there instead;
+  see midi_in_port_serial.cpp's own comment). Nothing in this project
+  currently depends on it being correctly initialized, but any future
+  session reconstructing MIDI-clock-sync-from-an-external-source
+  behavior should start here rather than re-discovering it.

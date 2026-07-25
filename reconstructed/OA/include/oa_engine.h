@@ -342,6 +342,7 @@ public:
 
 struct CSTGPlaybackEvent;	/* forward decl, real definition in oa_engine_init.h */
 struct CSTGAudioEvent;		/* forward decl, real definition in oa_engine_init.h */
+struct CSTGMidiQueue;		/* forward decl, real definition in oa_engine_init.h */
 
 /*
  * Real, fully-fleshed classes with many other confirmed methods
@@ -1349,6 +1350,25 @@ public:
 	unsigned char activeSensingSeen;		/* +0x2e3 */
 	unsigned int  _unknown2e4;			/* +0x2e4 */
 
+	/*
+	 * CSTGMidiInPort(int portType, unsigned int flagsInit) -- CONFIRMED
+	 * real (`_ZN14CSTGMidiInPortC2E12eSTGMidiPortj`, `.text+0xf59a0`,
+	 * 144 bytes). Added when `midi_korgusb_port.cpp` needed it as a
+	 * genuine construction-time dependency -- see its own definition,
+	 * src/engine/midi_in_port_serial.cpp, for the full derivation
+	 * (including a genuinely new discovery -- an embedded, still-
+	 * unreconstructed `CSTGExtMIDIClockSync` sub-object at +0x108 --
+	 * deliberately NOT reproduced by this minimal ctor). Body accesses
+	 * fields via raw `self[<real offset>]`, NOT the named members above
+	 * (this class's own literal C++ `sizeof` is 4 bytes short of the
+	 * real 0x2e8 -- no explicit `vtable` field -- so named-member access
+	 * would silently land 4 bytes off; see that same header note in
+	 * `CSTGMidiInPortKorgUsb`'s own comment, oa_engine_init.h).
+	 * `portType`/`eSTGMidiPort` modeled as plain `int`, matching this
+	 * project's existing convention (not a real named C++ enum).
+	 */
+	CSTGMidiInPort(int portType, unsigned int flagsInit);
+
 	void ReceiveSysEx(const unsigned char *data, unsigned int len);
 
 	/*
@@ -1368,6 +1388,24 @@ public:
 	 */
 	void StartSysEx();
 	void ReceiveSysExData(unsigned char b);
+
+	/*
+	 * Activate(CSTGMidiQueue*)/Deactivate() -- CONFIRMED real
+	 * (`_ZN14CSTGMidiInPort8ActivateEP13CSTGMidiQueue`, `.text+0xf5830`,
+	 * 358 bytes; `_ZN14CSTGMidiInPort10DeactivateEv`, `.text+0xf5820`,
+	 * 5 bytes), CONFIRMED direct call targets of
+	 * `CSTGMidiInPortKorgUsb::Activate()`/`Deactivate()`
+	 * (midi_korgusb_port.cpp). NOT implemented in this pass -- a
+	 * substantial separate cluster (queue-wiring semantics for the
+	 * MIDI-IN side, parallel to but independent from the already-real
+	 * `CSTGMidiOutPort::Activate()`) disproportionate to the KorgUsb
+	 * transport candidate this batch reconstructs, matching this
+	 * project's established "confirmed real, deliberately deferred"
+	 * convention (e.g. `ReceiveSysEx` just above). This project's own
+	 * host KATs supply their own minimal stand-in definitions.
+	 */
+	void Activate(CSTGMidiQueue *q);
+	void Deactivate();
 };
 
 /*
@@ -1419,6 +1457,87 @@ public:
 	void CheckForCompleteMessage();
 	void ReceiveByte(unsigned char b);
 	void ReceiveBytes(const unsigned char *data, unsigned char len);
+};
+
+/*
+ * USBMidiPacket -- a single USB-MIDI-class packet, passed BY VALUE to
+ * `CSTGMidiInPortUSB::ReceivePacket()` (below) in a single register
+ * (`objdump -dr` of `CKorgUsbAudioDriverMidiPorts::CMidiPortPair::
+ * InputCallback()`, midi_korgusb_port.cpp, confirms the value is never
+ * touched/unpacked by that thunk, consistent with any small
+ * <=4-byte-by-value type). Modeled as a plain 4-byte word matching the
+ * standard USB-MIDI-class packet shape (cable# nibble + code-index
+ * nibble + up to 3 MIDI data bytes) -- the EXACT bit layout is NOT
+ * independently confirmed in this pass (no consumer of the value is
+ * reconstructed, see `CSTGMidiInPortUSB` below).
+ */
+typedef unsigned int USBMidiPacket;
+
+/*
+ * CSTGMidiInPortUSB -- the generic-USB-MIDI-class accessory hierarchy
+ * (survey candidate 3's "hierarchy 2", genuinely distinct from
+ * `CSTGMidiInPortKorgUsb` below -- confirmed via `nm -C`, separate
+ * vtables). ONLY forward-declared here, with the ONE method
+ * `CKorgUsbAudioDriverMidiPorts::CMidiPortPair::InputCallback()`
+ * (midi_korgusb_port.cpp) needs to type-check its own real direct
+ * (non-virtual) call into `_ZN17CSTGMidiInPortUSB13ReceivePacketE
+ * 13USBMidiPacket` (`.text+0xf7500`, 1287 bytes) -- CONFIRMED real and
+ * called, but its own body/fields are a disproportionate separate
+ * cluster (own class hierarchy, own `CSTGMidiOutPortUSB`/
+ * `CSTGUSBMidiAccessoryMidiInPort` siblings) deliberately NOT
+ * reconstructed this pass, matching this project's established
+ * "confirmed real, deliberately deferred" convention. DECLARED ONLY,
+ * no definition anywhere in production code -- this project's host
+ * KATs supply their own stand-in, same convention as
+ * `CSTGMidiOutPortSerial::CanTransmitHardware()`/`TransmitHardwareByte()`.
+ */
+class CSTGMidiInPortUSB : public CSTGMidiInPort {
+public:
+	void ReceivePacket(USBMidiPacket pkt);
+};
+
+/*
+ * CSTGMidiInPortKorgUsb -- the receive (Korg-USB-audio-composite-
+ * interface) half of the KorgUsb MIDI transport, always constructed in
+ * a pair with `CSTGMidiOutPortKorgUsb` (oa_engine_init.h) inside
+ * `CKorgUsbAudioDriverMidiPorts::CMidiPortPair` (midi_korgusb_port.cpp,
+ * where the real 2-instance `sInstance` singleton and full derivation
+ * live). CONFIRMED real via `.rel.rodata._ZTV21CSTGMidiInPortKorgUsb`
+ * (3 slots, identical shape to the base `CSTGMidiInPort` vtable: dtor
+ * still pure, `Activate(CSTGMidiQueue*)`/`Deactivate()` both REAL
+ * overrides). Adds exactly ONE field beyond the base class's own 0x2e8
+ * bytes:
+ *   +0x2e8  midiPortIndex (byte) -- CONFIRMED (ctor writes 0/1 for the
+ *           pair's two instances) the same 0/1 index passed to the
+ *           companion module's `KorgUsbMidiInitialize()`/
+ *           `KorgUsbMidiInitialized()`/`KorgUsbMidiDone()` (via
+ *           `CMidiPortPair::Connect()`/`Disconnect()`, which read this
+ *           exact field) -- i.e. "which of the 2 KorgUsb MIDI ports
+ *           this pair represents", NOT necessarily the same enumerant
+ *           as `eSTGMidiPort` (a separate ctor parameter also 0/1 for
+ *           this pair, by coincidence -- not independently confirmed to
+ *           always match).
+ * `ShouldActivate() const` -- CONFIRMED real but genuinely UNREACHABLE
+ * (own un-merged comdat section, zero relocations/xrefs anywhere in
+ * OA.ko) -- real body is exactly `return true;`, reproduced verbatim
+ * as dead-but-real code rather than omitted.
+ *
+ * NOT modeled as a C++ named field: `CSTGMidiInPort` itself (above) has
+ * NO explicit `vtable` field of its own (its literal declared `sizeof`
+ * is 0x2e4, 4 bytes short of the real 0x2e8 -- confirmed by summing its
+ * fields -- because none of ITS methods ever rely on C++ field layout,
+ * only raw `self[<real offset>]` byte-offset access, this project's
+ * dominant convention for the whole MIDI-in family). Adding a genuine
+ * named field on top of that unreliable base would silently compile to
+ * the WRONG absolute offset. `midiPortIndex` is therefore read/written
+ * via raw `((unsigned char*)this)[0x2e8]` in the .cpp instead, matching
+ * `CSTGMidiInPort`'s own established convention exactly.
+ */
+class CSTGMidiInPortKorgUsb : public CSTGMidiInPort {
+public:
+	void Activate(CSTGMidiQueue *q);
+	void Deactivate();
+	bool ShouldActivate() const { return true; }
 };
 
 /*

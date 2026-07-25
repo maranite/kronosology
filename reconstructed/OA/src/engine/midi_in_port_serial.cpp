@@ -358,3 +358,65 @@ void CSTGMidiInPortSerial::ReceiveBytes(const unsigned char *data, unsigned char
 	for (unsigned int i = 0; i < len; i++)
 		ReceiveByteCore(self, data[i]);
 }
+
+/*
+ * CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
+ * -- CONFIRMED real (`_ZN14CSTGMidiInPortC2E12eSTGMidiPortj`,
+ * `.text+0xf59a0`, 144 bytes, regparm(3): this=EAX, portType=EDX,
+ * flagsInit=ECX), full `objdump -dr` transcription. Added THIS BATCH
+ * (candidate-3/KorgUsb) as a genuine new dependency:
+ * `CKorgUsbAudioDriverMidiPorts`'s own ctor (midi_korgusb_port.cpp)
+ * calls this SAME real function directly to construct its 2 embedded
+ * `CSTGMidiInPortKorgUsb` sub-objects -- it cannot be left an
+ * undefined/deferred extern the way e.g. `ReceiveSysEx()` is, because
+ * unlike those, this ctor runs unconditionally on the module's own
+ * live global-constructor path, not a dead/hardware-gated branch.
+ *
+ * Real body, in order: `portType` stored at +0x25; `flags` (+0x26)
+ * read-modify-written, replacing only bit0 with `flagsInit & 1` (bit1
+ * and the other 6 bits are left whatever they already were in memory --
+ * this is placement-into-existing-storage, NOT a zero-init, matching
+ * `CSTGMidiOutPort`'s own base ctor's identical "only touch what I own"
+ * pattern); vtable set to `&_ZTV14CSTGMidiInPort + 8`;
+ * `sysExScratchLen` (+0x24) cleared; `+0x28`/`+0x8c` set to `-1`
+ * (sentinel, exact meaning not independently determined -- both fall
+ * inside this class's own already-documented `_unrecovered27`/
+ * `_unrecovered108` gaps); the 3 embedded `CSTGMidiQueueWriter` pairs
+ * (+0xf0/+0xf4, +0xf8/+0xfc, +0x100/+0x104) zeroed; `sysExState` (+0x2e0)
+ * cleared; finally calls the already-real
+ * `CSTGMidiPortManager::RegisterMidiInPort(this)`.
+ *
+ * DELIBERATELY NOT reproduced: two more real writes inside this same
+ * ctor body, `*(byte*)(this+0x148) = 1` and a vtable-pointer write at
+ * `this+0x108` (`&_ZTV20CSTGExtMIDIClockSync + 8`) -- the latter proves
+ * `CSTGMidiInPort` embeds a THIRD clock-sync-family object (parallel to
+ * `CSTGMIDIClockSync`'s own use of the already-reconstructed
+ * `CSTGIntMIDIClockSync`, oa_engine_init.h) somewhere in the existing,
+ * already-documented `_unrecovered108[0x1d8]` gap -- a genuinely new
+ * discovery, but reconstructing a whole THIRD MIDI-clock-sync class
+ * hierarchy (own vtable, own methods, its own ctor call chain) is a
+ * disproportionate expansion for this batch, matching this project's
+ * established "confirmed real, deliberately deferred, characterized for
+ * a future session" convention. Nothing this batch's own KATs touch
+ * depends on either omitted write.
+ */
+CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
+{
+	unsigned char *self = (unsigned char *)this;
+
+	self[0x25] = (unsigned char)portType;
+	self[0x26] = (unsigned char)((self[0x26] & 0xfe) | (flagsInit & 1));
+	*(unsigned int *)(self + 0x00) = 0; /* real: &_ZTV14CSTGMidiInPort + 8, own vtable not yet reconstructed as a real class hierarchy -- see class comment */
+	self[0x24] = 0;
+	*(unsigned int *)(self + 0x28) = 0xffffffffu;
+	*(unsigned int *)(self + 0x8c) = 0xffffffffu;
+	*(unsigned int *)(self + 0xf0) = 0;
+	*(unsigned int *)(self + 0xf4) = 0;
+	*(unsigned int *)(self + 0xf8) = 0;
+	*(unsigned int *)(self + 0xfc) = 0;
+	*(unsigned int *)(self + 0x100) = 0;
+	*(unsigned int *)(self + 0x104) = 0;
+	self[0x2e0] = 0;
+
+	CSTGMidiPortManager::RegisterMidiInPort(this);
+}

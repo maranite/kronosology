@@ -856,3 +856,18 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
  * batch's actual reconstruction target) is entirely unaffected. */
 void CSTGMidiInPort::StartSysEx() { }
 void CSTGMidiInPort::ReceiveSysExData(unsigned char) { }
+
+/* CSTGMidiInPort::Activate(CSTGMidiQueue*)/Deactivate() -- confirmed
+ * real OA.ko-internal symbols (.text+0xf5830/0xf5820, 358/5 bytes),
+ * confirmed real call targets from the new
+ * CSTGMidiInPortKorgUsb::Activate()/Deactivate() (KorgUsb MIDI transport
+ * batch, src/engine/midi_korgusb_port.cpp). Own body is a substantial,
+ * separate MIDI-IN queue-wiring cluster (parallel to but independent
+ * from the already-real CSTGMidiOutPort::Activate()) -- deliberately
+ * deferred no-op stubs, same convention as StartSysEx()/
+ * ReceiveSysExData() just above. Safe as a no-op here: this batch's own
+ * KATs exercise CSTGMidiOutPortKorgUsb's transmit-side logic (the
+ * actual reconstruction target), which does not depend on the InPort
+ * side's own queue-wiring effects. */
+void CSTGMidiInPort::Activate(CSTGMidiQueue *) { }
+void CSTGMidiInPort::Deactivate() { }

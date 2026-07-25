@@ -52,6 +52,21 @@ CSTGMidiPortManager *CSTGMidiPortManager::sInstance;
 CSTGGlobal *CSTGGlobal::sInstance;
 CSTGMessageProcessor *CSTGMessageProcessor::sInstance;
 
+/* CSTGMidiPortManager::sMidiInPorts/RegisterMidiInPort() -- needed since
+ * this file's own CSTGMidiInPort::CSTGMidiInPort() ctor (added for the
+ * KorgUsb MIDI transport batch, midi_korgusb_port.cpp) calls it; this
+ * test never constructs a real CSTGMidiInPort via the ctor itself (only
+ * via a raw FakePort cast, below), but the ctor's own symbol is still
+ * pulled in by linking this TU and must resolve. */
+void *CSTGMidiPortManager::sMidiInPorts[4];
+void CSTGMidiPortManager::RegisterMidiInPort(CSTGMidiInPort *port)
+{
+	unsigned char *p = (unsigned char *)port;
+	int index = (signed char)p[0x25];
+	if (index >= 0 && index < 4)
+		((void **)sMidiInPorts)[index] = port;
+}
+
 /* StartSysEx()/ReceiveSysExData() deferred stand-ins, tracked so the
  * "0xF0 dispatches to StartSysEx()" and "in-SysEx data dispatches to
  * ReceiveSysExData()" call sites can be verified without pulling in

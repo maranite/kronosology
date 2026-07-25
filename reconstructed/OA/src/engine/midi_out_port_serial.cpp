@@ -373,12 +373,18 @@ bool CSTGMidiOutPortSerial::ProcessRealTimeMessage()
 /*
  * ReadNextMessage(unsigned char*, unsigned int) -- CONFIRMED real,
  * `.text+0xf84a0`, 191 bytes. Thin wrapper around the shared
- * round-robin poll (see PollNextRegularMessage() above); return value
- * genuinely discarded by the real disassembly.
+ * round-robin poll (see PollNextRegularMessage() above). CORRECTED
+ * (candidate-3/KorgUsb batch): genuinely a member of the BASE class
+ * `CSTGMidiOutPort` (matching its real mangled symbol
+ * `_ZN15CSTGMidiOutPort15ReadNextMessageEPhj`), and its return value is
+ * NOT discarded by the real disassembly -- see the class declaration's
+ * own comment (oa_engine_init.h) for the full derivation and why the
+ * prior "void, Serial-hosted, discarded" model was locally correct for
+ * every caller that existed at the time but wrong in general.
  */
-void CSTGMidiOutPortSerial::ReadNextMessage(unsigned char *buf, unsigned int bufLen)
+unsigned int CSTGMidiOutPort::ReadNextMessage(unsigned char *buf, unsigned int bufLen)
 {
-	PollNextRegularMessage(this, buf, bufLen);
+	return PollNextRegularMessage(this, buf, bufLen);
 }
 
 /*
