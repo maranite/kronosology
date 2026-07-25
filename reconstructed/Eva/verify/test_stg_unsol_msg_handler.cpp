@@ -50,6 +50,7 @@ static void check(const char *label, bool ok)
 struct StgUnsolMsgHandlerTestHooks {
 	static CEditor::CPanelIfcTask *Owner(const CSTGUnsolMsgHandler &h) { return h.mOwner; }
 	static const CSTGUnsolMsgHandler::Slot &SlotAt(const CSTGUnsolMsgHandler &h, int i) { return h.mTable[i]; }
+	static void SetForceSaveOnEnd(CSTGUnsolMsgHandler &h, unsigned char v) { h.mForceSaveOnEnd = v; }
 
 	static void *AddrOfConstRef(void (CSTGUnsolMsgHandler::*mfp)(const STGMessage &))
 	{
@@ -511,6 +512,52 @@ int main()
 				check("EffectSlotMsgHandler (idx==2, field!=0x19): len == 1, flag == 1", cap.len == 1 && cap.flag == 1);
 			}
 		}
+
+		EditApi = realEditApi;
+	}
+
+	/* Stage 6 breadth sweep, 2026-07-25: USTGAPIControl::SaveRandomSeed()/
+	 * ForceErPShutdown() promoted from Tier-B link-stubs to real bodies
+	 * (stg_unsol_msg_handler.cpp) -- SaveRandomSeed() now genuinely
+	 * fork()+execve()s "/korg/Eva/mumount" (which does not exist on this host,
+	 * so the child harmlessly exit(1)s and the parent's own real error path
+	 * fires -- exactly the same shape a real device missing the on-image
+	 * /korg/Eva/mumount binary would hit), and ForceErPShutdown() builds a
+	 * real STGMessage and forwards it through the already-real
+	 * SendSTGMessageWithSource() (which fails gracefully with m_activeUser2rtFD
+	 * == -1, unconnected, in this host harness -- same behavior already proven
+	 * safe by test_ustg_user_api.cpp). Exercised here via EndHandling()'s own
+	 * real mForceSaveOnEnd-gated tail, with a fake EditApi forcing the
+	 * "ESSong flag == 0" branch that reaches both calls -- not just a direct
+	 * unit call, since USTGAPIControl/USTGAPIFsck are file-local (no header
+	 * declaration) by this project's own established convention for
+	 * not-reconstructed-elsewhere classes.
+	 */
+	printf("[8] EndHandling()'s real mForceSaveOnEnd tail -- SaveRandomSeed()/ForceErPShutdown() (Stage 6 breadth sweep, 2026-07-25)\n");
+	{
+		struct Fake8 {
+			static unsigned char GetScopeId(void *, const char *) { return 0x40; }
+			static void QueryFlag(void *, unsigned char, int, int, unsigned char *out, int)
+			{
+				*out = 0; /* force the "flag == 0" branch */
+			}
+		};
+		struct Trap8 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap8::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake8::GetScopeId;
+		fakeVtbl[0x2c / 4] = (void *)Fake8::QueryFlag;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		StgUnsolMsgHandlerTestHooks::SetForceSaveOnEnd(handler, 1);
+		handler.EndHandling(); /* real fork/execve/waitpid + sleep(3) + STGMessage send -- no crash expected */
+		check("EndHandling() with mForceSaveOnEnd set + flag==0: does not crash "
+		      "(real SaveRandomSeed()/sync()/sleep(3)/ForceErPShutdown() path)",
+		      true);
 
 		EditApi = realEditApi;
 	}

@@ -21,30 +21,149 @@
 
 #include "stg_unsol_msg_handler.h"
 
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <sys/wait.h>
 #include <unistd.h>
+
+/* USTGAPIFsck -- not reconstructed elsewhere in this project (a whole not-decoded
+ * filesystem-check/mount-helper class, `nm -C` shows further siblings, e.g.
+ * `StopCheckMedium()`, out of scope). Declared file-local, same convention as
+ * `USTGAPIControl` below -- only the one real static method `SaveRandomSeed()` needs.
+ * Real signature/body from GenericMumount@08e27120.c (356 bytes, `cc=__cdecl`,
+ * `char **param_1`), cross-checked against direct `objdump -dr` for the two real
+ * error-message format strings and the real errno-vs-EINTR (4) retry-loop condition.
+ * `sErrorCode`/`sErrorString` are real static data members (`nm -C`-confirmed
+ * addresses 0xea2de20/0xea2dda0) -- sized/typed from every real snprintf() call
+ * site in this function (`sErrorCode` always literal 0xc; `sErrorString` is the
+ * snprintf() destination with a literal 0x80-byte bound, so declared `char[0x80]`).
+ */
+class USTGAPIFsck {
+public:
+	/* .text+0x08e27120, 356 bytes. REAL -- fork()+execve("/korg/Eva/mumount",
+	 * argv, {NULL})+waitpid() in the child/parent respectively; returns 1 only
+	 * if the child both ran and exited with status 0. Every failure path sets
+	 * sErrorCode/sErrorString (dead outputs -- nothing reconstructed elsewhere
+	 * reads them back) before returning 0.
+	 */
+	static int GenericMumount(char *const *argv);
+
+private:
+	static char sErrorString[0x80];
+	static int  sErrorCode;
+};
+
+char USTGAPIFsck::sErrorString[0x80];
+int  USTGAPIFsck::sErrorCode;
+
+int USTGAPIFsck::GenericMumount(char *const *argv)
+{
+	pid_t pid = fork();
+	if (pid < 0) {
+		sErrorCode = 0xc;
+		snprintf(sErrorString, 0x80, "can't mount errno %d", errno);
+		return 0;
+	}
+
+	if (pid == 0) {
+		char *const envp[1] = { 0 };
+		execve("/korg/Eva/mumount", const_cast<char *const *>(argv), envp);
+		/* Real: subroutine does not return. */
+		exit(1);
+	}
+
+	int status;
+	for (;;) {
+		pid_t w = waitpid(pid, &status, 0);
+		if (w > 0)
+			break;
+		if (errno != 4 /* EINTR */) {
+			sErrorCode = 0xc;
+			snprintf(sErrorString, 0x80, "wait fails errno %d", errno);
+			return 0;
+		}
+	}
+
+	if ((status & 0x7f) == 0) {
+		unsigned exitCode = (unsigned)(status >> 8) & 0xff;
+		if (exitCode != 0) {
+			sErrorCode = 0xc;
+			snprintf(sErrorString, 0x80, "umount exit %d", exitCode);
+			return 0;
+		}
+		return 1;
+	}
+
+	sErrorCode = 0xc;
+	snprintf(sErrorString, 0x80, "umount execution errno %d", errno);
+	return 0;
+}
 
 /* USTGAPIControl -- not reconstructed elsewhere in this project. Declared file-local
  * (same convention as ckernel.cpp's own local CTracer) with only the two real static
  * methods EndHandling() needs. Real signatures confirmed from functions.csv:
  *   ForceErPShutdown(.text+0x08e1cbe0, 60 bytes)  cc=__cdecl, ushort param_1
  *   SaveRandomSeed(.text+0x08e1d090, 78 bytes)    cc=__cdecl, void
- * Both static (no `this`) -- not implemented (Tier-B call-contract extern; the real
- * bodies belong to a whole not-reconstructed class).
+ * Both static (no `this`).
  */
 class USTGAPIControl {
 public:
-	static void SaveRandomSeed();
+	static bool SaveRandomSeed();
 	static void ForceErPShutdown(unsigned short code);
 };
 
-/* Tier-B link-stubs (not Tier A -- see class comment above): real signatures only,
- * empty bodies so the link succeeds, per this project's own Stage-4 tier convention
- * ("every symbol on the unresolved list got a real definition ... the linker needs
- * an actual symbol, not just a compatible declaration").
+/* .text+0x08e1d090, 78 bytes. REAL -- `USTGAPIFsck::GenericMumount("/korg/Eva/mumount",
+ * "sr", NULL)`. The literal `"sr"` (real ground-truth 2nd argv element, confirmed via
+ * direct `objdump -dr` at the exact address the ctor loads, 0x08f774c9 -- NOT a guess)
+ * turns out to be the compiler's own tail-suffix string-pooling of an unrelated
+ * envelope-parameter name table entry ("ahdsr" ends in "...sr\0", reused verbatim as
+ * this call's own, unrelated, standalone "sr" literal) -- confirmed via
+ * `objdump -s -j .rodata` at that address, not misread. What "sr" itself means to
+ * /korg/Eva/mumount (a mode flag? a device name?) is not recovered -- /korg/Eva/mumount
+ * itself is a separate on-image binary, out of scope for this project.
  */
-void USTGAPIControl::SaveRandomSeed() { /* Tier-B link-stub. .text+0x08e1d090, 78 bytes. */ }
-void USTGAPIControl::ForceErPShutdown(unsigned short) { /* Tier-B link-stub. .text+0x08e1cbe0, 60 bytes. */ }
+bool USTGAPIControl::SaveRandomSeed()
+{
+	static char argMumount[] = "/korg/Eva/mumount";
+	static char argSr[] = "sr";
+	char *argv[4] = { argMumount, argSr, 0, 0 };
+
+	int ok = USTGAPIFsck::GenericMumount(argv);
+	if (ok == 0)
+		puts("failed to save random seed");
+	return ok != 0;
+}
+
+/* .text+0x08e1cbe0, 60 bytes. REAL -- builds a 16-byte STGMessage (length-prefixed,
+ * see ustg_user_api.h's own header comment: byte 0 is the total message length, not
+ * a type tag) and forwards it via the already-real `SendSTGMessageWithSource()`.
+ * Field shape confirmed from the real disassembly: {u16 length=0x10; u16 subtype=1;
+ * u32 field8=0; u32 field12=0x27; u32 payload=code} -- the SAME 4-field prefix
+ * `LoadStoredSettings()`'s own STGMessageLocalShape uses (lcd_control.cpp), plus one
+ * more explicit trailing payload dword this call site actually sets (that file's own
+ * 5th stack slot is present too, just left as uninitialized stack leftover there --
+ * see its own comment).
+ */
+struct ErPShutdownMsgShape {
+	unsigned short length;
+	unsigned short subtype;
+	unsigned int   field8;
+	unsigned int   field12;
+	unsigned int   payload;
+};
+
+void USTGAPIControl::ForceErPShutdown(unsigned short code)
+{
+	ErPShutdownMsgShape msg;
+	msg.length = 0x10;
+	msg.subtype = 1;
+	msg.field8 = 0;
+	msg.field12 = 0x27;
+	msg.payload = code;
+
+	USTGUserAPI::SendSTGMessageWithSource(reinterpret_cast<const STGMessage *>(&msg));
+}
 
 CSTGUnsolMsgHandler *CSTGUnsolMsgHandler::sInstance = 0;
 

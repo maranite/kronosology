@@ -46,6 +46,29 @@ void PegMessageQueuePush(void *queue, const void *msg)
 	(void)msg;
 }
 
+/* Real ground-truth external dependency: `CControlSurface::GetInstance()`
+ * (.text+0x08942da0) / `CControlSurface::MoveKnobFader(EKnobFader, short)`
+ * (.text+0x0895c4f0, the (enum, int) overload -- confirmed via `nm -C`
+ * against the real `uVar3`/`uVar1` argument types at OnAnalogEvent's own call
+ * site) -- CControlSurface is a large god-object family (52 symbol references
+ * across the export), same out-of-scope territory as the ES-family classes
+ * (README.md's "Confirmed out of scope" list). Modeled here as inert
+ * stand-ins purely so OnAnalogEvent's own real dispatch/field-touching logic
+ * can be transcribed faithfully without fabricating that toolkit -- same
+ * convention as PegMessageQueuePush above.
+ */
+void *ControlSurfaceGetInstance()
+{
+	return 0;
+}
+
+void ControlSurfaceMoveKnobFader(void *instance, int knob, short value)
+{
+	(void)instance;
+	(void)knob;
+	(void)value;
+}
+
 } // namespace
 
 /* CTask's own test-only placeholder default ctor (task.h) -- not ground truth. */
@@ -424,8 +447,93 @@ int CEditor::CPanelIfcTask::Exec(CMessage &message)
 	return -1;
 }
 
-void CEditor::CPanelIfcTask::OnAnalogEvent(const CPanelOut::SAnalogEvt *) { /* Tier-B link-stub. .text+0x0824be00, 403 bytes. */ }
-void CEditor::CPanelIfcTask::OnEncoderEvent(const CPanelOut::SEncoderEvt *) { /* Tier-B link-stub. .text+0x0824bdb0, 79 bytes. */ }
+/* .text+0x0824be00, 403 bytes. REAL. Diagnostic-mode gate (mDiagMode, +0x9c):
+ * when set, the raw {type,value} pair is packed into one dword and forwarded
+ * as a Peg message (cmd 0x500a) instead of reaching CControlSurface at all --
+ * same "diag mode reroutes the whole pipeline" shape OnButtonEvent already
+ * has. Otherwise `evt->type` (8..0x18) is mapped to a 0..0x10 knob/fader
+ * index and forwarded to CControlSurface::MoveKnobFader(); type==0x19 (25) is
+ * its own special case -- pushes a Peg message (cmd 0x500a) carrying just
+ * `evt->value` and returns without reaching CControlSurface (matches every
+ * currently-reconstructed real caller in stg_unsol_msg_handler.cpp, which
+ * always sets evt.type = 0x19). Any other type value is silently dropped.
+ */
+void CEditor::CPanelIfcTask::OnAnalogEvent(const CPanelOut::SAnalogEvt *evt)
+{
+	struct PanelAnalogMsg {
+		unsigned short cmd;
+		unsigned short pad;
+		unsigned int   z1, z2, z3;
+		unsigned int   payload;
+	} msg;
+	msg.pad = 0;
+	msg.z1 = 0;
+	msg.z2 = 0;
+	msg.z3 = 0;
+
+	if (mDiagMode != 0) {
+		msg.cmd = 0x500a;
+		msg.payload = (static_cast<unsigned int>(evt->type) << 16) |
+			static_cast<unsigned int>(static_cast<unsigned short>(evt->value));
+		PegMessageQueuePush(PegThing_mpMessageQueue, &msg);
+		return;
+	}
+
+	int knob;
+	switch (evt->type) {
+	case 8: knob = 0; break;
+	case 9: knob = 1; break;
+	case 10: knob = 2; break;
+	case 0xb: knob = 3; break;
+	case 0xc: knob = 4; break;
+	case 0xd: knob = 5; break;
+	case 0xe: knob = 6; break;
+	case 0xf: knob = 7; break;
+	case 0x10: knob = 8; break;
+	case 0x11: knob = 9; break;
+	case 0x12: knob = 10; break;
+	case 0x13: knob = 0xb; break;
+	case 0x14: knob = 0xc; break;
+	case 0x15: knob = 0xd; break;
+	case 0x16: knob = 0xe; break;
+	case 0x17: knob = 0xf; break;
+	case 0x18: knob = 0x10; break;
+	case 0x19:
+		msg.cmd = 0x500a;
+		msg.payload = static_cast<unsigned int>(static_cast<unsigned short>(evt->value));
+		PegMessageQueuePush(PegThing_mpMessageQueue, &msg);
+		return;
+	default:
+		return;
+	}
+
+	void *instance = ControlSurfaceGetInstance();
+	ControlSurfaceMoveKnobFader(instance, knob, evt->value);
+}
+
+/* .text+0x0824bdb0, 79 bytes. REAL: pushes a Peg message (cmd 0x500e) whose
+ * payload is `evt->value`'s own first byte, sign-extended -- ground truth
+ * reads it as a raw `char`, not `evt.value`'s declared `uint8_t` type; the
+ * sign extension is preserved (matches OnButtonEvent's own charcode
+ * sign-extension convention, above).
+ */
+void CEditor::CPanelIfcTask::OnEncoderEvent(const CPanelOut::SEncoderEvt *evt)
+{
+	struct PanelEncoderMsg {
+		unsigned short cmd;
+		unsigned short pad;
+		unsigned int   z1, z2, z3;
+		int            payload;
+	} msg;
+	msg.cmd = 0x500e;
+	msg.pad = 0;
+	msg.z1 = 0;
+	msg.z2 = 0;
+	msg.z3 = 0;
+	msg.payload = static_cast<int>(static_cast<signed char>(evt->value));
+
+	PegMessageQueuePush(PegThing_mpMessageQueue, &msg);
+}
 
 CPanelCfg::CPanelCfg(const CTask &owner, const char *name, int direction, unsigned short mode)
 	: COutLinkMono(owner, name, direction, mode), mLastResult(0)

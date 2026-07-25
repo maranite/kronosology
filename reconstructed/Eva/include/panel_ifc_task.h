@@ -250,14 +250,23 @@ public:
 	 */
 	int Exec(CMessage &msg);
 
-	/* .text+0x0824be00/0x0824bdb0, 403/79 bytes -- real instance methods,
-	 * CSTGUnsolMsgHandler's own HandleMessage()/EndHandling()/SendValueSlider()/
-	 * SendValueEncoder() call these on `mOwner`, and Exec(CMessage&) above
-	 * calls OnAnalogEvent in a loop. Tier B: real signatures only (confirmed
-	 * via `nm -C`), not implemented -- out of this pass's scope (not flagged
-	 * tractable by the batch that scoped this file).
+	/* .text+0x0824be00, 403 bytes. REAL (Stage 6 breadth sweep, 2026-07-25) --
+	 * mDiagMode (+0x9c) gate reroutes to a Peg message (cmd 0x500a); otherwise
+	 * maps `evt->type` (8..0x18) to a 0..0x10 knob/fader index and forwards to
+	 * `CControlSurface::MoveKnobFader()` (inert stand-in, .cpp -- CControlSurface
+	 * itself is a large not-reconstructed god-object family, same category as
+	 * the ES-family classes); `type==0x19` is its own special case, a Peg
+	 * message instead (matches every currently-reconstructed real caller in
+	 * stg_unsol_msg_handler.cpp). CSTGUnsolMsgHandler's own HandleMessage()/
+	 * EndHandling()/SendValueSlider()/SendValueEncoder() call this on `mOwner`,
+	 * and Exec(CMessage&) above calls it in a loop.
 	 */
 	void OnAnalogEvent(const CPanelOut::SAnalogEvt *evt);
+
+	/* .text+0x0824bdb0, 79 bytes. REAL -- pushes a Peg message (cmd 0x500e)
+	 * carrying `evt->value`'s own first byte, sign-extended (see .cpp).
+	 * CSTGUnsolMsgHandler's own EndHandling()/SendValueEncoder() call this.
+	 */
 	void OnEncoderEvent(const CPanelOut::SEncoderEvt *evt);
 
 private:

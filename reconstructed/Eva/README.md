@@ -36,10 +36,19 @@ Eva/
 | 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
 | 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`), and a dedicated `CEditor` batch (15 direct methods + ctor/dtor, real multiple-inheritance vtable cluster, new self-contained `CParameterString` class -- see that section for the full `Setup()` fan-out analysis and what's deferred), and (see "Stage 6: CEditable/CAlphaKeybIfcTask" below) a
 standalone `CEditable`/`CAlphaKeybIfcTask` batch re-investigating one of `CEditor::
-Setup()`'s two previously-deferred fan-out targets. 382 of 37,795 functions
-reconstructed (per a fresh `manifest/gen_manifest.py` regen — this count has run
-somewhat ahead of this summary line between batches; treat the regenerated number as
-authoritative) — still a small, deliberately-scoped slice, not a broad sweep yet |
+Setup()`'s two previously-deferred fan-out targets, and a further broad `nm -C`
+sweep pass (2026-07-25) that promoted `CEditor::CPanelIfcTask::OnAnalogEvent()`/
+`OnEncoderEvent()` from real-signature Tier-B stubs to real bodies (mDiagMode gate,
+knob/fader-index switch forwarding to an inert `CControlSurface` stand-in, Peg-push
+special case for `type==0x19`) and, separately, `USTGAPIControl::SaveRandomSeed()`/
+`ForceErPShutdown()` + new `USTGAPIFsck::GenericMumount()` (real
+fork()+execve("/korg/Eva/mumount")+waitpid(), forwarding through the already-real
+`SendSTGMessageWithSource()`) -- `CAlphaKeybIfcTask::ProcessCode()` re-checked and
+confirmed to stay Tier B (genuine `PegMessage`/`PegMessageQueue` toolkit depth, not a
+fresh opportunity). 400 of 37,795 functions reconstructed (per a fresh
+`manifest/gen_manifest.py` regen — this count has run somewhat ahead of this summary
+line between batches; treat the regenerated number as authoritative) — still a small,
+deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 

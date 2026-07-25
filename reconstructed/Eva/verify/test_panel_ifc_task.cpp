@@ -35,6 +35,7 @@
 #include "module.h"
 #include "omega_ptr_array.h"
 #include "system_api.h"
+#include "stg_unsol_msg_handler.h" /* CPanelOut::SAnalogEvt/SEncoderEvt real definitions */
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -359,6 +360,60 @@ int main()
 		*(unsigned short *)(raw + 8) = 0x0207;
 		int rc7 = task.Exec(*reinterpret_cast<CMessage *>(raw));
 		check("Exec(CMessage&) unknown subtype: returns -1", rc7 == -1);
+	}
+
+	printf("[9] OnAnalogEvent()/OnEncoderEvent() -- real dispatch, no crash\n");
+	{
+		/* mDiagMode gate: EnterDiagnostics(1) sets it via the real, already-
+		 * verified code path (see [3] above) rather than a raw poke.
+		 */
+		task.EnterDiagnostics(1);
+		check("EnterDiagnostics(1): mDiagMode == 1",
+		      PanelIfcTaskTestHooks::GetDiagMode(task) == 1);
+
+		CPanelOut::SAnalogEvt aevt;
+		aevt.type = 8;
+		aevt.value = 500;
+		task.OnAnalogEvent(&aevt); /* diag-mode reroute, Peg push, no crash */
+		check("OnAnalogEvent() under mDiagMode!=0: does not crash", true);
+
+		task.EnterDiagnostics(0);
+		check("EnterDiagnostics(0): mDiagMode == 0",
+		      PanelIfcTaskTestHooks::GetDiagMode(task) == 0);
+
+		/* type==0x19: its own special case, Peg push + early return, same as
+		 * every currently-reconstructed real caller (stg_unsol_msg_handler.cpp).
+		 */
+		aevt.type = 0x19;
+		aevt.value = 700;
+		task.OnAnalogEvent(&aevt);
+		check("OnAnalogEvent(type=0x19): Peg-push special case, does not crash", true);
+
+		/* type in [8..0x18]: real knob/fader index mapping, forwards to the
+		 * inert CControlSurface stand-in (.cpp) -- exercise the full range,
+		 * including both switch-table ends.
+		 */
+		for (int t = 8; t <= 0x18; ++t) {
+			aevt.type = t;
+			aevt.value = static_cast<short>(t * 10);
+			task.OnAnalogEvent(&aevt);
+		}
+		check("OnAnalogEvent(type=8..0x18): full knob/fader range, no crash", true);
+
+		/* unmatched type: default -> return, no crash */
+		aevt.type = 0;
+		aevt.value = 0;
+		task.OnAnalogEvent(&aevt);
+		aevt.type = 0xff;
+		task.OnAnalogEvent(&aevt);
+		check("OnAnalogEvent(type=0 / 0xff): default no-op case, no crash", true);
+
+		CPanelOut::SEncoderEvt eevt;
+		eevt.value = 200; /* > 0x7f -- exercises the real signed-char extension */
+		eevt.reserved[0] = eevt.reserved[1] = eevt.reserved[2] = 0;
+		eevt.zero = 0;
+		task.OnEncoderEvent(&eevt);
+		check("OnEncoderEvent(value=200): sign-extended byte payload, no crash", true);
 	}
 
 	printf("\n%d checks failed\n", g_fail);

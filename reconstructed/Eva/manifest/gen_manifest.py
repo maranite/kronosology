@@ -155,6 +155,13 @@ RECONSTRUCTED = {
     "08e28350",  # USTGUserAPI::ReadMessageWithTimeout
     "08e28470",  # USTGUserAPI::ReadUnsolicitedMessage
     "08e28220",  # USTGUserAPI::SendPanelMessage
+
+    # Stage 6 breadth sweep, 2026-07-25: USTGAPIControl::SaveRandomSeed()/
+    # ForceErPShutdown() + USTGAPIFsck::GenericMumount() promoted from Tier-B
+    # link-stubs to real bodies (stg_unsol_msg_handler.cpp).
+    "08e1d090",  # USTGAPIControl::SaveRandomSeed()
+    "08e1cbe0",  # USTGAPIControl::ForceErPShutdown(unsigned short)
+    "08e27120",  # USTGAPIFsck::GenericMumount(char const* const*)
     "08e285c0",  # USTGUserAPI::GetProgress
     "08e28560",  # USTGUserAPI::IncrementProgress
     "08e284f0",  # USTGUserAPI::SetProgress
@@ -760,6 +767,8 @@ RECONSTRUCTED = {
     "0824c000",  # CEditor::CPanelIfcTask::Exec(CMessage&) [1-arg override, real vtable slot 3]
     "0807d330",  # COutLinkMono::OutMono(unsigned short, unsigned long) -- 2nd real overload
     "0898fbb0",  # CPanelCfg::~CPanelCfg() [D1/D2, comdat-merged]
+    "0824be00",  # CEditor::CPanelIfcTask::OnAnalogEvent(CPanelOut::SAnalogEvt const*) -- Stage 6 breadth sweep, 2026-07-25
+    "0824bdb0",  # CEditor::CPanelIfcTask::OnEncoderEvent(CPanelOut::SEncoderEvt const*) -- Stage 6 breadth sweep, 2026-07-25
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
