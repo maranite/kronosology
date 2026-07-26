@@ -37,6 +37,16 @@ struct EditorTestHooks {
 	static CEditor::CChunkServerTask *GetChunkServerTask(CEditor &e) { return e.mChunkServerTask; }
 };
 
+/* Pokes CChunkServer's protected fields -- see chunk_server.h's own friend
+ * declaration. Added 2026-07-26 alongside promoting Load() from Tier B to
+ * Tier A (recovered via objdump register tracing, see chunk_server.h/.cpp).
+ */
+struct ChunkServerTestHooks {
+	static int GetReserved7c(const CChunkServer &c) { return c.mReserved7c; }
+	static int GetAccessMode(const CChunkServer &c) { return c.mAccessMode; }
+	static void SetAccessMode(CChunkServer &c, int mode) { c.mAccessMode = mode; }
+};
+
 static int g_fail;
 static void check(const char *label, bool ok)
 {
@@ -209,6 +219,55 @@ int main()
 		 */
 		cst->Unlock(0, 0, 0);
 		check("Unlock() (real vtable-slot-6 dispatch) does not crash", true);
+	}
+
+	printf("[8e] CChunkServer::Load() -- promoted Tier B -> Tier A 2026-07-26 (objdump-recovered mAccessMode-keyed tail call)\n");
+	{
+		CEditor editor("EditorTest7", 0);
+		editor.Setup();
+		CEditor::CChunkServerTask *cst = EditorTestHooks::GetChunkServerTask(editor);
+		check("CChunkServerTask constructed", cst != 0);
+
+		/* Real ctor argument is `CChunkServer(owner, 0)` (editor.cpp) -- every
+		 * CChunkServerTask in this reconstruction starts with mAccessMode == 0.
+		 */
+		check("CChunkServerTask starts with mAccessMode == 0",
+		      ChunkServerTestHooks::GetAccessMode(*cst) == 0);
+
+		/* mode == 0: dispatches through vtable slot 12 (EvaVTableStub-backed,
+		 * install-only in this reconstruction -- garbage-but-safe return, same
+		 * convention as Unlock()'s own slot-6 dispatch). No soft-assert call.
+		 * Real, previously-undocumented side effect: mReserved7c := 0
+		 * unconditionally, regardless of which branch is taken.
+		 */
+		cst->Load(0, 0, 0, 0, 0, 0);
+		check("Load() mode==0 (vtable slot 12 dispatch) does not crash", true);
+		check("Load() sets mReserved7c = 0 (mode==0 path)",
+		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
+
+		/* mode == 1: skips the soft-assert, dispatches through vtable slot 13
+		 * directly.
+		 */
+		ChunkServerTestHooks::SetAccessMode(*cst, 1);
+		cst->Load(0, 0, 0, 0, 0, 0);
+		check("Load() mode==1 (vtable slot 13 dispatch, no assert) does not crash", true);
+		check("Load() sets mReserved7c = 0 (mode==1 path)",
+		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
+
+		/* mode == 2 (neither 0 nor 1): real ground truth fires a non-aborting
+		 * soft-assert (Api+0x94, "ChunkServer.cpp"/0x174) THEN still falls
+		 * through to the same slot-13 dispatch mode==1 uses -- Api's own real
+		 * `__attribute__((constructor))` (sysapi_instance.cpp) has already run
+		 * by this point in any linked executable, so the call is against a
+		 * real, non-null, EvaVTableStub-backed vtable, matching every other
+		 * Api+0x94 soft-assert call site already exercised in this project
+		 * (chunk_man.cpp's CChkCmdBG dtor, etc).
+		 */
+		ChunkServerTestHooks::SetAccessMode(*cst, 2);
+		cst->Load(0, 0, 0, 0, 0, 0);
+		check("Load() mode==2 (soft-assert then slot 13 dispatch) does not crash", true);
+		check("Load() sets mReserved7c = 0 (mode==2 path)",
+		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
 	}
 
 	printf("[9] CEditor::CMainTask::IsSwitchPressed/IsShowCost -- pure global reads\n");

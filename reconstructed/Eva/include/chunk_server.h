@@ -29,10 +29,12 @@
  *
  * REAL LAYOUT (0x94 bytes total, matching every real caller's own
  * `malloc(0x94)`; base `CTask` ends at 0x7c, task.h):
- *   +0x7c  mReserved7c  never touched by the real ctor -- kept for exact
- *                       object-size fidelity only, same "dead slot, size
- *                       fidelity" category as CPanelIfcTask's own mReserved84
- *                       (panel_ifc_task.h)
+ *   +0x7c  mReserved7c  never touched by the real ctor, BUT `Load()` (below,
+ *                       now Tier A) unconditionally writes 0 here as its own
+ *                       first real side effect -- corrected 2026-07-26 from
+ *                       an earlier "never touched" claim that was only ever
+ *                       true of the ctor. Still never READ back by any
+ *                       reconstructed method.
  *   +0x80  mUnknown80   ctor sets 1; never read back by any reconstructed
  *                       method
  *   +0x84  mEntryCount  ctor zeroes; the real "how many key/value rows exist"
@@ -67,23 +69,42 @@
  * Install-only in this reconstruction (EvaVTableStub-backed) -- nothing in
  * this project's own call graph dispatches through it yet.
  *
- * TIER SPLIT: every method EXCEPT `Load()`/`Exec(CMessage&)` is Tier A.
- * `Unlock()` (.text+0x080cbdf0, 63 bytes) is real but forwards through this
- * object's OWN vtable at byte offset +0x18 from the installed pointer (i.e.
- * primary-array index 6, `GetSaveBuffSize`'s own following-11-virtuals
- * group's 2nd entry -- confirmed by direct address match against the
- * `.rodata` dump, NOT by name) -- since `CEditor::CChunkServerTask` (the
- * only real derived class in this project) does not override that slot, a
- * direct call to the base `OnUnlock()` its own 6-arg call site's 3rd literal
- * argument (`2`) would otherwise select gives IDENTICAL behavior to a true
- * vtable dispatch here; modeled as a genuine indirect call through the
- * installed vtable array (matching ground truth's own mechanism exactly, not
- * simplified to a direct call) since the array is available and correctly
- * sized regardless. `Load()` (.text+0x080cbfd0, 250 bytes) and `Exec
- * (CMessage&)` (.text+0x080cc0d0, 1336 bytes) stay Tier B -- `Load()`'s own
- * real body is itself a further vtable-slot dispatch with an argument list
- * Ghidra's own decompiler could not recover ("WARNING: Could not recover
- * jumptable... Treating indirect jump as call"), and `Exec()` is genuine
+ * TIER SPLIT: every method EXCEPT `Exec(CMessage&)` is now Tier A (`Load()`
+ * promoted 2026-07-26 -- see below). `Unlock()` (.text+0x080cbdf0, 63 bytes)
+ * is real but forwards through this object's OWN vtable at byte offset +0x18
+ * from the installed pointer (i.e. primary-array index 6, `GetSaveBuffSize`'s
+ * own following-11-virtuals group's 2nd entry -- confirmed by direct address
+ * match against the `.rodata` dump, NOT by name) -- since `CEditor::
+ * CChunkServerTask` (the only real derived class in this project) does not
+ * override that slot, a direct call to the base `OnUnlock()` its own 6-arg
+ * call site's 3rd literal argument (`2`) would otherwise select gives
+ * IDENTICAL behavior to a true vtable dispatch here; modeled as a genuine
+ * indirect call through the installed vtable array (matching ground truth's
+ * own mechanism exactly, not simplified to a direct call) since the array is
+ * available and correctly sized regardless.
+ *
+ * `Load()` (.text+0x080cbfd0, 250 bytes) was originally left Tier B because
+ * Ghidra's own decompiler could not recover its indirect-call argument list
+ * ("WARNING: Could not recover jumptable... Treating indirect jump as
+ * call"). Recovered 2026-07-26 by transcribing directly from `objdump -dr
+ * -M intel` instead (same technique already used for `CTask::RegisterIfc()`/
+ * `TVector<T,1>::MakeCapacity()`): it is `mReserved7c = 0;` followed by a
+ * `mAccessMode`-keyed TAIL CALL through this object's own installed vtable --
+ * slot 12 (byte 0x30, `OnLoad(CChunk*,uchar,uchar*,ulong)`) when
+ * `mAccessMode == 0`; otherwise slot 13 (byte 0x34, `OnLoad(ulong,uchar*,
+ * uchar,uchar*,ulong)`), with a real (but non-aborting) `Api`+0x94 soft-
+ * assert first when `mAccessMode` is neither 0 nor 1 ("Assertion failed in
+ * module %s, line %i.\n" / "ChunkServer.cpp" / 0x174). Both vtable targets
+ * are the trivial `return 0;` overloads for a plain `CChunkServer`, but for
+ * the ONE real derived class in this project (`CEditor::CChunkServerTask`)
+ * slot 12 is instead that class's own real, non-trivial `OnLoad(CChunk*,...)`
+ * override (editor.cpp, itself still Tier B -- genuine `PegResourceHandler::
+ * Load()` depth, out of scope) -- Load()'s own dispatch is modeled as a
+ * genuine indirect vtable call, not a hardcoded direct call to either
+ * overload, so this composes correctly regardless of which concrete class is
+ * actually installed.
+ *
+ * `Exec(CMessage&)` (.text+0x080cc0d0, 1336 bytes) stays Tier B -- genuine
  * chunk-protocol depth, same bar as `CEditor::CMainTask::Exec()`/
  * `CAlphaKeybIfcTask::ProcessCode()`.
  */
@@ -169,9 +190,10 @@ public:
 	 */
 	unsigned int GetServerHandle(unsigned char key) const;
 
-	/* .text+0x080cbfd0, 250 bytes. Tier B link-stub -- see header comment
-	 * (real body's own indirect-call argument list was not recoverable even
-	 * by Ghidra's own decompiler).
+	/* .text+0x080cbfd0, 250 bytes. REAL -- see header comment above for the
+	 * full mAccessMode-keyed tail-call-through-own-vtable derivation
+	 * (recovered via direct objdump register tracing after Ghidra's own
+	 * decompiler failed on it).
 	 */
 	void Load(CChunk *chunk, unsigned long a, unsigned char *b, unsigned char c, unsigned char *d, unsigned long e);
 
@@ -183,12 +205,14 @@ public:
 	int Exec(void *msg);
 
 protected:
-	int            mReserved7c; /* +0x7c, never touched -- size fidelity only */
+	int            mReserved7c; /* +0x7c, ctor never touches it, but Load() does (see above) */
 	int            mUnknown80;  /* +0x80 */
 	int            mEntryCount; /* +0x84 */
 	int            mUnknown88;  /* +0x88 */
 	unsigned char *mTableBuf;   /* +0x8c */
 	int            mAccessMode; /* +0x90 */
+
+	friend struct ChunkServerTestHooks;
 
 private:
 	/* Not implemented -- same "never copied in ground truth" convention as

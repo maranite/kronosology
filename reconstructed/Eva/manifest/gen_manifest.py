@@ -805,8 +805,10 @@ RECONSTRUCTED = {
     # --- 2026-07-26: CEditor::Setup()'s fan-out re-survey (following the
     # CreateUserModules() unlock) -- CChunkServer (chunk_server.h) + CEditor::
     # CChunkServerTask (editor.h), the LAST previously-deferred fan-out target,
-    # wired in UNCONDITIONALLY (not gated, unlike CAlphaKeybIfcTask). Load()
-    # (080cbfd0) and Exec(CMessage&) (080cc0d0) stay Tier B -- see chunk_server.h.
+    # wired in UNCONDITIONALLY (not gated, unlike CAlphaKeybIfcTask). Exec
+    # (CMessage&) (080cc0d0) stays Tier B -- see chunk_server.h. Load()
+    # (080cbfd0) was ALSO originally left Tier B here but promoted later the
+    # same day -- see the standalone entry further below.
     "080cbcf0",  # CChunkServer::CChunkServer(CModule const&, EAccessMode)
     "080cbb90",  # CChunkServer::~CChunkServer() [D1]
     "080cba90",  # CChunkServer::OnUnlock(...)
@@ -827,6 +829,14 @@ RECONSTRUCTED = {
     "0898f6a0",  # CEditor::CChunkServerTask::~CChunkServerTask() [D1]
     "08245ec0",  # CEditor::CChunkServerTask::OnSave(CChunk*, ...)
     "08245ed0",  # CEditor::CChunkServerTask::GetSaveBuffSize(...) const
+
+    # --- 2026-07-26 (later same day): CChunkServer::Load() promoted Tier B ->
+    # Tier A. Ghidra's own decompiler failed on it ("Could not recover
+    # jumptable"); recovered directly from objdump -dr register tracing
+    # instead (same technique as CTask::RegisterIfc()'s own MakeCapacity()
+    # promotion above). See chunk_server.h header comment for the full
+    # mAccessMode-keyed tail-call-through-own-vtable derivation.
+    "080cbfd0",  # CChunkServer::Load(CChunk*, unsigned long, unsigned char*, unsigned char, unsigned char*, unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
