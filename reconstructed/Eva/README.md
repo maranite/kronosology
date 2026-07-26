@@ -3299,3 +3299,73 @@ every `verify/` binary individually: all clean except the pre-existing,
 already-documented `eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`
 6-FAIL (unrelated). `tools/build_lenny.sh`: `LINK OK`. Manifest 505 → 507 of
 37,795.
+
+### `nm -C` breadth sweep follow-up, 2026-07-26 -- 3 small Tier-B setters promoted
+
+Continued the same broad `nm -C`/call-graph sweep this project keeps re-running after
+each "exhausted" verdict, this time grepping the tree's own `"Tier B"`/`"Tier-B"` doc
+comments directly for named-but-not-yet-promoted stubs rather than starting from
+`nm -C`'s raw class list (most classes not yet in `include/` turned out to be genuinely
+deep god-objects already covered by this project's own "confirmed out of scope" list --
+`CDirEntry`/`CRMJob`/`CKGMsgProcessor`/`CControlSurface`/`CDesktop`/`CViewBase` all
+checked and confirmed either too deep, unreachable, or already-covered-elsewhere; see
+this batch's own agent-memory note for the full survey).
+
+Found and promoted 3 small, self-contained methods, all confirmed via direct
+`objdump -dr -M intel` (not decompiled -- Ghidra `load_binary` was not attempted this
+session since these were small enough for direct disassembly):
+
+- `CChkApiInstance::SetOwnerModule(CChunkMan*)` (.text+0x080bfcd0, 130 bytes,
+  `mains.cpp`) -- real field write at `self+0x4`, with a real "already assigned"
+  soft-assert re-check (via `Api`'s own vtable slot +0x94, the SAME idiom already
+  established in `tempo.cpp`/`chunk_man.cpp`/`chunk_server.cpp`/`task.cpp`) that does
+  NOT prevent the final unconditional overwrite -- ground truth never early-returns
+  after either of its two soft-asserts fires.
+- `CRMApiInstance::SetResMan(CResMan*)` (.text+0x081655e0, 85 bytes, `mains.cpp`) --
+  real field write at `self+0xc`, single assert-only-on-NULL shape (no "already
+  assigned" re-check, a real, confirmed difference from `SetOwnerModule` above, not a
+  simplification).
+- `CEditApiInstance::AssignScope(char const*, unsigned char)` (.text+0x080d23e0, 23
+  bytes, `config_manager.cpp`) -- real indexed store `((char**)(this+8))[scope] =
+  name; return 1;`. Stays genuinely unreachable on this pass's own boot path (its only
+  caller, `CConfigManager::AssignEditServerIDs()`'s per-entry loop, never executes
+  because `config_info.cpp`'s own `sm_ptEditServerInfo` placeholder is zero-initialized)
+  -- transcribed for real anyway per this project's standing "faithful dead code over
+  convenient no-op" convention (same license as `USTGAPILCDControl::
+  LoadStoredSettings()`'s dead `local_10` read).
+
+Both real file-name strings passed to the shared assert idiom were byte-dumped from
+`.rodata`, not guessed: `"ChkApin.cpp"` (0x8e7fca9) and `"RMApin.cpp"` (0x8e80561) --
+both abbreviate "ApiInstance.cpp" to "Apin.cpp" specifically in these two literals; no
+other `Xxx.cpp` string found elsewhere in this project abbreviates that way.
+
+**Real bug caught and fixed by this promotion, not by inspection alone:** `mains.cpp`'s
+`ChkApiInstance[4]` static byte buffer was sized (as of the 2026-07-23 correction pass)
+for exactly what its own static constructor writes -- the vtable pointer, 4 bytes. With
+`SetOwnerModule()`'s real body now writing 4 more bytes at `self+0x4`, that buffer was
+one real field too small; a live call from `MMainChunkMan()` would have silently
+overrun it. Bumped to 8 bytes (`mains.cpp`'s own comment explains the sizing). No other
+sibling buffer needed a change: `RMApiInstance[0x2c]` already covers `self+0xc`+4 with
+room to spare.
+
+None of `CChkApiInstance`/`CRMApiInstance`/`CEditApiInstance` became a reconstructed
+class in its own right -- all 3 stay locally-scoped, opaque-buffer shims exactly as
+before (each is a 20-30+-method god-object in ground truth), only these 3 specific
+methods are now real.
+
+New KAT: `verify/test_mains_api_setters.cpp` (9 checks) -- re-declares all 3 classes
+locally (matching mains.cpp's/config_manager.cpp's exact signatures, since neither is
+exposed via any header) to link against the real definitions in `objs/init/mains.o`/
+`objs/init/config_manager.o`, then drives each against its own freshly allocated
+buffer (not the real file-local `ChkApiInstance`/`RMApiInstance`/`EditApiInstance`
+statics, which stay untestable from outside their own TU). Covers both `SetOwnerModule`
+soft-assert branches (module==NULL, already-assigned re-call), `SetResMan`'s
+single-assert shape, and 3 independent `AssignScope()` slots for cross-clobber safety.
+Ran every `verify/` binary individually: all clean except the pre-existing,
+already-documented `eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md` 6-FAIL
+(unrelated, `src/ipc/*`, never touched this batch). `tools/build_lenny.sh`: `LINK OK`.
+`git status`/`git diff --stat` checked before staging -- `include/poller.h` (a
+concurrent agent's own `CPoller::Exec()` work) and the OA-side
+`HARDWARE_REVIEW_LOG.md`/`SESSION_SUMMARY_2026-07-25.md`/`tools/build_gdbserver.sh`/
+`tools/gdbserver-i386-musl` (other agents' work) left untouched and unstaged. Manifest
+507 -> 508 of 37,795.

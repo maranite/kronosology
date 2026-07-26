@@ -398,20 +398,33 @@ inline void ApiConnect(int a, int b, int c, int d, int e)
 
 } // namespace
 
-/* CEditApiInstance::AssignScope()/EditApiInstance are Tier-B: real signature/global
- * confirmed from the decompile, but with this pass's own zero-initialized
- * sm_ptEditServerInfo placeholder (config_info.cpp), AssignEditServerIDs()'s loop
- * body that would call this is real but unreachable (see below) -- so an empty body
- * here is not a behavioral gap for anything this pass's data can exercise.
+/* CEditApiInstance::AssignScope() -- promoted to a real body 2026-07-26. Direct
+ * `objdump -dr` of .text+0x080d23e0 (23 bytes) shows a trivial indexed store, not a
+ * broker-lookup: `((char **)((char*)this + 8))[scope] = name; return 1;` -- a fixed
+ * per-scope name-pointer table starting at `this+8` (CEditApiInstance itself stays
+ * an opaque byte buffer everywhere else in this project -- EditApiInstance[], below
+ * -- so this is modeled as a raw offset write on that same buffer, same convention
+ * as mains.cpp's `FMApiInstance+0x4d8` write and this file's own many `Api`-vtable
+ * raw dispatches).
+ *
+ * Still genuinely unreachable on this pass's own boot path -- AssignEditServerIDs()'s
+ * calling loop (below) never executes because config_info.cpp's own
+ * sm_ptEditServerInfo placeholder is zero-initialized (first name is already NULL) --
+ * but that is a property of this project's OWN placeholder config data, not of this
+ * function itself, so it is transcribed for real rather than left as an empty stub,
+ * matching the standing "faithful dead code over convenient no-op" convention this
+ * project already uses for USTGAPILCDControl::LoadStoredSettings()'s dead `local_10`
+ * read and AssignEditServerIDs()'s own loop body just below.
  */
 class CEditApiInstance {
 public:
-	void AssignScope(const char *name, unsigned char scope);
+	int AssignScope(const char *name, unsigned char scope);
 };
 
-void CEditApiInstance::AssignScope(const char * /*name*/, unsigned char /*scope*/)
+int CEditApiInstance::AssignScope(const char *name, unsigned char scope)
 {
-	/* Tier-B link-stub. */
+	((const char **)((char *)this + 0x8))[scope] = name;
+	return 1;
 }
 
 /* Real global, shared with mains.cpp's own MMainEditMan() (the same EditApiInstance

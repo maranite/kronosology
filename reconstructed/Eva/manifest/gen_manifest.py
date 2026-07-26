@@ -1017,6 +1017,22 @@ RECONSTRUCTED = {
     # separate, dedicated-batch-scale reconstruction).
     "089f2190",  # CPoller::MsgSetAnalogClient(CMessage&)
     "089f1a10",  # CPoller::MsgSetButtonClient(CMessage&)
+
+    # --- 2026-07-26 (nm -C sweep, mains.cpp/config_manager.cpp XxxApiInstance setter
+    # batch): 3 small Tier-B empty-body link-stubs promoted to real bodies, found by
+    # grepping this project's own "Tier B"/"Tier-B" doc comments for a still-open,
+    # tractable name. All 3 use the same real Api+0x94 soft-assert idiom already
+    # established in tempo.cpp/chunk_man.cpp/chunk_server.cpp/task.cpp; neither of
+    # CChkApiInstance/CRMApiInstance/CEditApiInstance is (or needs to become) a full
+    # reconstructed class -- each stays a locally-scoped opaque-buffer shim, same as
+    # before, only these 3 specific methods became real. Fixed a real, previously
+    # latent buffer-undersizing bug this promotion exposed: mains.cpp's own
+    # `ChkApiInstance[4]` static byte buffer was one real field (4 bytes) too small
+    # for SetOwnerModule()'s own self+0x4 write once that write became real; bumped to
+    # 8 bytes (see mains.cpp's own comment). See verify/test_mains_api_setters.cpp.
+    "080bfcd0",  # CChkApiInstance::SetOwnerModule(CChunkMan*)
+    "081655e0",  # CRMApiInstance::SetResMan(CResMan*)
+    "080d23e0",  # CEditApiInstance::AssignScope(char const*, unsigned char)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

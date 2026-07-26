@@ -607,11 +607,14 @@ void MMainESDisk(CSystemApi *api)
  * All 9 wrapper functions themselves are transcribed faithfully (Tier A, all under
  * 130 bytes, fully mechanical). Every module CONSTRUCTOR is real (CModule::CModule,
  * module.cpp) except CFileMan::CFileMan/CResMan::CResMan, which are Tier-B link-stubs
- * (empty bodies) -- the two genuinely too-deep derived ctors in this family. The 6
- * real per-module vtables these install, the 8 real API-instance globals, and the
- * handful of real but undecoded DAT_ constants passed to the +0xa4 registration slot
- * are all opaque Tier-B placeholders, same "install/pass but never dispatch or read
- * back" treatment as the 15+2 driver/module vtables above.
+ * (empty bodies) -- the two genuinely too-deep derived ctors in this family.
+ * `CChkApiInstance::SetOwnerModule()`/`CRMApiInstance::SetResMan()` (the item-4 named
+ * setters) were promoted to real bodies 2026-07-26 -- see their own definitions below
+ * for the real Api+0x94 soft-assert idiom and field offsets. The 6 real per-module
+ * vtables these install, the 8 real API-instance globals, and the handful of real but
+ * undecoded DAT_ constants passed to the +0xa4 registration slot remain opaque Tier-B
+ * placeholders, same "install/pass but never dispatch or read back" treatment as the
+ * 15+2 driver/module vtables above.
  * ===========================================================================
  */
 
@@ -670,7 +673,11 @@ extern "C" unsigned char EditApiInstance[0x404] = {};
 static unsigned char SeqApiInstance[8] = {};
 static unsigned char FMApiInstance[0x4e0] = {};
 static unsigned char g_oSysExApiInstance[0x40] = {};
-static unsigned char ChkApiInstance[4] = {};
+static unsigned char ChkApiInstance[8] = {}; /* bumped 4->8 bytes 2026-07-26: real
+	CChkApiInstance::SetOwnerModule() (promoted to a real body this same pass) writes
+	the owner-module pointer at offset +0x4, 4 more bytes than ConstructChkApiInstance()
+	alone ever touched -- same "just big enough for what our own reconstructed code
+	writes" sizing convention as this array's 2026-07-23 correction note above. */
 static unsigned char DumpApiInstance[8] = {};
 static unsigned char RMApiInstance[0x2c] = {};
 static unsigned char RTRouterApiInstance[0x1c] = {};
@@ -956,18 +963,80 @@ extern "C" const char *CChunkMan_SysName = "ChunkMan";
  * for the exact per-field/per-method breakdown.
  */
 
-/* CChkApiInstance::SetOwnerModule()/CRMApiInstance::SetResMan() -- Tier-B link-stubs. */
+/* CChkApiInstance::SetOwnerModule()/CRMApiInstance::SetResMan() -- promoted Tier A
+ * 2026-07-26. Both are real, self-contained field stores on an opaque cross-boundary
+ * object (neither CChkApiInstance nor CRMApiInstance is reconstructed as a full class
+ * anywhere in this project -- both are 30+-method god-objects, same "ES-family"
+ * out-of-scope boundary), reached exactly as this file's own header comment
+ * describes: MMainChunkMan()/MMainResMan() (both already real, below) are their only
+ * two call sites in this reconstruction.
+ *
+ * Both use the SAME real Api+0x94 soft-assert idiom already established in
+ * tempo.cpp/chunk_man.cpp/chunk_server.cpp/task.cpp -- confirmed here via direct
+ * `objdump -dr` of .text+0x080bfcd0 (CChkApiInstance::SetOwnerModule, 0x82 bytes) and
+ * .text+0x081655e0 (CRMApiInstance::SetResMan, 0x55 bytes): both load `ds:0x930a1f4`
+ * (== `Api`, same global this file already defines), fetch its vtable, and call
+ * slot +0x94 with the same real format string ("Assertion failed in module %s, line
+ * %i.\n", .rodata+0x8e7bef8) plus a real per-callsite file-name/line-number pair --
+ * "ChkApin.cpp"/0x138(312)/0x139(313) for SetOwnerModule, "RMApin.cpp"/0x36(54) for
+ * SetResMan (both file strings byte-dumped from .rodata, not guessed -- this
+ * project's own Korg source tree apparently abbreviated "ApiInstance.cpp" to
+ * "Apin.cpp" in these two literals specifically; every other Xxx.cpp string found
+ * elsewhere in this pass is unabbreviated).
+ *
+ * Neither assert is fatal (ApiAssert forwards to the standing EvaVTableStub, see
+ * omega_vtables.cpp) and the real disassembly never early-returns after either fires
+ * -- the final field store happens unconditionally, transcribed the same way here.
+ */
+namespace {
+inline void ApiAssert(const char *file, int line)
+{
+	typedef void (*Fn)(void *, const char *, const char *, int);
+	void *vtbl = *(void **)Api;
+	Fn fn = *(Fn *)((char *)vtbl + 0x94);
+	fn(Api, "Assertion failed in module %s, line %i.\n", file, line);
+}
+} /* namespace */
+
 class CChkApiInstance {
 public:
 	static void SetOwnerModule(void *self, void *module);
 };
-void CChkApiInstance::SetOwnerModule(void * /*self*/, void * /*module*/) {}
+
+/* .text+0x080bfcd0, 130 bytes. Real field is `this+0x4` (CChunkMan* owner module).
+ * Real ground-truth order (confirmed via disassembly control flow, not assumed):
+ * the "already assigned" check re-reads `this+0x4` AFTER the NULL-module assert
+ * branch rejoins it (a real `goto`-style merge in the original, not two independent
+ * `if`s) -- modeled here as plain sequential code since both branches converge on
+ * the same read either way, same observable behavior.
+ */
+void CChkApiInstance::SetOwnerModule(void *self, void *module)
+{
+	if (module == 0)
+		ApiAssert("ChkApin.cpp", 0x138); /* 312: module is NULL */
+
+	if (*(void **)((char *)self + 0x4) != 0)
+		ApiAssert("ChkApin.cpp", 0x139); /* 313: owner module already assigned */
+
+	*(void **)((char *)self + 0x4) = module;
+}
 
 class CRMApiInstance {
 public:
 	static void SetResMan(void *self, void *resMan);
 };
-void CRMApiInstance::SetResMan(void * /*self*/, void * /*resMan*/) {}
+
+/* .text+0x081655e0, 85 bytes. Real field is `this+0xc` (CResMan* pointer). Only one
+ * assert branch here (no "already assigned" re-check, unlike SetOwnerModule above --
+ * confirmed real difference between the two, not a simplification).
+ */
+void CRMApiInstance::SetResMan(void *self, void *resMan)
+{
+	if (resMan == 0)
+		ApiAssert("RMApin.cpp", 0x36); /* 54: resMan is NULL */
+
+	*(void **)((char *)self + 0xc) = resMan;
+}
 
 /* .text+0x080d2a00, 111 bytes. Registers EditApiInstance via RegisterApi() (Api's
  * vtable slot +0xa4, ground-truth-confirmed to be CSysApiInstance::RegisterApi --

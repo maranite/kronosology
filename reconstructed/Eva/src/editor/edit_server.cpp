@@ -49,8 +49,10 @@ extern CSystemApi *Api; /* mains.cpp */
 /* CEditApiInstance -- the real scope broker every CEditServer registers
  * itself with (.text 080d1f70/080d1f30/080d2400). Only ever backed today by
  * the opaque EditApiInstance byte buffer (mains.cpp) -- no real C++ class
- * modeled yet. Stubbed the same way mains.cpp already stubs
- * CChkApiInstance::SetOwnerModule/CRMApiInstance::SetResMan: empty bodies,
+ * modeled yet. Stubbed the same "empty body" way mains.cpp used to stub
+ * CChkApiInstance::SetOwnerModule/CRMApiInstance::SetResMan before those two
+ * were promoted to real bodies (2026-07-26, mains.cpp) -- CEditApiInstance
+ * itself is a much larger ~14-method family and stays out of scope here.
  * GetAssignedScope returns 0xff (the same "unassigned" sentinel the real
  * ctor's own default write already uses before this call runs) since
  * nothing in this reconstruction can compute the real scope id without
