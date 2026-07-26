@@ -61,11 +61,24 @@
  * CDumpMachine@080cf4d0.c):
  *   +0x1c  mOwnerTask   the ctor's own `CDumpTask&` argument, stored as a raw pointer
  *
- * `ReadPacket()`/`WritePacket()`/`IsDumpEnded()` are Tier B this pass (real signature,
- * minimal body): all 3 read/write through `mOwnerTask->BufferingTask()`'s own embedded
- * `CDumpBuffer` (buffering_task.h/dump_buffer.h), whose own `Read()`/`Write()` are
- * themselves Tier B (dump_buffer.h) -- genuinely unreached from this pass's own call
- * graph either way (only called from the out-of-scope state-handler family).
+ * `ReadPacket()`/`WritePacket()`/`IsDumpEnded()` promoted to real bodies 2026-07-26
+ * (re-check of the DumpManager cluster batch): all 3 are trivial forwards --
+ * `mOwnerTask->BufferingTask()` (real, `CDumpTask`'s own `+0x94` field, read
+ * directly by raw offset in ground truth rather than through the accessor) gives a
+ * `CBufferingTask*`; `ReadPacket()`/`WritePacket()` reinterpret that pointer +0x80
+ * (where `CDumpBuffer` is always embedded, buffering_task.h) as a `CDumpBuffer*` and
+ * tail-call its own (now-real, dump_buffer.h) `Read()`/`Write()`; `IsDumpEnded()`
+ * reads `CBufferingTask+0x98` directly, which is the SAME byte as `CDumpBuffer+0x18`
+ * (`mRemainingLength`) via that identical `+0x80` embedding -- ground truth computes
+ * it as one flat offset rather than two nested ones, but it's the same field either
+ * way (RemainingLength(), dump_buffer.h). Still NOT reachable from this
+ * reconstruction's own wired call graph -- only called from the genuinely
+ * out-of-scope `CDumpManStateMachine` state-handler family -- promoted anyway for the
+ * same "small, self-contained, completes the cluster" reasoning as `CDumpBuffer::
+ * Read()`/`Write()` (dump_buffer.h's own header comment). Real soft NULL asserts on
+ * `BufferingTask()` (Api+0x94) omitted per this project's usual convention; ground
+ * truth dereferences the (possibly null) pointer unconditionally afterward either
+ * way, so this is not converted into a hard guard.
  * `SetTimeout()`/`SendSexMessage()`/`PutMessage()` ARE Tier A: real, self-contained
  * one-line forwards into already-real code (`CSysExMsgTaskBase::SetTimeout()`/
  * `SendMsg()`) or a Tier-B stub whose OWN forwarding call site is still a real,
@@ -166,13 +179,13 @@ public:
 	 */
 	void PutMessage(const unsigned char *data, unsigned char len);
 
-	/* .text+0x080cf2f0, 133 bytes. Tier B -- see header comment. */
+	/* .text+0x080cf2f0, 133 bytes. Tier A (2026-07-26) -- see header comment. */
 	void ReadPacket(unsigned char *data, unsigned char len);
 
-	/* .text+0x080cf380, 133 bytes. Tier B -- see header comment. */
+	/* .text+0x080cf380, 133 bytes. Tier A (2026-07-26) -- see header comment. */
 	void WritePacket(const unsigned char *data, unsigned char len);
 
-	/* .text+0x080cf250, 91 bytes. Tier B -- see header comment. */
+	/* .text+0x080cf250, 91 bytes. Tier A (2026-07-26) -- see header comment. */
 	bool IsDumpEnded();
 
 private:

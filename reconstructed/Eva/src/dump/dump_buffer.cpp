@@ -5,6 +5,8 @@
 #include "dump_buffer.h"
 #include "omega_vtables.h"
 
+#include <cstring>
+
 CDumpBuffer::CDumpBuffer(unsigned long requestedCapacity)
 	: CCircByteBuffer(requestedCapacity), mRemainingLength(0), mExpectedLength(0)
 {
@@ -31,17 +33,65 @@ void CDumpBuffer::Reset()
 	mExpectedLength = 0;
 }
 
-bool CDumpBuffer::Read(unsigned char * /*dst*/, unsigned long /*len*/)
+bool CDumpBuffer::Read(unsigned char *dst, unsigned long len)
 {
-	/* Tier B -- see header comment. Not reachable from this pass's own wired call
-	 * graph (only CDumpMachine::ReadPacket(), itself only called from the
-	 * genuinely out-of-scope CDumpManStateMachine state-handler family).
+	/* mLimitActive lives one dword past this object's own storage, at the owning
+	 * CBufferingTask's own +0xa0 -- see header comment / buffering_task.h.
 	 */
-	return false;
+	unsigned int limitActive = *reinterpret_cast<unsigned int *>(
+		reinterpret_cast<char *>(this) + 0x20);
+
+	unsigned long readLen;
+	bool truncated;
+	if (limitActive != 0) {
+		readLen = len;
+		truncated = false;
+	} else if (len <= mRemainingLength) {
+		readLen = len;
+		truncated = false;
+	} else {
+		readLen = mRemainingLength;
+		truncated = true;
+	}
+
+	if (!CCircByteBuffer::Read(dst, readLen))
+		return false;
+
+	if (limitActive != 0)
+		return true;
+
+	/* Real soft asserts (mExpectedLength != 0; readLen <= mRemainingLength, both
+	 * Api+0x94) omitted -- both non-enforcing, see header comment.
+	 */
+	mRemainingLength -= readLen;
+	if (mRemainingLength == 0)
+		mExpectedLength = 0;
+
+	if (truncated)
+		memset(dst + readLen, 0, len - readLen);
+
+	return true;
 }
 
-bool CDumpBuffer::Write(const unsigned char * /*src*/, unsigned long /*len*/)
+bool CDumpBuffer::Write(const unsigned char *src, unsigned long len)
 {
-	/* Tier B -- see header comment / Read()'s own twin comment above. */
-	return false;
+	unsigned int limitActive = *reinterpret_cast<unsigned int *>(
+		reinterpret_cast<char *>(this) + 0x20);
+
+	unsigned long writeLen = len;
+	if (limitActive == 1 && writeLen > mRemainingLength)
+		writeLen = mRemainingLength;
+
+	if (!CCircByteBuffer::Write(src, writeLen))
+		return false;
+
+	if (limitActive != 1)
+		return true;
+
+	/* Real soft assert (mExpectedLength != 0, Api+0x94) omitted, same as Read(). */
+	mRemainingLength -= writeLen;
+	if (mRemainingLength == 0)
+		mExpectedLength = 0;
+
+	return true;
 }

@@ -5,6 +5,7 @@
 #include "dump_man_state_machine.h"
 #include "dump_task.h"
 #include "buffering_task.h"
+#include "dump_buffer.h"
 #include "sysex_msg_task_base.h"
 #include "omega_vtables.h"
 
@@ -102,18 +103,26 @@ void CDumpMachine::PutMessage(const unsigned char *data, unsigned char len)
 	mOwnerTask->BufferingTask()->Put(data, len);
 }
 
-void CDumpMachine::ReadPacket(unsigned char * /*data*/, unsigned char /*len*/)
+void CDumpMachine::ReadPacket(unsigned char *data, unsigned char len)
 {
-	/* Tier B -- see header comment. */
+	/* Real soft NULL assert on BufferingTask() omitted -- see header comment. */
+	CDumpBuffer *buf = reinterpret_cast<CDumpBuffer *>(
+		reinterpret_cast<char *>(mOwnerTask->BufferingTask()) + 0x80);
+	buf->Read(data, len);
 }
 
-void CDumpMachine::WritePacket(const unsigned char * /*data*/, unsigned char /*len*/)
+void CDumpMachine::WritePacket(const unsigned char *data, unsigned char len)
 {
-	/* Tier B -- see header comment. */
+	/* Real soft NULL assert on BufferingTask() omitted -- see header comment. */
+	CDumpBuffer *buf = reinterpret_cast<CDumpBuffer *>(
+		reinterpret_cast<char *>(mOwnerTask->BufferingTask()) + 0x80);
+	buf->Write(data, len);
 }
 
 bool CDumpMachine::IsDumpEnded()
 {
-	/* Tier B -- see header comment. */
-	return false;
+	/* Real soft NULL assert on BufferingTask() omitted -- see header comment. */
+	CDumpBuffer *buf = reinterpret_cast<CDumpBuffer *>(
+		reinterpret_cast<char *>(mOwnerTask->BufferingTask()) + 0x80);
+	return buf->RemainingLength() == 0;
 }

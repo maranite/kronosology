@@ -523,6 +523,22 @@ RECONSTRUCTED = {
     "080cf500",  # CDumpManMod::Config() (confirmed genuinely empty)
     "080cf510",  # CDumpManMod::Start() (confirmed genuinely empty)
 
+    # --- Re-check of the DumpManager cluster batch (2026-07-26): promoted
+    # CDumpBuffer::Read()/Write() and CDumpMachine::ReadPacket()/WritePacket()/
+    # IsDumpEnded() from Tier B to real bodies -- still NOT reachable from this
+    # reconstruction's own wired call graph (their real callers stay the
+    # out-of-scope CDumpManStateMachine state-handler family, plus a separately-
+    # confirmed-dead-in-ground-truth-itself CDumpApiInstance/DumpApi path), but
+    # small, self-contained (zero new dependencies), and complete this cluster's
+    # own CDumpBuffer/CDumpMachine classes to 100% real -- see dump_buffer.h's own
+    # updated header comment for the full length-tracking algorithm writeup,
+    # including a confirmed (not guessed) Read()/Write() field-polarity asymmetry.
+    "080cf030",  # CDumpBuffer::Read(uchar*, ulong)
+    "080cf170",  # CDumpBuffer::Write(uchar const*, ulong)
+    "080cf2f0",  # CDumpMachine::ReadPacket(uchar*, uchar)
+    "080cf380",  # CDumpMachine::WritePacket(uchar const*, uchar)
+    "080cf250",  # CDumpMachine::IsDumpEnded()
+
     # --- Stage 6: breadth sweep, THIRD CClientCommServer follow-up pass same day
     # (2026-07-25). Promotes 9 of the 10 methods the second follow-up pass left
     # Tier B (23/26 Tier A total now -- only OnReceiveMessage(CMessage const&) stays
