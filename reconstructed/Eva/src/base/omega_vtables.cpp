@@ -403,4 +403,30 @@ void *PTR__CPanelCfg_08f29d48[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 int EvaDataPlaceholder_08f29d04 = 0;
+
+/* CChunkServer / CEditor::CChunkServerTask -- see omega_vtables.h's own
+ * header comment for the full 16+3 byte-exact derivation.
+ */
+void *PTR__CChunkServer_08e859a8[16] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__CChunkServer_08e859f0[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CChunkServerTask_08f25b88[16] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__CChunkServerTask_08f25bd0[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

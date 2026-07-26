@@ -102,6 +102,15 @@ public:
 	/* .text+0x08245960, 963 bytes. Tier B link-stub -- see header comment. */
 	void ProcessCode(IAlphaKeybCode::SKeyboardCode *code);
 
+	/* .text+0x08245eb0, 1 byte -- REAL. Ground truth's own body is a bare
+	 * `ret`, nothing else (confirmed via the real decompile/objdump: no
+	 * instructions before it). `CEditor::Start()` calls this (unqualified,
+	 * real `__cdecl` static, no `this`) whenever `mAlphaKeybIfcTask != 0` --
+	 * wired in editor.cpp now that `CEditor::Setup()` itself is confirmed
+	 * live-boot-reachable (see eva_createusermodules_editor_unlock_2026-07-26).
+	 */
+	static void Setup();
+
 private:
 	unsigned char mEditable[4]; /* embedded CEditable, editable.h */
 	void         *mIfcVtbl;

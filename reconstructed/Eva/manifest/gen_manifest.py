@@ -801,6 +801,32 @@ RECONSTRUCTED = {
     # MakeCapacity() anywhere in this project. See task.h header comment.
     "0807ec90",  # CTask::RegisterIfc(CIfcUnknown*)
     "08182220",  # TVector<CTask::SRegisteredIfc,1>::MakeCapacity(unsigned int)
+
+    # --- 2026-07-26: CEditor::Setup()'s fan-out re-survey (following the
+    # CreateUserModules() unlock) -- CChunkServer (chunk_server.h) + CEditor::
+    # CChunkServerTask (editor.h), the LAST previously-deferred fan-out target,
+    # wired in UNCONDITIONALLY (not gated, unlike CAlphaKeybIfcTask). Load()
+    # (080cbfd0) and Exec(CMessage&) (080cc0d0) stay Tier B -- see chunk_server.h.
+    "080cbcf0",  # CChunkServer::CChunkServer(CModule const&, EAccessMode)
+    "080cbb90",  # CChunkServer::~CChunkServer() [D1]
+    "080cba90",  # CChunkServer::OnUnlock(...)
+    "080cbaa0",  # CChunkServer::OnRelock(...)
+    "080cbab0",  # CChunkServer::OnBegin(...)
+    "080cbac0",  # CChunkServer::OnEnd(...)
+    "080cbad0",  # CChunkServer::OnSave(CChunk*, unsigned char, unsigned char*, unsigned long)
+    "080cbae0",  # CChunkServer::OnSave(unsigned long&, unsigned char const*&, ...)
+    "080cbaf0",  # CChunkServer::OnLoad(CChunk*, unsigned char, unsigned char*, unsigned long)
+    "080cbb00",  # CChunkServer::OnLoad(unsigned long, unsigned char*, ...)
+    "080cbb10",  # CChunkServer::OnAbort(ECommand)
+    "080cbb20",  # CChunkServer::OnStoppedByUser(ECommand)
+    "080cbb30",  # CChunkServer::GetSaveBuffSize(unsigned char, unsigned char, unsigned char) const
+    "080cbdc0",  # CChunkServer::GetServerID(int) const
+    "080cbdf0",  # CChunkServer::Unlock(unsigned char, unsigned char, unsigned char*)
+    "080cbe30",  # CChunkServer::GetServerHandle(unsigned char) const
+    "08245f50",  # CEditor::CChunkServerTask::CChunkServerTask(CModule const&)
+    "0898f6a0",  # CEditor::CChunkServerTask::~CChunkServerTask() [D1]
+    "08245ec0",  # CEditor::CChunkServerTask::OnSave(CChunk*, ...)
+    "08245ed0",  # CEditor::CChunkServerTask::GetSaveBuffSize(...) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

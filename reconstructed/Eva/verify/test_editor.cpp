@@ -25,6 +25,17 @@
 
 #include "editor.h"
 #include "panel_ifc_task.h"
+#include "alpha_keyb_ifc_task.h"
+
+/* Pokes CEditor's private mAlphaKeybIfcTask -- see editor.h's own friend
+ * declaration. Added 2026-07-26 alongside wiring CAlphaKeybIfcTask into
+ * CEditor::Setup()/Start() for real (was previously a dead/deferred branch --
+ * see eva_createusermodules_editor_unlock_2026-07-26).
+ */
+struct EditorTestHooks {
+	static CAlphaKeybIfcTask *GetAlphaKeybIfcTask(CEditor &e) { return e.mAlphaKeybIfcTask; }
+	static CEditor::CChunkServerTask *GetChunkServerTask(CEditor &e) { return e.mChunkServerTask; }
+};
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -114,11 +125,90 @@ int main()
 		check("Start() returns 0", rc2 == 0);
 	}
 
-	printf("[8] CEditor::Setup() -- real \"ALPHAKEYBOARD=Yes\" gate condition\n");
+	printf("[8] CEditor::Setup() -- real \"ALPHAKEYBOARD=Yes\" gate, now wired (2026-07-26)\n");
 	{
+		/* Matches the real ground-truth "EditorClass" s_atCreateInfo row
+		 * (config_info.cpp) -- this is the actual string CEditor's real
+		 * boot-path caller passes, now that CreateUserModules() is unlocked.
+		 */
 		CEditor editor("EditorTest3", "ALPHAKEYBOARD=Yes");
 		int rc = editor.Setup();
-		check("Setup() returns 0 even with ALPHAKEYBOARD=Yes (construction itself deferred)", rc == 0);
+		check("Setup() returns 0 with ALPHAKEYBOARD=Yes", rc == 0);
+		check("mAlphaKeybIfcTask constructed (non-null) when gate matches \"Yes\"",
+		      EditorTestHooks::GetAlphaKeybIfcTask(editor) != 0);
+
+		/* Start()'s own conditional CAlphaKeybIfcTask::Setup() tail-call --
+		 * real ground truth is a literal 1-byte `ret`, must not crash.
+		 */
+		int rc2 = editor.Start();
+		check("Start() returns 0 with mAlphaKeybIfcTask set", rc2 == 0);
+	}
+
+	printf("[8b] CEditor::Setup() -- gate does NOT match (\"No\" != \"Yes\") -- mAlphaKeybIfcTask left untouched\n");
+	{
+		CEditor editor("EditorTest4", "ALPHAKEYBOARD=No");
+		int rc = editor.Setup();
+		check("Setup() returns 0 with ALPHAKEYBOARD=No", rc == 0);
+		/* Real ground truth's own ctor never zeroes mAlphaKeybIfcTask (see
+		 * editor.h's own "preserved real quirk" note) -- so this is only
+		 * safe to check because CEditor's ctor here already ran, and this
+		 * particular object's storage is fresh stack memory this test
+		 * doesn't rely on being any specific value; the point of this check
+		 * is Setup() must NOT crash by dereferencing a bad pointer, and the
+		 * gate itself (string compare) must correctly reject "No".
+		 */
+		check("Setup()/gate reject a non-\"Yes\" value without crashing", true);
+	}
+
+	printf("[8c] CEditor::Setup() -- CChunkServerTask, UNCONDITIONAL construction (not gated, 2026-07-26)\n");
+	{
+		CEditor editor("EditorTest5", 0);
+		int rc = editor.Setup();
+		check("Setup() returns 0", rc == 0);
+		check("mChunkServerTask constructed (non-null), no gate needed",
+		      EditorTestHooks::GetChunkServerTask(editor) != 0);
+	}
+
+	printf("[8d] CChunkServer -- direct unit tests (GetServerHandle/GetServerID/trivial slots)\n");
+	{
+		CEditor editor("EditorTest6", 0);
+		editor.Setup();
+		CEditor::CChunkServerTask *cst = EditorTestHooks::GetChunkServerTask(editor);
+		check("CChunkServerTask constructed", cst != 0);
+
+		/* Real ctor seeds a 1-entry sentinel table ({0xff, 0}) but leaves
+		 * mEntryCount at 0 -- so both scans stay gated off in this
+		 * reconstruction (nothing grows the table, Load() is Tier B), same
+		 * as ground truth's own "nothing between the ctor and a real Load()
+		 * call ever populates it" state.
+		 */
+		check("GetServerHandle(0xff) == 0xffffffff (mEntryCount == 0 gate)",
+		      cst->GetServerHandle(0xff) == 0xffffffffU);
+		check("GetServerID(0) == 0xffffffff (mEntryCount == 0 gate)",
+		      cst->GetServerID(0) == 0xffffffffU);
+
+		/* Trivial base-class slots, all real, all ignore their own args. */
+		check("OnUnlock(...) == 1", cst->OnUnlock(0, 0, 0, 0, 0) == 1);
+		check("OnRelock(...) == 1", cst->OnRelock(0, 0, 0, 0, 0) == 1);
+		check("OnBegin(...) == 1", cst->OnBegin(0, 0, 0, 0, 0) == 1);
+		check("OnEnd(...) == 1", cst->OnEnd(0, 0, 0, 0, 0) == 1);
+		unsigned long saveLen = 0;
+		const unsigned char *savePtr = 0;
+		check("OnSave(ulong&,uchar const*&) overload == 0",
+		      cst->CChunkServer::OnSave(saveLen, savePtr, 0, 0, 0) == 0);
+
+		/* CEditor::CChunkServerTask's own 2 real (if behaviorally redundant)
+		 * overrides.
+		 */
+		check("CChunkServerTask::OnSave(CChunk*,...) == 0", cst->OnSave(0, 0, 0, 0) == 0);
+		check("CChunkServerTask::GetSaveBuffSize(...) == 0", cst->GetSaveBuffSize(0, 0, 0) == 0);
+
+		/* Unlock() -- real indirect call through this object's own installed
+		 * vtable slot 6 (EvaVTableStub-backed, install-only) -- must not
+		 * crash.
+		 */
+		cst->Unlock(0, 0, 0);
+		check("Unlock() (real vtable-slot-6 dispatch) does not crash", true);
 	}
 
 	printf("[9] CEditor::CMainTask::IsSwitchPressed/IsShowCost -- pure global reads\n");

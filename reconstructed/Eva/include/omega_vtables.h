@@ -570,6 +570,36 @@ extern void *PTR__CEditor_08f29bc0[5];
 extern void *PTR__CPanelIfcTask_08f29ce8[7];
 extern void *PTR__CPanelCfg_08f29d48[6];
 extern int   EvaDataPlaceholder_08f29d04;
+
+/* CChunkServer / CEditor::CChunkServerTask -- CEditor::Setup()'s own LAST
+ * previously-deferred fan-out target (editor.h/chunk_server.h, 2026-07-26 --
+ * the "not tractable this pass" note the original dedicated CEditor batch
+ * left has been revisited and closed). Both classes share the SAME real
+ * 16-slot primary group (2 dtor + CTask::Exec()/Exec(CMessage&)/
+ * CTask::ExecMsg() (5-slot CTask-family header, matching PTR__CTask_08e82128's
+ * own established shape) + CChunkServer's own 11 new virtuals:
+ * GetSaveBuffSize/OnUnlock/OnRelock/OnBegin/OnEnd/OnSave(CChunk*)/
+ * OnSave(ulong&,uchar const*&)/OnLoad(CChunk*)/OnLoad(ulong,uchar*)/OnAbort/
+ * OnStoppedByUser) plus a 3-slot secondary ("mIfcThunk", this+8) group (2
+ * dtor thunks + an ExecMsg thunk, same shape as CTask/CPanelIfcTask/
+ * CAlphaKeybIfcTask's own secondary groups) -- ALL confirmed by a direct
+ * `.rodata` dword read (not inferred), CChunkServer at 0x08e859a0 (install
+ * points 0x08e859a8/0x08e859f0) and CEditor::CChunkServerTask at 0x08f25b78
+ * (install points 0x08f25b88/0x08f25bd0). CChunkServerTask's own vtable
+ * re-emits the FULL 16-slot group (standard GCC single-inheritance-derived-
+ * class vtable shape) with only GetSaveBuffSize/OnSave(CChunk*)/OnLoad(CChunk*)
+ * replaced by its own overrides (slots 5/10/12) -- every other slot is the
+ * SAME address as CChunkServer's own (byte-for-byte confirmed, not just
+ * assumed from "not overridden"). Both vtables install-only (EvaVTableStub-
+ * backed, same convention as every other array in this file) -- nothing in
+ * this reconstruction's own call graph dispatches through either vtable yet
+ * (CEditor::Setup() only constructs+Add()s a CChunkServerTask, it never calls
+ * any of its chunk-protocol methods).
+ */
+extern void *PTR__CChunkServer_08e859a8[16];
+extern void *PTR__CChunkServer_08e859f0[3];
+extern void *PTR__CChunkServerTask_08f25b88[16];
+extern void *PTR__CChunkServerTask_08f25bd0[3];
 }
 
 #endif /* OMEGA_VTABLES_H */

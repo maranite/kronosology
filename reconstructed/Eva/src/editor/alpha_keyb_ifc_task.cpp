@@ -56,3 +56,10 @@ void CAlphaKeybIfcTask::ProcessCode(IAlphaKeybCode::SKeyboardCode *)
 	 * see header comment for why this stays out of scope.
 	 */
 }
+
+void CAlphaKeybIfcTask::Setup()
+{
+	/* Real ground truth: a bare `ret`, confirmed via objdump -- genuinely
+	 * empty, not an unreconstructed stub standing in for something bigger.
+	 */
+}

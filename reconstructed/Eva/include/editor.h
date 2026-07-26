@@ -35,18 +35,32 @@
  *                              different, unrelated classes that happen to
  *                              share an unqualified name, per that header's
  *                              own note). Constructed by Setup(), malloc(0x8c).
- *   +0x40074  CPanelIfcTask*  -- panel_ifc_task.h (already partially real).
- *                              Constructed by Setup(), malloc(0xb8).
- *   +0x40078  void* (opaque)  -- CEditor::CChunkServerTask*, own nested class,
- *                              deferred (see Setup()'s own header comment
- *                              below). Constructed by Setup(), malloc(0x94).
+ *   +0x40074  CPanelIfcTask*  -- panel_ifc_task.h, fully real (Stage 6
+ *                              dedicated CPanelIfcTask batch). Constructed by
+ *                              Setup(), malloc(0xb8).
+ *   +0x40078  CChunkServerTask* -- own nested class, now fully real (this
+ *                              session, 2026-07-26 -- see Setup()'s own
+ *                              header comment below and chunk_server.h).
+ *                              Constructed by Setup(), malloc(0x94),
+ *                              UNCONDITIONALLY (not gated, unlike the
+ *                              ALPHAKEYBOARD sibling).
  *   +0x4007c  CAlphaKeybIfcTask* -- top-level (NOT nested under CEditor,
  *                              confirmed by its own mangled ctor name
  *                              `_ZN17CAlphaKeybIfcTaskC1ERK7CEditor` --
  *                              `17CAlphaKeybIfcTask`, no enclosing `CEditor`
- *                              qualifier), deferred. Constructed by Setup()
- *                              ONLY if the "ALPHAKEYBOARD" parameter string
- *                              equals "Yes", malloc(0x84).
+ *                              qualifier). Now real (alpha_keyb_ifc_task.h)
+ *                              AND wired into Setup()/Start() (this session,
+ *                              2026-07-26) -- see that bullet below and
+ *                              editor.cpp for the wiring itself. Constructed
+ *                              by Setup() ONLY if the "ALPHAKEYBOARD"
+ *                              parameter string equals "Yes", malloc(0x84) --
+ *                              and, per config_info.cpp's own real
+ *                              `s_atCreateInfo` "EditorClass" row (literal
+ *                              `"ALPHAKEYBOARD=Yes"`), this branch IS taken
+ *                              on the real boot path now that
+ *                              `CConfigManager::CreateUserModules()` is
+ *                              unlocked (eva_createusermodules_editor_unlock_
+ *                              2026-07-26) -- not a dead/never-taken branch.
  *   +0x40080  CParameterString* -- parameter_string.h (new, fully real this
  *                              pass). Null if the ctor's own `alphaKeybParam`
  *                              argument is null.
@@ -104,29 +118,45 @@
  *                     `panel_ifc_task.h` gained only the minimal additional
  *                     ctor overload Setup() needs to link (Tier-B, see that
  *                     header).
- *   - CChunkServerTask NOT tractable this pass: needs a new base class
- *                     `CChunkServer` (CChunkServerTask@08245f50.c's own base
- *                     ctor call) -- a genuinely separate, non-trivial 21-real-
- *                     method class (OnUnlock/OnRelock/OnBegin/OnEnd/OnSave x2/
- *                     OnLoad x2/OnAbort/OnStoppedByUser/GetSaveBuffSize/
- *                     GetServerID/Unlock/GetServerHandle/Load/Exec, confirmed
- *                     via `nm -C`, .text+0x080cba90..0x080cc0d0) that nothing
- *                     in this project has touched yet. Deferred entirely,
- *                     including CEditor::CChunkServerTask's own 3 trivial
- *                     methods (OnSave/GetSaveBuffSize both just `return 0;`,
- *                     OnLoad forwards to `PegResourceHandler::Load` -- Peg
- *                     again) -- kept as an untyped `void*` member (Setup()
- *                     still stores the real pointer at the real +0x40078
- *                     offset, just without a named type to dereference it).
- *   - CAlphaKeybIfcTask NOT tractable this pass: needs `CEditable`
- *                     (edit_man.h references it only by name, not
- *                     reconstructed) and `CTask::RegisterIfc` (already
- *                     documented Tier-B in task.h). Also gated behind an
- *                     optional boot-config string ("ALPHAKEYBOARD=Yes") this
- *                     reconstruction's own boot path never sets, so even if
- *                     built, Setup()'s own real branch would skip it today.
- *                     Kept as a forward-declared (incomplete-type) pointer
- *                     member -- real class, just not defined anywhere yet.
+ *   - CChunkServerTask now fully real AND wired (this session, 2026-07-26,
+ *                     the same fan-out re-survey that unlocked CAlphaKeybIfcTask
+ *                     above). The base class this needs, `CChunkServer`
+ *                     (chunk_server.h, .text+0x080cba90..0x080cc0d0),
+ *                     turned out genuinely tractable once actually surveyed --
+ *                     18 of its own 21 real methods are either 1-6 byte
+ *                     trivial constant returns or small (<100 byte) real
+ *                     logic; only `Load()`/`Exec(CMessage&)` stay Tier B
+ *                     (genuine chunk-protocol depth / an unrecoverable
+ *                     indirect-call argument list even Ghidra's own
+ *                     decompiler flagged). `CEditor::CChunkServerTask`'s own
+ *                     3 overrides (OnSave/GetSaveBuffSize both just
+ *                     `return 0;`, both real; OnLoad forwards to
+ *                     `PegResourceHandler::Load` -- Peg-toolkit depth, stays
+ *                     Tier B) are below. UNLIKE `CAlphaKeybIfcTask`'s
+ *                     "ALPHAKEYBOARD=Yes" gate, this construction is
+ *                     UNCONDITIONAL in `Setup()` -- always on the real boot
+ *                     path, not contingent on any config string.
+ *   - CAlphaKeybIfcTask now fully real AND wired (this session, 2026-07-26,
+ *                     following up on the now-live `CreateUserModules()` fix --
+ *                     eva_createusermodules_editor_unlock_2026-07-26). Was
+ *                     reconstructed standalone but deliberately left unwired
+ *                     by an earlier Stage 6 breadth-sweep batch (see
+ *                     alpha_keyb_ifc_task.h's own header comment) to avoid
+ *                     touching this file during concurrent CEditor work, and
+ *                     because at the time `CreateUserModules()`'s own bug
+ *                     meant `CEditor`'s ctor never actually received the real
+ *                     `"ALPHAKEYBOARD=Yes"` config string anyway -- so the
+ *                     branch was a dead condition on this project's own
+ *                     traced boot path either way. Both preconditions are now
+ *                     resolved: `CEditable`/`CTask::RegisterIfc` (task.h) are
+ *                     real, and `s_atCreateInfo`'s real "EditorClass" row
+ *                     (config_info.cpp) DOES pass `"ALPHAKEYBOARD=Yes"` as
+ *                     `CEditor`'s own ctor argument on the real boot path --
+ *                     this branch is taken for real. `CAlphaKeybIfcTask::
+ *                     Setup()` (`CEditor::Start()`'s own conditional call,
+ *                     see below) is also now real -- ground truth's own body
+ *                     is a literal 1-byte `ret`, confirmed via objdump, so
+ *                     there was nothing left to defer.
  */
 
 #ifndef EDITOR_H
@@ -136,6 +166,7 @@
 #include "edit_server.h" /* CEditServer */
 #include "parameter_string.h"
 #include "task.h"        /* CTask (CMainTask's real base) */
+#include "chunk_server.h" /* CChunkServer (CChunkServerTask's real base) */
 
 class CAlphaKeybIfcTask; /* top-level, NOT nested -- see header comment. Real
                            * class, deferred; only ever used here as an
@@ -143,8 +174,9 @@ class CAlphaKeybIfcTask; /* top-level, NOT nested -- see header comment. Real
 
 class CEditor : public CModule {
 public:
-	class CMainTask;      /* defined immediately below, out-of-line */
-	class CPanelIfcTask;  /* defined out-of-line in panel_ifc_task.h */
+	class CMainTask;        /* defined immediately below, out-of-line */
+	class CPanelIfcTask;    /* defined out-of-line in panel_ifc_task.h */
+	class CChunkServerTask; /* defined immediately below, out-of-line */
 
 	/* .text+0x08249cd0, 199 bytes. `alphaKeybParam` is main()'s own optional
 	 * config-string argument (real ground truth: only non-null on some
@@ -163,14 +195,17 @@ public:
 	 */
 	static int Config();
 
-	/* .text+0x082498b0, 63 bytes. Real: dispatches CMainTask::InitDesktop()/
-	 * CPanelIfcTask::SetupPanelInterface() (both Tier-B/Peg-adjacent stubs
-	 * today, see those classes) and, only if the optional CAlphaKeybIfcTask
-	 * sibling was built by Setup(), a static `CAlphaKeybIfcTask::Setup()`
-	 * call (real ground truth: a genuine 0-argument static/tail-call, per
-	 * `Start@082498b0.c` -- not an oversight, confirmed via objdump the same
-	 * way IsSwitchPressed/IsShowCost/EnterCheckHardware/StopScreenRefresh
-	 * below were).
+	/* .text+0x082498b0, 63 bytes. Real: dispatches `CMainTask::InitDesktop()`
+	 * (Tier-B/Peg-adjacent stub, see that class) and
+	 * `CPanelIfcTask::SetupPanelInterface()` (fully real, Stage 6 dedicated
+	 * CPanelIfcTask batch) unconditionally, and, only if the optional
+	 * `CAlphaKeybIfcTask` sibling was built by `Setup()`, a static
+	 * `CAlphaKeybIfcTask::Setup()` call (real ground truth: a genuine
+	 * 0-argument static/tail-call, per `Start@082498b0.c` -- not an
+	 * oversight, confirmed via objdump the same way
+	 * IsSwitchPressed/IsShowCost/EnterCheckHardware/StopScreenRefresh below
+	 * were; that callee is itself now real too -- a literal 1-byte `ret`,
+	 * alpha_keyb_ifc_task.h).
 	 */
 	int Start();
 
@@ -241,8 +276,8 @@ private:
 	CEditServer        mEditServer;        /* +0x38, 0x40038 bytes */
 	CMainTask         *mMainTask;          /* +0x40070 */
 	CPanelIfcTask     *mPanelIfcTask;      /* +0x40074 */
-	void              *mChunkServerTask;   /* +0x40078, deferred (see header) */
-	CAlphaKeybIfcTask *mAlphaKeybIfcTask;  /* +0x4007c, deferred (see header) */
+	CChunkServerTask  *mChunkServerTask;   /* +0x40078, now real (see header) */
+	CAlphaKeybIfcTask *mAlphaKeybIfcTask;  /* +0x4007c, now real+wired (see header) */
 	CParameterString  *mAlphaKeybParam;    /* +0x40080 */
 
 	static CEditor *sm_poTheEditor; /* real global, `_ZN7CEditor13sm_poTheEditorE` */
@@ -252,6 +287,13 @@ private:
 	 */
 	CEditor(const CEditor &);
 	CEditor &operator=(const CEditor &);
+
+	/* Friend accessor for verify/test_editor.cpp -- CEditor has no public
+	 * accessor for mAlphaKeybIfcTask (ground truth doesn't either), same
+	 * "friend pokes private state" convention as PanelIfcTaskTestHooks
+	 * (panel_ifc_task.h)/OutLinkTestHooks (out_link.h).
+	 */
+	friend struct EditorTestHooks;
 };
 
 /* CEditor::CMainTask -- NOT CEditMan::CMainTask (edit_man.h), a completely
@@ -324,6 +366,75 @@ public:
 
 private:
 	void *mScreen;
+};
+
+/* CEditor::CChunkServerTask -- own nested class, base CChunkServer
+ * (chunk_server.h). Reconstructed 2026-07-26 alongside the CAlphaKeybIfcTask
+ * wiring, once CEditor::Setup() itself was confirmed live-boot-reachable --
+ * see editor.h's own header comment above and chunk_server.h for the base
+ * class's own full writeup.
+ *
+ * REAL LAYOUT: no new fields of its own (`CChunkServerTask@08245f50.c`, 52
+ * bytes, base-constructs `CChunkServer::CChunkServer(owner, 0)` [EAccessMode
+ * literal 0] then installs its own primary + secondary vtable identities,
+ * nothing else) -- matches `malloc(0x94)`, the SAME size as its own base
+ * `CChunkServer` (chunk_server.h).
+ *
+ * VTABLE: real 16-slot primary + 3-slot secondary, SAME shape/size as
+ * `CChunkServer`'s own (confirmed byte-exact via a direct `.rodata` dword
+ * read at 0x08f25b78 -- omega_vtables.h) -- only 3 of the 16 primary slots
+ * differ from `CChunkServer`'s own (GetSaveBuffSize/OnSave(CChunk*)/
+ * OnLoad(CChunk*), slots 5/10/12), confirmed address-for-address against
+ * every other slot.
+ */
+class CEditor::CChunkServerTask : public CChunkServer {
+public:
+	/* .text+0x08245f50, 52 bytes. `owner` stands in for the real ctor's
+	 * `CModule const&` argument (matches ground truth's own parameter type
+	 * exactly -- unlike CAlphaKeybIfcTask's own upcast-from-CEditor
+	 * convenience, this ctor's real argument IS just `CModule const&`).
+	 */
+	explicit CChunkServerTask(const CModule &owner);
+
+	/* .text+0x0898f6a0 (D1). Real ground truth reinstalls the SAME 2 vtable
+	 * identities its own ctor installed, then falls through to the
+	 * (automatic) base `CChunkServer::~CChunkServer()` -- same "written, then
+	 * immediately superseded by the inherited cleanup" shape already
+	 * documented elsewhere in this project (e.g. CAlphaKeybIfcTask's own
+	 * dtor, alpha_keyb_ifc_task.h) EXCEPT here the derived write ISN'T
+	 * superseded (CChunkServer's own dtor reinstalls the SAME
+	 * PTR__CChunkServer identities CChunkServerTask's own derived write
+	 * would otherwise be overwritten to -- but since CChunkServerTask's own
+	 * dtor writes ITS OWN identities first and CChunkServer's dtor doesn't
+	 * know that happened, the final observable state after a full
+	 * `~CChunkServerTask()` unwind is genuinely CChunkServer's OWN identity,
+	 * not CChunkServerTask's -- transcribed faithfully, not "fixed" to keep
+	 * the derived identity).
+	 */
+	~CChunkServerTask();
+
+	/* .text+0x08245ec0, 3 bytes. REAL: unconditionally `return 0;`
+	 * (overrides CChunkServer::OnSave(CChunk*,...), which also just returns
+	 * 0 -- this override is a genuine, if behaviorally redundant, real
+	 * ground-truth override, not a no-op fabrication).
+	 */
+	unsigned int OnSave(CChunk *chunk, unsigned char a, unsigned char *b, unsigned long c);
+
+	/* .text+0x08245ed0, 3 bytes. REAL: unconditionally `return 0;` (same
+	 * "redundant but genuine override" status as OnSave above).
+	 */
+	int GetSaveBuffSize(unsigned char a, unsigned char b, unsigned char c) const;
+
+	/* .text+0x08245ee0, 107 bytes. Tier B link-stub -- real body (for
+	 * `param3 > 2 && (param4[0]-0xd) < 2`) calls
+	 * `PegResourceHandler::Load(PegThing::mpResourceHandler, a, param4[0],
+	 * param4[1], param4[2])` -- Peg-toolkit depth, the same gap
+	 * panel_ifc_task.h's own header comment already documents project-wide.
+	 * Real ground truth returns 0 on every other path -- modeled here as an
+	 * unconditional `return 0;`, matching every path this reconstruction can
+	 * actually exercise without fabricating the Peg call.
+	 */
+	unsigned int OnLoad(CChunk *chunk, unsigned char a, unsigned char *b, unsigned long c);
 };
 
 #endif /* EDITOR_H */
