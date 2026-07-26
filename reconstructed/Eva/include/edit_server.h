@@ -340,8 +340,8 @@ public:
 	                  const void *buf, unsigned int bufLen, EEditSource source);
 
 	/* .text+0x08c1a680, 161 bytes. Real: only actually posts a notification
-	 * (CNotifyList::Put(), Tier-B below) when the class-static
-	 * sm_bNotifyEnabled is set; on a successful Put(), latches
+	 * (CNotifyList::Put(), notify_list.h -- promoted Tier B -> Tier A 2026-07-26)
+	 * when the class-static sm_bNotifyEnabled is set; on a successful Put(), latches
 	 * mNotifyLatch/clears mNotifyPending depending on which of the two is
 	 * currently set (a real "was a notify already pending" toggle --
 	 * transcribed exactly, not independently confirmed against any other

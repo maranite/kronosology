@@ -31,6 +31,7 @@
 #include "edit_server.h"
 #include "omega_vtables.h"
 #include "system_api.h"
+#include "notify_list.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -64,30 +65,33 @@ namespace {
 	unsigned char EditApiInstance_GetAssignedScope(void * /*self*/, const char * /*name*/) { return 0xff; }
 }
 
-/* CNotifyList::Put(uchar,uchar,uchar) (.text+0x08071000) -- the real
- * change-notification poster. Out of scope (its own subsystem: GrowEventsList/
- * ReleaseList/GetList, none reconstructed) -- stubbed as a no-op returning
- * "no notify posted" (0), matching PutNotify()'s own real gating (this
- * reconstruction's sm_bNotifyEnabled defaults false anyway, see
- * edit_server.h, so this stub is doubly unreachable today).
+/* CNotifyList::Put(uchar,uchar,uchar) (.text+0x08071000) -- promoted Tier B -> Tier A
+ * 2026-07-26 (broad Tier-B recheck sweep): CNotifyList is a genuine, previously
+ * unmodeled small class (notify_list.h/.cpp), not out of scope at all -- every one of
+ * its methods (GrowEventsList/ReleaseList/GetList/Put) is a small, self-contained
+ * free-list operation. Real ground truth: Put() always returns 1 (every code path
+ * converges on the same `eax = 1` epilogue) -- both call sites below preserve their
+ * own pre-existing `posted == 0` dead-code shape rather than simplifying it away,
+ * matching this project's "faithfully-transcribed even when unreachable" convention.
+ * PutNotify()'s own real gating (sm_bNotifyEnabled defaults false, see edit_server.h)
+ * still means this queue is never actually exercised on this pass's own traced boot
+ * path -- that hasn't changed, only the code behind it is now real instead of a
+ * fabricated no-op.
  */
-namespace {
-	int CNotifyList_Put(void * /*list*/, unsigned char /*scope*/, unsigned char /*index*/,
-	                     unsigned char /*subIndex*/)
-	{
-		return 0;
-	}
-}
 
 bool CEditServer::sm_bNotifyEnabled = false;
 
-/* Real global static (CEditServer::m_oNotifyList, symbols.csv: 0930a248) --
- * the CNotifyList instance PutNotify() posts through. Not modeled as a real
- * object (CNotifyList is Tier-B, see above); kept as an opaque placeholder
- * pointer, matching this project's "declare the real global, stub what it
- * points at" convention used for FMApi/EditApi/etc. in mains.cpp.
+/* Real global static (CEditServer::m_oNotifyList, symbols.csv: 0930a248) -- a genuine
+ * embedded CNotifyList object (0xc bytes, matches sizeof(CGlobalObjectBase) + 2
+ * pointers exactly), not a bare placeholder pointer as the prior pass modeled it (see
+ * notify_list.h). Ordinary C++ static-object syntax here runs CNotifyList's own real
+ * ctor before main() via the standard .init_array mechanism -- same real effect as
+ * every other XxxApiInstance-family global's own `global.constructors.keyed.to.*`
+ * static constructor, just expressed as a genuine C++ object since CNotifyList (unlike
+ * SysApiInstance/EditApiInstance/etc.) has a real, reconstructible ctor of its own
+ * rather than being placement-new'd into a raw byte buffer.
  */
-static void *g_oNotifyList = 0;
+static CNotifyList g_oNotifyList;
 
 /* ===========================================================================
  * Shared PMF-resolution helper -- the real disassembly's own recurring
@@ -655,7 +659,8 @@ unsigned int CEditServer::Set(unsigned char group, unsigned char index, unsigned
 	if (!sm_bNotifyEnabled)
 		return 0;
 
-	int posted = CNotifyList_Put(g_oNotifyList, group, index, subIndex);
+	g_oNotifyList.Put(group, index, subIndex);
+	int posted = 1; /* real CNotifyList::Put() always returns 1 -- see file header. */
 	return (unsigned)(posted != 0);
 }
 
@@ -664,7 +669,8 @@ int CEditServer::PutNotify(unsigned char group, unsigned char subIndex)
 	if (!sm_bNotifyEnabled)
 		return 0;
 
-	int posted = CNotifyList_Put(g_oNotifyList, group, subIndex, 0);
+	g_oNotifyList.Put(group, subIndex, 0);
+	int posted = 1; /* real CNotifyList::Put() always returns 1 -- see file header. */
 	if (posted == 0)
 		return 0;
 
