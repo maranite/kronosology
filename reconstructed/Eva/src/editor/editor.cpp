@@ -17,7 +17,6 @@
 #include "panel_ifc_task.h"
 #include "alpha_keyb_ifc_task.h"
 #include "omega_vtables.h"
-#include <cstdio>
 
 #include <cstring>
 
@@ -190,17 +189,17 @@ CEditor::CEditor(const char *name, const char *alphaKeybParam)
 		mAlphaKeybParam = new CParameterString(alphaKeybParam);
 	}
 
-	/* TEMPORARY live-boot verification marker (2026-07-26) -- confirms
-	 * CEditor::CEditor() actually runs on the real construction path
-	 * (mains.cpp's CEditorConstructor::Create() -> placement new), not
-	 * just reachable in source. Remove once confirmed in eva_stdout.log.
-	 * Explicit fflush() is ALSO temporary/diagnostic-only: stdout is fully
-	 * buffered once redirected to eva_stdout.log, and after the s_bRunning
-	 * fix (see omega_interface.cpp) the real main loop now genuinely never
-	 * returns, so nothing else would ever force this buffer out to disk.
+	/* Live-boot verification note (2026-07-26): a temporary
+	 * puts("CEDITOR_CTOR_MARKER...")+fflush() was added here, rebuilt, and
+	 * booted live in kronos_vm -- confirmed present, exactly once, in
+	 * /korg/rw/eva_stdout.log, proving CEditor::CEditor() genuinely runs on
+	 * the real construction path (mains.cpp's CEditorConstructor::Create()
+	 * -> placement new), not just reachable in source. Removed again after
+	 * confirmation since ground truth's own ctor has no such call; see
+	 * agent-memory eva_ceditor_construction_confirmed_2026-07-26.md for the
+	 * full finding (this also surfaced and fixed a real s_bRunning
+	 * mis-initialization bug in omega_interface.cpp).
 	 */
-	puts("CEDITOR_CTOR_MARKER: CEditor::CEditor() constructed");
-	fflush(stdout);
 }
 
 CEditor::~CEditor()

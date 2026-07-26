@@ -39,8 +39,33 @@ COmegaInterface Omega;
 /* Definitions for the shared statics declared in omega_globals.h -- see that header
  * for the address-arithmetic evidence tying this whole block together, and for
  * s_hThreads/s_tThreadInfo's real per-element layout.
+ *
+ * REAL BUG FIX (live-boot verification pass, 2026-07-26): s_bRunning was
+ * `= 0` here, but ground truth's own .data initializer is NOT zero --
+ * s_bRunning@0x091ae7d0 falls inside the real Eva binary's .data section
+ * (.data spans 0x091ad9c0..0x09304c60; .bss starts at 0x09304c60), and the
+ * file bytes at that address are `01 00 00 00` (confirmed by direct hex read
+ * of Decomp/EVA_Decomp/Eva at file offset 0x11657d0 = .data's own sh_offset
+ * 0x11649c0 + (0x091ae7d0 - 0x091ad9c0)). So the real global starts at 1, not
+ * 0. This matters a lot: OmegaTimingThread()'s very first statement is
+ * `if (s_bRunning == 0) return;` (omega_threads.cpp) -- with the old `= 0`
+ * initializer that return fired on thread entry, in EVERY prior boot test,
+ * meaning Init()/main() never actually blocked in the real timing loop at
+ * all (contradicting this file's OWN header comment on Init(), "this is the
+ * real reason Init() (and therefore main()) does not return until app
+ * shutdown") -- Init() returned near-instantly, main() ran straight through
+ * Close(), and OmegaInitThread (which is what eventually calls
+ * CKernel::InitUserLayer() -> CConfigManager::CreateUserModules() ->
+ * CEditorConstructorCreate() -> CEditor::CEditor()) got at most a few
+ * milliseconds of scheduling before the whole process exited -- explaining
+ * why a live-boot CEDITOR_CTOR_MARKER probe (2026-07-26) found the ctor
+ * never fired despite Setup()'s registration path being genuinely reachable.
+ * s_timingenablelock/s_iTimingDisable (below/omega_globals.h) are NOT
+ * affected by this same class of bug -- both live at 0x09309474/0x09309480,
+ * well inside .bss (NOBITS, unconditionally zero), confirmed by the same
+ * section-range check.
  */
-volatile int s_bRunning = 0;
+volatile int s_bRunning = 1;
 volatile int s_timingenablelock = 0;
 int s_iTimingDisable = 0;
 static struct timeval s_tvStart; /* only ever read/written here -- not shared cross-TU */
