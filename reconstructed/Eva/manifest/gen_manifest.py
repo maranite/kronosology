@@ -1033,6 +1033,20 @@ RECONSTRUCTED = {
     "080bfcd0",  # CChkApiInstance::SetOwnerModule(CChunkMan*)
     "081655e0",  # CRMApiInstance::SetResMan(CResMan*)
     "080d23e0",  # CEditApiInstance::AssignScope(char const*, unsigned char)
+
+    # --- 2026-07-26 (Exec() 0-arg batch): the 12-way jump-table hardware-event-drain
+    # loop named by the CPoller closeout batch's own note above. Direct `objdump -dr
+    # -M intel` register tracing of the whole 3213-byte body plus a real `objdump -s
+    # -j .rodata` byte dump of the 12-entry jump table (.rodata+0x08f7c268). Modeled
+    # the type-11 ANALOG ring-push and the second-pass client flush as real calls to
+    # the already-reconstructed CIfcClient::PutAnalogEvt()/FlushAnalogEvts() instead
+    # of re-inlining ground truth's own byte-identical duplicates of that same logic
+    # (same "duplicate real ground-truth function per call site, modeled as a call
+    # instead" precedent FindRegisteredClient()'s own wrappers already established).
+    # CPoller's only remaining genuinely-deferred surface after this is
+    # Exec(CMessage&) (6747B, the real per-message string-command dispatcher, ~94
+    # strcmp() call sites -- a completely separate mechanism, out of scope here).
+    "089ee7d0",  # CPoller::Exec()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

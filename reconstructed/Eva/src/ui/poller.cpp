@@ -58,6 +58,28 @@
  * field comments previously guessed both the wrong way around) -- see the two new
  * static tables (`s_analogCode[]`, `s_buttonPrimaryCode[]`/`s_buttonAltCode[]`)
  * immediately below, copied verbatim from ground truth's own `.rodata`.
+ *
+ * `Exec()` (2026-07-26 Exec() 0-arg batch) transcribed from .text+0x089ee7d0 (3213
+ * bytes) via direct `objdump -dr -M intel` register tracing of the whole body plus
+ * a real `objdump -s -j .rodata` byte dump of the 12-entry jump table @
+ * `.rodata+0x08f7c268` (Ghidra's own `load_binary` timed out again this session).
+ * See poller.h's own per-method header comment for the complete derivation. Adds
+ * one new static table, `s_buttonFlag[]`, the button `.rodata` table's own third
+ * field -- dead data for `MsgSetButtonClient()` but a real, live gate here.
+ *
+ * `Exec(CMessage&)` (2026-07-26 Exec(CMessage&) closeout batch) transcribed from
+ * .text+0x089f54f0 (6747 bytes) via a full `objdump -dr -M intel` branch-target CFG
+ * reachability walk (Ghidra's own `load_binary` timed out again this session,
+ * consistent with every other same-day batch). A prior pass's "94 strcmp() sites,
+ * not a numeric switch" characterization was a real misdiagnosis, corrected this
+ * batch: there IS a real 15-way jump table, and all 15 cases turned out to be
+ * ground truth's own inlined duplicate (or, for 3 of them, a real direct call) of
+ * one of the 15 `Msg*()` sibling methods above. Modeled as real calls to those
+ * siblings, per this file's own established "duplicate real ground-truth function
+ * per call site, modeled as a call instead" precedent -- see this method's own
+ * header comment (both here and poller.h) for the full per-case correspondence and
+ * the shared `PollerTranslateSubResult()` return-code mapping this discovery
+ * required. `CPoller` is now fully structurally closed.
  */
 
 #include "poller.h"
@@ -696,6 +718,24 @@ static const int s_buttonPrimaryCode[0x80] = {
 
 static const int s_buttonAltCode[0x80] = { 0 };
 
+/* Real .rodata table's own third field (offset +8 of the same 16-byte entries
+ * above) -- dead data for MsgSetButtonClient() (never read there) but a real,
+ * live gate for Exec()'s own type-3/4/5 BUTTON dispatch below. Byte-dumped
+ * directly (`objdump -s -j .rodata --start-address=0x8f7b860`): all 128 entries
+ * are 1 in this exact build -- transcribed as a real, live check anyway (per
+ * poller.h's own top-of-file note), not collapsed to `true`.
+ */
+static const int s_buttonFlag[0x80] = {
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+};
+
 int CPoller::MsgSetAnalogClient(CMessage &msg)
 {
 	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
@@ -1032,6 +1072,369 @@ int CPoller::MsgRegisterClientByRef(CMessage &msg)
 	int result = RegisterClient(handle, nameA, nameB);
 	payload[0] = handle;
 	return result;
+}
+
+/* --- Exec() (2026-07-26 Exec() 0-arg batch) -- see poller.h's own per-method header
+ * comment for the complete derivation (12-way jump table, both stack-buffer
+ * mechanisms, the LED-phase bitmap diff tail). Transcribed via direct
+ * `objdump -dr -M intel` register tracing of the whole 3213-byte body plus a real
+ * `objdump -s -j .rodata` byte dump of the 12-entry jump table @
+ * `.rodata+0x08f7c268`.
+ */
+int CPoller::Exec()
+{
+	if (mResource == 0) {
+		SetMask(1);
+		return -1;
+	}
+
+	/* mResource's own vtbl slot +0x14 (index 5) -- a NEW opaque slot, real
+	 * signature `bool(*)(void*, SHwEvent*)`: fills the 8-byte out-param with the
+	 * next pending hardware event and returns true, or returns false once none
+	 * remain. Same "raw vtbl-offset call on an opaque named resource" convention
+	 * every other mResource use in this file already establishes (ctor's own
+	 * +0x8/+0xc/+0x10 gates, MsgShortBeep() et al.'s own +0x1c notify).
+	 */
+	struct SHwEvent {
+		unsigned int type;
+		unsigned int value;
+	};
+	typedef int (*FnPollEvent)(void *, SHwEvent *);
+	void *resVtbl = *reinterpret_cast<void **>(mResource);
+	FnPollEvent pollEvent =
+	    *reinterpret_cast<FnPollEvent *>(reinterpret_cast<char *>(resVtbl) + 0x14);
+
+	typedef void (*NotifyFn)(void *, void *);
+	NotifyFn resNotify =
+	    *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+
+	unsigned char **clientsBegin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **clientsEnd   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+	unsigned int clientsCount = (unsigned int)(clientsEnd - clientsBegin);
+
+	/* Batch accumulator for event types 1/2 (mField39c-selected client): up to 16
+	 * records of `{tag(4B); byte@4; byte@5}`, flushed as one OutMono(0, ...) call
+	 * either mid-drain (buffer full) or once more at loop exit if non-empty.
+	 */
+	unsigned char keyBatch[0x80];
+	unsigned char *keyBatchPos = keyBatch;
+
+	/* Handles of ANALOG (type-11) clients whose ring transitioned from empty to
+	 * non-empty this tick -- flushed in a second pass below. Real ground-truth
+	 * capacity is 64 entries; `mHandleTable1` itself only has 64 slots and the
+	 * `mExtra38` gate below prevents queueing the same client twice in one tick,
+	 * so this can never actually overflow.
+	 */
+	unsigned int flushHandles[0x40];
+	unsigned int flushCount = 0;
+
+	SHwEvent evt;
+	while (pollEvent(mResource, &evt)) {
+		if (evt.type > 0xb)
+			continue; /* real: ground truth's own unsigned `ja` bounds check
+			           * treats any out-of-range type identically to type 0 --
+			           * a silent no-op, not a gap here. */
+
+		switch (evt.type) {
+		case 0:
+			/* Real, genuine no-op -- jump table entry 0 IS the loop's own
+			 * "fetch next event" tail (confirmed via direct disassembly). */
+			break;
+
+		case 1:
+		case 2:
+			if (mField39c == 0xffffffff)
+				break;
+			*reinterpret_cast<unsigned int *>(keyBatchPos) = (evt.type == 1) ? 1u : 0u;
+			keyBatchPos[4] = (unsigned char)(evt.value >> 8);
+			keyBatchPos[5] = (unsigned char)evt.value;
+			keyBatchPos += 8;
+			if (keyBatchPos == keyBatch + sizeof(keyBatch)) {
+				CIfcClient *client =
+				    reinterpret_cast<CIfcClient *>(clientsBegin[mField39c]);
+				client->OutMono(0, keyBatch, (unsigned short)sizeof(keyBatch));
+				keyBatchPos = keyBatch;
+			}
+			break;
+
+		case 3:
+		case 4:
+		case 5: {
+			/* real: `index` (used directly, unshifted -- a different real
+			 * indexing convention than type 11's own ANALOG lookup below) is
+			 * bounds-checked by ground truth against neither `mHandleTable2`'s
+			 * own 128-entry size nor the button `.rodata` table's -- same
+			 * "transcribed unchecked, a real preserved risk" license as type
+			 * 11's own index below. */
+			unsigned int index = evt.value;
+			unsigned int handle = mHandleTable2[index];
+			if (handle == 0xffffffff)
+				break;
+			if (handle >= clientsCount)
+				break;
+			CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[handle]);
+			if (*reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x14) == 0)
+				break;
+			/* real: button table's own `flag` field (offset +8 of the 16-byte
+			 * entry) must equal 1 -- always true in this exact build (per
+			 * poller.h's own top-of-file note), transcribed as a real, live
+			 * gate anyway. */
+			if (s_buttonFlag[index] != 1)
+				break;
+
+			struct SButtonMsg {
+				unsigned int opcode;
+				int          code;
+				int          altCode;
+				unsigned int flag390;
+			} local;
+			local.opcode  = (evt.type == 5) ? 0u : 1u;
+			local.code    = s_buttonPrimaryCode[index];
+			local.altCode = s_buttonAltCode[index];
+			local.flag390 = mFlag390;
+			client->OutMono(1, &local, sizeof(local));
+			break;
+		}
+
+		case 6: {
+			unsigned int handle = mField394;
+			if (handle == 0xffffffff)
+				break;
+			if (handle >= clientsCount)
+				break;
+			CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[handle]);
+			if (*reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x14) == 0)
+				break;
+
+			/* Real: only the low byte of this 4-byte field is ever written --
+			 * bytes 1..3 are genuinely uninitialized stack garbage in ground
+			 * truth (same "reproduce the real undefined read" license
+			 * MsgShortBeep() already established), left uninitialized here too.
+			 */
+			struct SField394Msg {
+				unsigned char loByte;
+				unsigned char pad[3];
+				unsigned int  flag390;
+			} local;
+			local.loByte  = (unsigned char)evt.value;
+			local.flag390 = mFlag390;
+			client->OutMono(2, &local, sizeof(local));
+			break;
+		}
+
+		case 7:
+		case 8:
+		case 9:
+		case 10: {
+			unsigned int handle = mField398;
+			if (handle == 0xffffffff)
+				break;
+			if (handle >= clientsCount)
+				break;
+			CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[handle]);
+			if (*reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x14) == 0)
+				break;
+
+			/* Real: bytes 6/7 of this 8-byte message are genuinely
+			 * uninitialized stack garbage (same license as case 6 above).
+			 */
+			struct SField398Msg {
+				unsigned int  opcode;
+				unsigned char byte4;
+				unsigned char byte5;
+				unsigned char pad[2];
+			} local;
+			local.opcode = (evt.type == 8) ? 0u : (evt.type == 10) ? 2u : 1u;
+			local.byte4  = (unsigned char)(evt.value >> 24);
+			local.byte5  = (unsigned char)(evt.value >> 8);
+			client->OutMono(4, &local, sizeof(local));
+			break;
+		}
+
+		case 11: {
+			/* real: neither `index` (against mHandleTable1's own 64-entry
+			 * size) nor its use as an s_analogCode[] index is bounds-checked
+			 * by ground truth itself -- transcribed unchecked, a real,
+			 * preserved risk if a hardware event ever carried a malformed
+			 * `value`, not a gap in this reconstruction. */
+			unsigned int index = evt.value >> 16;
+			unsigned int handle = mHandleTable1[index];
+			if (handle == 0xffffffff)
+				break;
+			if (handle >= clientsCount)
+				break;
+			CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[handle]);
+			if (*reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x14) == 0)
+				break;
+
+			CPanelOut::SAnalogEvt analogEvt;
+			analogEvt.type  = s_analogCode[index];
+			analogEvt.value = (short)(evt.value & 0xffff);
+			client->PutAnalogEvt(analogEvt);
+
+			/* real: CIfcClient::mExtra38 (opaque raw +0x38 offset, same license
+			 * as every other cross-CIfcClient-boundary read in this file)
+			 * gates whether this client gets queued for the second-pass flush
+			 * below -- only once per tick. */
+			int *extra38 = reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x38);
+			if (*extra38 == -1) {
+				flushHandles[flushCount] = handle;
+				*extra38 = (int)flushCount;
+				flushCount++;
+			}
+			break;
+		}
+
+		default:
+			break;
+		}
+	}
+
+	/* Real: flushes any partially-filled type-1/2 batch left over once the
+	 * drain loop runs out of events (a real, separate flush site from the
+	 * "buffer full" one inside the loop above -- ground truth guards this one
+	 * on non-empty, same as the one above is only ever reached already-full).
+	 */
+	if (keyBatchPos != keyBatch && mField39c != 0xffffffff && mField39c < clientsCount) {
+		CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[mField39c]);
+		client->OutMono(0, keyBatch, (unsigned short)(keyBatchPos - keyBatch));
+	}
+
+	/* Second pass: flush every ANALOG client queued by a type-11 event above
+	 * (ground truth is a Duff's-device-unrolled 4-at-a-time scan; collapsed to
+	 * a plain loop here, identical result). Modeled as real calls to the
+	 * already-reconstructed FlushAnalogEvts() instead of re-inlining ground
+	 * truth's own byte-identical duplicate of that same flush logic (same
+	 * "duplicate real ground-truth function per call site, modeled as a call
+	 * instead" precedent FindRegisteredClient()'s own wrappers already
+	 * established).
+	 */
+	for (unsigned int i = 0; i < flushCount; i++) {
+		CIfcClient *client = reinterpret_cast<CIfcClient *>(clientsBegin[flushHandles[i]]);
+		client->FlushAnalogEvts();
+		*reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(client) + 0x38) = -1;
+	}
+
+	int phaseChanged = s_oLEDBlinker.Exec();
+	if (phaseChanged == 0)
+		return 0;
+	if (mResource == 0) /* real, dead-in-practice re-check -- mResource can't
+	                      * change value anywhere else in this function; kept
+	                      * anyway, same "unreachable defensive arm" license
+	                      * RegisterClient()'s own dead checks already use. */
+		return 0;
+
+	const unsigned char *ledBase = reinterpret_cast<const unsigned char *>(&s_oLEDBlinker);
+	int blinkPhase = *reinterpret_cast<const int *>(ledBase + 4);
+	const unsigned short *blinkBitmap = reinterpret_cast<const unsigned short *>(ledBase + 0xc);
+	unsigned short *stateWords = reinterpret_cast<unsigned short *>(mZeroBlock);
+
+	struct SResourceMsg {
+		unsigned int opcode;
+		unsigned int value;
+	} local;
+
+	for (unsigned int w = 0; w < 0x20; w++) {
+		unsigned short blinkBits = blinkBitmap[w];
+		if (blinkBits == 0)
+			continue;
+
+		unsigned short oldWord = stateWords[w];
+		unsigned short newWord = (blinkPhase != 0)
+		    ? (unsigned short)(oldWord | blinkBits)   /* "on" half: force blinking LEDs on */
+		    : (unsigned short)(oldWord & ~blinkBits); /* "off" half: force blinking LEDs off */
+		if (newWord == oldWord)
+			continue;
+
+		stateWords[w] = newWord;
+		local.opcode = 6;
+		local.value = ((unsigned int)newWord << 16) | w;
+		resNotify(mResource, &local);
+	}
+
+	return 0;
+}
+
+/* --- Exec(CMessage&) (2026-07-26 Exec(CMessage&) closeout batch) -- see poller.h's
+ * own per-method header comment for the complete derivation. Transcribed via a full
+ * `objdump -dr -M intel` branch-target CFG reachability walk of the whole 6747-byte
+ * body (a prior pass's "94 strcmp() sites, not a numeric switch" characterization
+ * was a real misdiagnosis this batch corrected -- see header comment).
+ *
+ * Real: a 15-way jump table on `CMessage`'s own +0x8 16-bit code word (range 0..14,
+ * any other value -- including every value > 14 -- falls through to a shared
+ * default that returns -1 with zero side effects). Every one of the 15 cases is
+ * ground truth's own inlined duplicate (cases 0/11/13: a real direct call instead;
+ * confirmed via the actual `call` instructions in the disassembly) of one of the 15
+ * `Msg*()` sibling methods above, confirmed by matching each case's own gate
+ * bit-plane / length threshold / payload shape against that sibling's own
+ * already-verified body, byte-for-byte -- modeled here as real calls to the
+ * sibling, per this project's own established "duplicate real ground-truth
+ * function per call site, modeled as a call instead" precedent (`RegisterClient()`'s
+ * own Phase-2 reuse scan; `MsgGetClientHandleByRef/Val()`'s own duplicate of
+ * `FindRegisteredClient()`'s scan; `Exec()`'s own type-11 duplicate of
+ * `CIfcClient::PutAnalogEvt()`). This is what the ~94 `strcmp()` sites actually
+ * were: cases 6 and 8 each separately inline their OWN full copy of
+ * `FindRegisteredClient()`'s own Duff's-device-unrolled scan (confirmed via CFG
+ * walk: the "different miss-handler per site" reading that looked like 92 distinct
+ * literal string comparisons was really just each unrolled iteration's own
+ * `mov eax,[base+4*i]` array-index advance).
+ *
+ * Every case's own return value passes through the SAME real translation
+ * (`PollerTranslateSubResult()` below), confirmed via the `setg dl`/`cmp eax,3`/
+ * `cmp eax,7` sequence physically present at several cases' own call/duplicate-tail
+ * sites, and via the two giant duplicated-scan cases' (6, 8) own hard-coded jump
+ * targets being numerically consistent with the identical mapping.
+ */
+
+static int PollerTranslateSubResult(int subResult)
+{
+	if (subResult > 3) {
+		if (subResult > 7)
+			return 4;
+		return -1;
+	}
+	return 0;
+}
+
+int CPoller::Exec(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	/* Real: ground truth loads the full 16-bit word at +0x8 but then only ever
+	 * consumes its LOW byte for the switch (`movzx ecx,[edx+8]; movzx esi,cl`) --
+	 * the high byte of that same word is +0x9, the independent bit-flags byte
+	 * every `Msg*()` sibling above tests on its own (`raw[9] & 0x1`/`& 0x2`).
+	 * The dispatch selector itself is therefore just this one byte, 0..14.
+	 */
+	unsigned char code = raw[8];
+
+	/* Real: unsigned `ja` bounds check -- any code > 14 (not just an explicit
+	 * "unknown command" sentinel) silently falls through to the default -1
+	 * return, zero side effects.
+	 */
+	if (code > 14)
+		return -1;
+
+	switch (code) {
+	case 0:  return PollerTranslateSubResult(MsgSetLed(msg));
+	case 1:  return PollerTranslateSubResult(MsgSetLed16bits(msg));
+	case 2:  return PollerTranslateSubResult(MsgShortBeep(msg));
+	case 3:  return PollerTranslateSubResult(MsgBackupLEDs(msg));
+	case 4:  return PollerTranslateSubResult(MsgRequestAnalogInputValue(msg));
+	case 5:  return PollerTranslateSubResult(MsgRegisterClientByRef(msg));
+	case 6:  return PollerTranslateSubResult(MsgGetClientHandleByRef(msg));
+	case 7:  return PollerTranslateSubResult(MsgRegisterClientByVal(msg));
+	case 8:  return PollerTranslateSubResult(MsgGetClientHandleByVal(msg));
+	case 9:  return PollerTranslateSubResult(MsgUnregisterClient(msg));
+	case 10: return PollerTranslateSubResult(MsgSetKeyboardClient(msg));
+	case 11: return PollerTranslateSubResult(MsgSetButtonClient(msg));
+	case 12: return PollerTranslateSubResult(MsgSetEncoderClient(msg));
+	case 13: return PollerTranslateSubResult(MsgSetAnalogClient(msg));
+	case 14: return PollerTranslateSubResult(MsgSetTouchPanelClient(msg));
+	}
+
+	return -1; /* unreachable given the range check above */
 }
 
 /* Tier-B link-stubs -- see poller.h's own header comment (2026-07-26 CPanel unlock

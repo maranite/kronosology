@@ -111,10 +111,12 @@
  * override this slot]. A SECOND (this-adjusted, offset-to-top -8) secondary vtable is
  * installed at CPoller+0x08 (the same multiple-inheritance slot task.h's own
  * "mIfcThunk" note already documents for CTask) with 3 slots: [D1-thunk][D0-thunk]
- * [ExecMsg-thunk, ALSO inherited verbatim from CTask's own secondary vtable]. Neither
- * `Exec()` overload nor the base `ExecMsg()` is reconstructed this batch (see below) --
- * per this project's own established rule ("never use real C++ `virtual` for
- * ground-truth vtable slots"), both `PTR__CPoller_08f7c368[5]` (primary) and
+ * [ExecMsg-thunk, ALSO inherited verbatim from CTask's own secondary vtable].
+ * `Exec()` (the 0-arg overload) is now reconstructed (2026-07-26 batch, see its own
+ * per-method header comment below) but, same as `Exec(CMessage&)`/base `ExecMsg()`
+ * (both still deferred), is NOT installed as a real C++ `virtual` slot -- per this
+ * project's own established rule ("never use real C++ `virtual` for ground-truth
+ * vtable slots"), both `PTR__CPoller_08f7c368[5]` (primary) and
  * `PTR__CPoller_08f7c384[3]` (secondary) are install-only EvaVTableStub arrays --
  * same "size the array to the real install-address-relative vfunc count, all slots
  * EvaVTableStub" convention the same-day CChunkServer/CEditor::CChunkServerTask batch
@@ -320,6 +322,30 @@
  * route to every `Msg*()` handler above), `Exec()` (3213B, the unrelated 0-arg
  * scheduler-tick override -- confirmed this session, via a direct `objdump -dr`
  * call-target check, to be `CLEDBlinker::Exec()`'s own real, single caller).
+ *
+ * UPDATE (2026-07-26, Exec() 0-arg batch): `Exec()` (the 0-arg scheduler-tick
+ * override, 3213B) is now fully reconstructed (Tier A) -- see its own per-method
+ * header comment above for the complete derivation (12-way jump table, the two
+ * distinct stack-buffer accumulator/queue mechanisms, the LED-phase bitmap diff
+ * tail). `CPoller`'s only remaining genuinely-deferred surface after this is
+ * `Exec(CMessage&)` (6747B, the real per-message string-command dispatcher --
+ * see its own note above: ~94 `strcmp()` call sites, NOT a numeric switch, a
+ * completely separate mechanism from every other handler in this file).
+ *
+ * UPDATE (2026-07-26, Exec(CMessage&) closeout batch): the "~94 strcmp() sites,
+ * not a numeric switch" reading above was a real misdiagnosis, corrected this
+ * batch via a full branch-target CFG reachability walk (not just a byte-count/
+ * strcmp-count glance) -- see `Exec(CMessage&)`'s own per-method header comment
+ * below for the full writeup. There IS a 15-way numeric jump table, and every one
+ * of its 15 cases turned out to be ground truth's own inlined duplicate (or, for
+ * 3 of them, a real direct call) of one of the 15 `Msg*()` sibling methods already
+ * reconstructed above -- modeled here as real calls to those siblings, collapsing
+ * the two ~700-instruction duplicated-`FindRegisteredClient()`-scan cases (the
+ * true source of the ~94 `strcmp()` count) down to one-line wrappers each.
+ * `Exec(CMessage&)` is now Tier A. `CPoller` is now FULLY structurally closed --
+ * no remaining deferred surface of its own (`InitButtons()`/`InitAnalogs()` stay
+ * Tier-B link-stubs for the separate, already-documented `CMessage`-machinery
+ * reason, not a CPoller-specific gap).
  */
 
 #ifndef POLLER_H
@@ -683,6 +709,176 @@ public:
 	 * `RegisterClient()`'s own return value.
 	 */
 	int MsgRegisterClientByRef(CMessage &msg);
+
+	/* .text+0x089ee7d0, 3213 bytes. Tier A (2026-07-26 Exec() 0-arg batch --
+	 * direct follow-up to the CLEDBlinker/final-prerequisites batch, which
+	 * characterized this function's overall shape but deferred the actual
+	 * transcription; see that batch's own closing memory note). Transcribed via
+	 * direct `objdump -dr -M intel` register tracing of the whole body plus a
+	 * real `objdump -s -j .rodata` byte dump of the 12-entry jump table @
+	 * `.rodata+0x08f7c268` (Ghidra's own `load_binary`/decompile timed out again
+	 * this session, consistent with several other same-day batches).
+	 *
+	 * This is the scheduler-tick override (the OTHER `Exec()` overload,
+	 * `Exec(CMessage&)`, is a completely different per-message string-command
+	 * dispatcher -- see that method's own separate deferred-status note; the two
+	 * share nothing but a name). Real shape, in call order:
+	 *
+	 * 1. If `mResource == 0`, calls `SetMask(1)` and returns -1 immediately (the
+	 *    same masked-fallback shape the ctor's own 4-gate resource-lookup uses).
+	 *
+	 * 2. Otherwise, drains `mResource`'s own vtbl slot `+0x14` (index 5, a NEW
+	 *    opaque slot on the same named resource `MsgShortBeep()`/`MsgSetLed()`
+	 *    already call through `+0x1c` -- real signature `bool(*)(void*, SHwEvent*)`
+	 *    where `SHwEvent` is an 8-byte `{unsigned int type; unsigned int value;}`
+	 *    out-param) in a `while` loop -- one call per pending hardware event,
+	 *    until it returns false. Each drained event's `type` field is dispatched
+	 *    through the real 12-way jump table (`type > 11` is treated identically
+	 *    to `type == 0` by ground truth's own unsigned `ja` bounds check -- a
+	 *    silent no-op, confirmed via direct disassembly, not assumed):
+	 *      - type 0: genuine no-op (the jump table's own entry 0 address IS the
+	 *        loop's own "fetch next event" tail -- a real, confirmed join point,
+	 *        not a gap in this reconstruction).
+	 *      - types 1/2: BATCH-accumulate an 8-byte record `{tag(4B); byte@4=
+	 *        (value>>8)&0xff; byte@5=value&0xff}` (tag=1 for type 1, tag=0 for
+	 *        type 2) into a 16-record/128-byte stack buffer, gated on
+	 *        `mField39c != 0xFFFFFFFF`; flushes the WHOLE buffer via a single
+	 *        `mField39c`-selected client's `OutMono(0, buf, len)` call either
+	 *        when the buffer fills (16 records) -- draining continues afterward
+	 *        with a fresh empty buffer -- or once more, only if non-empty, when
+	 *        the event-drain loop itself runs out of events (confirmed via the
+	 *        real `cmp edi,ebp; je <skip>` guard at the loop-exit join point).
+	 *      - types 3/4 (opcode=1) and 5 (opcode=0): `mHandleTable2`-selected
+	 *        BUTTON client (index = `value`, used directly, unshifted -- a real,
+	 *        different indexing convention than type 11's own ANALOG lookup
+	 *        below), gated on the real button `.rodata` table's own `flag`
+	 *        field (`s_buttonPrimaryCode`'s sibling table entry, offset +8)
+	 *        `== 1` (per poller.h's own top-of-file note, always true in this
+	 *        exact build -- transcribed as a real, live gate anyway, not
+	 *        collapsed). Sends a 16-byte `{opcode; code; altCode; flag390}`
+	 *        message via `OutMono(1, ...)`.
+	 *      - type 6: `mField394`-selected client, an 8-byte `{byte0=value&0xff;
+	 *        3 genuinely UNINITIALIZED padding bytes; dword@4=mFlag390}` message
+	 *        via `OutMono(2, ...)` -- ground truth's own real `mov BYTE PTR
+	 *        [...],cl` is a single-byte store into a 4-byte stack field, same
+	 *        "reproduce the real undefined read, don't paper over it" license
+	 *        `MsgShortBeep()` already established.
+	 *      - types 7/9 (opcode=1), 8 (opcode=0), 10 (opcode=2): all four share
+	 *        ONE real body (confirmed via direct disassembly -- types 7 and 9
+	 *        jump to the literal same address), `mField398`-selected client, an
+	 *        8-byte `{opcode; byte@4=(value>>24)&0xff; byte@5=(value>>8)&0xff;
+	 *        2 uninitialized padding bytes}` message via `OutMono(4, ...)`.
+	 *      - type 11: the ANALOG path. `index = value>>16`, `code =
+	 *        s_analogCode[index]` (the SAME `.rodata` table
+	 *        `MsgSetAnalogClient()` uses), `handle = mHandleTable1[index]`
+	 *        (neither `index` bound is checked against the table's own real
+	 *        0x40-entry size by ground truth itself -- transcribed unchecked, a
+	 *        real, preserved risk if a hardware event ever carried a malformed
+	 *        `value`, not a gap in this reconstruction), gated on `handle` being
+	 *        a valid CONNECTED `mClients` index. Pushes `{code, (int16_t)(value
+	 *        & 0xffff)}` into that client's own analog-event ring -- modeled as
+	 *        a real call to the already-reconstructed `CIfcClient::PutAnalogEvt()`
+	 *        instead of re-inlining ground truth's own byte-identical duplicate
+	 *        of that same ring-push logic (same "duplicate real ground-truth
+	 *        function per call site, modeled as a call instead" precedent
+	 *        `FindRegisteredClient()`'s own wrappers already established). If
+	 *        the client's own `mExtra38` field (opaque raw `+0x38` offset, same
+	 *        license as every other cross-`CIfcClient`-boundary read in this
+	 *        file) was `-1` (i.e. not already queued for flush THIS tick),
+	 *        records the handle into a second, separate 64-entry stack list and
+	 *        sets `mExtra38` to a "now queued" sentinel (its exact numeric value
+	 *        doesn't matter beyond being `!= -1` -- ground truth stores a
+	 *        monotonic counter there, but nothing ever reads it back as a real
+	 *        index).
+	 *
+	 * 3. After the drain loop exits: if the type-11 queue collected zero
+	 *    handles, skips straight to step 4. Otherwise, for each queued handle
+	 *    (ground truth is a Duff's-device-unrolled 4-at-a-time scan; collapsed
+	 *    to a plain loop here, identical result), calls that client's own
+	 *    already-real `FlushAnalogEvts()` (flushes the ring via `OutMono(3,...)`
+	 *    only if non-empty, same "model the duplicate as a call" precedent as
+	 *    step 2's type-11 handling above) and unconditionally resets its
+	 *    `mExtra38` back to `-1`.
+	 *
+	 * 4. Calls the global `s_oLEDBlinker.Exec()` (led_blinker.h). If it returned
+	 *    0 (no blink-phase change this tick), returns 0 immediately -- the real,
+	 *    dead-in-practice `mResource == 0` re-check here (mResource can't
+	 *    change value anywhere else in this function) is still transcribed,
+	 *    same "unreachable defensive arm, kept anyway" license as
+	 *    `RegisterClient()`'s own dead index checks. Otherwise walks all 32
+	 *    words of `s_oLEDBlinker`'s own private "currently blinking" bitmap
+	 *    (opaque raw `+0xc` offset -- same license as every other cross-class
+	 *    raw read in this file) against THIS `CPoller` instance's own
+	 *    `mZeroBlock`: for each word where the blink-bitmap is non-zero,
+	 *    computes a new `mZeroBlock` word as `(old & ~blinkBits)` when
+	 *    `s_oLEDBlinker`'s own `mBlinkPhase` (opaque raw `+0x4` offset) is 0
+	 *    (forces every blinking LED in that word OFF), or `(old | blinkBits)`
+	 *    when `mBlinkPhase != 0` (forces every blinking LED ON) -- confirmed via
+	 *    direct disassembly which of the two branches corresponds to which
+	 *    phase value, not assumed from symmetry. If the computed word actually
+	 *    changed, writes it back and notifies `mResource`'s own vtbl `+0x1c`
+	 *    slot with the SAME `{opcode=6, value=(newWord<<16)|wordIndex}` shape
+	 *    `MsgSetLed16bits()`/`MsgBackupLEDs()` already use on that slot.
+	 *    Returns 0 unconditionally once the 32-word sweep completes.
+	 */
+	int Exec();
+
+	/* .text+0x089f54f0, 6747 bytes. Tier A (2026-07-26 Exec(CMessage&) closeout
+	 * batch -- direct follow-up to the CLEDBlinker/FindRegisteredClient/Exec()
+	 * batches above, which left this as CPoller's only remaining deferred surface).
+	 * A prior pass characterized this as "a genuine NAME-STRING command dispatcher,
+	 * 94 `strcmp()` sites, not a numeric switch" -- WRONG, corrected this batch via a
+	 * full `objdump -dr -M intel` CFG reconstruction (branch-target reachability
+	 * analysis per case, not just a byte-count/strcmp-count glance): there IS a real
+	 * numeric switch (a 15-way jump table @ `.rodata+0x8f7c298` on the LOW BYTE of
+	 * `CMessage`'s own +0x8 16-bit word (`movzx ecx,[edx+8]; movzx esi,cl` --
+	 * ground truth loads the full word but only the low byte ever feeds the
+	 * switch; the high byte of that same word is +0x9, the independent bit-flags
+	 * byte every `Msg*()` sibling below tests on its own), range 0..14, `> 14`
+	 * and every other out-of-range value falling through to a shared default
+	 * that returns -1 with zero side effects.
+	 *
+	 * The concrete, load-bearing finding: EVERY ONE of the 15 cases is ground
+	 * truth's own INLINED DUPLICATE of one of the 15 already-real `Msg*()` sibling
+	 * methods above (`MsgSetLed`, `MsgSetLed16bits`, `MsgShortBeep`,
+	 * `MsgBackupLEDs`, `MsgRequestAnalogInputValue`, `MsgRegisterClientByRef`,
+	 * `MsgGetClientHandleByRef`, `MsgRegisterClientByVal`, `MsgGetClientHandleByVal`,
+	 * `MsgUnregisterClient`, `MsgSetKeyboardClient`, `MsgSetButtonClient`,
+	 * `MsgSetEncoderClient`, `MsgSetAnalogClient`, `MsgSetTouchPanelClient`, in code
+	 * order 0..14) -- confirmed by matching each case's own gate bit-plane, length
+	 * threshold, and payload-field shape against that sibling's own already-verified
+	 * header comment, byte-for-byte, not by assumption. Three cases (0, 11, 13 --
+	 * `MsgSetLed`/`MsgSetButtonClient`/`MsgSetAnalogClient`) are REAL calls to the
+	 * symbol (confirmed `call` instructions in the disassembly). The other 12 are
+	 * ground truth's own literal inlined duplicate of the sibling's body (same
+	 * "duplicate real ground-truth function per call site" pattern already
+	 * established repeatedly in this file -- `RegisterClient()`'s own Phase-2 reuse
+	 * scan, `MsgGetClientHandleByRef/Val()`'s own duplicate of
+	 * `FindRegisteredClient()`'s scan, `Exec()`'s own type-11 duplicate of
+	 * `CIfcClient::PutAnalogEvt()`) -- modeled here as real calls to the sibling
+	 * instead, per that same precedent, NOT a simplification of behavior. This is
+	 * what the ~94 `strcmp()` sites actually were: cases 6 and 8
+	 * (`MsgGetClientHandleByRef`/`MsgGetClientHandleByVal`) each separately inline
+	 * their OWN full byte-exact copy of `FindRegisteredClient()`'s own Duff's-device-
+	 * unrolled connected-client name-match scan (confirmed via a branch-target CFG
+	 * walk: the two scans' own miss-handlers are plain `mov eax,[esi+4*k]` array-
+	 * index advances, NOT a genuine 92-way string table -- the "different literal
+	 * command string per branch" reading was a real misdiagnosis this batch
+	 * corrected). Every other case's own inline duplicate is comparatively small
+	 * (tens of instructions, not hundreds).
+	 *
+	 * Every case's own return value passes through ONE shared, real translation
+	 * (confirmed via the `setg`/`cmp eax,3`/`cmp eax,7` sequence physically present
+	 * at cases 0/5/7/9/11/12/13/14's own call/duplicate-tail sites, and via the
+	 * cases-6/8 giant duplicates' own hard-coded jump targets being numerically
+	 * consistent with the identical mapping): raw sub-result 0..3 -> 0; 4..7 -> -1;
+	 * 8+ -> 4 (see `PollerTranslateSubResult()`, poller.cpp). This explains what
+	 * looked like inconsistent per-case return codes before this batch (e.g.
+	 * `MsgUnregisterClient()`'s own raw 9/2/0/4 becoming this function's own 4/0/0/-1)
+	 * -- every sibling's raw return code survives, just remapped through this one
+	 * real translation shared by all 15 cases.
+	 */
+	int Exec(CMessage &msg);
 
 	/* .text+0x089f4830, 2925 bytes. Tier-B link-stub (empty body) -- genuinely
 	 * large, needs the CMessage machinery this project hasn't reconstructed at

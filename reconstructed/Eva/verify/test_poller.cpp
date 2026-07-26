@@ -81,6 +81,7 @@
 #include "module.h"
 #include "system_api.h"
 #include "stg_unsol_msg_handler.h"
+#include "omega_ptr_array.h"
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -115,6 +116,30 @@ struct PollerTestHooks {
 	static void *Cursor(const CPoller::CIfcClient &c) { return c.mCursor; }
 	static const unsigned char *RingBuf(const CPoller::CIfcClient &c) { return c.mRingBuf; }
 	static const unsigned char *LedBackup(const CPoller &p) { return p.mLedBackup; }
+
+	/* Mutable accessors added for the Exec() (0-arg) batch, 2026-07-26 -- letting
+	 * a KAT wire mHandleTable1/2 and mField394/398/39c directly to a hand-built
+	 * mClients array, and read back mZeroBlock/CIfcClient::mExtra38 after a real
+	 * p.Exec() call, without needing the various Msg*() setters to do it.
+	 */
+	static unsigned int *HandleTable1RW(CPoller &p) { return p.mHandleTable1; }
+	static unsigned int *HandleTable2RW(CPoller &p) { return p.mHandleTable2; }
+	static void SetField394(CPoller &p, unsigned int v) { p.mField394 = v; }
+	static void SetField398(CPoller &p, unsigned int v) { p.mField398 = v; }
+	static void SetField39c(CPoller &p, unsigned int v) { p.mField39c = v; }
+	static void SetFlag390(CPoller &p, unsigned char v) { p.mFlag390 = v; }
+	static unsigned int *ZeroBlockRW(CPoller &p) { return p.mZeroBlock; }
+	static int Extra38(const CPoller::CIfcClient &c) { return c.mExtra38; }
+	static void SetExtra38(CPoller::CIfcClient &c, int v) { c.mExtra38 = v; }
+};
+
+/* Same convention as test_out_link.cpp's own OutLinkTestHooks -- CPoller::CIfcClient
+ * IS-A COutLinkMono, so the SAME friend declaration (out_link.h) lets this pokes its
+ * mLink field too. Separate re-declaration per verify binary, no ODR conflict.
+ */
+struct OutLinkTestHooks {
+	static void SetLink(COutLinkMono &o, void *fakeLink) { o.mLink = (CLink *)fakeLink; }
+	static void *Links(COutLinkMono &o) { return o.mLinks; }
 };
 
 /* Same friend name led_blinker.h already declares -- separate verify binary from
@@ -174,6 +199,24 @@ extern "C" void FakeResNotify(void *, unsigned int *msg)
 	g_lastNotifyValue = msg[1];
 }
 
+/* mResource's own vtbl slot +0x14 (index 5) -- Exec()'s (0-arg) own "poll next
+ * hardware event" fake, 2026-07-26 batch. Drains a scripted array of {type,value}
+ * pairs, same "script consumed in order, then false" convention any real caller's
+ * KAT in this project would need for an event-drain loop.
+ */
+struct SFakeHwEvent { unsigned int type, value; };
+static const SFakeHwEvent *g_pollScript;
+static unsigned int g_pollScriptCount, g_pollScriptIndex;
+extern "C" int FakeResPollEvent(void *, unsigned int *out)
+{
+	if (g_pollScriptIndex >= g_pollScriptCount)
+		return 0;
+	out[0] = g_pollScript[g_pollScriptIndex].type;
+	out[1] = g_pollScript[g_pollScriptIndex].value;
+	g_pollScriptIndex++;
+	return 1;
+}
+
 static void *g_fakeResVtbl[8];
 struct FakeResObj { void *vtbl; } g_fakeResObj;
 
@@ -184,8 +227,64 @@ static void setup_fake_resource()
 	g_fakeResVtbl[0x8 / 4] = (void *)FakeResConnect;
 	g_fakeResVtbl[0xc / 4] = (void *)FakeResDisconnect;
 	g_fakeResVtbl[0x10 / 4] = (void *)FakeResGetType;
+	g_fakeResVtbl[0x14 / 4] = (void *)FakeResPollEvent;
 	g_fakeResVtbl[0x1c / 4] = (void *)FakeResNotify;
 	g_fakeResObj.vtbl = g_fakeResVtbl;
+}
+
+/* Shared fake CLink descriptor + receiver for exercising real CIfcClient::OutMono()
+ * calls from within Exec() (0-arg) -- same technique test_out_link.cpp's own [3]
+ * check established (a friend-poked mLink pointing at a zeroed buffer whose +0x24
+ * is a fake receiver object, own vtbl slot 8 recording what was sent). One shared
+ * instance suffices: every real call site records into g_lastOutMono* globals,
+ * checked immediately after each scripted Exec() call, and a per-client call
+ * counter (keyed by the `this` pointer OutMono() was invoked against) lets the KAT
+ * confirm exactly WHICH client got notified.
+ */
+static unsigned char g_fakeClink[0x30];
+struct FakeOutMonoReceiver { void *vtbl; };
+static FakeOutMonoReceiver g_fakeOutMonoRecv;
+static int g_outMonoCalls;
+static unsigned short g_lastOutMonoEcb;
+static unsigned char g_lastOutMonoBuf[64];
+static unsigned short g_lastOutMonoLen;
+extern "C" int FakeOutMonoReceiverSlot8(void *, void *clinkPlus10)
+{
+	g_outMonoCalls++;
+	/* CLink+0x18 holds the packed flags word (high nibble preserved, low bits
+	 * 0x200|ecb per out_link.h's own OutMono() derivation) -- recover the real
+	 * ecb the caller passed the same way ground truth's own receiver would.
+	 */
+	unsigned char *clink = (unsigned char *)clinkPlus10 - 0x10;
+	g_lastOutMonoEcb = (unsigned short)(*(unsigned short *)(clink + 0x18) & 0xff);
+	g_lastOutMonoLen = *(unsigned short *)(clink + 0x1a);
+	void *buf = *(void **)(clink + 0x20);
+	unsigned short copyLen = g_lastOutMonoLen;
+	if (copyLen > sizeof(g_lastOutMonoBuf))
+		copyLen = sizeof(g_lastOutMonoBuf);
+	memcpy(g_lastOutMonoBuf, buf, copyLen);
+	return 0;
+}
+
+static void wire_client_for_outmono(CPoller::CIfcClient &c)
+{
+	int dummyElem = 0;
+	((COmegaPtrArray *)OutLinkTestHooks::Links(c))->Add(&dummyElem); /* marks
+	    "connected" (client+0x14) AND makes OutMono()'s own mLinks non-empty --
+	    same dual-purpose field this project's poller.h header comment already
+	    documents (CIfcClient's own +0x14 IS COutLink::mLinks's own Count()). */
+	OutLinkTestHooks::SetLink(c, g_fakeClink);
+}
+
+static void setup_fake_outmono_receiver()
+{
+	memset(g_fakeClink, 0, sizeof(g_fakeClink));
+	static void *recvVtbl[3];
+	recvVtbl[0] = (void *)FakeApiNoOp;
+	recvVtbl[1] = (void *)FakeApiNoOp;
+	recvVtbl[2] = (void *)FakeOutMonoReceiverSlot8;
+	g_fakeOutMonoRecv.vtbl = recvVtbl;
+	*(void **)(g_fakeClink + 0x24) = &g_fakeOutMonoRecv;
 }
 
 static int g_outLinkNotifyCalls;
@@ -1109,6 +1208,249 @@ int main()
 		check("MsgSetButtonClient(mode=2) filled all 128 mHandleTable2 slots "
 		      "with the handle (0xFFFFFFFF)",
 		      allFortyTwo);
+
+		PollerTestHooks::SetClients(p, 0, 0);
+	}
+
+	printf("[17] Exec() (0-arg scheduler-tick override, 2026-07-26 batch)\n");
+	{
+		setup_fake_outmono_receiver();
+
+		printf("  [17a] mResource == 0: SetMask(1) fires, returns -1, no draining\n");
+		{
+			CPoller p(owner, 0);
+			g_pollScriptIndex = g_pollScriptCount = 0; /* script irrelevant, never
+			                                              reached -- confirms this
+			                                              via the early return */
+			int r = p.Exec();
+			check("Exec() returns -1 when mResource == 0", r == -1);
+			check("SetMask(1) fired (mMask bit 0x01 set)",
+			      (PollerTestHooks::Mask(p) & 0x01) != 0);
+		}
+
+		/* All remaining sub-checks share one real (non-masked) CPoller, same
+		 * gate-passing setup as check [5].
+		 */
+		g_fakeLookupResult = &g_fakeResObj;
+		g_fakeResourceType = 10;
+		g_fakeConnectResult = 0;
+		CPoller p(owner, "PollerExecRes");
+		check("[17] setup: mResource is the real fake resource",
+		      PollerTestHooks::Resource(p) == &g_fakeResObj);
+
+		CTask clientOwner(owner, "ExecClientOwner", 2, 1, 0x804b);
+		/* Real ground truth always constructs a CIfcClient with lastArg == -1
+		 * (RegisterClient()'s own real `new (raw) CIfcClient(*this, nameBuf,
+		 * 0xffffffff)` call, poller.cpp) -- matched here so mExtra38 starts at
+		 * -1, the real "not yet queued this tick" sentinel type-11 depends on.
+		 */
+		CPoller::CIfcClient client(clientOwner, "ExecClient", -1);
+		wire_client_for_outmono(client);
+		void *clientsArr[1] = { &client };
+		PollerTestHooks::SetClients(p, clientsArr, clientsArr + 1);
+
+		printf("  [17b] type 0 (no-op) and an out-of-range type are both silent\n");
+		{
+			SFakeHwEvent script[2] = { { 0, 0x1234 }, { 42, 0x5678 } };
+			g_pollScript = script;
+			g_pollScriptCount = 2;
+			g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			g_notifyCalls = 0;
+			int r = p.Exec();
+			check("Exec() returns 0 on a normal (mResource != 0) run", r == 0);
+			check("type 0 / out-of-range type: no OutMono() calls at all",
+			      g_outMonoCalls == 0);
+		}
+
+		printf("  [17c] types 1/2: batch-accumulate to the mField39c client, "
+		       "flush on full (16) AND at loop-exit (partial)\n");
+		{
+			PollerTestHooks::SetField39c(p, 0);
+			SFakeHwEvent script[17];
+			for (int i = 0; i < 16; i++) {
+				script[i].type = (i % 2 == 0) ? 1u : 2u;
+				script[i].value = 0x100 + i;
+			}
+			script[16].type = 1;
+			script[16].value = 0x999;
+			g_pollScript = script;
+			g_pollScriptCount = 17;
+			g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("types 1/2 batching produced exactly 2 OutMono() flushes "
+			      "(one full-buffer mid-drain, one partial at loop-exit)",
+			      g_outMonoCalls == 2);
+			/* The LAST OutMono() recorded is the loop-exit partial flush (1
+			 * record, tag=1 since script[16].type==1, low byte 0x99).
+			 */
+			check("loop-exit partial flush: ecb == 0", g_lastOutMonoEcb == 0);
+			check("loop-exit partial flush: len == 8 (1 record)",
+			      g_lastOutMonoLen == 8);
+			check("loop-exit partial flush: record tag == 1",
+			      *(unsigned int *)g_lastOutMonoBuf == 1u);
+			check("loop-exit partial flush: record byte@5 == value&0xff (0x99)",
+			      g_lastOutMonoBuf[5] == 0x99);
+		}
+
+		printf("  [17d] types 3/5: BUTTON dispatch via mHandleTable2, opcode "
+		       "1-vs-0, real code/altCode/flag390 payload\n");
+		{
+			unsigned int *table2 = PollerTestHooks::HandleTable2RW(p);
+			table2[5] = 0; /* index 5 -> s_buttonPrimaryCode[5] == 5 */
+			PollerTestHooks::SetFlag390(p, 0x7);
+
+			SFakeHwEvent scriptType3[1] = { { 3, 5 } };
+			g_pollScript = scriptType3; g_pollScriptCount = 1; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("type 3: exactly 1 OutMono() call", g_outMonoCalls == 1);
+			check("type 3: ecb == 1", g_lastOutMonoEcb == 1);
+			check("type 3: len == 16", g_lastOutMonoLen == 16);
+			check("type 3: opcode == 1", *(unsigned int *)(g_lastOutMonoBuf + 0) == 1u);
+			check("type 3: code == 5 (s_buttonPrimaryCode[5])",
+			      *(int *)(g_lastOutMonoBuf + 4) == 5);
+			check("type 3: altCode == 0 (real all-zero table)",
+			      *(int *)(g_lastOutMonoBuf + 8) == 0);
+			check("type 3: flag390 == 7 (the configured value)",
+			      *(unsigned int *)(g_lastOutMonoBuf + 12) == 7u);
+
+			SFakeHwEvent scriptType5[1] = { { 5, 5 } };
+			g_pollScript = scriptType5; g_pollScriptCount = 1; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("type 5: opcode == 0 (the real, different constant from type 3)",
+			      *(unsigned int *)(g_lastOutMonoBuf + 0) == 0u);
+		}
+
+		printf("  [17e] type 6: mField394 client, {loByte, ..., flag390}, ecb=2\n");
+		{
+			PollerTestHooks::SetField394(p, 0);
+			PollerTestHooks::SetFlag390(p, 0x42);
+			SFakeHwEvent script[1] = { { 6, 0xaabbccdd } };
+			g_pollScript = script; g_pollScriptCount = 1; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("type 6: exactly 1 OutMono() call", g_outMonoCalls == 1);
+			check("type 6: ecb == 2", g_lastOutMonoEcb == 2);
+			check("type 6: len == 8", g_lastOutMonoLen == 8);
+			check("type 6: loByte == value & 0xff (0xdd)", g_lastOutMonoBuf[0] == 0xdd);
+			check("type 6: flag390 dword @+4 == 0x42",
+			      *(unsigned int *)(g_lastOutMonoBuf + 4) == 0x42u);
+		}
+
+		printf("  [17f] types 8/10: mField398 client, opcode 0 vs 2, real "
+		       "byte4/byte5 split\n");
+		{
+			PollerTestHooks::SetField398(p, 0);
+
+			SFakeHwEvent scriptType8[1] = { { 8, 0x11223344 } };
+			g_pollScript = scriptType8; g_pollScriptCount = 1; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("type 8: exactly 1 OutMono() call", g_outMonoCalls == 1);
+			check("type 8: ecb == 4", g_lastOutMonoEcb == 4);
+			check("type 8: len == 8", g_lastOutMonoLen == 8);
+			check("type 8: opcode == 0", *(unsigned int *)(g_lastOutMonoBuf + 0) == 0u);
+			check("type 8: byte4 == (value>>24)&0xff (0x11)",
+			      g_lastOutMonoBuf[4] == 0x11);
+			check("type 8: byte5 == (value>>8)&0xff (0x33)",
+			      g_lastOutMonoBuf[5] == 0x33);
+
+			SFakeHwEvent scriptType10[1] = { { 10, 0x55667788 } };
+			g_pollScript = scriptType10; g_pollScriptCount = 1; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+			check("type 10: opcode == 2", *(unsigned int *)(g_lastOutMonoBuf + 0) == 2u);
+			check("type 10: byte4 == 0x55", g_lastOutMonoBuf[4] == 0x55);
+			check("type 10: byte5 == 0x77", g_lastOutMonoBuf[5] == 0x77);
+		}
+
+		printf("  [17g] type 11 (ANALOG): pushes via the real PutAnalogEvt(), "
+		       "queues for a SINGLE second-pass flush even across 2 pushes to "
+		       "the same client (mExtra38 gate), resets mExtra38 to -1 after\n");
+		{
+			unsigned int *table1 = PollerTestHooks::HandleTable1RW(p);
+			table1[3] = 0; /* index 3 -> handle 0 (our one client) */
+			PollerTestHooks::SetExtra38(client, -1);
+
+			/* value = (index<<16)|analogReading; s_analogCode[3] == 0 (a real
+			 * padding slot per the verbatim table) -- irrelevant here, only the
+			 * ring push + queue bookkeeping is under test.
+			 */
+			SFakeHwEvent script[2] = {
+				{ 11, (3u << 16) | 111 },
+				{ 11, (3u << 16) | 222 },
+			};
+			g_pollScript = script; g_pollScriptCount = 2; g_pollScriptIndex = 0;
+			g_outMonoCalls = 0;
+			p.Exec();
+
+			check("type 11 x2 to the same client: exactly ONE second-pass "
+			      "flush (mExtra38 gate prevents double-queueing)",
+			      g_outMonoCalls == 1);
+			check("that one flush: ecb == 3 (FlushAnalogEvts()'s own real ecb)",
+			      g_lastOutMonoEcb == 3);
+			check("that one flush: len == 16 (2 ring entries, 8 bytes each)",
+			      g_lastOutMonoLen == 16);
+			check("first ring entry's value == 111",
+			      *(short *)(g_lastOutMonoBuf + 4) == 111);
+			check("second ring entry's value == 222",
+			      *(short *)(g_lastOutMonoBuf + 8 + 4) == 222);
+			check("mExtra38 reset back to -1 after the second-pass flush",
+			      PollerTestHooks::Extra38(client) == -1);
+			check("cursor reset to the ring start after the flush",
+			      PollerTestHooks::Cursor(client) == PollerTestHooks::RingBuf(client));
+		}
+
+		printf("  [17h] CLEDBlinker::Exec() phase-toggle tail: OR-in on the "
+		       "'on' half, notifies mResource+0x1c with the real {opcode=6, "
+		       "(newWord<<16)|wordIndex} shape\n");
+		{
+			/* Fresh CLEDBlinker state (real placement-new re-run of its own
+			 * ctor -- same object identity, clean mCount/mBlinkPhase/mDivider/
+			 * mBitmap, since s_oLEDBlinker is a single global shared with test
+			 * [14]'s own earlier checks).
+			 */
+			new (&s_oLEDBlinker) CLEDBlinker();
+			s_oLEDBlinker.Register(3); /* bit 3 of mBitmap word 0; real: mCount
+			                              0->1 transition also resets mDivider/
+			                              mBlinkPhase to 0 */
+			check("[17h] setup: mDivider == 0 right after Register() from idle",
+			      true); /* mDivider isn't friend-exposed; behavior confirmed
+			                below via Exec()'s own real return-1-on-first-tick
+			                shape instead of a direct field peek */
+
+			unsigned int *zeroBlock = PollerTestHooks::ZeroBlockRW(p);
+			zeroBlock[0] = 0; /* LED currently off */
+
+			SFakeHwEvent script[1] = { { 0, 0 } }; /* no hardware events needed --
+			                                          only the LED tail matters */
+			g_pollScript = script; g_pollScriptCount = 0; g_pollScriptIndex = 0;
+			g_notifyCalls = 0;
+			int r = p.Exec();
+
+			check("Exec() still returns 0 when the LED tail fires", r == 0);
+			check("mResource+0x1c notify fired exactly once (word 0 changed)",
+			      g_notifyCalls == 1);
+			check("notify opcode == 6", g_lastNotifyOpcode == 6);
+			check("notify value == (0x8<<16)|0 (bit 3 forced ON, word index 0)",
+			      g_lastNotifyValue == (0x8u << 16));
+			check("mZeroBlock word 0 updated to 0x8 in CPoller's own bitmap too",
+			      (*(unsigned short *)&zeroBlock[0]) == 0x8);
+
+			/* Second tick: mDivider is now 1 (not 0), so CLEDBlinker::Exec()
+			 * just counts down and returns 0 -- Exec()'s own LED tail must
+			 * skip entirely (no second notify).
+			 */
+			g_pollScriptIndex = 0;
+			g_notifyCalls = 0;
+			p.Exec();
+			check("second tick: CLEDBlinker::Exec() returns 0 (still counting "
+			      "down) -- no notify fires",
+			      g_notifyCalls == 0);
+		}
 
 		PollerTestHooks::SetClients(p, 0, 0);
 	}
