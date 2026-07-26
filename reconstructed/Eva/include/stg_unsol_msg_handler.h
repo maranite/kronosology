@@ -105,9 +105,8 @@
  * processing reaching into CCombi/CProg/CGlobal/CControlSurface/CMMI/CModeManager/
  * CControlSurface/CDiskUtil/CForm-family classes,voice-model-algorithm-database state this pass does
  * not reconstruct): ControlMsgHandler (4886B, dispatches into CControlSurface/CMMI/
- * CDiskUtil/CForm-family classes,CHelpManager -- by far the deepest), GlobalMsgHandler (2012B,
- * per-global-param switch over ~0x70 codes plus a `SetWithoutUpdatingSTG()` free-
- * function dependency this pass doesn't reconstruct), CombiMsgHandler (2951B, CMMI/
+ * CDiskUtil/CForm-family classes,CHelpManager -- by far the deepest),
+ * CombiMsgHandler (2951B, CMMI/
  * CModeManager/CPrograms/CToneAdjustTool), ProgramSlotMsgHandler (1792B, CMMI::
  * GetInstance()/CModeManager::IsOnTimbreProgramEditInContext/ChangeToTopPage/
  * CKGMsgProcessor::GetInstance()), ProgramMsgHandler (3114B, CMMI), VoiceModelMsgHandler
@@ -150,6 +149,41 @@
  * not unconditionally `0x500c` -- written inline in this one method rather than
  * bent into the shared helper, same "don't generalize a helper for one outlier"
  * precedent EndHandling() already set.
+ *
+ * GlobalMsgHandler (real 2012B, .text 0x08918b50..0x08919360) -- promoted to Tier A
+ * (2026-07-26). Its own real subtype switch (msg's own +8 field, 0..4) covers
+ * global-param / drumkit-param / wave-sequence-param / two flag-diff cases, each
+ * hand-verified against `objdump -dr -M intel` (not just the decompile, which turned
+ * out accurate everywhere EXCEPT its own `CSWTCH_231[code+0x21]` table-index framing
+ * -- Ghidra invented its own array base; the real one, direct-indexed, is
+ * 0x08f1c481, see stg_unsol_msg_handler.cpp's own header comment). Its one
+ * out-of-scope dependency is `SetWithoutUpdatingSTG()`, a real internal-linkage
+ * (`static`) free function GCC IPA-cloned into a 4-argument runtime shape (scope/
+ * code/value/payload in EAX/EDX/ECX/stack at both real call sites, confirmed by
+ * register tracing -- its full mangled signature has a 5th `EEditSource` parameter
+ * this clone never materializes) -- stubbed, return value unused at both call sites
+ * (each the last statement in its case block, immediately before an early return).
+ *
+ * Two genuinely asymmetric restore-guard shapes exist here, NOT collapsed into
+ * EditApiSendParamMsg()'s uniform "live check right before the call" shape (which
+ * every OTHER branch below genuinely does have and does reuse):
+ *   - case 0's own subtype-0x26 sub-case: the begin-restore guard before the shared
+ *     final `setParam` call uses a snapshotted `iVar8` (0 by default; if
+ *     s_eNowRestoreSeqParameters was set, re-read fresh immediately after that
+ *     sub-case's own inner setParam+endRestore cycle, not at the point of the final
+ *     check itself) -- the matching END-restore guard after the final call, by
+ *     contrast, is a fresh live re-read. Confirmed at the real 0x08918ee7 vs
+ *     0x08918d7f instructions.
+ *   - case 2's own subtype-0x14-field==0x20 sub-case: a real `goto LAB_089192c8`
+ *     (real address 0x089192c8) from the "non-negative" branch back into the top of
+ *     the "negative" branch's own body, AFTER that sub-case's own inner
+ *     setParam+endRestore cycle -- so the re-entered code's own begin-restore check
+ *     can fire a SECOND, independent beginRestore() even though one already ran
+ *     earlier in the same invocation. Transcribed with a real C++ goto/label pair,
+ *     same precedent as edit_server.cpp's own goto preservation.
+ * Both are dead given s_eNowRestoreSeqParameters's own always-0 status throughout
+ * this reconstruction, but preserved exactly rather than hand-waved, per this
+ * project's own "faithful even when currently dead" convention.
  *
  * Reference-vs-pointer parameter shape for every method below is taken from
  * symbols.csv's own demangled names, not functions.csv's ABI-level (pointer-only)
@@ -290,7 +324,6 @@ public:
 	 * see header comment for sizes. Not implemented.
 	 */
 	void ControlMsgHandler(const STGMessage &msg);
-	void GlobalMsgHandler(const STGMessage &msg);
 	void CombiMsgHandler(STGMessage &msg);
 	void ProgramSlotMsgHandler(STGMessage &msg);
 	void ProgramMsgHandler(STGMessage &msg);
@@ -306,6 +339,12 @@ public:
 	 * deferred for goto/switch complexity + a buffer-reuse concern now resolved).
 	 */
 	void EffectSlotMsgHandler(STGMessage &msg);
+	/* Tier A, batch 4 (2026-07-26) -- real body, see header comment (formerly
+	 * deferred for a `SetWithoutUpdatingSTG()` dependency, now a safely-stubbed
+	 * out-of-scope leaf, plus two genuinely asymmetric restore-guard shapes now
+	 * resolved by direct register tracing rather than hand-waved).
+	 */
+	void GlobalMsgHandler(const STGMessage &msg);
 
 	/* Real layout is {code* fn; int32 adj} per HandleMessage()'s own decompile --
 	 * kept public/raw (not a real C++ pointer-to-member) so the ctor and

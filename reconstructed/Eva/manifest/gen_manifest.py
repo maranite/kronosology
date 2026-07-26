@@ -252,6 +252,15 @@ RECONSTRUCTED = {
     # cross-checked instruction-by-instruction against the decompile.
     "08917cd0",  # CSTGUnsolMsgHandler::EffectSlotMsgHandler
 
+    # --- CSTGUnsolMsgHandler batch 4 (2026-07-26) -- GlobalMsgHandler, the one
+    # genuine new lead identified by the prior session's Tier-B re-survey (its only
+    # out-of-scope dependency, SetWithoutUpdatingSTG(), is a real 4-arg IPA-cloned
+    # free function called twice, return value unused, safely stubbed). Two real,
+    # genuinely asymmetric restore-guard shapes hand-verified via objdump -dr against
+    # the real .text+0x08918b50 body (case 0's snapshotted iVar8, case 2's real
+    # `goto LAB_089192c8` double-beginRestore re-entry) -- see header/.cpp.
+    "08918b50",  # CSTGUnsolMsgHandler::GlobalMsgHandler
+
     # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
     # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()
     # genuinely IS called in ground truth (CEditor::CPanelIfcTask's and CPoller's own

@@ -326,6 +326,100 @@ static const unsigned char kHandleEffectSlotMsg_s_akbyAP[30] = {
 	0x01,0x06, 0x01,0x07, 0x0e,0x02, 0x0d,0x02, 0x0d,0x00, 0x12,0x00, 0xff,0xff, 0x01,0x0a,
 };
 
+/* --- GlobalMsgHandler support data (Stage 6 batch 4, 2026-07-26) ------------------
+ *
+ * Three real local `static const` {code,delta} byte-pair tables, each belonging to a
+ * different not-reconstructed free function (Ghidra's own qualified
+ * `Function(Args)::s_akbyAP` names below), plus one real byte-flag table -- all read
+ * directly out of the real binary's .rodata (`objdump -s -j .rodata`, VA confirmed via
+ * the real load instruction's own immediate operand, not guessed from the decompile's
+ * opaque table reference), same technique as this file's other s_akbyAP tables above.
+ */
+static const unsigned char kGlobalParamAP[220] = {
+	0x01,0x00, 0x01,0x01, 0x01,0x02, 0x01,0x03, 0x01,0x04, 0x01,0x05, 0x01,0x06, 0x01,0x0b,
+	0x01,0x0e, 0x01,0x0f, 0x01,0x10, 0x01,0x11, 0x02,0x00, 0x02,0x06, 0x02,0x0c, 0x02,0x12,
+	0x02,0x18, 0x02,0x1e, 0x02,0x24, 0x02,0x36, 0x03,0x00, 0x03,0x01, 0x03,0x02, 0x03,0x03,
+	0x03,0x04, 0x03,0x06, 0x03,0x0a, 0x03,0x0b, 0x03,0x0c, 0x03,0x0d, 0x03,0x0e, 0x03,0x0f,
+	0x07,0x00, 0x07,0x01, 0x07,0x03, 0x07,0x04, 0x07,0x20, 0x07,0x21, 0x08,0x01, 0x08,0x0d,
+	0x06,0x00, 0x06,0x08, 0x06,0x10, 0x06,0x20, 0x06,0x10, 0x06,0x20, 0x06,0x30, 0x06,0x39,
+	0x00,0x10, 0x02,0x2a, 0x02,0x30, 0x01,0x0c, 0x03,0x11, 0x03,0x12, 0x01,0x20, 0x03,0x13,
+	0x01,0x1f, 0x01,0x21, 0x06,0x5a, 0x06,0x5b, 0x06,0x5c, 0x06,0x5d, 0x06,0x5e, 0x06,0x5f,
+	0x06,0x60, 0x06,0x61, 0x06,0x62, 0x06,0x63, 0x06,0x64, 0x06,0x65, 0x06,0x66, 0x06,0x67,
+	0x06,0x68, 0x06,0x69, 0x06,0x6a, 0x06,0x72, 0x06,0x7a, 0x06,0x82, 0x06,0x8a, 0x06,0x8b,
+	0x06,0x8c, 0x06,0x8d, 0x06,0x8e, 0x06,0x8f, 0x06,0x90, 0x06,0x91, 0x06,0x92, 0x06,0x93,
+	0x06,0x94, 0x06,0x95, 0x06,0x96, 0x06,0x97, 0x06,0x98, 0x06,0x99, 0x06,0x9a, 0x06,0x9b,
+	0x06,0x9c, 0x06,0x9d, 0x06,0x9e, 0x06,0x9f, 0x06,0xa0, 0x06,0xa1, 0x06,0xa2, 0x06,0xa3,
+	0x06,0xa4, 0x06,0xa5, 0x06,0xa6, 0x06,0xa7, 0x07,0x02, 0x01,0x22,
+}; /* HandleGlobalMsgGlobalParam(STGGlobalParamMsg_const*)::s_akbyAP, 0x08f1c2e0, 220
+    * bytes = 110 pairs, index = global-param code 0..0x6d. NOT sentinel-terminated in
+    * this range (no 0xff byte0 anywhere in it) -- GlobalMsgHandler's own "cVar9==-1
+    * return" validity check is real but provably dead given this table's own content,
+    * same "faithful but unreached" status as this file's other dead guard checks. */
+
+static const unsigned char kDrumkitParamAP[62] = {
+	0x0a,0x1f, 0x0a,0x20, 0x0a,0x21, 0x0a,0x0f, 0x0a,0x10, 0x0a,0x0c, 0x0a,0x0d, 0x0a,0x11,
+	0x0a,0x12, 0x0a,0x13, 0x0a,0x14, 0x0a,0x15, 0x0a,0x16, 0x0a,0x17, 0x0a,0x18, 0x0a,0x19,
+	0x0a,0x1a, 0x0a,0x1b, 0x0a,0x1c, 0x0a,0x1d, 0x0a,0x1e, 0x0a,0x03, 0x0a,0x04, 0x0a,0x07,
+	0x0a,0x05, 0x0a,0x06, 0x0a,0x0b, 0x0a,0x0a, 0x0a,0x08, 0x0a,0x09, 0x0a,0x0e,
+}; /* HandleGlobalMsgDrumkitParam(STGGlobalDrumKitMsg_const*)::s_akbyAP, 0x08f1c3c0,
+    * 62 bytes = 31 pairs, index = drumkit-slot code 0..0x1e. code byte (byte0) is
+    * always 0x0a (10) -- only the delta byte varies. */
+
+static const unsigned char kWaveSeqParamAP[68] = {
+	0x0b,0x05, 0x0b,0x07, 0x0b,0x06, 0x0b,0x0a, 0x0b,0x0b, 0x0b,0x0e, 0x0b,0x0c, 0x0b,0x0d,
+	0x0b,0x11, 0x0b,0x12, 0x0b,0x0f, 0x0b,0x10, 0x0b,0x13, 0x0b,0x14, 0x0b,0x16, 0x0b,0x15,
+	0x0b,0x17, 0x0b,0x19, 0x0b,0x1a, 0x0b,0x1b, 0x0b,0x1e, 0x0b,0x1f, 0x0b,0x1d, 0x0b,0x1c,
+	0x0b,0x20, 0x0b,0x21, 0x0b,0x22, 0x0b,0x23, 0x0b,0x24, 0x0b,0x25, 0x0b,0x27, 0x0b,0x26,
+	0xff,0xff, 0x0b,0x18,
+}; /* HandleGlobalMsgWaveSequenceParam(STGGlobalWaveSequenceMsg_const*)::s_akbyAP,
+    * 0x08f1c400, 68 bytes = 34 pairs, index = wave-sequence code 0..0x21. Entry 0x20
+    * is a real {0xff,0xff} sentinel -- code 0x20 is intercepted by its own dedicated
+    * if-branch inside GlobalMsgHandler before this table is ever indexed, so the
+    * sentinel is confirmed-dead, not a guess. */
+
+static const unsigned char kGlobalMsgWaveSeqFlag[18] = {
+	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,
+}; /* Real bytes 0x08f1c491..0x08f1c4a2, 18 bytes. Real base address (confirmed via
+    * `objdump -dr`: `cmp BYTE PTR [ecx+0x8f1c481],0x0` with ecx holding the message's
+    * own raw, unadjusted wave-sequence code) is 0x08f1c481, direct-indexed by the raw
+    * code -- NOT Ghidra's own decompile framing, which expresses this same real byte
+    * range as `CSWTCH_231[code+0x21]` against an array it declares starting at
+    * 0x08f1c460 (the SAME real address as EffectSlotMsgHandler's own, unrelated,
+    * already-documented int[9] CSWTCH_231 table -- Ghidra's CSWTCH_NNN names are a
+    * per-decompile-run counter, not a real shared symbol, exactly the ambiguity this
+    * file's EffectSlotMsgHandler header comment already flags). This array is
+    * declared pre-shifted to start at the real 0x08f1c491 (only the range this
+    * function ever actually indexes, code in [0x10,0x21]) for a clean 0-based
+    * `[code-0x10]` index, same "direct real bytes, index documented against its own
+    * real base" convention as this file's own kCSWTCH_290. All 1 except code==0x20
+    * (0), i.e. index (0x20-0x10)=0x10=16.
+    */
+
+/* SetWithoutUpdatingSTG -- the one out-of-scope free-function dependency
+ * GlobalMsgHandler has. Real mangled name (`nm -C`):
+ * `_ZL21SetWithoutUpdatingSTGhhhRK6CValue11EEditSource` = internal-linkage
+ * `static void SetWithoutUpdatingSTG(unsigned char, unsigned char, unsigned char,
+ * CValue const&, EEditSource)` -- a 5-parameter general signature. The real
+ * `.clone.1` symbol actually called at both of GlobalMsgHandler's own call sites
+ * (`call 8916f00 <..SetWithoutUpdatingSTGhhhRK6CValue11EEditSource.clone.1>`) is a
+ * GCC IPA clone: since the function has internal linkage and GCC can see every call
+ * site in the whole translation unit, it re-derived a custom argument-to-register
+ * assignment for this specific clone and (confirmed by direct register tracing of
+ * BOTH real call sites, not assumed) only 4 runtime values are ever actually passed
+ * -- scope/code/value/payload-pointer in EAX/EDX/ECX/stack, in that order, at both
+ * sites identically. The 5th (EEditSource) parameter is never materialized at either
+ * call site, i.e. constant-propagated away by the same clone. Stubbed below matching
+ * that real 4-argument runtime shape (not the full mangled signature) -- return value
+ * unused at both call sites (each is the last statement in its case block,
+ * immediately before an early `return;`), same "genuinely undecoded external call,
+ * transcribed anyway" convention as this file's own GetResLength()/
+ * CChunkBase_WriteBinary()/TObjArray_SIDEntry_Add() stand-ins.
+ */
+static void SetWithoutUpdatingSTG(unsigned char scope, unsigned char code, unsigned char value, void *payload)
+{
+	(void)scope; (void)code; (void)value; (void)payload;
+}
+
 /* --- ABI-level helpers to fill the raw {code*, adj} dispatch table -----------------
  *
  * The real ctor stores each handler as a bare code-pointer assignment
@@ -630,7 +724,6 @@ void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 /* --- Tier B link-stubs: genuinely deep per-subsystem processing, not implemented -- */
 
 void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 4886 bytes. */ }
-void CSTGUnsolMsgHandler::GlobalMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x08918b50, 2012 bytes. */ }
 void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919360, 2951 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08918410, 1792 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919fd0, 3114 bytes. */ }
@@ -1012,5 +1105,279 @@ void CSTGUnsolMsgHandler::EffectSlotMsgHandler(STGMessage &msg)
 			EditApiVoidSelfFn endRestore = *(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38);
 			endRestore(EditApi);
 		}
+	}
+}
+
+/* CSTGUnsolMsgHandler::GlobalMsgHandler(STGMessage const&), .text+0x08918b50, real
+ * 2012 bytes (0x08918b50..0x08919360). Promoted from Tier B (Stage 6 batch 4,
+ * 2026-07-26). Every EditApi vtable dispatch below (+0x20/+0x28/+0x2c/+0x30/+0x38/
+ * +0x3c) and all five real cases were hand-verified against `objdump -dr -M intel`
+ * of the real function body, not just the Ghidra decompile -- the decompile's own
+ * control flow turned out accurate everywhere it was cross-checked, EXCEPT its
+ * `CSWTCH_231[code+0x21]` table-index framing (a Ghidra-invented base, corrected to
+ * the real direct-indexed 0x08f1c481 base above, same ambiguity already flagged for
+ * this file's other CSWTCH_NNN tables).
+ *
+ * Two genuinely asymmetric restore-guard shapes exist here, confirmed by direct
+ * register tracing (not assumed to mirror EditApiSendParamMsg()'s uniform "live
+ * check right before the call" shape used by every other case below):
+ *
+ *   - case 0 (subtype 0x26 sub-case): the begin-restore guard immediately before the
+ *     shared final `setParam` call uses a SNAPSHOTTED `iVar8` (0 by default; if
+ *     s_eNowRestoreSeqParameters was set, `iVar8` is instead re-read fresh
+ *     immediately after that sub-case's OWN inner `setParam`+endRestore cycle) --
+ *     not a fresh re-read at the point of the check itself. The corresponding
+ *     END-restore guard right after the final call, by contrast, DOES use a fresh
+ *     live re-read. Confirmed at 0x08918ee7 (`test edi,edi`) vs 0x08918d7f (`mov
+ *     edx,ds:0xacadb20` -- fresh) in the real disassembly.
+ *   - case 2 (subtype-0x14 field == 0x20 sub-case): real ground truth has a genuine
+ *     `goto LAB_089192c8` (real address 0x089192c8, confirmed) from inside the
+ *     "non-negative" branch back into the top of the "negative" branch, AFTER that
+ *     branch's own inner setParam+endRestore cycle -- meaning the re-entered code's
+ *     own begin-restore check can fire a SECOND, independent beginRestore() call
+ *     even though one already ran earlier in the same case invocation. Transcribed
+ *     below with a real C++ goto/label pair (matching this project's own
+ *     edit_server.cpp goto-preservation precedent), not routed around.
+ *
+ * Both asymmetries are dead code given s_eNowRestoreSeqParameters's own always-0
+ * status throughout this reconstruction (same as every other place this flag
+ * appears in this file), but are preserved exactly rather than collapsed into the
+ * EditApiSendParamMsg() shared helper, which assumes the simpler uniform shape that
+ * every OTHER case below (1, 2's other two sub-cases, 3, 4) genuinely has.
+ */
+void CSTGUnsolMsgHandler::GlobalMsgHandler(const STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	/* Local to this function only, same "declared where first needed" convention
+	 * as EndHandling()'s own QueryFlagFn -- +0x20 ("get param pointer", returns a
+	 * pointer whose own +0x24 field is read) and +0x2c ("query a flag", writes a
+	 * dword out-param) are each used by exactly one/two cases below.
+	 */
+	typedef void *(*EditApiGetParamPtrFn)(void *, unsigned char, unsigned char, unsigned char);
+	typedef void (*EditApiQueryFlagFn)(void *, unsigned char, int, int, unsigned char *, int);
+
+	switch (*(int *)(p + 8)) {
+	case 0: {
+		if (*(unsigned int *)(p + 0x10) > 0x6d)
+			return;
+
+		unsigned char scope = EditApiGetScopeId("ESGlobal");
+		int paramCode = *(int *)(p + 0x10);
+		unsigned int local_2c = *(unsigned int *)(p + 0x14);
+		int iVar5 = *(int *)(p + 0xc);
+		unsigned char rawCode = kGlobalParamAP[paramCode * 2];
+		if (rawCode == 0xff)
+			return;
+
+		int iVar8;
+		if (paramCode == 0x26) {
+			int div12 = iVar5 / 0xc;
+
+			if (s_eNowRestoreSeqParameters != 0) {
+				void *vtbl0 = *(void **)EditApi;
+				(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+			}
+			USTGUserAPI::mNowStopMessaging = 1;
+			CEditor::lastEditMessage = 0x500c;
+			{
+				void *vtblInner = *(void **)EditApi;
+				EditApiSetParamFn setParamInner = *(EditApiSetParamFn *)((char *)vtblInner + 0x30);
+				setParamInner(EditApi, scope, 8, 0, &div12, 4, 1);
+			}
+			USTGUserAPI::mNowStopMessaging = 0;
+
+			iVar8 = 0;
+			if (s_eNowRestoreSeqParameters != 0) {
+				void *vtbl2 = *(void **)EditApi;
+				(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+				iVar8 = s_eNowRestoreSeqParameters; /* real: re-read AFTER endRestore, not before */
+			}
+			iVar5 = iVar5 % 0xc;
+		} else {
+			iVar8 = s_eNowRestoreSeqParameters;
+			if ((unsigned int)(paramCode - 0x2c) < 2) {
+				iVar5 = iVar5 + 8;
+			} else if ((unsigned int)(paramCode - 4) < 3) {
+				local_2c = (local_2c != 0);
+			}
+		}
+
+		unsigned char value = (unsigned char)((char)iVar5 + (char)kGlobalParamAP[paramCode * 2 + 1]);
+
+		/* Asymmetric begin-guard -- see this function's own header comment. */
+		if (iVar8 != 0) {
+			void *vtbl3 = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtbl3 + 0x3c))(EditApi);
+		}
+
+		USTGUserAPI::mNowStopMessaging = 1;
+		CEditor::lastEditMessage = 0x500c;
+		{
+			void *vtbl = *(void **)EditApi;
+			EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+			setParam(EditApi, scope, rawCode, value, &local_2c, 4, 1);
+		}
+		USTGUserAPI::mNowStopMessaging = 0;
+
+		/* End-guard is a fresh live re-read -- real, and NOT the same source as
+		 * the begin-guard's `iVar8` above (see header comment).
+		 */
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtblEnd = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtblEnd + 0x38))(EditApi);
+		}
+		return;
+	}
+
+	case 1: {
+		if (*(int *)(p + 0xc) != -1)
+			return;
+		unsigned int idx = *(unsigned int *)(p + 0x18);
+		if (idx > 0x1e)
+			return;
+
+		unsigned char scope = EditApiGetScopeId("ESGlobal");
+		unsigned char stgCode  = kDrumkitParamAP[idx * 2];
+		unsigned int  stgValue = (unsigned int)(unsigned char)kDrumkitParamAP[idx * 2 + 1];
+
+		if (idx < 0x1f && ((1u << (idx & 0x1f)) & 0x401fffffu) != 0)
+			stgValue += (unsigned int)(*(int *)(p + 0x14)) * 0x15;
+
+		/* Real inline setParam call (code/value are the LITERAL constants
+		 * 0xa/2, not stgCode/stgValue -- those are only used by the
+		 * SetWithoutUpdatingSTG() stub call below).
+		 */
+		EditApiSendParamMsg(scope, 0xa, 2, p + 0x10, 4, 1);
+
+		SetWithoutUpdatingSTG(scope, stgCode, (unsigned char)(stgValue & 0xff), p + 0x1c);
+		return;
+	}
+
+	case 2: {
+		if (*(int *)(p + 0xc) != -1)
+			return;
+
+		unsigned char scope = EditApiGetScopeId("ESGlobal");
+		unsigned int sub = *(unsigned int *)(p + 0x14);
+
+		if (sub == 0x20) {
+			int val = *(int *)(p + 0x1c);
+
+			/* Real goto LAB_089192c8 shape -- see this function's own header
+			 * comment for the asymmetric-double-beginRestore nuance.
+			 */
+			if (val < 0) {
+wave_seq_negate:
+				val = (int)((unsigned int)(~val) >> 31);
+				if (s_eNowRestoreSeqParameters != 0) {
+					void *vtbl0 = *(void **)EditApi;
+					(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+				}
+			} else {
+				val = val + 1;
+				if (s_eNowRestoreSeqParameters != 0) {
+					void *vtbl1 = *(void **)EditApi;
+					(*(EditApiVoidSelfFn *)((char *)vtbl1 + 0x3c))(EditApi);
+				}
+				USTGUserAPI::mNowStopMessaging = 1;
+				CEditor::lastEditMessage = 0x500c;
+				{
+					void *vtblInner = *(void **)EditApi;
+					EditApiSetParamFn setParamInner = *(EditApiSetParamFn *)((char *)vtblInner + 0x30);
+					setParamInner(EditApi, scope, 0xb, 2, &val, 4, 1);
+				}
+				USTGUserAPI::mNowStopMessaging = 0;
+				if (s_eNowRestoreSeqParameters != 0) {
+					void *vtbl2 = *(void **)EditApi;
+					(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+					goto wave_seq_negate;
+				}
+				val = (int)((unsigned int)(~val) >> 31);
+			}
+
+			unsigned int local_3c = (unsigned int)val;
+			USTGUserAPI::mNowStopMessaging = 1;
+			CEditor::lastEditMessage = 0x500c;
+			{
+				void *vtbl = *(void **)EditApi;
+				EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+				setParam(EditApi, scope, 0xb, 3, &local_3c, 4, 1);
+			}
+			USTGUserAPI::mNowStopMessaging = 0;
+			if (s_eNowRestoreSeqParameters != 0) {
+				void *vtblEnd = *(void **)EditApi;
+				(*(EditApiVoidSelfFn *)((char *)vtblEnd + 0x38))(EditApi);
+			}
+			return;
+		}
+
+		if (sub > 0x21)
+			return;
+
+		unsigned char subCode  = kWaveSeqParamAP[sub * 2];
+		unsigned char subValue = kWaveSeqParamAP[sub * 2 + 1];
+
+		if ((sub - 0x10) < 0x12 && kGlobalMsgWaveSeqFlag[sub - 0x10] != 0) {
+			unsigned int target = *(unsigned int *)(p + 0x10);
+
+			void *vtblP = *(void **)EditApi;
+			EditApiGetParamPtrFn getParamPtr = *(EditApiGetParamPtrFn *)((char *)vtblP + 0x20);
+			void *paramObj = getParamPtr(EditApi, scope, 0xb, 4);
+			unsigned int clamp = *(unsigned int *)((char *)paramObj + 0x24);
+
+			if ((int)clamp < (int)target) {
+				subValue = (unsigned char)(subValue + (char)((char)target - (char)clamp) * 0x11);
+				target = clamp;
+			}
+
+			EditApiSendParamMsg(scope, 0xb, 4, &target, 4, 1);
+
+			SetWithoutUpdatingSTG(scope, subCode, subValue, p + 0x18);
+			return;
+		}
+
+		unsigned int local_3c = *(unsigned int *)(p + 0x1c);
+		if (sub < 0xe && ((1u << (sub & 0x1f)) & 0x3030u) != 0)
+			local_3c += 1;
+
+		EditApiSendParamMsg(scope, subCode, subValue, &local_3c, 4, 1);
+		return;
+	}
+
+	case 3: {
+		unsigned char scope = EditApiGetScopeId("ESGlobal");
+
+		void *vtblQ = *(void **)EditApi;
+		EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtblQ + 0x2c);
+		unsigned int flagVal = 0;
+		queryFlag(EditApi, scope, 0xa, 1, (unsigned char *)&flagVal, 4);
+
+		unsigned int local_3c = *(unsigned int *)(p + 0xc);
+		if (local_3c == flagVal)
+			return;
+
+		EditApiSendParamMsg(scope, 0xa, 1, &local_3c, 4, 1);
+		return;
+	}
+
+	case 4: {
+		unsigned char scope = EditApiGetScopeId("ESGlobal");
+
+		void *vtblQ = *(void **)EditApi;
+		EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtblQ + 0x2c);
+		unsigned int flagVal = 0;
+		queryFlag(EditApi, scope, 0xb, 1, (unsigned char *)&flagVal, 4);
+
+		unsigned int local_2c = *(unsigned int *)(p + 0xc);
+		if (local_2c == flagVal)
+			return;
+
+		EditApiSendParamMsg(scope, 0xb, 1, &local_2c, 4, 1);
+		return;
+	}
+
+	default:
+		return;
 	}
 }

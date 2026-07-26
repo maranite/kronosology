@@ -516,6 +516,383 @@ int main()
 		EditApi = realEditApi;
 	}
 
+	/* --- Stage 6 batch 4 (2026-07-26): GlobalMsgHandler, the one genuine new lead
+	 * out of the six remaining Tier-B handlers surveyed in this same session's
+	 * memory writeup -- see header/.cpp for the two real, genuinely asymmetric
+	 * restore-guard shapes (case 0's snapshotted iVar8, case 2's goto
+	 * LAB_089192c8 double-beginRestore re-entry). SetWithoutUpdatingSTG is a
+	 * file-local static in stg_unsol_msg_handler.cpp (not header-declared, same
+	 * convention as USTGAPIControl/USTGAPIFsck) -- its own two call sites (case 1,
+	 * case 2's wave-seq-table sub-branch) can't be observed directly from here, so
+	 * coverage below confirms every OTHER observable effect (scope/code/value/
+	 * payload reaching the real EditApi vtable dispatch) plus "does not crash"
+	 * for the SetWithoutUpdatingSTG-reaching branches, same as this file's
+	 * existing Tier-B-adjacent stub coverage elsewhere.
+	 */
+	printf("[9] GlobalMsgHandler (Stage 6 batch 4, 2026-07-26, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool called;
+			const char *scopeName;
+			unsigned char scope, code, value;
+			unsigned int payload;
+			int len, flag;
+		};
+		static Capture cap;
+		static unsigned int g_flagVal;
+		static unsigned char g_paramObj[0x28];
+
+		struct Fake9 {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeName = name;
+				return 0x40;
+			}
+			static void SetParam(void *, unsigned char scope, unsigned char code, unsigned char value,
+			                     void *payload, int len, int flag)
+			{
+				cap.called = true;
+				cap.scope = scope;
+				cap.code = code;
+				cap.value = value;
+				cap.len = len;
+				cap.flag = flag;
+				cap.payload = 0;
+				if (len > 0 && (size_t)len <= sizeof(cap.payload))
+					memcpy(&cap.payload, payload, (size_t)len);
+			}
+			static void QueryFlag(void *, unsigned char, int, int, unsigned char *out, int len)
+			{
+				memcpy(out, &g_flagVal, (size_t)len);
+			}
+			static void *GetParamPtr(void *, unsigned char, unsigned char, unsigned char)
+			{
+				return g_paramObj;
+			}
+		};
+
+		struct Trap9 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap9::Nop;
+		fakeVtbl[0x20 / 4] = (void *)Fake9::GetParamPtr;
+		fakeVtbl[0x28 / 4] = (void *)Fake9::GetScopeId;
+		fakeVtbl[0x2c / 4] = (void *)Fake9::QueryFlag;
+		fakeVtbl[0x30 / 4] = (void *)Fake9::SetParam;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char buf[64];
+
+		/* case 0, code 0x6e (>0x6d): out-of-range global-param code, must
+		 * return without dispatch.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0x6e;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case0: code>0x6d returns without dispatch", !cap.called);
+		}
+
+		/* case 0, code 0 (table[0] = (1,0), not in the 0x26/0x2c-0x2d/4-6
+		 * special ranges): value == (char)iVar5 + 0, code == 1.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0;   /* paramCode 0 */
+			*(unsigned int *)(buf + 0xc) = 5;     /* iVar5 */
+			*(unsigned int *)(buf + 0x14) = 0x11223344; /* local_2c payload */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case0 (code 0): dispatched", cap.called);
+			check("GlobalMsgHandler case0 (code 0): scope name == \"ESGlobal\"", cap.scopeName && strcmp(cap.scopeName, "ESGlobal") == 0);
+			check("GlobalMsgHandler case0 (code 0): code == 1 (table[0] byte0)", cap.code == 1);
+			check("GlobalMsgHandler case0 (code 0): value == 5 (iVar5 + table[0] byte1==0)", cap.value == 5);
+			check("GlobalMsgHandler case0 (code 0): payload == field0x14 verbatim", cap.payload == 0x11223344);
+		}
+
+		/* case 0, code 4 (table[4] = (1,4), inside the 4..6 "normalize to
+		 * boolean" range): local_2c becomes (field0x14 != 0) -> payload == 1.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 4;
+			*(unsigned int *)(buf + 0xc) = 9;
+			*(unsigned int *)(buf + 0x14) = 0x99; /* nonzero -> normalized to 1 */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case0 (code 4): code == 1 (table[4] byte0)", cap.code == 1);
+			check("GlobalMsgHandler case0 (code 4): value == 13 (9+4)", cap.value == 13);
+			check("GlobalMsgHandler case0 (code 4): payload normalized to boolean 1", cap.payload == 1);
+		}
+
+		/* case 0, code 0x26: real div-by-12 special case -- reaches this
+		 * function's own inner setParam(code=8,value=0) first (not directly
+		 * observable beyond "no crash", since the fake vtbl's SetParam
+		 * overwrites `cap` for the LATER, final call too), then the outer
+		 * call with code == table[0x26] byte0 (0x01), value == (iVar5%12) +
+		 * table[0x26] byte1. iVar5=0xc+3 -> iVar5%12==3. table idx 0x26=38 =
+		 * (0x08,0x01) i.e. byte0=8, byte1=1 -- code==8, value==3+1==4.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0x26;
+			*(unsigned int *)(buf + 0xc) = 0xc + 3;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case0 (code 0x26): dispatched (final call observed)", cap.called);
+			check("GlobalMsgHandler case0 (code 0x26): final code == 8 (table[0x26] byte0)", cap.code == 8);
+			check("GlobalMsgHandler case0 (code 0x26): final value == 4 ((15%12)+1)", cap.value == 4);
+		}
+
+		/* case 1: target != -1 -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0xc) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case1: target != -1 returns without dispatch", !cap.called);
+		}
+
+		/* case 1: idx 0 -> table[0] = (0x0a,0x1f), idx not in the bitmask ->
+		 * no addend. Inner call is the LITERAL (code=0xa,value=2); the
+		 * SetWithoutUpdatingSTG(scope,0x0a,0x1f,...) stub call isn't directly
+		 * observable, but must not crash.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x18) = 0;   /* idx 0 */
+			*(unsigned int *)(buf + 0x10) = 0xaabbccdd;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case1 (idx 0): dispatched", cap.called);
+			check("GlobalMsgHandler case1 (idx 0): code == 0xa (literal)", cap.code == 0xa);
+			check("GlobalMsgHandler case1 (idx 0): value == 2 (literal)", cap.value == 2);
+			check("GlobalMsgHandler case1 (idx 0): payload == field0x10 verbatim", cap.payload == 0xaabbccdd);
+		}
+
+		/* case 1: idx 0x1f (>0x1e) -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x18) = 0x1f;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case1: idx>0x1e returns without dispatch", !cap.called);
+		}
+
+		/* case 2, sub==0x20, negative field0x1c: label entry directly, no
+		 * inner call, final code==0xb, value==3, payload boolean 0 (negative
+		 * -> ~x>>31 == 0).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x14) = 0x20;
+			*(int *)(buf + 0x1c) = -5;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case2 (sub 0x20, negative): dispatched", cap.called);
+			check("GlobalMsgHandler case2 (sub 0x20, negative): code == 0xb", cap.code == 0xb);
+			check("GlobalMsgHandler case2 (sub 0x20, negative): value == 3", cap.value == 3);
+			check("GlobalMsgHandler case2 (sub 0x20, negative): payload boolean == 0", cap.payload == 0);
+		}
+
+		/* case 2, sub==0x20, non-negative field0x1c: real inner call fires
+		 * first (code=0xb,value=2, not separately observable beyond no-crash
+		 * since the fake SetParam gets overwritten by the final call too),
+		 * then final code==0xb, value==3, payload boolean 1 (non-negative ->
+		 * ~x>>31 == 1).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x14) = 0x20;
+			*(int *)(buf + 0x1c) = 7;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case2 (sub 0x20, non-negative): final code == 0xb", cap.code == 0xb);
+			check("GlobalMsgHandler case2 (sub 0x20, non-negative): final value == 3", cap.value == 3);
+			check("GlobalMsgHandler case2 (sub 0x20, non-negative): payload boolean == 1", cap.payload == 1);
+		}
+
+		/* case 2, sub in the wave-seq-table special range (0x10..0x21) with
+		 * kGlobalMsgWaveSeqFlag set (every index except 0x20, already
+		 * covered above) -- e.g. sub 0x11 (kGlobalMsgWaveSeqFlag[1]==1). The
+		 * observable inner EditApiSendParamMsg call always uses the LITERAL
+		 * (code=0xb, value=4) -- kWaveSeqParamAP's own {subCode,subValue}
+		 * pair for this sub only ever reaches the non-observable
+		 * SetWithoutUpdatingSTG() stub call, not this call. Real
+		 * getParamPtr()->+0x24 clamp: with clamp >= target, no adjustment,
+		 * so payload == the raw, unclamped target.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x14) = 0x11;
+			*(unsigned int *)(buf + 0x10) = 3; /* target */
+
+			*(int *)(g_paramObj + 0x24) = 10; /* clamp >= target -> no adjustment */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case2 (wave-seq-table, sub 0x11): dispatched", cap.called);
+			check("GlobalMsgHandler case2 (wave-seq-table, sub 0x11): code == 0xb (literal)", cap.code == 0xb);
+			check("GlobalMsgHandler case2 (wave-seq-table, sub 0x11): value == 4 (literal)", cap.value == 4);
+			check("GlobalMsgHandler case2 (wave-seq-table, sub 0x11): payload == target (3, unclamped)", cap.payload == 3);
+		}
+
+		/* case 2, default sub-branch (sub not 0x20, not in the special
+		 * flagged range) -- e.g. sub 1: table[1] = (0x0b,0x07), not < 0xe
+		 * with the 0x3030 bitmask set (bit 1 -> 0x3030 & 2 == 0) so no +1
+		 * adjustment. code == 0xb, value == 7, payload == field0x1c
+		 * verbatim.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0xc) = -1;
+			*(unsigned int *)(buf + 0x14) = 1;
+			*(unsigned int *)(buf + 0x1c) = 0x55667788;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case2 (default, sub 1): dispatched", cap.called);
+			check("GlobalMsgHandler case2 (default, sub 1): code == 0xb (table[1] byte0)", cap.code == 0xb);
+			check("GlobalMsgHandler case2 (default, sub 1): value == 7 (table[1] byte1)", cap.value == 7);
+			check("GlobalMsgHandler case2 (default, sub 1): payload == field0x1c verbatim", cap.payload == 0x55667788);
+		}
+
+		/* case 2: target check fails -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0xc) = 5; /* != -1 */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case2: target != -1 returns without dispatch", !cap.called);
+		}
+
+		/* case 3: field0xc mismatches the queried flag -> dispatch with the
+		 * real literal code==0xa, value==1, payload == field0xc verbatim.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 3;
+			*(unsigned int *)(buf + 0xc) = 0x42;
+			g_flagVal = 0x99; /* mismatched */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case3 (mismatch): dispatched", cap.called);
+			check("GlobalMsgHandler case3 (mismatch): code == 0xa (literal)", cap.code == 0xa);
+			check("GlobalMsgHandler case3 (mismatch): value == 1 (literal)", cap.value == 1);
+			check("GlobalMsgHandler case3 (mismatch): payload == field0xc verbatim", cap.payload == 0x42);
+		}
+
+		/* case 3: field0xc matches the queried flag -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 3;
+			*(unsigned int *)(buf + 0xc) = 0x77;
+			g_flagVal = 0x77;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case3 (match): returns without dispatch", !cap.called);
+		}
+
+		/* case 4: field0xc mismatches -> dispatch with code==0xb, value==1. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 4;
+			*(unsigned int *)(buf + 0xc) = 0x12;
+			g_flagVal = 0x34;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+
+			check("GlobalMsgHandler case4 (mismatch): dispatched", cap.called);
+			check("GlobalMsgHandler case4 (mismatch): code == 0xb (literal)", cap.code == 0xb);
+			check("GlobalMsgHandler case4 (mismatch): value == 1 (literal)", cap.value == 1);
+			check("GlobalMsgHandler case4 (mismatch): payload == field0xc verbatim", cap.payload == 0x12);
+		}
+
+		/* case 4: field0xc matches -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 4;
+			*(unsigned int *)(buf + 0xc) = 0x21;
+			g_flagVal = 0x21;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler case4 (match): returns without dispatch", !cap.called);
+		}
+
+		/* default (subtype 5, out of range 0..4): no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 5;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.GlobalMsgHandler(msg);
+			check("GlobalMsgHandler default subtype: returns without dispatch", !cap.called);
+		}
+
+		EditApi = realEditApi;
+	}
+
 	/* Stage 6 breadth sweep, 2026-07-25: USTGAPIControl::SaveRandomSeed()/
 	 * ForceErPShutdown() promoted from Tier-B link-stubs to real bodies
 	 * (stg_unsol_msg_handler.cpp) -- SaveRandomSeed() now genuinely
