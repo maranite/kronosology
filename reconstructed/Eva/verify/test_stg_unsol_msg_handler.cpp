@@ -939,6 +939,252 @@ int main()
 		EditApi = realEditApi;
 	}
 
+	/* --- Tier A, batch 5 (2026-07-26): ProgramSlotMsgHandler --------------------
+	 *
+	 * Promoted from Tier B this session (follow-up to the 5-handler recheck).
+	 * CModeManager::IsOnTimbreProgramEditInContext() is a file-local opaque stub
+	 * hardcoded to always return false (stg_unsol_msg_handler.cpp) -- same
+	 * "genuinely unmodeled external subsystem, confirmed real but currently dead"
+	 * status as s_eNowRestoreSeqParameters elsewhere in this file, not something
+	 * this test can force true -- so only the "not in timbre edit" halves of the
+	 * idx==8/idx==9 special cases are exercised here; their ChangeToTopPage/
+	 * CKGMsgProcessor tails are real but unreachable from this test harness,
+	 * same license already used for CPanelIfcTask/USTGAPIControl-reaching tails
+	 * elsewhere in this file.
+	 */
+	printf("[10] ProgramSlotMsgHandler (Tier A batch 5, 2026-07-26, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool called;
+			const char *scopeName;
+			unsigned char scope, code, value;
+			unsigned int payload;
+			int len, flag;
+		};
+		static Capture cap;
+
+		struct Fake10 {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeName = name;
+				return 0x40;
+			}
+			static void SetParam(void *, unsigned char scope, unsigned char code, unsigned char value,
+			                     void *payload, int len, int flag)
+			{
+				cap.called = true;
+				cap.scope = scope;
+				cap.code = code;
+				cap.value = value;
+				cap.len = len;
+				cap.flag = flag;
+				cap.payload = 0;
+				if (len > 0 && (size_t)len <= sizeof(cap.payload))
+					memcpy(&cap.payload, payload, (size_t)len);
+			}
+			static void QueryFlag(void *, unsigned char, int, int, unsigned char *out, int len)
+			{
+				memset(out, 0, (size_t)len); /* forces the "queried != payload" ChangeToTopPage
+				                               * branch to never look equal by accident in any
+				                               * test below that reaches idx==8/9's own query --
+				                               * moot in practice since IsOnTimbreProgramEditInContext
+				                               * always returns false, gating those branches off. */
+			}
+		};
+
+		struct Trap10 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap10::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake10::GetScopeId;
+		fakeVtbl[0x2c / 4] = (void *)Fake10::QueryFlag;
+		fakeVtbl[0x30 / 4] = (void *)Fake10::SetParam;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char buf[64];
+
+		/* p+8 != 1: must return without dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+			check("ProgramSlotMsgHandler: p+8 != 1 returns without dispatch", !cap.called);
+		}
+
+		/* idx == 0x4a (special case A): kind==0 (Combi) -> "ESCombi", code =
+		 * p[0x14](5) + table[0x4a*2](0x48) = 0x4d, value = p[0x28](0x20) +
+		 * table[0x4a*2+1](0x10) = 0x30, payload = &msg[0x20] verbatim, len=4.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 0;                 /* kind == Combi */
+			*(unsigned int *)(buf + 0x10) = 0xffff;   /* wildcard target */
+			buf[0x14] = 5;
+			buf[0x28] = 0x20;
+			*(int *)(buf + 0x1c) = 0x4a;               /* idx */
+			*(unsigned int *)(buf + 0x20) = 0xdeadbeef;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=0x4a: dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=0x4a: scope name == \"ESCombi\"", cap.scopeName && strcmp(cap.scopeName, "ESCombi") == 0);
+			check("ProgramSlotMsgHandler idx=0x4a: code == 0x4d", cap.code == 0x4d);
+			check("ProgramSlotMsgHandler idx=0x4a: value == 0x30", cap.value == 0x30);
+			check("ProgramSlotMsgHandler idx=0x4a: payload == msg[0x20] verbatim", cap.payload == 0xdeadbeef);
+			check("ProgramSlotMsgHandler idx=0x4a: len == 4, flag == 1", cap.len == 4 && cap.flag == 1);
+		}
+
+		/* idx == 9 (special case B), not in timbre-edit context (always false
+		 * here): code = p[0x14](2) + table[9*2](0x48) = 0x4a, value =
+		 * table[9*2+1] = 0 (unmodified), payload16 = (p[0x28](1)<<7)|p[0x20]
+		 * word(5) = 0x85, len == 2.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 0;                 /* kind == Combi -> "ESCombi" */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			buf[0x14] = 2;
+			*(int *)(buf + 0x28) = 1;
+			*(uint16_t *)(buf + 0x20) = 5;
+			*(int *)(buf + 0x1c) = 9;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=9: dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=9: code == 0x4a (2+0x48)", cap.code == 0x4a);
+			check("ProgramSlotMsgHandler idx=9: value == 0 (table[9] unmodified)", cap.value == 0);
+			check("ProgramSlotMsgHandler idx=9: payload == 0x85 ((1<<7)|5)", cap.payload == 0x85);
+			check("ProgramSlotMsgHandler idx=9: len == 2, flag == 1", cap.len == 2 && cap.flag == 1);
+		}
+
+		/* idx == 0xb, kind==0 (Combi): decrements msg[0x20]'s own byte
+		 * (5 -> 4), falls into the generic tail with SVar6=0: code =
+		 * p[0x14](7) + table[0xb*2](0x48) = 0x4f, value = 0 + table[0xb*2+1]
+		 * (2) = 2, flag = kCSWTCH_231[midiSource=3] = 1, payload = &msg[0x20]
+		 * (now holding the decremented value, 4).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 0;                 /* kind == Combi */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 2) = 3;                /* midiSource */
+			buf[0x14] = 7;
+			*(int *)(buf + 0x1c) = 0xb;
+			*(uint32_t *)(buf + 0x20) = 5;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=0xb: dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=0xb: code == 0x4f (7+0x48)", cap.code == 0x4f);
+			check("ProgramSlotMsgHandler idx=0xb: value == 2 (table[0xb] byte1)", cap.value == 2);
+			check("ProgramSlotMsgHandler idx=0xb: payload == 4 (msg[0x20] decremented 5->4)", cap.payload == 4);
+			check("ProgramSlotMsgHandler idx=0xb: flag == 1 (kCSWTCH_231[3])", cap.flag == 1);
+		}
+
+		/* idx == 5 (plain-default group), kind==2 (Song) -> "ESSong": SVar6=0,
+		 * code = p[0x14](3) + table[5*2](0x48) = 0x4b, value = 0 +
+		 * table[5*2+1](0x1e) = 0x1e.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 2;                 /* kind == Song -> "ESSong" */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			buf[0x14] = 3;
+			*(int *)(buf + 0x1c) = 5;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=5 (default): dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=5 (default): scope name == \"ESSong\"", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+			check("ProgramSlotMsgHandler idx=5 (default): code == 0x4b (3+0x48)", cap.code == 0x4b);
+			check("ProgramSlotMsgHandler idx=5 (default): value == 0x1e (SVar6=0 + table[5] byte1)", cap.value == 0x1e);
+		}
+
+		/* idx == 0x4b (SVar6 = msg[0x18]): code = p[0x14](1) + table[0x4b*2]
+		 * (0x48) = 0x49, value = msg[0x18](9) + table[0x4b*2+1](0x56) = 0x5f.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			buf[0x14] = 1;
+			buf[0x18] = 9;
+			*(int *)(buf + 0x1c) = 0x4b;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=0x4b: dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=0x4b: code == 0x49 (1+0x48)", cap.code == 0x49);
+			check("ProgramSlotMsgHandler idx=0x4b: value == 0x5f (9+0x56)", cap.value == 0x5f);
+		}
+
+		/* idx > 0x4c (out of range): SVar6 = 0, generic tail still reached
+		 * (real ground truth reaches the same tail; this reconstruction
+		 * clamps the table index rather than reading OOB, see .cpp header).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			buf[0x14] = 1;
+			*(int *)(buf + 0x1c) = 0x100;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx>0x4c: dispatched (still reaches the generic tail)", cap.called);
+		}
+
+		/* idx == 0xe (kind != 0 -> "ESSong" direct-store-PMR-status special
+		 * case): songIdx = 0xe-0xe = 0, table = (0x6a, 0x00), code = table[0]
+		 * = 0x6a, value = p[0x14](4) + table[1](0) = 4, payload = p[0x20]
+		 * low byte, len == 1.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x24) = 1;                 /* kind == Prog -> "ESSong" branch entry */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			buf[0x14] = 4;
+			*(int *)(buf + 0x20) = 0x77;
+			*(int *)(buf + 0x1c) = 0xe;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramSlotMsgHandler(msg);
+
+			check("ProgramSlotMsgHandler idx=0xe (song direct-store): dispatched", cap.called);
+			check("ProgramSlotMsgHandler idx=0xe: scope name == \"ESSong\"", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+			check("ProgramSlotMsgHandler idx=0xe: code == 0x6a (table[0])", cap.code == 0x6a);
+			check("ProgramSlotMsgHandler idx=0xe: value == 4 (4+0)", cap.value == 4);
+			check("ProgramSlotMsgHandler idx=0xe: payload == 0x77 (msg[0x20] low byte), len == 1", cap.payload == 0x77 && cap.len == 1);
+		}
+
+		EditApi = realEditApi;
+	}
+
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

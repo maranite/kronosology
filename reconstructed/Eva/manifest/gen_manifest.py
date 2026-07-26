@@ -264,6 +264,16 @@ RECONSTRUCTED = {
     # `goto LAB_089192c8` double-beginRestore re-entry) -- see header/.cpp.
     "08918b50",  # CSTGUnsolMsgHandler::GlobalMsgHandler
 
+    # --- CSTGUnsolMsgHandler batch 5 (2026-07-26) -- ProgramSlotMsgHandler, promoted
+    # from Tier B as a follow-up to the same session's 5-handler recheck (which had
+    # traced ~80% of this by hand but stopped short of a verified reconstruction).
+    # Real size 1849 bytes (0x08918410..0x08918b49 -- Ghidra's own "size=1792" label
+    # undercounts trailing out-of-line branch targets, same pattern already seen for
+    # EffectSlotMsgHandler). New real dependencies CMMI/CModeManager/CKGMsgProcessor,
+    # all stubbed file-local (real signatures, opaque-but-safe-to-call bodies), same
+    # convention as SetWithoutUpdatingSTG() above.
+    "08918410",  # CSTGUnsolMsgHandler::ProgramSlotMsgHandler
+
     # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
     # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()
     # genuinely IS called in ground truth (CEditor::CPanelIfcTask's and CPoller's own

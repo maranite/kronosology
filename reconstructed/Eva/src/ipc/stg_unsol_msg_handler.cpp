@@ -725,7 +725,6 @@ void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 
 void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 4886 bytes. */ }
 void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919360, 2951 bytes. */ }
-void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08918410, 1792 bytes. */ }
 void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919fd0, 3114 bytes. */ }
 void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
 
@@ -1379,5 +1378,354 @@ wave_seq_negate:
 
 	default:
 		return;
+	}
+}
+
+/* --- Tier A, batch 5 (2026-07-26): ProgramSlotMsgHandler --------------------------
+ *
+ * Promoted from Tier B (follow-up to the 2026-07-26 5-handler recheck, which had
+ * traced ~80% of this by hand but deliberately stopped short of a verified
+ * reconstruction -- see eva_stg_unsol_5handlers_recheck_2026-07-26.md). Every branch,
+ * table read, and vtable dispatch below is hand-verified against `objdump -dr -M
+ * intel` of the real .text+0x08918410..0x08918b49 body (NOT just the Ghidra
+ * decompile, whose own SSA variable-name reuse across reloads made several fields
+ * look like distinct values when they are in fact the same message field read twice
+ * -- e.g. the decompile's `iVar3` and `uVar11` are BOTH just `*(int*)(msg+0x1c)`).
+ *
+ * Real size is 1849 bytes (0x08918410..0x08918b49), not Ghidra's own "size=1792"
+ * label -- same "decompiler undercounts trailing out-of-line branch targets" pattern
+ * already documented for EffectSlotMsgHandler; confirmed by disassembling straight
+ * through to the next function's own entry with no gap.
+ *
+ * Shape: the same CStorage-guard / kind-switch (0=Combi/1=Prog/2=Song against
+ * sm_ucCurrentCombi+DAT_0af3054b / sm_ucCurrentProg+DAT_0af30549 / sm_usCurrentSong,
+ * 0xfffe/0xffff wildcard-target carve-out) already established by every other
+ * handler in this file. Two real dependencies new to this file:
+ * `CMMI::GetInstance()`/`CModeManager::IsOnTimbreProgramEditInContext(int) const`/
+ * `CModeManager::ChangeToTopPage(CDesktop*, int)` and `CKGMsgProcessor::GetInstance()`
+ * -- all stubbed just above (file-local, real signatures from functions.csv,
+ * "real-signature call-contract extern, opaque-but-safe-to-call body" convention,
+ * same spirit as SetWithoutUpdatingSTG() in the GlobalMsgHandler section above).
+ *
+ * Real dispatch is on `idx = *(int*)(msg+0x1c)` -- this is BOTH the value the real
+ * code branches on AND the direct *2-stride index into the 77-entry {code,value}
+ * byte-pair table `kProgramSlot_s_akbyAP` (real .rodata 0x08f1c140, confirmed by
+ * `lea ebp,[esi+esi*1+0x8f1c140]` with esi holding this exact field, computed
+ * UNCONDITIONALLY before any range check -- see the out-of-range note below):
+ *   idx == 0x4a       : special case A -- extra field msg[0x28] feeds `value`
+ *                       directly, single EditApiSendParamMsg call (len=4, using
+ *                       &msg[0x20] as payload), return.
+ *   idx == 9          : special case B -- packs (msg[0x28]<<7)|msg[0x20] into a
+ *                       2-byte payload. If NOT in timbre-program-edit context
+ *                       (IsOnTimbreProgramEditInContext(msg[0x14])==false), sends it
+ *                       straight through (code/value from the table, unmodified). If
+ *                       IN that context, queries EditApi's own "ESProg" flag (code=0,
+ *                       value=0) and compares against the packed payload -- if
+ *                       different, navigates via ChangeToTopPage() and sends a fixed
+ *                       code=0/value=0 message instead, THEN stamps
+ *                       CKGMsgProcessor::GetInstance()'s own +0x28/+0x29 byte flags
+ *                       (purpose not traced, opaque, real) before returning; if EQUAL,
+ *                       falls through to the same unmodified-table send as the
+ *                       not-in-context case.
+ *   idx == 0xb        : if kind==0 (Combi), decrements msg[0x20]'s own byte (real
+ *                       `cmp cl,2; adc cl,0xff` idiom -- proven equivalent below to a
+ *                       plain "decrement, floored so 0/1 stay unchanged"), then falls
+ *                       into the generic tail with SVar6=0 (same as the plain-default
+ *                       group).
+ *   idx == 8          : special case C -- same overall shape as idx==9, but the
+ *                       "ESCombi/ESSong-scope query" happens UNCONDITIONALLY up front
+ *                       (its own "value" argument is the table's own value byte, not
+ *                       a literal 0) to build the payload word, THEN the
+ *                       in-context/ChangeToTopPage tail is the same shape as idx==9's.
+ *   every other idx in [0, 0x49] (i.e. not 0x4a/9/0xb/8) : SVar6 = 0, generic tail.
+ *   idx in [0x4b, 0x4d)                                   : SVar6 = msg[0x18] (byte).
+ *   idx > 0x4c (out of the real table's own 0..0x4c bound) : SVar6 = 0, generic tail
+ *                       -- real ground truth computes the table address (`ebp`)
+ *                       BEFORE this bounds check and would read past the table's own
+ *                       154 bytes if actually dereferenced; the bounds check gates
+ *                       every real *use* of that address, so the OOB address itself
+ *                       is dead, not dereferenced, in the shipped binary. This
+ *                       reconstruction gates the table read on the same bound
+ *                       (idx <= 0x4c) to avoid true C++ UB, which does not change any
+ *                       observable outcome (SVar6=0 either way; the code/value
+ *                       computed below become moot at the same idx-only-affects-
+ *                       table-index-not-branch-outcome point).
+ *
+ * The generic tail (idx==0xb after its own decrement, the plain-default group, and
+ * both the msg[0x18]-as-SVar6 and out-of-range cases) is the one hand-written case
+ * that does NOT match EditApiSendParamMsg()'s uniform shape -- same real divergence
+ * already established for EffectSlotMsgHandler's own generic tail: `flag` comes from
+ * `kCSWTCH_231[midiSource]` (the SAME shared table/address already declared above,
+ * confirmed by direct disassembly of this function too, not a coincidence) and
+ * `CEditor::lastEditMessage` is `(flag==3)+0x500c`, not fixed. Every other call site
+ * below (special cases A/B/C, both their simple and ChangeToTopPage-guarded tails)
+ * genuinely has flag=1/lastEditMessage=0x500c fixed at every one of its own real call
+ * sites -- confirmed by direct disassembly, not assumed -- so those five call sites
+ * legitimately reuse the shared EditApiSendParamMsg() helper.
+ */
+
+/* HandleProgramSlot(STGProgramSlotMsg*,eSTGMidiSource)::s_akbyAP -- the small 2-entry
+ * "direct store PMR status" table (index = msg[0x1c]-0xe, 0 or 1), real bytes at
+ * 0x08f1c13c, 4 bytes, immediately followed in .rodata by the main table below (same
+ * "compiler pools per-function local statics back to back" layout already seen
+ * elsewhere in this file). Ghidra's own decompile did not recognize this as the same
+ * named local static as the main table (it expressed the access as raw
+ * `uVar11 + 0x8f1c12f + uVar2` arithmetic instead, which does not correspond to any
+ * real single instruction) -- confirmed instead by direct `objdump -dr`: the real
+ * instructions are `add bl,[ebp+ebp*1+0x8f1c13d]` / `movzx esi,[ebp+ebp*1+0x8f1c13c]`
+ * with ebp=(msg[0x1c]-0xe), i.e. a direct idx*2-stride pair table exactly like every
+ * other s_akbyAP table in this file, not the Ghidra-invented offset expression.
+ */
+static const unsigned char kProgramSlot_s_akbyAPSong[4] = {
+	0x6a, 0x00, 0x6a, 0x10,
+}; /* 0x08f1c13c, real bytes */
+
+/* HandleProgramSlot(STGProgramSlotMsg*,eSTGMidiSource)::s_akbyAP -- the main 77-entry
+ * {code,value} table, real bytes at 0x08f1c140, 154 bytes, indexed directly by
+ * msg[0x1c] (0..0x4c) with no further scaling beyond the usual *2 stride --
+ * confirmed by `lea ebp,[esi+esi*1+0x8f1c140]` with esi holding the raw field value
+ * (not a separately-normalized index). Every even byte (the "code" component)
+ * happens to be the constant 0x48 across all 77 entries -- confirmed by direct byte
+ * read, not assumed -- but transcribed here in full rather than special-cased, same
+ * "keep the real table even when a pattern is visible" convention as
+ * kCSWTCH_290/kCSWTCH_231 above.
+ */
+static const unsigned char kProgramSlot_s_akbyAP[154] = {
+	0x48,0x1c, 0x48,0x0d, 0x48,0x05, 0x48,0x0e, 0x48,0x0f, 0x48,0x1e, 0x48,0x1d, 0x48,0x1f,
+	0x48,0x00, 0x48,0x00, 0x48,0x01, 0x48,0x02, 0x48,0x03, 0x48,0x04, 0x48,0x38, 0x48,0x54,
+	0x48,0x39, 0x48,0x3a, 0x48,0x3b, 0x48,0x3c, 0x48,0x3d, 0x48,0x06, 0x48,0x07, 0x48,0x08,
+	0x48,0x0b, 0x48,0x09, 0x48,0x0a, 0x48,0x0c, 0x48,0x36, 0x48,0x3e, 0x48,0x40, 0x48,0x3f,
+	0x48,0x41, 0x48,0x42, 0x48,0x44, 0x48,0x43, 0x48,0x45, 0x48,0x20, 0x48,0x21, 0x48,0x22,
+	0x48,0x23, 0x48,0x24, 0x48,0x25, 0x48,0x26, 0x48,0x27, 0x48,0x28, 0x48,0x29, 0x48,0x2a,
+	0x48,0x2b, 0x48,0x2c, 0x48,0x2d, 0x48,0x2e, 0x48,0x2f, 0x48,0x30, 0x48,0x31, 0x48,0x33,
+	0x48,0x32, 0x48,0x34, 0x48,0x35, 0x48,0x48, 0x48,0x47, 0x48,0x46, 0x48,0x4f, 0x48,0x50,
+	0x48,0x51, 0x48,0x53, 0x48,0x52, 0x48,0x37, 0x48,0x4a, 0x48,0x49, 0x48,0x4c, 0x48,0x4b,
+	0x48,0x4d, 0x48,0x4e, 0x48,0x10, 0x48,0x56, 0x48,0x58,
+}; /* 0x08f1c140, real bytes, indices 0..0x4c */
+
+/* CDesktop/CModeManager/CMMI -- not reconstructed elsewhere in this project. Declared
+ * file-local (same convention as CESSongTask/USTGAPIControl above) with only the real
+ * methods this handler needs. Real signatures confirmed via functions.csv:
+ *   CMMI::GetInstance()                                       .text+0x08964540, __cdecl
+ *   CModeManager::IsOnTimbreProgramEditInContext(int) const   .text+0x08966580, __thiscall
+ *   CModeManager::ChangeToTopPage(CDesktop*, int)              .text+0x08965410, __thiscall
+ * CMMI::GetInstance()'s returned singleton has two real fields read directly by every
+ * caller in this file (+0x00 CDesktop*, +0x04 CModeManager*) -- modeled here as a
+ * genuine static instance (not a null-returning stub) so the two pointers it yields
+ * are always valid to pass as a real (if behaviorally inert) `this`, same
+ * "safe-to-call opaque stub" spirit as SetWithoutUpdatingSTG() above, applied to a
+ * pointer-returning singleton rather than a plain free function.
+ */
+class CDesktop {};
+class CModeManager {
+public:
+	bool IsOnTimbreProgramEditInContext(int ctx) const { (void)ctx; return false; }
+	void ChangeToTopPage(CDesktop *desktop, int flag) { (void)desktop; (void)flag; }
+};
+class CMMI {
+	struct Singleton { CDesktop *desktop; CModeManager *modeManager; };
+public:
+	static void *GetInstance()
+	{
+		static CDesktop sDesktop;
+		static CModeManager sModeManager;
+		static Singleton sInstance = { &sDesktop, &sModeManager };
+		return &sInstance;
+	}
+};
+
+/* CKGMsgProcessor -- not reconstructed elsewhere (a whole class with many real
+ * methods per symbols.csv -- ctor/dtor/SetGEMax/GetKarmaNotes/Process/etc, all out of
+ * scope). Only the real GetInstance() (.text+0x089138f0, __cdecl) this handler needs;
+ * its singleton's own +0x28/+0x29 byte fields are set directly here (purpose not
+ * traced, opaque, real) -- backed by a real static buffer (not a null stub) for the
+ * same reason as CMMI's above.
+ */
+class CKGMsgProcessor {
+public:
+	static void *GetInstance()
+	{
+		static unsigned char sInstance[0x40] = { 0 };
+		return sInstance;
+	}
+};
+
+void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &msg)
+{
+	typedef void (*EditApiQueryFlagFn)(void *, unsigned char, int, int, unsigned char *, int);
+
+	unsigned char *p = (unsigned char *)&msg;
+
+	if (*(int *)(p + 8) != 1)
+		return;
+
+	int kind = *(int *)(p + 0x24);
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	unsigned int objId, objSub;
+
+	if (kind == 1)      { objId = (unsigned int)CStorage::sm_ucCurrentProg;  objSub = (unsigned int)DAT_0af30549; }
+	else if (kind == 2) { objSub = (unsigned int)CStorage::sm_usCurrentSong; objId = 0; }
+	else if (kind == 0) { objId = (unsigned int)CStorage::sm_ucCurrentCombi; objSub = (unsigned int)DAT_0af3054b; }
+	else                { objId = 0; objSub = 0; }
+
+	if ((*(unsigned int *)(p + 0xc) != objId || target != objSub) && target != 0xfffe && target != 0xffff)
+		return;
+
+	unsigned short midiSource = *(unsigned short *)(p + 2);
+	int modeCtx = *(int *)(p + 0x14);
+	int idx = *(int *)(p + 0x1c);
+
+	void *mmi = CMMI::GetInstance();
+	CModeManager *modeMgr = *(CModeManager **)((char *)mmi + 4);
+	bool inTimbreEdit = modeMgr->IsOnTimbreProgramEditInContext(modeCtx);
+
+	unsigned char scope;
+	if (kind == 0) {
+		scope = EditApiGetScopeId("ESCombi");
+	} else {
+		scope = EditApiGetScopeId("ESSong");
+		int songIdx = idx - 0xe;
+		if ((unsigned int)songIdx < 2) {
+			unsigned char payload = p[0x20];
+			unsigned char code  = kProgramSlot_s_akbyAPSong[songIdx * 2];
+			unsigned char value = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAPSong[songIdx * 2 + 1]);
+
+			CESSongTask::ms_bShouldDirectStorePMRStatus = 1;
+			EditApiSendParamMsg(scope, code, value, &payload, 1, 1);
+			CESSongTask::ms_bShouldDirectStorePMRStatus = 0;
+			return;
+		}
+	}
+
+	/* idx == 0x4a: special case A. */
+	if (idx == 0x4a) {
+		unsigned char code  = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAP[idx * 2]);
+		unsigned char value = (unsigned char)(p[0x28] + kProgramSlot_s_akbyAP[idx * 2 + 1]);
+		EditApiSendParamMsg(scope, code, value, p + 0x20, 4, 1);
+		return;
+	}
+
+	/* idx == 9: special case B. */
+	if (idx == 9) {
+		uint16_t payload16 = (uint16_t)(((unsigned int)*(int *)(p + 0x28) << 7) | *(unsigned short *)(p + 0x20));
+
+		if (inTimbreEdit) {
+			unsigned char scopeProg = EditApiGetScopeId("ESProg");
+			unsigned int queried = 0;
+			{
+				void *vtbl = *(void **)EditApi;
+				EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtbl + 0x2c);
+				queryFlag(EditApi, scopeProg, 0, 0, (unsigned char *)&queried, 4);
+			}
+			if (payload16 != (uint16_t)queried) {
+				void *mmiB = CMMI::GetInstance();
+				(*(CModeManager **)((char *)mmiB + 4))->ChangeToTopPage(*(CDesktop **)mmiB, 0);
+				EditApiSendParamMsg(scopeProg, 0, 0, &payload16, 2, 1);
+				void *kgmp = CKGMsgProcessor::GetInstance();
+				((unsigned char *)kgmp)[0x28] = 1;
+				((unsigned char *)kgmp)[0x29] = 1;
+				return;
+			}
+		}
+
+		unsigned char code  = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAP[idx * 2]);
+		unsigned char value = kProgramSlot_s_akbyAP[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, &payload16, 2, 1);
+		return;
+	}
+
+	int svar6 = 0;
+
+	if (idx == 0xb) {
+		if (kind == 0) {
+			/* real: `cmp cl,2; adc cl,0xff` -- proven-equivalent plain
+			 * decrement floored at value<2 (0 or 1 left unchanged).
+			 */
+			unsigned char v = p[0x20];
+			if (v >= 2)
+				v -= 1;
+			*(uint32_t *)(p + 0x20) = v;
+		}
+		/* svar6 stays 0; falls into the generic tail below. */
+	} else if (idx == 8) {
+		/* idx == 8: special case C -- unconditional query up front (using the
+		 * table's own value byte, not a literal), then the same in-context/
+		 * ChangeToTopPage shape as idx==9.
+		 */
+		uint16_t payload16;
+		{
+			unsigned char code   = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAP[idx * 2]);
+			unsigned char qvalue = kProgramSlot_s_akbyAP[idx * 2 + 1];
+			unsigned int queried = 0;
+			void *vtbl = *(void **)EditApi;
+			EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtbl + 0x2c);
+			queryFlag(EditApi, scope, code, qvalue, (unsigned char *)&queried, 2);
+			payload16 = (uint16_t)((queried & 0x7f) | ((unsigned int)(*(int *)(p + 0x20)) << 7));
+		}
+
+		if (inTimbreEdit) {
+			unsigned char scopeProg = EditApiGetScopeId("ESProg");
+			unsigned int queried2 = 0;
+			{
+				void *vtbl = *(void **)EditApi;
+				EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtbl + 0x2c);
+				queryFlag(EditApi, scopeProg, 0, 0, (unsigned char *)&queried2, 4);
+			}
+			if (payload16 != (uint16_t)queried2) {
+				void *mmiC = CMMI::GetInstance();
+				(*(CModeManager **)((char *)mmiC + 4))->ChangeToTopPage(*(CDesktop **)mmiC, 0);
+				EditApiSendParamMsg(scopeProg, 0, 0, &payload16, 2, 1);
+				void *kgmp = CKGMsgProcessor::GetInstance();
+				((unsigned char *)kgmp)[0x28] = 1;
+				((unsigned char *)kgmp)[0x29] = 1;
+				return;
+			}
+		}
+
+		unsigned char code  = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAP[idx * 2]);
+		unsigned char value = kProgramSlot_s_akbyAP[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, &payload16, 2, 1);
+		return;
+	} else if ((unsigned int)(idx - 0x4b) < 2) {
+		svar6 = p[0x18];
+	}
+	/* else: plain-default group or out-of-range (idx > 0x4c) -- svar6 stays 0. */
+
+	/* Generic tail -- shared by idx==0xb (after its own decrement), the
+	 * plain-default group, the out-of-range case, and the msg[0x18]-as-svar6 case.
+	 * Diverges from EditApiSendParamMsg()'s shape: `flag` comes from
+	 * kCSWTCH_231[midiSource] and CEditor::lastEditMessage is `(flag==3)+0x500c`,
+	 * not fixed -- same real divergence already established for
+	 * EffectSlotMsgHandler's own generic tail.
+	 */
+	int flag = 1;
+	if (midiSource < 9)
+		flag = kCSWTCH_231[midiSource];
+
+	/* Real ground truth reads kProgramSlot_s_akbyAP[idx*2] unconditionally, even
+	 * when idx > 0x4c (dead/OOB address, never actually reached with an
+	 * out-of-bounds idx by any real caller) -- gated here on the table's own real
+	 * bound to avoid true C++ UB; see this function's own header comment.
+	 */
+	unsigned int ti = ((unsigned int)idx <= 0x4c) ? (unsigned int)idx : 0;
+	unsigned char code  = (unsigned char)(p[0x14] + kProgramSlot_s_akbyAP[ti * 2]);
+	unsigned char value = (unsigned char)(svar6 + kProgramSlot_s_akbyAP[ti * 2 + 1]);
+
+	if (s_eNowRestoreSeqParameters != 0) {
+		void *vtbl0 = *(void **)EditApi;
+		(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+	}
+
+	void *vtbl = *(void **)EditApi;
+	EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+
+	USTGUserAPI::mNowStopMessaging = 1;
+	CEditor::lastEditMessage = (uint16_t)((flag == 3 ? 1 : 0) + 0x500c);
+	setParam(EditApi, scope, code, value, p + 0x20, 4, flag);
+	USTGUserAPI::mNowStopMessaging = 0;
+
+	if (s_eNowRestoreSeqParameters != 0) {
+		void *vtbl2 = *(void **)EditApi;
+		(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
 	}
 }
