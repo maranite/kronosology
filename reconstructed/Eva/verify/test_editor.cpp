@@ -50,6 +50,94 @@ struct ChunkServerTestHooks {
 	static void SetAccessMode(CChunkServer &c, int mode) { c.mAccessMode = mode; }
 };
 
+/* --- CChunkServer::Exec(CMessage&) test scaffolding (promoted Tier B -> Tier
+ * A 2026-07-26) -- same "build a real object, swap in a capturing fake
+ * vtable" technique as test_sysex_msg_task_base.cpp's own Exec(CMessage&)
+ * test. Real CMessage layout (chunk_server.h's own header comment): +0x8 a
+ * 16-bit command-code word, +0x10 a pointer to the command's own payload.
+ */
+struct FakeChunkMessage {
+	unsigned char pad0[8];
+	unsigned short code;    /* +0x8 */
+	unsigned char pad_a[6]; /* +0xa..0x10 */
+	unsigned char *payload; /* +0x10 */
+};
+
+static void *g_cceThis;
+static unsigned char g_cceA, g_cceB, g_cceC;
+static int g_cceCmd;
+static unsigned char *g_ccePtr;
+static unsigned long g_cceD;
+static unsigned int g_cceRet;
+static int g_cceCalls;
+
+extern "C" unsigned int FakeCommandSlot(CChunkServer *self, unsigned char a, int cmd,
+                                          unsigned char b, unsigned char *c, unsigned long d)
+{
+	g_cceThis = self; g_cceA = a; g_cceCmd = cmd; g_cceB = b; g_ccePtr = c; g_cceD = d;
+	g_cceCalls++;
+	return g_cceRet;
+}
+
+extern "C" void FakeOnAbort(CChunkServer *self, int cmd)
+{
+	g_cceThis = self; g_cceCmd = cmd; g_cceCalls++;
+}
+
+extern "C" void FakeOnStoppedByUser(CChunkServer *self, int cmd)
+{
+	g_cceThis = self; g_cceCmd = cmd; g_cceCalls++;
+}
+
+extern "C" int FakeGetSaveBuffSize(const CChunkServer *self, unsigned char a, unsigned char b,
+                                     unsigned char c)
+{
+	g_cceThis = const_cast<void *>(static_cast<const void *>(self));
+	g_cceA = a; g_cceB = b; g_cceC = c;
+	g_cceCalls++;
+	return static_cast<int>(g_cceRet);
+}
+
+extern "C" unsigned int FakeOnLoad4(CChunkServer *self, void *chunk, unsigned char c,
+                                      unsigned char *outBuf, unsigned long e)
+{
+	g_cceThis = self; g_ccePtr = static_cast<unsigned char *>(chunk); g_cceC = c;
+	(void)outBuf; (void)e;
+	g_cceCalls++;
+	return g_cceRet;
+}
+
+extern "C" unsigned int FakeOnLoad5(CChunkServer *self, unsigned long a, unsigned char *b,
+                                      unsigned char c, unsigned char *d, unsigned long e)
+{
+	g_cceThis = self; g_cceD = a; g_ccePtr = b; g_cceC = c;
+	(void)d; (void)e;
+	g_cceCalls++;
+	return g_cceRet;
+}
+
+extern "C" unsigned int FakeOnSave4(CChunkServer *self, void *chunk, unsigned char c,
+                                      unsigned char *outBuf, unsigned long e)
+{
+	g_cceThis = self; g_ccePtr = static_cast<unsigned char *>(chunk); g_cceC = c;
+	(void)outBuf; (void)e;
+	g_cceCalls++;
+	return g_cceRet;
+}
+
+extern "C" unsigned int FakeOnSave5(CChunkServer *self, unsigned long *lenOut,
+                                      const unsigned char **dataOut, unsigned char c,
+                                      unsigned char *outBuf, unsigned long e)
+{
+	g_cceThis = self; g_cceC = c;
+	(void)outBuf; (void)e;
+	*lenOut = 3;
+	static const unsigned char kFakeData[3] = { 0xaa, 0xbb, 0xcc };
+	*dataOut = kFakeData;
+	g_cceCalls++;
+	return g_cceRet;
+}
+
 static int g_fail;
 static void check(const char *label, bool ok)
 {
@@ -271,6 +359,170 @@ int main()
 		check("Load() mode==2 (soft-assert then slot 13 dispatch) does not crash", true);
 		check("Load() sets mReserved7c = 0 (mode==2 path)",
 		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
+	}
+
+	printf("[8f] CChunkServer::Exec(CMessage&) -- promoted Tier B -> Tier A 2026-07-26 (objdump-recovered self-vtable dispatch)\n");
+	{
+		CEditor editor("EditorTest8", 0);
+		editor.Setup();
+		CEditor::CChunkServerTask *cst = EditorTestHooks::GetChunkServerTask(editor);
+		check("CChunkServerTask constructed", cst != 0);
+
+		/* Real Exec(CMessage&) dispatches through THIS object's OWN vtable --
+		 * swap in a capturing fake, same technique as
+		 * test_sysex_msg_task_base.cpp's own Exec(CMessage&) test.
+		 */
+		void *realVtbl = *reinterpret_cast<void **>(cst);
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; i++) fakeVtbl[i] = 0;
+		fakeVtbl[5]  = (void *)FakeGetSaveBuffSize;
+		fakeVtbl[6]  = (void *)FakeCommandSlot;  /* OnUnlock */
+		fakeVtbl[10] = (void *)FakeOnSave4;
+		fakeVtbl[11] = (void *)FakeOnSave5;
+		fakeVtbl[12] = (void *)FakeOnLoad4;
+		fakeVtbl[13] = (void *)FakeOnLoad5;
+		fakeVtbl[14] = (void *)FakeOnAbort;
+		fakeVtbl[15] = (void *)FakeOnStoppedByUser;
+		*reinterpret_cast<void **>(cst) = fakeVtbl;
+
+		unsigned char buf[24];
+		for (int i = 0; i < 24; i++) buf[i] = static_cast<unsigned char>(i + 1);
+		FakeChunkMessage msg;
+		memset(&msg, 0, sizeof(msg));
+		msg.payload = buf;
+
+		/* bits 0x100/0x200 both clear -> -1, no dispatch. */
+		msg.code = 0x0000;
+		g_cceCalls = 0;
+		check("code with neither 0x100 nor 0x200 set returns -1 (no dispatch)",
+		      cst->Exec(*reinterpret_cast<CMessage *>(&msg)) == -1 && g_cceCalls == 0);
+
+		/* bit 0x100 set, unmatched low byte -> -1, no dispatch. */
+		msg.code = 0x0100 | 0x50;
+		g_cceCalls = 0;
+		check("bit 0x100 set, unmatched opcode returns -1 (no dispatch)",
+		      cst->Exec(*reinterpret_cast<CMessage *>(&msg)) == -1 && g_cceCalls == 0);
+
+		/* opcode 0xe7 (bit 0x100) -> OnAbort(this, (int)payload) via vtbl[14]. */
+		msg.code = 0x0100 | 0xe7;
+		g_cceCalls = 0;
+		int rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe7 dispatches to OnAbort via vtbl[14]",
+		      g_cceCalls == 1 && g_cceThis == (void *)cst);
+		check("opcode 0xe7 passes cmd == (int)payload",
+		      g_cceCmd == reinterpret_cast<int>(buf));
+		check("opcode 0xe7 returns 0", rc == 0);
+
+		/* opcode 0xe8 (bit 0x100) -> OnStoppedByUser via vtbl[15]. */
+		msg.code = 0x0100 | 0xe8;
+		g_cceCalls = 0;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe8 dispatches to OnStoppedByUser via vtbl[15]", g_cceCalls == 1);
+		check("opcode 0xe8 returns 0", rc == 0);
+
+		/* opcode 0xe6 (bit 0x100) -> TObjArray<SIDEntry>::Add() stand-in
+		 * (this+0x80) -- inert stub, just confirm no crash + return 0.
+		 */
+		msg.code = 0x0100 | 0xe6;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe6 (SID Add) does not crash and returns 0", rc == 0);
+
+		/* opcode 0xe0 (bit 0x200, dx=0) -> OnUnlock via vtbl[6]. Real arg
+		 * marshalling: a=body[1], cmd=body[0], b=body[2], c=body+3,
+		 * d=BE32(payload[0..3]) where body=payload+4.
+		 */
+		msg.code = 0x0200 | 0xe0;
+		g_cceCalls = 0;
+		g_cceRet = 1; /* handler returns 1 -> Exec() should return 0 */
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		unsigned char *body = buf + 4;
+		unsigned long expectedHeader =
+		    (static_cast<unsigned long>(buf[0]) << 24) |
+		    (static_cast<unsigned long>(buf[1]) << 16) |
+		    (static_cast<unsigned long>(buf[2]) << 8) |
+		     static_cast<unsigned long>(buf[3]);
+		check("opcode 0xe0 dispatches to OnUnlock via vtbl[6]", g_cceCalls == 1);
+		check("opcode 0xe0 passes a == body[1]", g_cceA == body[1]);
+		check("opcode 0xe0 passes cmd == body[0]", g_cceCmd == body[0]);
+		check("opcode 0xe0 passes b == body[2]", g_cceB == body[2]);
+		check("opcode 0xe0 passes c == body+3", g_ccePtr == body + 3);
+		check("opcode 0xe0 passes d == BE32(payload[0..3])", g_cceD == expectedHeader);
+		check("opcode 0xe0 returns 0 when OnUnlock returns 1", rc == 0);
+
+		g_cceRet = 0; /* handler returns 0 -> Exec() should return -1 */
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe0 returns -1 when OnUnlock returns != 1", rc == -1);
+
+		/* opcode 0xe9 (bit 0x200, dx=9) -> GetSaveBuffSize via vtbl[5], result
+		 * written back little-endian into payload[0..3].
+		 */
+		msg.code = 0x0200 | 0xe9;
+		g_cceCalls = 0;
+		g_cceRet = 0x11223344;
+		unsigned char expectA = buf[0], expectB = buf[1], expectC = buf[2];
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe9 dispatches to GetSaveBuffSize via vtbl[5]", g_cceCalls == 1);
+		check("opcode 0xe9 passes a/b/c == payload[0..2] (captured before the call's own write-back)",
+		      g_cceA == expectA && g_cceB == expectB && g_cceC == expectC);
+		check("opcode 0xe9 writes result little-endian into payload[0..3]",
+		      buf[0] == 0x44 && buf[1] == 0x33 && buf[2] == 0x22 && buf[3] == 0x11);
+		check("opcode 0xe9 returns 0", rc == 0);
+
+		/* opcode 0xe4 (bit 0x200, dx=4) -> Load, mAccessMode==0 branch -> OnLoad(CChunk*,...)
+		 * via vtbl[12]; real side effect: mReserved7c = 0 unconditionally.
+		 */
+		for (int i = 0; i < 24; i++) buf[i] = static_cast<unsigned char>(i + 1);
+		msg.code = 0x0200 | 0xe4;
+		ChunkServerTestHooks::SetAccessMode(*cst, 0);
+		g_cceCalls = 0;
+		g_cceRet = 1;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe4 mode==0 dispatches to OnLoad(CChunk*,...) via vtbl[12]",
+		      g_cceCalls == 1);
+		check("opcode 0xe4 sets mReserved7c = 0",
+		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
+		check("opcode 0xe4 mode==0 returns 0 when handler returns 1", rc == 0);
+
+		/* mAccessMode==2 (neither 0 nor 1): soft Api assert, then
+		 * OnLoad(ulong,...) via vtbl[13] regardless.
+		 */
+		ChunkServerTestHooks::SetAccessMode(*cst, 2);
+		g_cceCalls = 0;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe4 mode==2 (soft-assert) still dispatches to OnLoad(ulong,...) via vtbl[13]",
+		      g_cceCalls == 1);
+		check("opcode 0xe4 mode==2 sets mReserved7c = 0",
+		      ChunkServerTestHooks::GetReserved7c(*cst) == 0);
+		(void)rc;
+
+		/* opcode 0xe5 (bit 0x200, dx=5) -> Save, mAccessMode==0 branch ->
+		 * OnSave(CChunk*,...) via vtbl[10] (no WriteBinary call on this path).
+		 */
+		ChunkServerTestHooks::SetAccessMode(*cst, 0);
+		msg.code = 0x0200 | 0xe5;
+		g_cceCalls = 0;
+		g_cceRet = 1;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe5 mode==0 dispatches to OnSave(CChunk*,...) via vtbl[10]",
+		      g_cceCalls == 1);
+		check("opcode 0xe5 mode==0 returns 0 when handler returns 1", rc == 0);
+
+		/* mAccessMode==1: OnSave(ulong&,uchar const*&,...) via vtbl[11], THEN
+		 * CChunkBase::WriteBinary() (inert stand-in) -- just confirm no crash.
+		 */
+		ChunkServerTestHooks::SetAccessMode(*cst, 1);
+		g_cceCalls = 0;
+		rc = cst->Exec(*reinterpret_cast<CMessage *>(&msg));
+		check("opcode 0xe5 mode==1 dispatches to OnSave(ulong&,...) via vtbl[11], no crash",
+		      g_cceCalls == 1);
+
+		/* dx > 9 (bit 0x200, opcode 0xea) -> -1, no dispatch. */
+		msg.code = 0x0200 | 0xea;
+		g_cceCalls = 0;
+		check("opcode 0xea (dx > 9) returns -1 (no dispatch)",
+		      cst->Exec(*reinterpret_cast<CMessage *>(&msg)) == -1 && g_cceCalls == 0);
+
+		*reinterpret_cast<void **>(cst) = realVtbl;
 	}
 
 	printf("[9] CEditor::CMainTask::IsSwitchPressed/IsShowCost -- pure global reads\n");

@@ -69,8 +69,9 @@
  * Install-only in this reconstruction (EvaVTableStub-backed) -- nothing in
  * this project's own call graph dispatches through it yet.
  *
- * TIER SPLIT: every method EXCEPT `Exec(CMessage&)` is now Tier A (`Load()`
- * promoted 2026-07-26 -- see below). `Unlock()` (.text+0x080cbdf0, 63 bytes)
+ * TIER SPLIT: ALL 15 real methods are Tier A as of 2026-07-26 (`Exec(CMessage&)`,
+ * the last holdout, closed this session -- see below and the header comment on
+ * `Exec()` itself). `Unlock()` (.text+0x080cbdf0, 63 bytes)
  * is real but forwards through this object's OWN vtable at byte offset +0x18
  * from the installed pointer (i.e. primary-array index 6, `GetSaveBuffSize`'s
  * own following-11-virtuals group's 2nd entry -- confirmed by direct address
@@ -104,9 +105,57 @@
  * overload, so this composes correctly regardless of which concrete class is
  * actually installed.
  *
- * `Exec(CMessage&)` (.text+0x080cc0d0, 1336 bytes) stays Tier B -- genuine
- * chunk-protocol depth, same bar as `CEditor::CMainTask::Exec()`/
- * `CAlphaKeybIfcTask::ProcessCode()`.
+ * `Exec(CMessage&)` (.text+0x080cc0d0, 1336 bytes) -- promoted Tier B -> Tier A
+ * 2026-07-26. The earlier "genuinely deep, >=4 distinct unidentified vtables"
+ * verdict ([[eva_nm_sweep_2026-07-26_second_pass_negative]]) was right about the
+ * depth but WRONG about the vtables being unidentified: full `objdump -dr -M
+ * intel` register tracing shows every one of this function's own ~13 indirect
+ * calls is `*(void**)this` -- i.e. THIS SAME OBJECT'S OWN 16-slot vtable
+ * (already fully named/Tier-A above: OnUnlock/OnRelock/OnBegin/OnEnd/OnSave x2/
+ * OnLoad x2/OnAbort/OnStoppedByUser/GetSaveBuffSize) -- plus the well-known
+ * `Api`+0x94 soft-assert forwarder (4 sites; one line number, 0x174, is
+ * byte-identical to `Load()`'s own real assert, confirming this is the correct
+ * function) and 2 already-NAMED, genuinely out-of-scope real symbols:
+ * `TObjArray<CChunkServer::SIDEntry>::Add(SIDEntry)` (.text+0x081863d0, mangled
+ * `_ZN9TObjArrayIN12CChunkServer8SIDEntryEE3AddES1_`) and
+ * `CChunkBase::WriteBinary(void const*, unsigned)` (.text+0x080ae650, mangled
+ * `_ZN10CChunkBase11WriteBinaryEPKvj`) -- both modeled as inert stand-ins in
+ * chunk_server.cpp, same "genuinely undecoded external call, transcribed
+ * anyway" convention as `GetResLength()`.
+ *
+ * STRUCTURAL INSIGHT (new this session): the `TObjArray<SIDEntry>::Add()` call
+ * site does `lea ebx,[ebx+0x80]` before calling -- i.e. its own `this` is
+ * `this+0x80` of `CChunkServer` itself. That means the `mUnknown80`/
+ * `mEntryCount`/`mUnknown88`/`mTableBuf` 16-byte group documented above IS the
+ * real ground truth's own `TObjArray<SIDEntry>` member's 4-field layout
+ * (capacity/count/growBy/data-pointer) -- not 4 independent fields as originally
+ * guessed. NOT refactored into an actual nested-array type this session (would
+ * touch the ctor/dtor/GetServerID/GetServerHandle/GetSaveBuffSize too, for zero
+ * behavior change -- the existing 4-field representation is already byte-exact);
+ * documented here so a future pass doesn't have to re-derive it.
+ *
+ * `CMessage`'s own real layout, read directly (same convention as
+ * `CSysExMsgTaskBase::Exec(CMessage&)`, sysex_msg_task_base.cpp): +0x8 a 16-bit
+ * command-code word, +0x10 a pointer to this command's own payload bytes. Bit
+ * 0x100 of the code word selects 3 single-shot commands (byte 0xe7 -> OnAbort,
+ * 0xe8 -> OnStoppedByUser, 0xe6 -> the `TObjArray<SIDEntry>::Add` call); bit
+ * 0x200 (checked only when 0x100 is clear) gates a 10-way dispatch on
+ * `(code & 0xff) - 0xe0`, confirmed byte-exact via a direct `.rodata` dword
+ * read of the real jumptable at 0x08e7ae8c (0xe0 Unlock/0xe1 Relock/0xe2 Begin/
+ * 0xe3 End/0xe4 Load/0xe5 Save/0xe6-0xe8 unreachable this way [same default -1
+ * as any other unmatched code, since those 3 are only ever reached via the
+ * bit-0x100 path above]/0xe9 GetSaveBuffSize). Any other code word (bit 0x100
+ * and 0x200 both clear, or a byte outside 0xe0..0xe9) returns -1.
+ *
+ * The 0xe4/0xe5 (Load/Save) cases each parse a SECOND 4-byte big-endian header
+ * plus several trailing bytes out of their own sub-payload before dispatching;
+ * ground truth genuinely computes and forwards these byte-exact, but since
+ * `OnLoad`/`OnSave`'s own base-class bodies ignore every argument
+ * unconditionally (all trivial `return N;`), their exact values only matter to
+ * a DERIVED override (`CEditor::CChunkServerTask::OnLoad(CChunk*,...)`,
+ * editor.cpp, itself still Tier B) -- transcribed as faithfully as static
+ * register tracing allows, not independently re-verified against that deferred
+ * override.
  */
 
 #ifndef CHUNK_SERVER_H
@@ -119,9 +168,22 @@
  * `IAlphaKeybCode`'s own treatment, alpha_keyb_ifc_task.h).
  */
 class CChunk;
+class CMessage;
 
 class CChunkServer : public CTask {
 public:
+	/* Real nested struct -- 3 ctor variants exist in ground truth (default,
+	 * (key,value), copy), not individually modeled; only the (key,value) form
+	 * `Exec(CMessage&)`'s own 0xe6 case actually needs is provided. 2-byte
+	 * {key,value} pair, same shape as `mTableBuf`'s own 2-byte-stride rows.
+	 */
+	struct SIDEntry {
+		unsigned char key;
+		unsigned char value;
+		SIDEntry(unsigned char k, unsigned char v) : key(k), value(v) {}
+	};
+
+
 	/* .text+0x080cbcf0, 167 bytes. */
 	CChunkServer(const CModule &owner, int accessMode);
 
@@ -198,11 +260,10 @@ public:
 	void Load(CChunk *chunk, unsigned long a, unsigned char *b, unsigned char c, unsigned char *d, unsigned long e);
 
 	/* .text+0x080cc0d0, 1336 bytes (the ONE real override CChunkServer
-	 * itself provides over CTask's own generic `Exec(CMessage&)`). Tier B
-	 * link-stub -- genuine chunk-protocol depth, same bar as
-	 * `CEditor::CMainTask::Exec()`.
+	 * itself provides over CTask's own generic `Exec(CMessage&)`). Tier A --
+	 * see header comment above for the full derivation.
 	 */
-	int Exec(void *msg);
+	int Exec(CMessage &msg);
 
 protected:
 	int            mReserved7c; /* +0x7c, ctor never touches it, but Load() does (see above) */

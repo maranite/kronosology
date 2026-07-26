@@ -14,6 +14,13 @@
  * indirect-call jumptable there), but directly from `objdump -dr -M intel`
  * register tracing. See chunk_server.h's own header comment for the full
  * derivation.
+ *
+ * `Exec@080cc0d0.c` (the class's own `Exec(CMessage&)` override) was likewise
+ * promoted Tier B -> Tier A 2026-07-26, also via direct `objdump -dr -M intel`
+ * register tracing (Ghidra's own decompile of this one was usable for the
+ * control-flow shape but not trusted for the byte-level argument marshalling,
+ * same caution as `Load()`). See chunk_server.h's own header comment for the
+ * full derivation, including the `TObjArray<SIDEntry>` structural insight.
  */
 
 #include "chunk_server.h"
@@ -40,6 +47,29 @@ int GetResLength(unsigned int, unsigned int, unsigned int)
 }
 
 typedef unsigned int (*POnCommandFn)(CChunkServer *, unsigned char, int, unsigned char, unsigned char *, unsigned long);
+
+/* Real, out-of-scope non-virtual method `CChunkBase::WriteBinary(void const*,
+ * unsigned)` (.text+0x080ae650) -- `CChunkBase` itself is never reconstructed
+ * anywhere in this project (same "opaque, pointer-only" treatment as `CChunk`).
+ * Modeled as an inert free-function stand-in taking the real call site's own
+ * `this` as a raw pointer, same "genuinely undecoded external call, transcribed
+ * anyway" convention as `GetResLength()` above.
+ */
+void CChunkBase_WriteBinary(void *, const void *, unsigned long)
+{
+}
+
+/* Real, out-of-scope templated container method
+ * `TObjArray<CChunkServer::SIDEntry>::Add(CChunkServer::SIDEntry)`
+ * (.text+0x081863d0, mangled `_ZN9TObjArrayIN12CChunkServer8SIDEntryEE3AddES1_`)
+ * -- not reconstructed as a real C++ template anywhere in this project (same
+ * "not a real template, a concretely-named stand-in" convention as
+ * `TVector<T,1>::MakeCapacity()`, task.h). Modeled as an inert stand-in, same
+ * convention as `CChunkBase_WriteBinary()` above.
+ */
+void TObjArray_SIDEntry_Add(void *, CChunkServer::SIDEntry)
+{
+}
 
 } /* anonymous namespace */
 
@@ -221,8 +251,207 @@ void CChunkServer::Load(CChunk *chunk, unsigned long a, unsigned char *b, unsign
 	fn(this, a, b, c, d, e);
 }
 
-int CChunkServer::Exec(void *)
+int CChunkServer::Exec(CMessage &msg)
 {
-	/* Tier B link-stub -- see header comment. */
-	return 0;
+	/* See chunk_server.h's own header comment for the full derivation
+	 * (register-traced from `objdump -dr -M intel`, not Ghidra's decompile).
+	 */
+	unsigned char *raw = reinterpret_cast<unsigned char *>(&msg);
+	unsigned short code = *reinterpret_cast<unsigned short *>(raw + 0x8);
+	unsigned char *payload = *reinterpret_cast<unsigned char **>(raw + 0x10);
+
+	void **vtbl = *reinterpret_cast<void ***>(this);
+
+	if (code & 0x100) {
+		unsigned char opcode = static_cast<unsigned char>(code & 0xff);
+
+		if (opcode == 0xe7) {
+			/* this->OnAbort((int)payload) via vtbl[14] (byte 0x38). */
+			typedef void (*OnAbortFn)(CChunkServer *, int);
+			reinterpret_cast<OnAbortFn>(vtbl[14])(
+			    this, static_cast<int>(reinterpret_cast<unsigned long>(payload)));
+			return 0;
+		}
+		if (opcode == 0xe8) {
+			/* this->OnStoppedByUser((int)payload) via vtbl[15] (byte 0x3c). */
+			typedef void (*OnStoppedFn)(CChunkServer *, int);
+			reinterpret_cast<OnStoppedFn>(vtbl[15])(
+			    this, static_cast<int>(reinterpret_cast<unsigned long>(payload)));
+			return 0;
+		}
+		if (opcode == 0xe6) {
+			/* mSIDArray.Add(SIDEntry(...)) -- `this+0x80` (mUnknown80/
+			 * mEntryCount/mUnknown88/mTableBuf) IS the real TObjArray<SIDEntry>'s
+			 * own 4-field layout (see header comment); `&mUnknown80` is
+			 * byte-identical to ground truth's own `lea ebx,[ebx+0x80]`.
+			 */
+			unsigned long param = reinterpret_cast<unsigned long>(payload);
+			unsigned char keyByte = static_cast<unsigned char>(param & 0xff);
+			unsigned char valByte = static_cast<unsigned char>((param >> 8) & 0xff);
+			TObjArray_SIDEntry_Add(&mUnknown80, SIDEntry(keyByte, valByte));
+			return 0;
+		}
+		return -1;
+	}
+
+	if (!(code & 0x200))
+		return -1;
+
+	unsigned char opcode = static_cast<unsigned char>(code & 0xff);
+	unsigned char dx = static_cast<unsigned char>(opcode - 0xe0);
+	if (dx > 9)
+		return -1;
+
+	/* Real: 4-byte big-endian header read from `payload[0..3]`, `body` =
+	 * `payload+4` -- shared by every case below.
+	 */
+	unsigned long header =
+	    (static_cast<unsigned long>(payload[0]) << 24) |
+	    (static_cast<unsigned long>(payload[1]) << 16) |
+	    (static_cast<unsigned long>(payload[2]) << 8) |
+	     static_cast<unsigned long>(payload[3]);
+	unsigned char *body = payload + 4;
+
+	if (dx <= 3) {
+		/* 0xe0 Unlock / 0xe1 Relock / 0xe2 Begin / 0xe3 End -- identical arg
+		 * marshalling, only the vtable slot differs (6/7/8/9, byte 0x18/0x1c/
+		 * 0x20/0x24). All 4 real base bodies ignore every argument and return 1
+		 * unconditionally.
+		 */
+		static const int kSlot[4] = { 6, 7, 8, 9 };
+		unsigned int result = reinterpret_cast<POnCommandFn>(vtbl[kSlot[dx]])(
+		    this, body[1], body[0], body[2], body + 3, header);
+		return (result == 1) ? 0 : -1;
+	}
+
+	if (dx == 4) {
+		/* 0xe4 Load. Real: `this->mReserved7c = 0` unconditionally (matches
+		 * `Load()`'s own documented side effect, independently re-derived
+		 * here), then a mAccessMode-keyed dispatch: `OnLoad(CChunk*,...)` via
+		 * vtbl[12] (byte 0x30) when mAccessMode==0, else a soft Api+0x94
+		 * assert (line 0x174 -- byte-identical to `Load()`'s own) when
+		 * mAccessMode is neither 0 nor 1, then
+		 * `OnLoad(ulong,uchar*,uchar,uchar*,ulong)` via vtbl[13] (byte 0x34)
+		 * regardless. `loadArea` = `body+4` is a second, independent 4-byte
+		 * header + trailing bytes this command's own payload carries.
+		 */
+		mReserved7c = 0;
+
+		unsigned long loadHeader =
+		    (static_cast<unsigned long>(body[0]) << 24) |
+		    (static_cast<unsigned long>(body[1]) << 16) |
+		    (static_cast<unsigned long>(body[2]) << 8) |
+		     static_cast<unsigned long>(body[3]);
+		unsigned char *loadArea = body + 4;
+		unsigned char *outBuf = loadArea + 9;
+		unsigned char c = loadArea[8];
+
+		unsigned int result;
+		if (mAccessMode != 0) {
+			if (mAccessMode != 1) {
+				typedef void (*AssertFn)(void *, const char *, const char *, int);
+				AssertFn fn = reinterpret_cast<AssertFn>(
+				    (*reinterpret_cast<void ***>(Api))[0x94 / 4]);
+				fn(Api, "Assertion failed in module %s, line %i.\n",
+				   "ChunkServer.cpp", 0x174);
+			}
+
+			unsigned long a = (static_cast<unsigned long>(loadArea[4]) << 24) |
+			                   (static_cast<unsigned long>(loadArea[5]) << 16) |
+			                   (static_cast<unsigned long>(loadArea[6]) << 8) |
+			                    static_cast<unsigned long>(loadArea[7]);
+			unsigned long b = (static_cast<unsigned long>(loadArea[0]) << 24) |
+			                   (static_cast<unsigned long>(loadArea[1]) << 16) |
+			                   (static_cast<unsigned long>(loadArea[2]) << 8) |
+			                    static_cast<unsigned long>(loadArea[3]);
+
+			typedef unsigned int (*OnLoad5Fn)(CChunkServer *, unsigned long,
+			                                   unsigned char *, unsigned char,
+			                                   unsigned char *, unsigned long);
+			result = reinterpret_cast<OnLoad5Fn>(vtbl[13])(
+			    this, a, reinterpret_cast<unsigned char *>(b), c, outBuf, header);
+		} else {
+			typedef unsigned int (*OnLoad4Fn)(CChunkServer *, void *, unsigned char,
+			                                   unsigned char *, unsigned long);
+			result = reinterpret_cast<OnLoad4Fn>(vtbl[12])(
+			    this, reinterpret_cast<void *>(loadHeader), c, outBuf, header);
+		}
+
+		/* Real: `outBuf[c] = (unsigned char)this->mReserved7c` -- re-read
+		 * AFTER the dispatch (a derived override could have written it).
+		 */
+		outBuf[c] = static_cast<unsigned char>(mReserved7c & 0xff);
+		return (result == 1) ? 0 : -1;
+	}
+
+	if (dx == 5) {
+		/* 0xe5 Save -- mirror of the Load case above (no `mReserved7c = 0`
+		 * here; ground truth genuinely omits it on this path). `saveHeader`
+		 * doubles as the `CChunk*` handle `OnSave(CChunk*,...)` receives AND
+		 * the `this` ground truth passes to `CChunkBase::WriteBinary()` on the
+		 * mAccessMode!=0 path.
+		 */
+		unsigned long saveHeader =
+		    (static_cast<unsigned long>(body[0]) << 24) |
+		    (static_cast<unsigned long>(body[1]) << 16) |
+		    (static_cast<unsigned long>(body[2]) << 8) |
+		     static_cast<unsigned long>(body[3]);
+		unsigned char *saveArea = body + 4;
+		unsigned char *outBuf = saveArea + 9;
+		unsigned char c = saveArea[8];
+
+		unsigned int result;
+		if (mAccessMode != 0) {
+			if (mAccessMode != 1) {
+				typedef void (*AssertFn)(void *, const char *, const char *, int);
+				AssertFn fn = reinterpret_cast<AssertFn>(
+				    (*reinterpret_cast<void ***>(Api))[0x94 / 4]);
+				fn(Api, "Assertion failed in module %s, line %i.\n",
+				   "ChunkServer.cpp", 0xd8);
+			}
+
+			unsigned long lenOut = 0;
+			const unsigned char *dataOut = 0;
+			typedef unsigned int (*OnSave5Fn)(CChunkServer *, unsigned long *,
+			                                   const unsigned char **, unsigned char,
+			                                   unsigned char *, unsigned long);
+			result = reinterpret_cast<OnSave5Fn>(vtbl[11])(
+			    this, &lenOut, &dataOut, c, outBuf, header);
+			CChunkBase_WriteBinary(reinterpret_cast<void *>(saveHeader), dataOut, lenOut);
+		} else {
+			typedef unsigned int (*OnSave4Fn)(CChunkServer *, void *, unsigned char,
+			                                   unsigned char *, unsigned long);
+			result = reinterpret_cast<OnSave4Fn>(vtbl[10])(
+			    this, reinterpret_cast<void *>(saveHeader), c, outBuf, header);
+		}
+
+		outBuf[c] = static_cast<unsigned char>(mReserved7c & 0xff);
+		return (result == 1) ? 0 : -1;
+	}
+
+	if (dx == 9) {
+		/* 0xe9 GetSaveBuffSize -- 3 header bytes forwarded straight through
+		 * via vtbl[5] (byte 0x14 -- CEditor::CChunkServerTask overrides this
+		 * slot, so this must stay a real indirect dispatch, not a direct call
+		 * to the base method). 32-bit result written back little-endian into
+		 * payload[0..3].
+		 */
+		typedef int (*GetSaveBuffSizeFn)(const CChunkServer *, unsigned char,
+		                                  unsigned char, unsigned char);
+		int result = reinterpret_cast<GetSaveBuffSizeFn>(vtbl[5])(
+		    this, payload[0], payload[1], payload[2]);
+
+		payload[0] = static_cast<unsigned char>(result & 0xff);
+		payload[1] = static_cast<unsigned char>((result >> 8) & 0xff);
+		payload[2] = static_cast<unsigned char>((result >> 16) & 0xff);
+		payload[3] = static_cast<unsigned char>((result >> 24) & 0xff);
+		return 0;
+	}
+
+	/* dx 6/7/8 (opcodes 0xe6/0xe7/0xe8) are unreachable via this path in
+	 * ground truth -- those 3 codes are only ever handled above, gated on bit
+	 * 0x100. The real jumptable's own entries for slots 6/7/8 point at the
+	 * same default -1 return every other unmatched code takes.
+	 */
+	return -1;
 }
