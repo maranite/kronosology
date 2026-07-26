@@ -1326,3 +1326,107 @@ a caller.
 
 No real-HW test applies to this entry -- it is a pure static-analysis
 cross-check with no behavioral claim to verify on hardware.
+
+---
+
+## CSTGMidiPortManager::~CSTGMidiPortManager() — physical MIDI port teardown at module unload (batch 57)
+
+Reconstructed (`src/engine/midi_port_manager.cpp`, `.text+0xf5280`, 264
+bytes), genuinely reached from `CSTGEngine::~CSTGEngine()`, not dead code.
+For each of 4 in-port/4 out-port static slots, IN-PORT THEN OUT-PORT
+(confirmed real interleave order, not "all in-ports then all out-ports"):
+if the slot is non-NULL AND its "active" flag bit (bit1/`0x2`) is set,
+dispatches through vtable slot 2 on that port object (presumably each
+port's own virtual destructor -- not independently confirmed beyond the
+call shape). This batch is this project's first confirmed real use of
+`CSTGMidiOutPort`'s own `+0x5` byte, previously modeled as unconfirmed
+padding, now named `flags` (matching `CSTGMidiInPort`'s existing `+0x26`
+field of the same name/purpose).
+
+Uncertain: this reconstruction has never exercised this destructor against
+a port that is ACTIVELY mid-transmission on real hardware (e.g. `OA.ko`
+unloaded/reloaded, or `CSTGEngine` torn down, while a physical MIDI cable
+is actively streaming data through `CSTGMidiOutPortSerial`/
+`CSTGMidiInPortSerial`) -- only host-KAT-verified with synthetic port
+objects. Whether the real vtable-slot-2 "destructor" call ever needs to
+flush/drain an in-flight UART transmit buffer, or whether it is safe to
+tear down unconditionally the instant `flags & 0x2`, is not confirmed from
+static analysis alone.
+
+Real-HW test that would help: with a real serial MIDI cable actively
+sending, trigger an OA.ko module unload/reload cycle and confirm no
+truncated/garbled MIDI bytes appear on the wire, and that a subsequent
+reload's re-`Activate()` cleanly re-establishes the port with no leftover
+state from the torn-down instance.
+
+---
+
+## CSTGControllerInfo::SendUnsolicitedUIParam — real mode-0 divergence + raw vtable slot 22/23 dispatch on a not-fully-typed object (batch 60)
+
+Reconstructed (`src/engine/controller_info_send_unsolicited_ui_param.cpp`,
+`.text+0x945d0`, 516B), a genuine live call chain (`CSTGControllerRTData::
+OnExtModePlayMuteSwitchAssignChange`/`OnExtModeSelectSwitchAssignChange`
+already call it for real) that sends real messages toward the front-panel/
+remote UI via the already-real `PushUnsolicitedMessage()`.
+
+Uncertain:
+- On the "structured" (`CSTGGlobal::sInstance->fieldAt(0x29cc4dc)`
+  nonzero) path, this function's own mode-dispatch formula collapses REAL
+  ground-truth modes 0 AND 1 onto `ResolveCurrentPerformance()`'s mode-1
+  formula, and ground truth's own mode-0 branch is confirmed (by
+  instruction-level trace, not assumption) simply never reached by this
+  function -- meaning if `CSTGGlobal`'s mode field is ever actually `0`
+  when this exact call path fires on real hardware, this reconstruction's
+  behavior has no ground-truth divergence to worry about (mode 0 is
+  provably unreachable here), but this has not been cross-checked against
+  what real front-panel state actually drives that mode field to during
+  normal play.
+- The resolved pointer plus a `CSTGProgramSlot`-stride (`0xe8`) index
+  locates a NOT independently-typed sub-object, and two RAW vtable
+  dispatches follow (slots 22/23) whose own real callees are not
+  identified anywhere in this project -- matching the existing
+  `CSTGEffectRackVars::UpdateDModRoutings` "raw vtable-slot call on an
+  opaque object" idiom, but meaning this function's own outgoing UI
+  message payload for the "structured" path depends on two entirely
+  unverified real computations.
+
+Real-HW test that would help: trigger `OnExtModePlayMuteSwitchAssignChange`/
+`OnExtModeSelectSwitchAssignChange` (toggle an ext-mode play/mute or select
+switch assignment from the front panel) while the current mode is each of
+the real `+0x684` values in turn, and compare the resulting UI-visible
+state/traffic against this reconstruction's per-mode message-field table
+(header comment in the .cpp) to confirm both the mode-0-unreachable claim
+and the two opaque vtable-slot results.
+
+---
+
+## CSTGAudioInputMixerBase — vtable slot 3's real target unidentified, safe zero-stub installed (batch 58)
+
+Reconstructed (`src/engine/audio_input_mixer.cpp`): the real ctor installs
+a real vtable pointer and the real `SetFXCtrlBus`/`SetHDRBus`/
+`SetSendBuses` methods all genuinely dispatch a RAW indirect call through
+this object's own vtable slot 3 on real, reachable call paths
+(`CSTGAudioInput::UpdateFXControlBus`/`UpdateHDRBus`, once a performance
+activates) -- unlike this project's more common "vtable slot never
+dispatched by anything real" deferral pattern, this slot's target is
+provably exercised in ground truth. Its real callee is not identified
+anywhere in this project, so a safe placeholder (`return 0`) is installed
+instead of the usual zero-filled (crash-on-call) table.
+
+Uncertain: every audio-input send-bus/FX-control-bus/HDR-bus value this
+reconstruction currently computes via slot 3 is unconditionally `0` --
+if the real slot-3 target on actual hardware computes a genuine gain,
+level, or bus-routing value (plausible, given the surrounding functions'
+own names), this reconstruction's audio-input bus routing would read as
+"always zero" rather than whatever the real computation produces. This is
+structural bus-routing plumbing, not DSP coefficient math, so arguably
+in scope per this project's own policy, but was not chased further this
+batch.
+
+Real-HW test that would help: on a real Kronos, route an audio input
+through the FX-control-bus or HDR-bus with a known, non-trivial setting
+and confirm (via a level meter or a captured recording) that the routed
+signal reflects a real, non-zero bus value -- if this reconstruction were
+ever deployed to real hardware, this would immediately reveal the "always
+0" placeholder as wrong, distinguishing it from the other deferred-vtable
+entries in this log where the real slot is confirmed unreachable/dead.

@@ -478,11 +478,16 @@ reconstruction gap):
   scope — the actual per-editor-page UI/model logic, same "indefinitely
   deferred" boundary as the Peg toolkit. Not constructed anywhere on the
   currently-wired boot path.
-- **5 of `CSTGUnsolMsgHandler`'s 30 methods** remain Tier-B link-stubs
-  (`ControlMsgHandler`/`CombiMsgHandler`/`ProgramSlotMsgHandler`/
-  `ProgramMsgHandler`/`VoiceModelMsgHandler`) — all reach into genuinely deep
-  `CControlSurface`/`CMMI`/`CModeManager`/`CStorage` state, re-checked
-  multiple times with no tractable angle found.
+- **2 of `CSTGUnsolMsgHandler`'s 30 methods** remain Tier-B link-stubs
+  (`ControlMsgHandler`/`VoiceModelMsgHandler`) — both reach into genuinely
+  deep `CControlSurface`/`CMMI`/`CModeManager`/`CStorage` state, re-checked
+  multiple times with no tractable angle found. **STALE-CLAIM CORRECTION
+  (2026-07-26 cross-check pass)**: this line originally also listed
+  `CombiMsgHandler`/`ProgramSlotMsgHandler`/`ProgramMsgHandler` as
+  Tier-B — all three were reconstructed for real in later 2026-07-26
+  commits (`08f208b`/`6ba0d3a`/`bcbc43f`) after this file was last
+  rewritten; see `include/stg_unsol_msg_handler.h`'s own per-method Tier
+  A/B comments for the current ground truth.
 - **`CClientCommServer`'s one remaining method** (`OnReceiveMessage`) —
   genuinely blocked on a real `CMessage` definition.
 - **`CBatchDiskMainTask`'s deeper `CZ`-driven business logic** (`PreloadDir`/
@@ -493,8 +498,13 @@ reconstruction gap):
   interface-link framework** — used by multiple other un-reconstructed
   interfaces too (`ILimiterNotify`, `IAlphaKeybEvent`, `IAlphaKeybCtrl`); a
   shared-framework batch, not a one-off.
-- **`CTask::RegisterIfc()`** — genuinely deep `TVector` growth dependency,
-  deliberately deferred.
+- ~~**`CTask::RegisterIfc()`** — genuinely deep `TVector` growth dependency,
+  deliberately deferred.~~ **STALE-CLAIM CORRECTION (2026-07-26 cross-check
+  pass)**: this was reconstructed for real the same day (commit `9093cb1`,
+  `CTask::RegisterIfc()` + `TVector<SRegisteredIfc,1>::MakeCapacity()`),
+  before this file's own last rewrite (`bb515cc`) — the rewrite simply
+  missed removing this line. See `include/task.h`'s own header comment
+  ("NOW Tier A").
 - **`CreateResourceFamilies()`** and the rest of `CConfigManager`'s deeper
   bring-up methods — surveyed, deliberately deferred (the same `CZ`
   dependency as above).

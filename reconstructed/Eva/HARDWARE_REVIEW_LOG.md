@@ -301,3 +301,108 @@ sticky-modifier state from a DIFFERENT key is active) and check whether any
 input misbehavior (a modifier appearing "stuck" or clearing unexpectedly)
 is observable, which would indicate this bit mismatch has a real, visible
 hardware consequence rather than being an inert quirk.
+
+---
+
+## `USTGAPIFsck::GenericMumount()` / `USTGAPIControl::SaveRandomSeed()` — real `fork()`+`execve("/korg/Eva/mumount")`+`waitpid()`, external binary never independently examined
+
+**NEW** (added 2026-07-26, cross-checking commit `c62cbd1`, Stage 6 breadth
+sweep, against this log — the fact was written up in `src/ipc/
+stg_unsol_msg_handler.cpp`'s own header comments but had no
+`HARDWARE_REVIEW_LOG.md` entry).
+
+`USTGAPIFsck::GenericMumount(char *const *argv)` (`.text+0x08e27120`, 356
+bytes) is a real, disassembly-confirmed `fork()`+`execve("/korg/Eva/
+mumount", argv, {NULL})`+`waitpid()` sequence — genuinely real OS-level
+process execution, not a mock or a simulated path. It is reached live from
+`USTGAPIControl::SaveRandomSeed()` (`.text+0x08e1d090`, real, called from
+`CSTGUnsolMsgHandler::EndHandling()`'s `mForceSaveOnEnd`-gated tail) with
+`argv = {"/korg/Eva/mumount", "sr", NULL}` — the literal `"sr"` second
+argument is confirmed byte-exact from `.rodata` (not a guess) but its
+OWN meaning to `/korg/Eva/mumount` (a mode flag? a device/label name?) is
+NOT recovered, since `/korg/Eva/mumount` is a separate on-image binary,
+never present in any extracted rootfs on this share and entirely out of
+this project's scope.
+
+What's uncertain for real hardware: this reconstruction's `GenericMumount`
+faithfully reproduces the parent-side fork/exec/wait control flow and its
+three distinct error-reporting paths (fork failure, wait failure sans
+`EINTR` retry, nonzero child exit code), but has never actually executed
+against the REAL `/korg/Eva/mumount` binary — only host-side test doubles.
+Real-hardware execution could differ if the real binary's actual exit-code
+contract, argument parsing of `"sr"`, or execution latency (this is
+presumably a umount/sync operation against the real SSD, on the critical
+path of `EndHandling()`'s "force save on end" flow, i.e. shutdown/panel
+power sequencing) doesn't match this reconstruction's assumptions.
+
+Real-HW test that would help: on a real Kronos, trigger whatever real
+condition sets `mForceSaveOnEnd` (a clean panel-driven shutdown is the
+most likely candidate) and confirm via `/proc/<Eva-pid>/status` or a
+`strace`-equivalent that `/korg/Eva/mumount sr` actually runs, exits 0,
+and that "saving the random seed" has an observable real-world effect
+(e.g. a file under `/korg/rw` updates) — would also finally pin down what
+the `"sr"` argument means.
+
+---
+
+## Deferred/out-of-scope registry — quick index, added for the final pre-hardware-testing pass (2026-07-26)
+
+Everything below is a genuine "confirmed genuinely out of scope" or
+"confirmed genuinely deep" verdict already reached and fully justified
+elsewhere in this tree (`SESSION_SUMMARY_2026-07-25.md`'s "What's still
+open", `README.md`'s per-subsystem stage tables, or the relevant
+`include/*.h` header comment) — this is NOT new investigation, just a
+single place listing every one of them with a one-line pointer, per this
+project's standing "log all issues for the end, work through with real
+hardware" instruction. None of these need their own detailed entry above
+(that format is reserved for genuine real-hardware-BEHAVIOR uncertainty
+about code this project HAS reconstructed) — but a real-hardware test pass
+should know they exist and are untested/unmodeled, not silently absent.
+
+- **Peg GUI toolkit** (149 classes) — confirmed genuinely unreached by the
+  boot path (Eva reaches its own `Start closing`/`End closing` shutdown
+  without it); not tested on real hardware because nothing in this
+  reconstruction's own call graph ever needs it. See `README.md` Stage 5.
+- **`CZ` string container** (247 methods) — confirmed out of scope
+  project-wide, kept opaque everywhere it's a dependency (`CBatchDiskMainTask`,
+  `CConfigManager::CreateResourceFamilies()`); not tested on real hardware
+  because this reconstruction never implements its real string/set
+  semantics, only its `sizeof`.
+- **`CStorage`/`CControlSurface`/`CMMI`/`CModeManager`** — confirmed
+  genuinely deep UI/control-surface state backing the 2 remaining
+  `CSTGUnsolMsgHandler` Tier-B handlers below; not tested on real hardware
+  because none of these classes are modeled beyond stub declarations.
+- **`CSTGUnsolMsgHandler::ControlMsgHandler`/`VoiceModelMsgHandler`** — the
+  last 2 of 30 message handlers, confirmed genuinely deep (re-checked
+  multiple times across the session, no tractable angle found); a real
+  message of either type arriving on real hardware currently hits an
+  unimplemented Tier-B stub in this reconstruction, not real behavior.
+- **`CEditClient`'s hash-table + free-list allocator** — confirmed
+  genuinely deep (an open-chaining hash table comparable in scope to `CZ`
+  itself, re-confirmed with concrete evidence 2026-07-26); not tested on
+  real hardware because `Register()`/`Unregister()` are unimplemented.
+- **`CDumpManStateMachine` family** — confirmed genuinely deep, deferred;
+  real SysEx/dump-protocol state-machine behavior is untested.
+- **`COutLinkIfcBase`/`CMarshaller<T>` framework** — confirmed genuinely
+  deep shared interface-link infrastructure (also blocks `ILimiterNotify`/
+  `IAlphaKeybEvent`/`IAlphaKeybCtrl`, not just `CAlphaKeybCtrlTask`); not
+  tested on real hardware because no concrete instantiation exists yet.
+- **10 `CXxxTask` ES-family UI god-objects** (`CESCommonTask` through
+  `CESSongTask`, 52–1092 real methods each) — confirmed deliberately out of
+  scope, not constructed anywhere on the currently-wired boot path; the
+  actual per-editor-page UI/model logic behind every edit screen is
+  entirely unmodeled.
+- **`CClientCommServer::OnReceiveMessage`** — the class's one remaining
+  unreconstructed method (23/26 → this is the last), genuinely blocked on
+  a real `CMessage` definition this project doesn't have; real inbound
+  comm-server traffic hitting this exact method is unmodeled.
+- **`CBatchDiskMainTask`'s 5 heaviest methods** (`PreloadDir`/
+  `PreloadGroup`/`PrepareGroupsForPreload`/`AddItemToPreload`/
+  `Exec(CMessage&)`) — confirmed `CZ`-container-scale, deferred; real
+  batch-disk-preload behavior (loading a large sample/multisample set from
+  the real SSD) is unmodeled by this reconstruction.
+- **`CDataHandler`/`CEditServer`/the 10 `CESxxx` model classes** — real
+  shell reconstructed, but confirmed NOT reachable from the currently-wired
+  boot path (gated behind `CreateUserModules()`'s own placeholder config
+  table content) — not a real-hardware behavior question until that gate
+  is itself resolved.
