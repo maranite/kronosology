@@ -212,3 +212,92 @@ bank, an OS update, an HDR export) while watching for `/proc/
 OmapNKS4ProgressBar` to appear and update, to confirm both that the file is
 real on-device infrastructure (not just a disassembly-recovered dead
 string) and what UI element, if any, it drives.
+
+---
+
+## `CPoller::InitButtons()`/`InitAnalogs()` — every button/analog client slot collapses onto ONE real handle (0), confirmed emergent, not yet real-HW-relevant-tested
+
+**NEW** (added 2026-07-26, consolidating a finding already written up in
+`SESSION_SUMMARY_2026-07-25.md`'s "genuine emergent behavior" section and in
+`include/poller.h`'s own header comments — not a new claim, just newly
+organized here because it's real-hardware-behavior-relevant, not a
+scope/Tier-B item).
+
+`CPoller::InitButtons()`/`InitAnalogs()` (real, Tier A, `.text+0x089f4830`/
+`0x089f3c80` in ground truth) each walk a real `.rodata` name-pair table
+(128 button slots, 78 populated; 64 analog slots, 29 populated — both
+byte-dumped directly, not assumed) and call the already-real
+`CPoller::RegisterClient()` once per populated slot, always with the exact
+same real name pair (`"Editor"`/`"PanelIfcTask"`). `RegisterClient()`'s own
+real Phase-2 logic (confirmed via disassembly, not a modeling choice) reuses
+the first still-**unconnected** `mClients` slot rather than constructing a
+new `CIfcClient` — and nothing in `InitButtons()`/`InitAnalogs()` themselves
+ever marks the client it just registered as connected. The result, verified
+empirically against real, unmocked code in a host-side KAT (not just argued
+analytically): running both functions back-to-back from a fresh `CPoller` —
+matching `CPanel::Config()`'s own real, unconditional call order
+(`InitButtons()` then `InitAnalogs()`) — constructs **exactly one** real
+`CIfcClient` object for the whole process, and *every one* of the 78
+populated button-table slots and 29 populated analog-table slots resolves to
+that same single client handle (0).
+
+What's uncertain for real hardware: this reconstruction only currently
+verifies the mechanism (`RegisterClient()`'s reuse-first-unconnected-slot
+logic, `InitButtons()`/`InitAnalogs()`'s calling pattern) against
+ground-truth disassembly — it does not, and cannot from static analysis
+alone, confirm what real downstream code on actual hardware does with 107
+button/analog registrations that all resolve to handle 0. Two live-hardware
+possibilities this project cannot currently distinguish: (a) this is
+entirely benign — perhaps every one of these 107 "registrations" is really
+just populating a lookup table for `CPoller::Exec()`'s own per-event
+dispatch (which reads the table by button/analog *code*, not by client
+handle, per `poller.h`'s own documentation of that function), in which case
+the shared handle is irrelevant and this is correct, intended behavior, not
+a bug at all; or (b) some real consumer somewhere does distinguish clients
+by handle (e.g. for per-client analog-event ring buffers, `CIfcClient`'s own
+`PutAnalogEvt()`/`FlushAnalogEvts()` machinery) and would observe cross-talk
+between what look like 107 independent registrations but are actually one
+shared object. This project's own traced call graph does not currently
+include a caller that would surface either outcome.
+
+Real-HW test that would help: on a real Kronos, if any UI/diagnostic
+capability exists to introspect `CPoller`'s own `mClients` array or to watch
+front-panel button/analog-input event delivery per-registered-client
+(rather than per raw hardware code), confirm whether the real firmware
+genuinely shares one client object across all 107 button/analog code
+registrations the way this reconstruction's own disassembly-derived model
+does, or whether some other mechanism (not yet traced by this project)
+keeps them logically separate despite the shared handle.
+
+---
+
+## `CAlphaKeybCtrlTask::SetCtrlCondition()` — three real, asymmetric bit read/clear mismatches in the sticky-key toggler
+
+`include/alpha_keyb_ctrl_task.h`'s own header comment (Stage 6 dedicated
+batch, 2026-07-26): `SetCtrlCondition()` (268 bytes, a static sticky-key
+bitmask toggler for the 'X'/';'/'L'/'a' keys) has three key-up cases,
+confirmed via careful mask-arithmetic re-reading of the real disassembly
+(not "fixed" into symmetric read/clear pairs, and a first KAT-writing draft
+accidentally DID normalize two of them before the KAT's own failing checks
+caught the mistake): key-up('X') **reads** bit 4 but **clears** bit 8;
+key-up(';') reads bit 2 but clears bit 1; key-up('L') reads bit 8 but clears
+bit 4. This is genuine, faithfully-preserved ground-truth behavior — real
+hex masks (`0xfffffff7`=~8, `0xfffffffe`=~1, `0xfffffffb`=~4) directly
+confirmed against the decompile, not a transcription artifact.
+
+What's uncertain for real hardware: whether this read/clear asymmetry
+produces any user-observable effect on a real Kronos's sticky-key/alpha-key
+modifier behavior — e.g. whether releasing one of these 4 keys can leave the
+sticky-modifier bitmask in a state inconsistent with the key that was
+actually released, and whether that inconsistency is ever visible as
+incorrect alpha-keyboard input behavior, or whether it's silently harmless
+because nothing downstream ever queries the specific bit each case actually
+clears (as opposed to the one it reads).
+
+Real-HW test that would help: on a real Kronos with the alpha-keyboard
+overlay active, exercise combinations of the 'X'/';'/'L'/'a' keys (in
+particular sequences where one of these keys is held/released while a
+sticky-modifier state from a DIFFERENT key is active) and check whether any
+input misbehavior (a modifier appearing "stuck" or clearing unexpectedly)
+is observable, which would indicate this bit mismatch has a real, visible
+hardware consequence rather than being an inert quirk.
