@@ -1047,6 +1047,20 @@ RECONSTRUCTED = {
     # Exec(CMessage&) (6747B, the real per-message string-command dispatcher, ~94
     # strcmp() call sites -- a completely separate mechanism, out of scope here).
     "089ee7d0",  # CPoller::Exec()
+
+    # --- 2026-07-26 (Exec(CMessage&) closeout batch): the OTHER Exec() overload named
+    # just above -- a prior pass's "~94 strcmp() sites, not a numeric switch" reading
+    # was a real misdiagnosis, corrected via a full `objdump -dr -M intel` branch-
+    # target CFG reachability walk. There IS a real 15-way jump table (.rodata+
+    # 0x8f7c298) on the LOW BYTE of CMessage's own +0x8 word; every one of its 15
+    # cases turned out to be ground truth's own inlined duplicate (3 of them: a real
+    # direct call) of one of the 15 already-real Msg*() sibling methods above --
+    # modeled as real calls to those siblings (same "duplicate real ground-truth
+    # function per call site" precedent used throughout this file), collapsing the
+    # two ~700-instruction duplicated-FindRegisteredClient()-scan cases (the true
+    # source of the ~94 strcmp() count) down to one-line wrappers each. This closes
+    # CPoller fully -- no remaining deferred surface of its own.
+    "089f54f0",  # CPoller::Exec(CMessage&)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

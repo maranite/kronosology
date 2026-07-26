@@ -1455,6 +1455,323 @@ int main()
 		PollerTestHooks::SetClients(p, 0, 0);
 	}
 
+	printf("[18] Exec(CMessage&) (2026-07-26 Exec(CMessage&) closeout batch): 15-way "
+	       "dispatch + return-code translation\n");
+	{
+		g_fakeLookupResult = &g_fakeResObj;
+		g_fakeResourceType = 10;
+		g_fakeConnectResult = 0;
+		CPoller p(owner, "PanelRes"); /* real mResource, needed by several cases */
+
+		unsigned char blobA[0x18]; memset(blobA, 0, sizeof(blobA));
+		unsigned char blobB[0x18]; memset(blobB, 0, sizeof(blobB));
+		*(int *)(blobA + 0x14) = 1; /* connected */
+		*(int *)(blobB + 0x14) = 0; /* NOT connected */
+		void *elems[2] = { blobA, blobB };
+		PollerTestHooks::SetClients(p, elems, elems + 2);
+
+		FakeMessage m;
+
+		/* --- out-of-range dispatch byte: real unsigned `ja` bounds check on the
+		 * LOW byte of +0x8, not the full 16-bit word -- confirmed via CFG walk,
+		 * see poller.h's own header comment.
+		 */
+		m.raw[8] = 15;
+		check("Exec(CMessage&) returns -1 for dispatch code 15 (just past the "
+		      "real 0..14 range)",
+		      p.Exec(m.AsMessage()) == -1);
+		m.raw[8] = 255;
+		check("Exec(CMessage&) returns -1 for dispatch code 255", p.Exec(m.AsMessage()) == -1);
+
+		/* --- return-code translation: 0..3 -> 0, 4..7 -> -1, 8+ -> 4 (confirmed
+		 * via the setg/cmp eax,3/cmp eax,7 sequence physically present at
+		 * several cases' own real call sites) -- exercised here via 3 sibling
+		 * raw return codes that fall in each of the 3 buckets.
+		 */
+		memset(m.raw, 0, sizeof(m.raw));
+		m.raw[8] = 9; /* -> MsgUnregisterClient */
+		m.SetFlags(0x1);
+		m.SetWord10(0xffffffff); /* raw sub-result 9 (bad handle) -> 8+ bucket */
+		check("translate bucket 8+ -> 4 (code 9, MsgUnregisterClient raw 9)",
+		      p.Exec(m.AsMessage()) == 4);
+
+		m.SetWord10(1); /* blobB, valid but not connected -> raw sub-result 2 */
+		check("translate bucket 0..3 -> 0 (code 9, MsgUnregisterClient raw 2)",
+		      p.Exec(m.AsMessage()) == 0);
+
+		memset(m.raw, 0, sizeof(m.raw));
+		m.raw[8] = 11; /* -> MsgSetButtonClient */
+		m.SetFlags(0x2);
+		m.SetTaggedLen(8);
+		struct Payload { unsigned int handle; unsigned int mode; unsigned int code; };
+		Payload badMode; badMode.handle = 0xffffffff; badMode.mode = 5; badMode.code = 0;
+		m.SetPtr10(&badMode); /* raw sub-result 6 (invalid mode) -> 4..7 bucket */
+		check("translate bucket 4..7 -> -1 (code 11, MsgSetButtonClient raw 6)",
+		      p.Exec(m.AsMessage()) == -1);
+
+		/* --- per-code dispatch routing: each of the 15 codes must reach its
+		 * OWN documented sibling, not some neighbor -- one distinguishing side
+		 * effect per code, reusing each sibling's own already-verified real
+		 * gate/threshold/field shape from sections [10]-[16] above.
+		 */
+
+		/* code 0 -> MsgSetLed(): opcode 2 notify + real mZeroBlock bit set. */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 0;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			struct { int ledCode; int state; } pl = { 3, 1 }; /* "on" */
+			m.SetPtr10(&pl);
+			g_notifyCalls = 0;
+			check("code 0 -> MsgSetLed(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 0 -> MsgSetLed(): opcode 2 notify fired",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 2);
+		}
+
+		/* code 1 -> MsgSetLed16bits(): opcode 6 notify, DIFFERENT payload shape
+		 * (group index + packed mask/bits) than code 0 above.
+		 */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 1;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			struct { short groupIndex; short pad; unsigned int packed; } pl;
+			pl.groupIndex = 1; pl.pad = 0; pl.packed = (0xffffu << 16) | 0x0004u;
+			m.SetPtr10(&pl);
+			g_notifyCalls = 0;
+			check("code 1 -> MsgSetLed16bits(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 1 -> MsgSetLed16bits(): opcode 6 notify fired",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 6);
+		}
+
+		/* code 2 -> MsgShortBeep(): opcode 7 notify, no payload at all. */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 2;
+			m.SetFlags(0x1);
+			g_notifyCalls = 0;
+			check("code 2 -> MsgShortBeep(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 2 -> MsgShortBeep(): opcode 7 notify fired",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 7);
+		}
+
+		/* code 3 -> MsgBackupLEDs(): SAVE-AND-CLEAR direction copies mZeroBlock
+		 * into mLedBackup then zeroes it -- distinguishing side effect no other
+		 * code produces.
+		 */
+		{
+			unsigned int *zeroBlock = PollerTestHooks::ZeroBlockRW(p);
+			zeroBlock[0] = 0x1234;
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 3;
+			m.SetFlags(0x1);
+			m.SetWord10(1); /* nonzero == SAVE-AND-CLEAR */
+			check("code 3 -> MsgBackupLEDs(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 3 -> MsgBackupLEDs(): mZeroBlock cleared after save",
+			      zeroBlock[0] == 0);
+		}
+
+		/* code 4 -> MsgRequestAnalogInputValue(): opcode 5 notify, value ==
+		 * the message's own +0x10 dword forwarded verbatim.
+		 */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 4;
+			m.SetFlags(0x1);
+			m.SetWord10(77);
+			g_notifyCalls = 0;
+			check("code 4 -> MsgRequestAnalogInputValue(): returns 0",
+			      p.Exec(m.AsMessage()) == 0);
+			check("code 4 -> MsgRequestAnalogInputValue(): opcode 5, value 77",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 5 && g_lastNotifyValue == 77);
+		}
+
+		/* code 5 -> MsgRegisterClientByRef(): real RegisterClient() append,
+		 * write-back handle via payload[0]. RegisterClient()'s own Phase-1 scan
+		 * walks every CONNECTED client's real name-chain pointer (+0x1c) -- the
+		 * blobA/blobB fake clients above only set +0x14 (connected) for the
+		 * simpler handle-validation handlers, so mClients is cleared to empty
+		 * for this and the code-7 test below (same "start from an empty
+		 * mClients" setup section [13] already uses for these same two
+		 * methods), then restored before the code-6/8 block re-populates it
+		 * with its own real name-chain fake client.
+		 */
+		PollerTestHooks::SetClients(p, 0, 0);
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 5;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0xc);
+			unsigned int refBuf[3] = { 0xdeadbeef, (unsigned int)(unsigned long)"RefA",
+			                           (unsigned int)(unsigned long)"RefB" };
+			m.SetPtr10(refBuf);
+			g_registerNotifyCalls = 0;
+			check("code 5 -> MsgRegisterClientByRef(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 5 -> MsgRegisterClientByRef(): Api+0x44 notify fired with "
+			      "the real forwarded names",
+			      g_registerNotifyCalls == 1 && strcmp(g_lastRegisterNameA, "RefA") == 0 &&
+			      strcmp(g_lastRegisterNameB, "RefB") == 0);
+		}
+
+		/* code 7 -> MsgRegisterClientByVal(): same RegisterClient() forwarding,
+		 * but the EMBEDDED-buffer payload shape (not pointer-based like code 5).
+		 */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 7;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0x64);
+			unsigned char valBuf[0x40]; memset(valBuf, 0, sizeof(valBuf));
+			strcpy((char *)valBuf + 4, "ValA");
+			strcpy((char *)valBuf + 0x34, "ValB");
+			m.SetPtr10(valBuf);
+			g_registerNotifyCalls = 0;
+			check("code 7 -> MsgRegisterClientByVal(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 7 -> MsgRegisterClientByVal(): Api+0x44 notify fired with "
+			      "the real embedded names",
+			      g_registerNotifyCalls == 1 && strcmp(g_lastRegisterNameA, "ValA") == 0 &&
+			      strcmp(g_lastRegisterNameB, "ValB") == 0);
+		}
+
+		PollerTestHooks::SetClients(p, elems, elems + 2); /* restore blobA/blobB */
+
+		/* code 6 / code 8 -> MsgGetClientHandleByRef()/ByVal(): real
+		 * FindRegisteredClient() lookup against a manually-connected fake
+		 * client, same opaque name-chain shape section [15] already builds.
+		 */
+		{
+			struct FakeNameChain {
+				unsigned char nameRecA[0x10];
+				unsigned char nameRec[0x44];
+				unsigned char linkQ[0x18];
+				int linkPCell;
+				unsigned char client[0x20];
+				FakeNameChain(const char *regNameA, const char *regNameB)
+				{
+					memset(nameRecA, 0, sizeof(nameRecA));
+					memset(nameRec, 0, sizeof(nameRec));
+					memset(linkQ, 0, sizeof(linkQ));
+					memset(client, 0, sizeof(client));
+					*reinterpret_cast<const char **>(nameRecA + 4) = regNameA;
+					*reinterpret_cast<int *>(nameRec + 0x3c) = (int)(unsigned long)nameRecA;
+					*reinterpret_cast<const char **>(nameRec + 4) = regNameB;
+					*reinterpret_cast<int *>(linkQ + 0x10) = (int)(unsigned long)nameRec;
+					linkPCell = (int)(unsigned long)linkQ;
+					*reinterpret_cast<int *>(client + 0x14) = 1; /* connected */
+					*reinterpret_cast<int *>(client + 0x1c) = (int)(unsigned long)&linkPCell;
+				}
+				unsigned char *ClientPtr() { return client; }
+			};
+
+			FakeNameChain nc("Erin", "Frank");
+			void *nameElems[1] = { nc.ClientPtr() };
+			PollerTestHooks::SetClients(p, nameElems, nameElems + 1);
+
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 6;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0xc);
+			unsigned int refBuf[3] = { 0xdeadbeef, (unsigned int)(unsigned long)"Erin",
+			                           (unsigned int)(unsigned long)"Frank" };
+			m.SetPtr10(refBuf);
+			check("code 6 -> MsgGetClientHandleByRef(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 6 -> MsgGetClientHandleByRef(): finds the real client (index 0)",
+			      refBuf[0] == 0u);
+
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 8;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0x64);
+			unsigned char valBuf[0x40]; memset(valBuf, 0, sizeof(valBuf));
+			strcpy((char *)valBuf + 4, "Erin");
+			strcpy((char *)valBuf + 0x34, "Frank");
+			m.SetPtr10(valBuf);
+			check("code 8 -> MsgGetClientHandleByVal(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 8 -> MsgGetClientHandleByVal(): finds the real client (index 0)",
+			      *(unsigned int *)valBuf == 0u);
+
+			PollerTestHooks::SetClients(p, elems, elems + 2); /* restore blobA/blobB */
+		}
+
+		/* code 9 -> MsgUnregisterClient(): already exercised above for the
+		 * translate-bucket checks; add the real Api+0x58 success-path notify.
+		 */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 9;
+			m.SetFlags(0x1);
+			m.SetWord10(0); /* blobA, connected */
+			g_outLinkNotifyCalls = 0;
+			check("code 9 -> MsgUnregisterClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 9 -> MsgUnregisterClient(): Api+0x58 notify fired with "
+			      "the real client pointer",
+			      g_outLinkNotifyCalls == 1 && g_lastOutLinkNotified == blobA);
+		}
+
+		/* codes 10/12/14 -> MsgSetKeyboardClient()/MsgSetEncoderClient()/
+		 * MsgSetTouchPanelClient(): same shared shape, distinguished only by
+		 * WHICH of mField39c/394/398 gets written -- confirms the dispatch
+		 * routes each code to its own real field, not a neighbor's.
+		 */
+		{
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 10;
+			m.SetFlags(0x1);
+			m.SetWord10(0xffffffff);
+			check("code 10 -> MsgSetKeyboardClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 10 -> MsgSetKeyboardClient(): wrote mField39c, not 394/398",
+			      PollerTestHooks::Field39c(p) == 0xffffffffu);
+
+			PollerTestHooks::SetField394(p, 0);
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 12;
+			m.SetFlags(0x1);
+			m.SetWord10(0xffffffff);
+			check("code 12 -> MsgSetEncoderClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 12 -> MsgSetEncoderClient(): wrote mField394",
+			      PollerTestHooks::Field394(p) == 0xffffffffu);
+
+			PollerTestHooks::SetField398(p, 0);
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 14;
+			m.SetFlags(0x1);
+			m.SetWord10(0xffffffff);
+			check("code 14 -> MsgSetTouchPanelClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 14 -> MsgSetTouchPanelClient(): wrote mField398",
+			      PollerTestHooks::Field398(p) == 0xffffffffu);
+		}
+
+		/* codes 11/13 -> MsgSetButtonClient()/MsgSetAnalogClient(): mode-2
+		 * bulk-fill on the RIGHT table (mHandleTable2 vs mHandleTable1), same
+		 * distinguishing-by-target-field idea as 10/12/14 above.
+		 */
+		{
+			Payload pl2; pl2.handle = 0xffffffff; pl2.mode = 2; pl2.code = 0;
+
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 11;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			m.SetPtr10(&pl2);
+			check("code 11 -> MsgSetButtonClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 11 -> MsgSetButtonClient(): filled mHandleTable2 (128 slots)",
+			      PollerTestHooks::HandleTable2(p)[127] == 0xffffffffu);
+
+			memset(m.raw, 0, sizeof(m.raw));
+			m.raw[8] = 13;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			m.SetPtr10(&pl2);
+			check("code 13 -> MsgSetAnalogClient(): returns 0", p.Exec(m.AsMessage()) == 0);
+			check("code 13 -> MsgSetAnalogClient(): filled mHandleTable1 (64 slots)",
+			      PollerTestHooks::HandleTable1(p)[63] == 0xffffffffu);
+		}
+
+		PollerTestHooks::SetClients(p, 0, 0);
+	}
+
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");
 	return g_fail ? 1 : 0;
 }
