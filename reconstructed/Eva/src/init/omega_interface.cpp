@@ -68,7 +68,14 @@ COmegaInterface Omega;
 volatile int s_bRunning = 1;
 volatile int s_timingenablelock = 0;
 int s_iTimingDisable = 0;
-static struct timeval s_tvStart; /* only ever read/written here -- not shared cross-TU */
+/* CORRECTION 2026-07-26: was `static` here with a comment claiming "only ever
+ * read/written here -- not shared cross-TU" -- WRONG. Ground truth's own
+ * HAL_GetSystemTime() (ckernel.cpp) and HAL_WaitMs() (not reconstructed, out of
+ * scope) both read this exact .bss address (0x093053d0) to compute an elapsed-ms
+ * timestamp. Made non-static so ckernel.cpp can declare a matching extern; found
+ * while reconstructing HAL_GetSystemTime() (see ckernel.cpp).
+ */
+struct timeval s_tvStart;
 pthread_t s_hOmegaInitThread;
 int g_bCriticalSectionValid = 0;
 

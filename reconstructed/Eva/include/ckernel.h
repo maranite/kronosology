@@ -112,4 +112,13 @@ private:
 	int   mUnknown0c; /* this+0x0c -- zeroed by ctor, never read back by ctor/dtor */
 };
 
+/* Real global, CKernel::CKernel()'s own host-interface singleton (.bss+0x09309830,
+ * CHostInterfaceBase* or CHostInterface* depending on the ctor's own hostInterfaceKind
+ * arg -- neither class reconstructed, vtable-dispatched only). Declared here (not just
+ * static in ckernel.cpp) so CSysApiInstance::WriteMessageToHost() (sysapi_instance.cpp)
+ * can reach it too -- same "define where the real cross-TU consumer needs it"
+ * precedent as g_poModuleManager (module_manager.h) / g_poScheduler (scheduler.h).
+ */
+extern void *g_poHostInterface;
+
 #endif /* CKERNEL_H */

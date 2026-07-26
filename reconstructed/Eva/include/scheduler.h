@@ -52,15 +52,27 @@ public:
 	 */
 	void InsertLevel(int level);
 
-	/* .text+0x08063120, 119 bytes. */
-	void Enable(int enable);
+	/* .text+0x08063120, 119 bytes. Real return type is `int` (the PREVIOUS mUnusedA
+	 * ("mEnabled") value) -- re-verified 2026-07-26 while reconstructing
+	 * CSysApiInstance::EnableMultiTask() (sysapi_instance.h/.cpp), which tail-jumps
+	 * straight into this function and needs that return value passed through
+	 * unchanged (every real caller's own `iVarN = EnableMultiTask(0); ...` save/
+	 * restore bracket, module_manager.cpp, only makes sense if the forward actually
+	 * yields the previous state). Was declared `void` before this pass, silently
+	 * dropping it -- see scheduler.cpp for the fixed body.
+	 */
+	int Enable(int enable);
 
 	/* .text+0x080623e0, 1025 bytes -- reconstructed (see header comment + scheduler.cpp).
 	 * Called once per scheduling-signal wakeup from CKernel::Exec().
 	 */
 	void Exec();
 
-	/* .text+0x080631c0, size not measured -- Tier-B link-stub, not reconstructed.
+	/* .text+0x080631c0, 78 bytes -- promoted Tier B -> Tier A 2026-07-26 (broad
+	 * Tier-B recheck sweep). Real body: unconditionally sets mNotifyHost, then on
+	 * enable!=0 clears mBusy and, if mReady, posts a
+	 * CSysApiInstance::WriteMessageToHost(3, 0x1c) notification -- same shape as
+	 * Enable()'s own 0->1 transition notify, see scheduler.cpp.
 	 * Called once from CKernel::InitUserLayer().
 	 */
 	void EnableUpdate(int enable);
@@ -73,5 +85,13 @@ private:
 	int   mReady;     /* +0x24 */
 	int   mNotifyHost; /* +0x28 */
 };
+
+/* Real global, CKernel::CKernel()'s own placement-new'd CScheduler singleton
+ * (.bss+0x09309840). Definition now lives here (not ckernel.cpp) so
+ * CSysApiInstance::EnableMultiTask() (sysapi_instance.cpp) can reach it too --
+ * same "define where the real cross-TU consumer needs it" precedent as
+ * g_poModuleManager (module_manager.h).
+ */
+extern CScheduler *g_poScheduler;
 
 #endif /* SCHEDULER_H */

@@ -10,8 +10,14 @@
  * zeroes it), the list is always empty and the walk is a real no-op, not a fabricated
  * shortcut.
  *
- * EnableUpdate(int) (.text+0x0805afb0, not measured) is a Tier-B link-stub -- real
- * update-notification refcounting, out of scope for this pass.
+ * EnableUpdate(int) (.text+0x0805afb0, 61 bytes) -- promoted Tier B -> Tier A
+ * 2026-07-26 (broad Tier-B recheck sweep). Real body: sets a this+0xc "update
+ * pending" flag, then on enable != 0 posts a WriteMessageToHost(2, 0x24)
+ * notification through the global Api's own vtable slot +0xf8 (see .cpp) -- same
+ * "set a flag, optionally notify host" shape as CScheduler::EnableUpdate()/
+ * CTracer::EnableUpdate(). This also fixed a real LESSON_vtable_dispatch_stub_gap
+ * instance: that vtable slot was still wired to the generic EvaVTableStub no-op
+ * (omega_vtables.cpp), silently swallowing the notification.
  */
 
 #ifndef ERROR_HANDLER_H
@@ -24,6 +30,9 @@ public:
 
 private:
 	void *mHead; /* this+0x00 -- singly-linked error-node list head; ctor zeroes it */
+	/* this+0x4..this+0xb: unknown, never touched by ~CErrorHandler()/EnableUpdate() --
+	 * EnableUpdate()'s own this+0xc write uses raw offset arithmetic (see .cpp)
+	 * rather than a named field here, since this gap isn't otherwise characterized. */
 };
 
 #endif /* ERROR_HANDLER_H */

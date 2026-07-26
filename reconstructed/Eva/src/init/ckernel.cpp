@@ -61,6 +61,7 @@
 
 #include <cstdlib>
 #include <new>
+#include <sys/time.h>
 
 /* CScheduler, COmegaPtrArray, CModuleManager, CErrorHandler, CSysApiInstance are now
  * real, shared, Stage-4-reconstructed classes (see their own headers) -- no longer
@@ -91,8 +92,27 @@ void MMainResMan();
  */
 class CTracer {
 public:
-	/* .text+0x0806ce80, not measured -- Tier-B link-stub. */
-	void EnableUpdate(int /*enable*/) {}
+	/* .text+0x0806ce80, 56 bytes -- promoted Tier B -> Tier A 2026-07-26 (broad
+	 * Tier-B recheck sweep). Real body: unconditionally sets this+0x8 = 1, then on
+	 * enable != 0 posts CSysApiInstance::WriteMessageToHost(2, 0x38) -- same
+	 * "set a flag, optionally notify host" shape as CScheduler::EnableUpdate()/
+	 * CErrorHandler::EnableUpdate() (scheduler.cpp/error_handler.cpp). CTracer's
+	 * own other real methods (DisableUpdate/Update/ExecMsg/AddTrace/ReadTrace/dtor,
+	 * a genuinely deeper message-tracing subsystem built on CZ/CMessageTrace) stay
+	 * out of scope -- this file only ever calls EnableUpdate(1), so only that one
+	 * needed promoting here.
+	 */
+	void EnableUpdate(int enable)
+	{
+		/* Raw offset write, not a named field -- this class is only ever a
+		 * malloc'd opaque blob elsewhere in this file (g_poTracer), same
+		 * "shape not otherwise modeled" convention as Cleanup()'s own
+		 * `char *self` arithmetic (sysapi_instance.cpp). Real field is at +0x8;
+		 * +0x0..+0x7 stay unmodeled (vtable slot + one unknown dword). */
+		*(int *)((char *)this + 0x8) = 1;
+		if (enable != 0)
+			((CSysApiInstance *)SysApiInstance)->WriteMessageToHost(2, 0x38);
+	}
 };
 
 /* Global registry CKernel's ctor/dtor both walk -- see header comment above. Real
@@ -108,8 +128,16 @@ COmegaPtrArray *sm_poGlobalObjectList = 0;
  * (module-scope globals, not CKernel instance members).
  */
 CKernel      *g_poKernel = 0;
-static void       *g_poHostInterface = 0; /* CHostInterfaceBase* or CHostInterface* -- vtable-dispatched only, class not reconstructed */
-static CScheduler *g_poScheduler = 0;
+/* g_poHostInterface itself is now defined non-static, declared in ckernel.h -- needed
+ * by CSysApiInstance::WriteMessageToHost() (sysapi_instance.cpp), same cross-TU need
+ * as g_poModuleManager below. Definition kept here since this file still owns
+ * construction/teardown.
+ */
+void *g_poHostInterface = 0; /* CHostInterfaceBase* or CHostInterface* -- vtable-dispatched only, class not reconstructed */
+/* g_poScheduler itself is now defined in scheduler.cpp (CSysApiInstance::
+ * EnableMultiTask() needs to reach it too, same precedent) -- declared there as
+ * `CScheduler *g_poScheduler`, pulled in via scheduler.h above.
+ */
 /* g_poModuleManager itself is now defined in module_manager.cpp (CModuleManager's own
  * methods need to reach it too, via CSysApiInstance::AddModule's real forwarding) --
  * declared there as `void *g_poModuleManager`, pulled in via module_manager.h above.
@@ -437,13 +465,41 @@ void CKernel::InitSystemLayer()
 static int g_bViewerTaskRunning = 0;
 static int g_bHostInterfaceBusy = 0;
 
-/* .text+0x0804d200, 109 bytes -- Tier-B link-stub, real body not reconstructed (not
- * needed: only reachable from Exec()'s own timer walk below, which is itself dead
- * code given this pass's construction -- see Exec()'s comment).
+/* Real global (omega_interface.cpp), gettimeofday()'d once in COmegaInterface::Init()
+ * -- was wrongly declared `static` (file-local) there with a comment claiming
+ * "not shared cross-TU"; ground truth's own HAL_GetSystemTime()/HAL_WaitMs() (the
+ * latter out of scope, not reconstructed here) both read the exact same .bss address
+ * (0x093053d0), so it IS shared. Fixed 2026-07-26 while reconstructing
+ * HAL_GetSystemTime() below -- see omega_interface.cpp.
+ */
+extern struct timeval s_tvStart;
+
+/* .text+0x0804d200, 114 bytes -- promoted Tier B -> Tier A 2026-07-26 (broad Tier-B
+ * recheck sweep). Real body: milliseconds elapsed since s_tvStart, computed as
+ * `(tv.tv_sec - s_tvStart.tv_sec) * 1000 + (tv.tv_usec - s_tvStart.tv_usec) / 1000`,
+ * with a borrow-1-second adjustment when tv_usec < s_tvStart.tv_usec (ground truth
+ * computes the usec delta as `(tv_usec + 1000000) - s_tvStart.tv_usec` and subtracts
+ * an extra 1000ms from the seconds term in that case) and GCC's classic
+ * divide-by-1000-via-magic-multiply (0x10624dd3 >> 38, sign-corrected) for the usec
+ * term -- both collapsed to plain arithmetic here, same license as every other
+ * magic-multiply divide already collapsed elsewhere in this project. Still dead code
+ * given this pass's own construction (only reachable from CKernel::Exec()'s own timer
+ * walk, itself always-empty here) -- reconstructed anyway for fidelity, matching
+ * CScheduler::Exec()'s own precedent of transcribing real-but-unreached logic.
  */
 static int HAL_GetSystemTime()
 {
-	return 0;
+	struct timeval tv;
+	gettimeofday(&tv, 0);
+
+	int secDelta = tv.tv_sec - s_tvStart.tv_sec;
+	int usecDelta = tv.tv_usec - s_tvStart.tv_usec;
+	if (usecDelta < 0) {
+		usecDelta += 1000000;
+		secDelta -= 1;
+	}
+
+	return secDelta * 1000 + usecDelta / 1000;
 }
 
 /* CKernel::Exec() .text+0x0805e630, 169 bytes. Called once per scheduling-signal

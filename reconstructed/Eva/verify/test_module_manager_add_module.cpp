@@ -13,8 +13,9 @@
  *     first, then appends the new one (real by-name re-registration behavior)
  *   - mBusy (+0x00) is cleared after every AddModule()
  *   - EnableUpdate() unconditionally sets mTopologyChanged (+0x40); only notifies
- *     the host (via the Tier-B WriteMessageToHost stub -- not directly observable
- *     here, so checked indirectly via mBusy/no-crash) when enable != 0
+ *     the host (via CSysApiInstance::WriteMessageToHost(), promoted to Tier A
+ *     2026-07-26 -- now checked directly via a fake g_poHostInterface vtable
+ *     object, not just indirectly via mBusy/no-crash) when enable != 0
  *   - SAFETY-CRITICAL regression check: once AddModule() genuinely populates
  *     mModules, CModuleManager::Setup() dispatches each module's real vtable slot
  *     +8 exactly once per real module -- this is the exact scenario that would
@@ -34,6 +35,7 @@
 #include "module_manager.h"
 #include "omega_ptr_array.h"
 #include "omega_vtables.h"
+#include "ckernel.h"
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -59,6 +61,33 @@ extern "C" void FakeStart(void *) { g_startCalls++; }
 static void *g_fakeModuleVtbl[5] = {
 	(void *)FakeDtor, (void *)FakeDtor, (void *)FakeSetup, (void *)FakeConfig, (void *)FakeStart,
 };
+
+/* Fake g_poHostInterface stand-in (ckernel.h) -- CSysApiInstance::WriteMessageToHost()
+ * (promoted Tier B -> Tier A 2026-07-26) faithfully has NO NULL check on
+ * g_poHostInterface before dispatching its vtable slot +0xc, matching ground truth
+ * exactly. This test's own EnableUpdate(1)/mStarted==1 path reaches that call
+ * (module_manager.cpp), so g_poHostInterface must point at a real vtable-shaped
+ * object here or the test itself would crash -- same "size is not depth" test-setup
+ * gap this whole recheck sweep is about, just on the test side rather than the
+ * production code side.
+ */
+static int g_hostMessageCalls;
+static char g_lastHostMessage[0x20];
+extern "C" void FakeHostWriteMessage(void *, const char *msg)
+{
+	/* Copy, not just save the pointer -- msg points into WriteMessageToHost()'s own
+	 * stack buffer, which is invalid the instant this call returns. */
+	g_hostMessageCalls++;
+	strncpy(g_lastHostMessage, msg, sizeof(g_lastHostMessage) - 1);
+	g_lastHostMessage[sizeof(g_lastHostMessage) - 1] = '\0';
+}
+static void *g_fakeHostVtbl[4] = {
+	(void *)0, (void *)0, (void *)0, (void *)FakeHostWriteMessage, /* slot +0xc */
+};
+/* The real g_poHostInterface points at an OBJECT whose first word is its vtable
+ * pointer -- not at the vtable array itself. */
+static void *g_fakeHostInstance = g_fakeHostVtbl;
+static void *g_fakeHostObj = &g_fakeHostInstance;
 
 /* Real CModule layout: vtbl(+0)/mName(+4)/mTasks(+8, 0x18 bytes)/mUnknown20(+0x20)/
  * mState(+0x24)/mScopeId(+0x28) -- only vtbl/mName/mState are touched by anything
@@ -160,19 +189,27 @@ int main(void)
 	check("mTopologyChanged (+0x40) == 1", *(int *)((char *)mgr + 0x40) == 1);
 	check("mBusy untouched (enable == 0)", *(char *)mgr == 1);
 
+	/* WriteMessageToHost() is now real Tier A (2026-07-26) -- point g_poHostInterface
+	 * at the fake vtable object above before either EnableUpdate() call can reach it. */
+	g_poHostInterface = g_fakeHostObj;
+
 	printf("[7] EnableUpdate(1) with mStarted == 0: mBusy cleared, no host notify attempted\n"
-	       "    (WriteMessageToHost is a real Tier-B no-op stub -- absence of a crash is\n"
-	       "    the observable proxy for \"the gate correctly didn't/did fire\")\n");
+	       "    (checked directly now that WriteMessageToHost is real -- g_hostMessageCalls\n"
+	       "    must stay 0)\n");
 	*(char *)mgr = 1;
 	*(int *)((char *)mgr + 0x3c) = 0; /* mStarted == 0 */
 	mgr->EnableUpdate(1);
 	check("mBusy cleared (enable != 0)", *(char *)mgr == 0);
+	check("no host notify when mStarted == 0", g_hostMessageCalls == 0);
 
 	printf("[8] EnableUpdate(1) with mStarted == 1: takes the WriteMessageToHost branch,\n"
-	       "    still no crash\n");
+	       "    real notification observed via the fake host-interface vtable\n");
 	*(int *)((char *)mgr + 0x3c) = 1; /* mStarted == 1 */
 	mgr->EnableUpdate(1);
 	check("survived the WriteMessageToHost call path", true);
+	check("host notify fired exactly once", g_hostMessageCalls == 1);
+	check("host message is \"3\\x0c8\\r\" (a=3, b=8)",
+	      strcmp(g_lastHostMessage, "3\x0c""8\r") == 0);
 
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;

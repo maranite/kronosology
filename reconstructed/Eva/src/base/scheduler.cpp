@@ -187,13 +187,15 @@ void CScheduler::InsertLevel(int level)
 		((CSysApiInstance *)SysApiInstance)->WriteMessageToHost(3, 0x1c);
 }
 
-void CScheduler::Enable(int enable)
+CScheduler *g_poScheduler = 0;
+
+int CScheduler::Enable(int enable)
 {
 	int wasEnabled = mUnusedA;
 	mUnusedA = enable;
 
 	if (enable == 0)
-		return;
+		return wasEnabled;
 
 	if (mReady == 0) {
 		mReady = 1;
@@ -206,6 +208,28 @@ void CScheduler::Enable(int enable)
 
 	if (enable != 0 && wasEnabled == 0 && mUnusedB != 0)
 		mUnusedB = 0;
+
+	/* Real return value: the PREVIOUS mUnusedA ("mEnabled") state, in EAX at every
+	 * ground-truth `ret` -- see scheduler.h. */
+	return wasEnabled;
+}
+
+/* .text+0x080631c0, 78 bytes -- promoted Tier B -> Tier A 2026-07-26. Real body:
+ * unconditionally sets mNotifyHost = 1, then (enable != 0 only) clears mBusy and,
+ * if mReady is already set, posts the same WriteMessageToHost(3, 0x1c) notification
+ * Enable()'s own 0->1 transition uses. Unlike Enable(), this never touches mUnusedA/
+ * mReady/mUnusedB itself -- it is a distinct "re-arm the host notification" entry
+ * point, not an alias for Enable().
+ */
+void CScheduler::EnableUpdate(int enable)
+{
+	mNotifyHost = 1;
+
+	if (enable != 0) {
+		mBusy = 0;
+		if (mReady != 0)
+			((CSysApiInstance *)SysApiInstance)->WriteMessageToHost(3, 0x1c);
+	}
 }
 
 void CScheduler::Exec()
@@ -239,11 +263,6 @@ void CScheduler::Exec()
 			}
 		}
 	}
-}
-
-void CScheduler::EnableUpdate(int /*enable*/)
-{
-	/* Tier-B link-stub -- .text+0x080631c0, not measured. See scheduler.h. */
 }
 
 void CLevelManager::RunLevel(void *this_)

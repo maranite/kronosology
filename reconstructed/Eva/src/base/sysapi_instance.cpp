@@ -2,9 +2,9 @@
  * sysapi_instance.cpp  -  see include/sysapi_instance.h.
  *
  * Cleanup()/AddModule() transcribed from Cleanup@0806ca50.c (497 bytes) and
- * AddModule@0806b550.c (22 bytes). EnableMultiTask()/WriteMessageToHost() are Tier-B
- * link-stubs (see sysapi_instance.h). RegisterApi() -- Tier A, see below and the
- * header's own file comment.
+ * AddModule@0806b550.c (22 bytes). EnableMultiTask()/WriteMessageToHost() -- promoted
+ * Tier B -> Tier A 2026-07-26 (broad Tier-B recheck sweep), see sysapi_instance.h.
+ * RegisterApi() -- Tier A, see below and the header's own file comment.
  *
  * ConstructSysApiInstance() (new, 2026-07-23) transcribes
  * global.constructors.keyed.to.SysApiInstance@0806cc50.c (123 bytes) -- the real static
@@ -22,10 +22,13 @@
 #include "module_manager.h"
 #include "global_object_base.h"
 #include "system_api.h"
+#include "scheduler.h"
+#include "ckernel.h"
 
 #include <new>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 
 unsigned char SysApiInstance[0x34] = {};
 
@@ -109,14 +112,38 @@ void CSysApiInstance::Cleanup()
 	apis->Shrink();
 }
 
-int CSysApiInstance::EnableMultiTask(int /*enable*/)
+int CSysApiInstance::EnableMultiTask(int enable)
 {
-	return 0; /* Tier-B link-stub. See sysapi_instance.h. */
+	/* Real: pure tail call into g_poScheduler->Enable(enable) -- see sysapi_instance.h. */
+	return g_poScheduler->Enable(enable);
 }
 
-void CSysApiInstance::WriteMessageToHost(int /*a*/, int /*b*/)
+namespace {
+/* Same "vtable dispatch through an opaque, unreconstructed singleton" idiom used
+ * throughout this project (ckernel.cpp's CallVSlot1/2, dump_task.cpp's CallVSlot1) --
+ * not shared across translation units by convention. Real slot takes ONE pointer
+ * argument (the formatted message buffer), not (a,b) -- the two ints are sprintf'd
+ * into that buffer by the caller, not passed through.
+ */
+typedef void (*HostMessageFn)(void *, const char *);
+
+inline void CallHostWriteMessage(void *hostInterface, const char *msg)
 {
-	/* Tier-B link-stub. */
+	void *vtbl = *(void **)hostInterface;
+	HostMessageFn fn = *(HostMessageFn *)((char *)vtbl + 0xc);
+	fn(hostInterface, msg);
+}
+} // namespace
+
+void CSysApiInstance::WriteMessageToHost(int a, int b)
+{
+	/* Real: sprintf(buf, "%d\x0c%d\r", a, b) into a 0x1c-byte stack buffer, then an
+	 * unchecked vtable dispatch (slot +0xc, one pointer arg -- the buffer) through
+	 * g_poHostInterface -- see sysapi_instance.h.
+	 */
+	char buf[0x1c];
+	sprintf(buf, "%d\x0c%d\r", a, b);
+	CallHostWriteMessage(g_poHostInterface, buf);
 }
 
 void CSysApiInstance::AddModule(CModule *module)

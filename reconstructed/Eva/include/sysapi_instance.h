@@ -30,9 +30,9 @@
  *
  * Cleanup() itself is reconstructed faithfully (Tier A -- self-contained given
  * COmegaPtrArray is already reconstructed). EnableMultiTask()/WriteMessageToHost(int,int)
- * are real, correctly-mangled Tier-B link-stubs (empty bodies) -- genuinely deeper
- * substrate (multitasking-disable refcounting, host message queue) out of scope for
- * this pass. AddModule(CModule*) is Tier A -- a real 22-byte thiscall forwarder
+ * -- promoted Tier B -> Tier A 2026-07-26 (broad Tier-B recheck sweep): both are
+ * small, self-contained real forwarders ("size is not depth" again), see their own
+ * declarations below. AddModule(CModule*) is Tier A -- a real 22-byte thiscall forwarder
  * straight to CModuleManager::AddModule() (module_manager.h), which is itself the
  * Tier-B link-stub end of this particular chain.
  *
@@ -104,15 +104,26 @@ public:
 	/* .text+0x0806ca50, 497 bytes. */
 	void Cleanup();
 
-	/* .text+0x0806b3a0, 22 bytes -- Tier-B link-stub. Real signature takes/returns
-	 * the previous enable-state int (a save/restore refcount pattern -- see every
-	 * CModuleManager caller's own `iVarN = EnableMultiTask(0); ...; EnableMultiTask(iVarN);`
-	 * bracket in module_manager.cpp); returning 0 here is a safe "was already
-	 * enabled" default under the stub.
+	/* .text+0x0806b3a0, 22 bytes -- promoted Tier B -> Tier A 2026-07-26. Real body
+	 * is a pure TAIL CALL into g_poScheduler->Enable(enable) (scheduler.h): loads
+	 * the CScheduler singleton into the 'this' slot and jmp's straight into
+	 * Enable(int), so EnableMultiTask's own return value IS Enable()'s real
+	 * return value (the previous mEnabled state) -- confirmed by tracing the exact
+	 * stack-slot overwrite ([esp+4], the incoming CSysApiInstance* this) with
+	 * g_poScheduler before the jmp. This is what every CModuleManager caller's own
+	 * `iVarN = EnableMultiTask(0); ...; EnableMultiTask(iVarN);` save/restore
+	 * bracket (module_manager.cpp) actually round-trips through.
 	 */
 	int EnableMultiTask(int enable);
 
-	/* .text+0x0806aa00, 64 bytes -- Tier-B link-stub. */
+	/* .text+0x0806aa00, 64 bytes -- promoted Tier B -> Tier A 2026-07-26. Real body:
+	 * `sprintf(buf, "%d\x0c%d\r", a, b)` into a 0x1c-byte stack buffer, then an
+	 * unchecked vtable dispatch (slot +0xc) through the global g_poHostInterface
+	 * (CHostInterfaceBase* or CHostInterface*, ckernel.cpp -- itself still not
+	 * reconstructed, vtable-dispatched only, same as every other g_poXxx singleton
+	 * of that shape). No NULL check on g_poHostInterface in the real disassembly
+	 * either -- preserved as-is.
+	 */
 	void WriteMessageToHost(int a, int b);
 
 	/* .text+0x0806b550, 22 bytes. Real forwarder to CModuleManager::AddModule() --
