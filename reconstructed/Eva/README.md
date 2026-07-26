@@ -3369,3 +3369,81 @@ concurrent agent's own `CPoller::Exec()` work) and the OA-side
 `HARDWARE_REVIEW_LOG.md`/`SESSION_SUMMARY_2026-07-25.md`/`tools/build_gdbserver.sh`/
 `tools/gdbserver-i386-musl` (other agents' work) left untouched and unstaged. Manifest
 507 -> 508 of 37,795.
+
+### `CPoller::InitButtons()`/`InitAnalogs()` reconstructed -- CPoller genuinely fully closed, 2026-07-26
+
+Dispatched to continue the `nm -C`/call-graph sweep downstream of `CPoller::
+Exec(CMessage&)` (the just-closed final-Exec-overload batch) and to re-check `CPanel`/
+`CBatchDiskMan`/`CAlphaKeybCtrl` for anything left unexamined. `Exec(CMessage&)`'s own
+dispatch targets (the 15 `Msg*()` siblings, `CIfcClient`) were all already Tier A --
+no fresh downstream lead there. `CPanel` turned out to already be fully closed (every
+method real, including the two it dispatches to below). `CBatchDiskMan`/
+`CAlphaKeybCtrl`'s own previously-flagged remaining gaps (`CBatchDiskMainTask`'s real
+`CZ`-driven ctor; `CAlphaKeybCtrlTask`'s `COutLinkIfcBase`/`CMarshaller<T>` interface-
+link framework) were re-confirmed as genuine, correctly-deferred, dedicated-batch-scale
+efforts -- not touched again this pass (a concurrent agent was independently working
+the `CZ`-adjacent side of this same list, confirmed via `git status`/`git diff --stat`
+throughout: `include/cz_util.h`/`include/omega_vtables.h` modified and new
+`dir_entry.h`/`rm_api_callback.h`/`rm_job.h` files were that agent's own work, left
+untouched).
+
+The actual find: `CPoller::InitButtons()`/`InitAnalogs()` (`.text+0x089f4830`/
+`0x089f3c80`, 2925B/2919B) -- poller.h's own prior verdict ("Tier-B link-stub,
+genuinely needs the `CMessage` machinery this project hasn't reconstructed") was
+itself wrong, the SAME "raw size implies depth" misdiagnosis class `Exec(CMessage&)`'s
+own prior "~94 `strcmp()` sites" note already corrected once. Direct `objdump -dr
+-M intel` register tracing showed the giant bodies are GCC re-inlining a full copy of
+`RegisterClient()`'s own already-real Phase-1 "already registered?" scan directly into
+the loop, then unconditionally calling the REAL `RegisterClient()` (a direct, plain
+`call` instruction, not indirect) for each populated table slot. Net effect: a plain
+loop over a real, byte-dumped `.rodata` name-pair table.
+
+Both tables' populated slots share the exact same real name pair, byte-verified via
+`objdump -s -j .rodata`: `.rodata+0x8f7c260` -> `{"Editor", "PanelIfcTask"}`, both
+strings present verbatim in `.rodata`. `InitButtons()`'s own table
+(`.rodata+0x8f7b860`, 128 entries x 16 bytes, the SAME entries `s_buttonPrimaryCode[]`/
+`s_buttonAltCode[]`/`s_buttonFlag[]` already read fields +0/+4/+8 of -- this function
+reads the 4th field, +0xc) is populated for slots 1..78 (NOT slot 0, despite
+`s_buttonPrimaryCode[0] == 0` -- a real, preserved asymmetry) and empty for 0 and
+79..127. `InitAnalogs()`'s own table (`.rodata+0x8f7c060`, 64 entries x 8 bytes, the
+same entries `s_analogCode[]` already reads field +0 of -- this function reads field
++4, which that array's own comment already flagged as "dead data for
+`MsgSetAnalogClient()`" and is very much alive here) is populated for exactly 29 of
+its 64 slots.
+
+**Genuine, verified-not-assumed emergent behavior**: because `RegisterClient()`'s own
+already-real Phase-2 logic reuses the first still-UNCONNECTED `mClients` slot rather
+than building a new `CIfcClient` (a quirk that batch's own writeup already documented
+in isolation), and nothing within `InitButtons()`/`InitAnalogs()` themselves ever
+connects the client it just built, running both functions back-to-back from a fresh
+`CPoller` (matching `CPanel::Config()`'s own real, unconditional call order --
+`InitButtons()` then `InitAnalogs()`) constructs exactly ONE real `CIfcClient` object
+total, with EVERY one of the 78 populated button slots and 29 populated analog slots
+resolving to that same single handle (0). This was verified empirically (not just
+argued analytically) via a host-side KAT run against real, unmocked `RegisterClient()`/
+`CIfcClient` code before being written up here.
+
+Also corrected two now-stale claims this batch's own finding invalidated:
+`MsgSetAnalogClient()`/`MsgSetButtonClient()`'s own header comments previously called
+themselves `mHandleTable1`/`mHandleTable2`'s "real, sole writer" -- narrowed to "sole
+RUNTIME writer"; `InitAnalogs()`/`InitButtons()` are each table's real boot-time FIRST
+writer.
+
+New KAT: `verify/test_poller.cpp` section `[19]` (10 checks) -- against a genuinely
+fresh `CPoller` (empty `mClients`, matching what real `CPanel::Config()` sees, not a
+friend-poked fake-client array like every other section), confirms the exact
+slot-population pattern (0/79/127 stay `0xFFFFFFFF`; 1/78/(analog)0/(analog)63 get
+handle 0) and the single-real-client emergent behavior above via `IsValidHandle(0)` /
+`!IsValidHandle(1)`. `make -k objs`/`make -k verify`: 0 new regressions (only the
+pre-existing, already-documented `test_client_comm_server` 6-FAIL, unrelated, `src/
+ipc/*`, untouched this batch -- and belongs to the concurrent agent's own area
+regardless). `tools/build_lenny.sh`: `LINK OK`.
+
+`CPoller` now has genuinely ZERO remaining deferred surface of its own -- both prior
+"CPoller is fully closed" claims (the `Exec(CMessage&)` batch's own, and this one)
+turned out to have one more real gap each, both now closed for real. `CPanel`
+(`CPoller`'s own real, definitive ground-truth constructor+Config() caller) is fully
+real too, confirmed by direct re-read of `panel.h` -- no gap anywhere on that chain.
+
+Manifest 510 -> 512 of 37,795 (`manifest/gen_manifest.py`'s own address-list additions,
+`089f4830`/`089f3c80`).

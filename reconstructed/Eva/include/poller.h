@@ -64,16 +64,22 @@
  *                         prologue; collapses to a plain loop here, identical result).
  *                         CONFIRMED (2026-07-26, CPoller closeout batch, correcting
  *                         this comment's own prior guess): the 64-entry ANALOG
- *                         client-handle table -- `MsgSetAnalogClient()`'s (below) real,
- *                         sole writer, confirmed via direct disassembly, not the
- *                         "button/keyboard/touch by size" guess this comment
- *                         previously carried.
+ *                         client-handle table -- `MsgSetAnalogClient()`'s (below)
+ *                         real, sole RUNTIME writer. CORRECTED (2026-07-26,
+ *                         final-closeout batch): `InitAnalogs()` (below) is the
+ *                         table's real, boot-time FIRST writer -- 29 of the 64
+ *                         slots get a live `RegisterClient()` handle at
+ *                         `CPanel::Config()` time, before any `MsgSetAnalogClient()`
+ *                         call could ever run; "sole writer" only ever meant "sole
+ *                         RUNTIME writer".
  *   +0x190 mHandleTable2 uint32_t[0x80] (512 bytes) -- same fill idiom, second larger
  *                         table (128 entries). CONFIRMED (2026-07-26, same batch):
  *                         the 128-entry BUTTON client-handle table --
- *                         `MsgSetButtonClient()`'s (below) real, sole writer, NOT the
- *                         "analog by relative size" guess this comment previously
- *                         carried.
+ *                         `MsgSetButtonClient()`'s (below) real, sole RUNTIME writer.
+ *                         CORRECTED (2026-07-26, final-closeout batch): same
+ *                         correction as `mHandleTable1` above -- `InitButtons()`
+ *                         (below) is the table's real, boot-time first writer (78
+ *                         of the 128 slots).
  *   +0x390 mFlag390      unsigned char, ctor clears to 0. Real meaning not decoded.
  *   +0x394 mField394,
  *   +0x398 mField398,
@@ -343,9 +349,19 @@
  * the two ~700-instruction duplicated-`FindRegisteredClient()`-scan cases (the
  * true source of the ~94 `strcmp()` count) down to one-line wrappers each.
  * `Exec(CMessage&)` is now Tier A. `CPoller` is now FULLY structurally closed --
- * no remaining deferred surface of its own (`InitButtons()`/`InitAnalogs()` stay
+ * no remaining deferred surface of its own (`InitButtons()`/`InitAnalogs()` stayed
  * Tier-B link-stubs for the separate, already-documented `CMessage`-machinery
  * reason, not a CPoller-specific gap).
+ *
+ * UPDATE (2026-07-26, final-closeout batch): the "needs CMessage machinery"
+ * verdict on `InitButtons()`/`InitAnalogs()` above was itself wrong, same
+ * "size implies depth" misdiagnosis class as `Exec(CMessage&)`'s own prior
+ * "~94 strcmp() sites" note two paragraphs up. Both functions' large size is
+ * GCC re-inlining `RegisterClient()`'s own already-real Phase-1 scan; net
+ * effect is a plain loop over a real `.rodata` table calling the already-real
+ * `RegisterClient()` sibling. Both now Tier A -- see their own per-method
+ * header comments below for the full byte-verified derivation. `CPoller` has
+ * genuinely ZERO remaining deferred surface of its own as of this update.
  */
 
 #ifndef POLLER_H
@@ -880,20 +896,69 @@ public:
 	 */
 	int Exec(CMessage &msg);
 
-	/* .text+0x089f4830, 2925 bytes. Tier-B link-stub (empty body) -- genuinely
-	 * large, needs the CMessage machinery this project hasn't reconstructed at
-	 * all yet (see "DEFERRED THIS BATCH" above), out of scope for this batch.
-	 * Declared/stubbed so CPoller's own real ground-truth caller,
-	 * `CPanel::Config()` (.text+0x089ee530, panel.h/.cpp -- Eva Stage 6 CPanel
-	 * unlock batch, 2026-07-26), can compile and dispatch a real call, matching
-	 * this project's established declare-real-signature/stub-body convention for
-	 * out-of-scope callees (e.g. CChkApiInstance::SetOwnerModule/
-	 * CRMApiInstance::SetResMan, mains.cpp).
+	/* .text+0x089f4830, 2925 bytes. Tier A (2026-07-26 CPoller final-closeout
+	 * batch) -- CORRECTS the prior "Tier-B, needs CMessage machinery" verdict
+	 * (this header's own previous note, and `MsgSetButtonClient()`'s "sole
+	 * writer" claim on `mHandleTable2` below, both now stale). The 2925-byte
+	 * size is NOT algorithmic depth: it is GCC re-inlining an entire copy of
+	 * `RegisterClient()`'s own already-real Phase-1 "already registered?"
+	 * scan directly into this loop body (same duplicated-scan bug class
+	 * `Exec(CMessage&)`'s cases 6/8 already found and collapsed) -- confirmed
+	 * via direct `objdump -dr -M intel` register tracing: the giant unrolled
+	 * middle walks `mClients` (+0x84/+0x88 begin/end) via the identical
+	 * Duff's-device shape, then unconditionally stores the resulting index
+	 * into `mHandleTable2[i]` and calls the REAL `RegisterClient(&mHandleTable2[i],
+	 * nameA, nameB)` (`.text+0x089f31c0`, a direct, unambiguous `call`
+	 * instruction, not indirect) when no existing match was found. Modeled
+	 * as a real loop that just calls the already-real sibling -- semantically
+	 * identical, since `RegisterClient()` itself performs the exact same
+	 * lookup-or-insert check internally.
+	 *
+	 * The per-button `(nameA, nameB)` pair comes from a real, byte-dumped
+	 * `.rodata` table (`objdump -s -j .rodata --start-address=0x8f7b860`,
+	 * 128 entries x 16 bytes -- the SAME table `s_buttonPrimaryCode[]`/
+	 * `s_buttonAltCode[]`/`s_buttonFlag[]` already transcribe from fields
+	 * +0/+4/+8; this function reads the entry's 4th field, +0xc, a `void**`
+	 * name-pair pointer). Byte-verified: entries 1..78 (78 of the 128 slots,
+	 * NOT slot 0 -- slot 0's own name pointer is NULL despite
+	 * `s_buttonPrimaryCode[0] == 0`, a real, preserved asymmetry) all share
+	 * the identical name-pair pointer (`.rodata+0x8f7c260` -> `("Editor",
+	 * "PanelIfcTask")`, both strings verbatim in `.rodata`); slots 0 and
+	 * 79..127 have a NULL name pointer and are skipped entirely (handle left
+	 * at the loop's own `0xffffffff` init, no `RegisterClient()` call). This
+	 * means at boot every one of the 78 populated button slots registers the
+	 * SAME sibling link (`CEditor::CPanelIfcTask`, the class already
+	 * reconstructed via `editor.h`'s `CPanelIfcTask` -- consistent with that
+	 * class's own established role as the button/analog/encoder event sink),
+	 * each getting its own distinct `CIfcClient` handle; `MsgSetButtonClient()`
+	 * (poller.cpp) can later overwrite individual slots at runtime by code,
+	 * matching `s_buttonPrimaryCode[]`'s own identity-mapped 1..78 range.
+	 *
+	 * CORRECTS `MsgSetButtonClient()`'s own header comment above (and this
+	 * one's prior claim): that method is NOT `mHandleTable2`'s "sole writer" --
+	 * this constructor-time initializer runs first and is the table's real,
+	 * documented first writer; `MsgSetButtonClient()` remains the only
+	 * RUNTIME writer, which is what that comment was actually establishing.
 	 */
 	void InitButtons();
 
-	/* .text+0x089f3c80, 2919 bytes. Tier-B link-stub, same reasoning as
-	 * InitButtons() above -- CPanel::Config()'s other real, unconditional call.
+	/* .text+0x089f3c80, 2919 bytes. Tier A (2026-07-26 CPoller final-closeout
+	 * batch) -- same shape, bug class, and correction as `InitButtons()`
+	 * above, over `mHandleTable1`/64 analog slots instead of `mHandleTable2`/
+	 * 128 button slots. Ground truth's per-slot `.rodata` table is the SAME
+	 * one `s_analogCode[]` (poller.cpp) already transcribes from
+	 * `.rodata+0x8f7c060` (64 entries x 8 bytes, `{int32_t code; void
+	 * *namePtr;}`) -- this function reads the entry's 2nd field (`namePtr`,
+	 * `s_analogCode[]`'s own comment already calls this "dead data for
+	 * MsgSetAnalogClient()"; it is very much alive here). Byte-verified: 29
+	 * of the 64 slots (indices 0,1,6,7,8,9,14,15,16,17,22,23,24,25,30,31,32,
+	 * 33,38,39,40,41,47,48,49,55,56,57,63) have a non-NULL `namePtr`, and
+	 * EVERY one of those 29 shares the identical pointer InitButtons() uses
+	 * (`.rodata+0x8f7c260` -> `("Editor", "PanelIfcTask")`); the remaining 35
+	 * slots are skipped (handle left at `0xffffffff`). Same
+	 * `RegisterClient(&mHandleTable1[i], "Editor", "PanelIfcTask")` real call
+	 * for each populated slot, same "not the sole writer" correction to
+	 * `MsgSetAnalogClient()`'s own header comment above.
 	 */
 	void InitAnalogs();
 

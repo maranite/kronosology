@@ -1772,6 +1772,60 @@ int main()
 		PollerTestHooks::SetClients(p, 0, 0);
 	}
 
+	/* [19] InitButtons()/InitAnalogs() (2026-07-26 final-closeout batch): real
+	 * boot-time population of mHandleTable2/mHandleTable1 from the byte-verified
+	 * .rodata name-pair tables, both calling through to the already-real
+	 * RegisterClient(). Exercised against a genuinely FRESH CPoller (empty
+	 * mClients, same as real CPanel::Config() would see) rather than the
+	 * friend-poked fake-client arrays every other section uses, since the whole
+	 * point here is to observe RegisterClient()'s own real Phase-2/Phase-3
+	 * behavior end to end.
+	 */
+	{
+		printf("[19] InitButtons()/InitAnalogs() (2026-07-26 final-closeout batch)\n");
+		CPoller p(owner, 0); /* mResource irrelevant -- neither method touches it */
+
+		p.InitButtons();
+
+		check("InitButtons(): slot 0 (unpopulated) stays 0xFFFFFFFF",
+		      PollerTestHooks::HandleTable2(p)[0] == 0xffffffffu);
+		check("InitButtons(): slot 1 (first populated) got a real handle (0)",
+		      PollerTestHooks::HandleTable2(p)[1] == 0u);
+		check("InitButtons(): slot 78 (last populated) reused the SAME handle (0)",
+		      PollerTestHooks::HandleTable2(p)[78] == 0u);
+		check("InitButtons(): slot 79 (first unpopulated tail) stays 0xFFFFFFFF",
+		      PollerTestHooks::HandleTable2(p)[79] == 0xffffffffu);
+		check("InitButtons(): slot 127 (last slot) stays 0xFFFFFFFF",
+		      PollerTestHooks::HandleTable2(p)[127] == 0xffffffffu);
+		check("InitButtons(): exactly ONE real CIfcClient got constructed "
+		      "(RegisterClient()'s own Phase-2 'reuse the still-unconnected "
+		      "slot' quirk -- every populated button slot after the first "
+		      "reuses handle 0, no 2nd client is ever built)",
+		      p.IsValidHandle(0) && !p.IsValidHandle(1));
+
+		p.InitAnalogs();
+
+		check("InitAnalogs(): slot 0 (first populated) reused the SAME single "
+		      "client InitButtons() already built (handle 0) -- it too is "
+		      "still unconnected, so Phase-2 matches again",
+		      PollerTestHooks::HandleTable1(p)[0] == 0u);
+		check("InitAnalogs(): slot 2 (unpopulated) stays 0xFFFFFFFF",
+		      PollerTestHooks::HandleTable1(p)[2] == 0xffffffffu);
+		check("InitAnalogs(): slot 63 (last populated) also reused handle 0",
+		      PollerTestHooks::HandleTable1(p)[63] == 0u);
+		check("InitAnalogs(): still exactly ONE real CIfcClient total across "
+		      "BOTH functions combined -- InitButtons()+InitAnalogs() together "
+		      "register 78+29 slots but construct only 1 real client object",
+		      p.IsValidHandle(0) && !p.IsValidHandle(1));
+
+		/* No SetClients(p, 0, 0) detach here, unlike the friend-poked-fake-array
+		 * sections above -- mClients is entirely real (RegisterClient()'s own
+		 * malloc'd TVector array + 1 real, heap-allocated CIfcClient), so the
+		 * normal ~CPoller() path (free(clientsBegin), same as section [13]'s own
+		 * real-append scope) is the correct, leak-free cleanup here.
+		 */
+	}
+
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");
 	return g_fail ? 1 : 0;
 }

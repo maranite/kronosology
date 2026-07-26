@@ -1061,6 +1061,20 @@ RECONSTRUCTED = {
     # source of the ~94 strcmp() count) down to one-line wrappers each. This closes
     # CPoller fully -- no remaining deferred surface of its own.
     "089f54f0",  # CPoller::Exec(CMessage&)
+
+    # --- 2026-07-26 (final-closeout batch): CORRECTS the "closes CPoller fully"
+    # claim immediately above -- InitButtons()/InitAnalogs() were still Tier-B
+    # link-stubs at that point ("needs CMessage machinery", poller.h's own prior
+    # note), a real remaining gap. Same misdiagnosis class as Exec(CMessage&)'s
+    # own prior "~94 strcmp() sites" note: the 2925B/2919B size is GCC re-inlining
+    # RegisterClient()'s own already-real Phase-1 scan, not algorithmic depth. Net
+    # effect: a plain loop over a real, byte-dumped .rodata name-pair table
+    # calling the already-real RegisterClient() sibling. Both now Tier A -- see
+    # poller.h's own per-method header comments for the full derivation. CPoller
+    # now has genuinely ZERO remaining deferred surface (verified: CPanel, its
+    # own real, definitive ground-truth caller, panel.h, is fully real too).
+    "089f4830",  # CPoller::InitButtons()
+    "089f3c80",  # CPoller::InitAnalogs()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

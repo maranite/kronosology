@@ -1437,16 +1437,74 @@ int CPoller::Exec(CMessage &msg)
 	return -1; /* unreachable given the range check above */
 }
 
-/* Tier-B link-stubs -- see poller.h's own header comment (2026-07-26 CPanel unlock
- * batch UPDATE). Real bodies (2925B/2919B) genuinely out of scope, same CMessage-
- * prerequisite reasoning as every other deferred CPoller method.
+/* CPoller::InitButtons()/InitAnalogs() -- see poller.h's own per-method header
+ * comments (final-closeout batch, 2026-07-26) for the full derivation: both
+ * were previously (mis)classified Tier-B "needs CMessage machinery"; in fact
+ * their large raw size is GCC re-inlining a full copy of `RegisterClient()`'s
+ * own Phase-1 scan, and the real net effect collapses to a plain loop over a
+ * real `.rodata` table calling the already-real `RegisterClient()` sibling
+ * (same "duplicated scan collapses to a call" precedent as `Exec(CMessage&)`'s
+ * cases 6/8 above). Both name-pair tables' populated slots share the exact
+ * same real name pair, byte-verified via `objdump -s -j .rodata`:
+ * `.rodata+0x8f7c260` -> `{"Editor", "PanelIfcTask"}`.
  */
+
+/* Real .rodata table @ 0x08f7b860, 128 entries x 16 bytes (the SAME entries
+ * s_buttonPrimaryCode[]/s_buttonAltCode[]/s_buttonFlag[] above already read
+ * fields +0/+4/+8 of); this function reads the 4th field, +0xc, a `void**`
+ * name-pair pointer. Byte-dumped directly: TRUE for slots 1..78 (name pointer
+ * == 0x8f7c260); FALSE (NULL name pointer, real ground-truth gap -- slot 0's
+ * own primary code is 0, but its name pointer is genuinely NULL, an
+ * asymmetry transcribed as found) for slot 0 and slots 79..127.
+ */
+static const bool s_buttonSlotPopulated[0x80] = {
+	0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
 void CPoller::InitButtons()
 {
+	for (unsigned int i = 0; i < 0x80; i++) {
+		mHandleTable2[i] = 0xffffffff;
+		if (s_buttonSlotPopulated[i]) {
+			unsigned int handle;
+			RegisterClient(handle, "Editor", "PanelIfcTask");
+			mHandleTable2[i] = handle;
+		}
+	}
 }
+
+/* Real .rodata table @ 0x08f7c060, 64 entries x 8 bytes -- the SAME entries
+ * s_analogCode[] above already reads field +0 (`code`) of; this function
+ * reads the entry's 2nd field, +4, a `void*` name-pair pointer
+ * (s_analogCode[]'s own comment already flags this field as "dead data for
+ * MsgSetAnalogClient()" -- it is very much alive here). Byte-dumped directly:
+ * TRUE for the 29 slots listed, all sharing the identical real name pointer
+ * (0x8f7c260); FALSE (NULL) for the remaining 35.
+ */
+static const bool s_analogSlotPopulated[0x40] = {
+	1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1,
+	1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1,
+	1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1,
+	1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1,
+};
 
 void CPoller::InitAnalogs()
 {
+	for (unsigned int i = 0; i < 0x40; i++) {
+		mHandleTable1[i] = 0xffffffff;
+		if (s_analogSlotPopulated[i]) {
+			unsigned int handle;
+			RegisterClient(handle, "Editor", "PanelIfcTask");
+			mHandleTable1[i] = handle;
+		}
+	}
 }
 
 CPoller::CIfcClient::CIfcClient(const CTask &owner, const char *name, int lastArg)
