@@ -90,34 +90,27 @@
  *                     subsystem sweep (CKGAPIControl/CGlobal/CPCMProg/
  *                     CNetConfig/CMIDI/USTGUserAPI/CKGUserAPI/COmegaInterface,
  *                     EnterCheckHardware@0824b020.c) and stay Tier-B stubs.
- *   - CPanelIfcTask   FINDING FOR A FUTURE DEDICATED PASS: its own real ctor
- *                     (CPanelIfcTask@0824b7e0.c) turns out to be FULLY
- *                     tractable now -- every dependency it needs
- *                     (CTask::CTask, CTask::Add(COutLink*), COutLinkMono::
- *                     COutLinkMono(), CSTGUnsolMsgHandler::CSTGUnsolMsgHandler())
- *                     is already real, reconstructed by earlier Stage 6
- *                     batches today. Likewise SetLEDStatus (x3)/ShortBeep/
- *                     EnterDiagnostics/SetupPanelInterface/SetAllLED/
- *                     OnTouchPanelEvent/OnButtonEvent/Exec(CMessage&) all
- *                     route through the already-real `COutLinkMono::OutMono()`
- *                     IPC primitive or `PegMessageQueue::Push()` (the latter
- *                     is the one remaining real Peg-toolkit gap: `PegThing`/
- *                     `PegMessageQueue` are NOT reconstructed anywhere in this
- *                     project). Only `Exec()` (the bare, 0-arg CTask-poll
- *                     override) additionally needs a full second brand-new
- *                     vtable (`CPanelCfg`, an anonymous COutLinkMono-derived
- *                     override the real ctor builds inline) verified
- *                     byte-exact from .rodata before it could be trusted --
- *                     genuinely a SEPARATE class's worth of work (a real new
- *                     CPanelIfcTask vtable + a real new CPanelCfg vtable, each
- *                     needing their own byte-exact-verified slot count, per
- *                     this project's own recurring undersized-vtable bug
- *                     class). NOT attempted this pass to keep this batch to
- *                     CEditor's own scope -- flagged here explicitly as
- *                     ready-to-go for whoever picks up CPanelIfcTask next.
- *                     `panel_ifc_task.h` gained only the minimal additional
- *                     ctor overload Setup() needs to link (Tier-B, see that
- *                     header).
+ *   - CPanelIfcTask   STALE NOTE, CORRECTED 2026-07-26: this paragraph
+ *                     originally flagged CPanelIfcTask as a "finding for a
+ *                     future dedicated pass" (the CEditor batch itself, this
+ *                     same day, deliberately left it Tier-B to stay in scope).
+ *                     That future pass already happened, same day
+ *                     (eva_panel_ifc_task_dedicated_batch.md, commit
+ *                     `365743a`) -- `CPanelIfcTask` (ctor/dtor/SetMargin/
+ *                     GetMargin/SetLEDStatus x3/ShortBeep/EnterDiagnostics/
+ *                     SetupPanelInterface/SetAllLED/OnTouchPanelEvent/
+ *                     OnButtonEvent/both Exec overloads/OnAnalogEvent/
+ *                     OnEncoderEvent) AND its own new `CPanelCfg` sub-object
+ *                     class are BOTH fully real now, including the "full
+ *                     second brand-new vtable" this note used to flag as
+ *                     outstanding work -- see panel_ifc_task.h for the
+ *                     complete, current reconstruction and its own real
+ *                     byte-exact vtable derivation. Left this note in place
+ *                     (rather than deleted) as a marker of how fast this
+ *                     specific "flagged, not yet attempted" claim went stale
+ *                     -- worth remembering generally: check panel_ifc_task.h
+ *                     directly rather than trusting this file's own account
+ *                     of CPanelIfcTask's status.
  *   - CChunkServerTask now fully real AND wired (this session, 2026-07-26,
  *                     the same fan-out re-survey that unlocked CAlphaKeybIfcTask
  *                     above). The base class this needs, `CChunkServer`
