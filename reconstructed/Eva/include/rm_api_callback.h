@@ -29,11 +29,33 @@
  * this-adjusting thunk table symbols.csv shows immediately follows the
  * CEditable-thunk group): 7 slots -- {~CRMApiCallBack (D1), ~CRMApiCallBack
  * (D0), OnSetRes, OnLoadRes, OnLoad, OnSave, OnDelete} -- matching this
- * class's own 7 named methods exactly. `CBatchDiskMainTask`'s own vtable
- * arrays (omega_vtables.h) install this group `EvaVTableStub`-backed, which
- * is not a compromise here -- ground truth's own real bodies for all 5 OnXxx
- * slots ARE the empty no-op `EvaVTableStub` already provides, confirmed
- * byte-for-byte, not merely assumed safe.
+ * class's own 7 named methods exactly.
+ *
+ * CORRECTION (`PreloadDir()` investigation, 2026-07-26): the claim below that
+ * "ground truth's own real bodies for all 5 OnXxx slots ARE the empty no-op
+ * EvaVTableStub already provides" was only checked at the BASE class level --
+ * true for 4 of 5 (`OnSetRes`/`OnLoadRes`/`OnSave`/`OnDelete`, confirmed
+ * byte-identical `ret`-only at 0x0818f1f0/0x0818f200/0x0818f220/0x0818f230,
+ * and this class's own vtable genuinely installs those base addresses at
+ * 0x08eabf04/0x08eabf08/0x08eabf10/0x08eabf14). Slot `OnLoad`
+ * (0x08eabf0c) is DIFFERENT: `CBatchDiskMainTask` genuinely overrides it with
+ * real logic at .text+0x08242e30 (`_ZThn128_` this-adjusting variant
+ * 0x08242e90, confirmed to be the exact value ground truth installs at
+ * 0x08eabf0c) -- increments `mUnknown8c`/`mUnknown90` depending on the
+ * result, calls `FMApi->FindNextFile()` on the last handle in
+ * `mUnknownVec`, then tail-calls `PreloadDir()` (batch_disk_main_task.h's
+ * own updated header comment has the full writeup). NOT reconstructed --
+ * no reachable caller in this project's own call graph (only the
+ * out-of-scope `CResMan`/`CJobStack` `LoadRes()`-family would dispatch it),
+ * and its real body's `[handle_ptr - 4]` dereference is only valid once
+ * `PrepareGroupsForPreload()`/`PreloadGroup()` have populated `mUnknownVec`
+ * (they stay deferred, so it is always the zero-initialized state here).
+ * `PTR__CBatchDiskMainTask_08eabec8[5]` (primary group) and
+ * `PTR__CBatchDiskMainTask_08eabefc[4]` (tertiary/this-adjusted group) both
+ * stay `EvaVTableStub`-backed -- this is now a documented, deliberate
+ * "confirmed real, deliberately not wired up (no live caller, would need a
+ * populated container to safely exercise)" state, not a silently-wrong
+ * "confirmed empty" claim.
  */
 
 #ifndef RM_API_CALLBACK_H

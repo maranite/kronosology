@@ -182,6 +182,22 @@ extern "C" void CEditorStartVSlot(void *obj)
 	((CEditor *)obj)->Start();
 }
 
+/*
+ * FIX (2026-07-26, broad Tier-B recheck sweep): PTR__CSysApiInstance_08e81008's own
+ * slot 62 (byte offset 0xf8) is installed as this real forwarder instead of the
+ * generic EvaVTableStub. Direct byte read of the ground-truth binary's own installed
+ * vtable (Eva, VA 08e81008+0xf8) confirms the real pointer there is exactly
+ * 0x0806aa00 = CSysApiInstance::WriteMessageToHost(int,int) (sysapi_instance.h).
+ * CErrorHandler::EnableUpdate() (error_handler.cpp) is the one reconstructed caller
+ * that dispatches through this exact slot on the global Api object -- under the old
+ * EvaVTableStub no-op, that notification silently vanished. Same
+ * "LESSON_vtable_dispatch_stub_gap" bug class as the +0x40/+0xa0/+0x44 slots above.
+ */
+extern "C" void WriteMessageToHostVSlot(void *obj, int a, int b)
+{
+	((CSysApiInstance *)obj)->WriteMessageToHost(a, b);
+}
+
 extern "C" {
 void *PTR__CHostInterfaceBase_08e80b68[22] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -255,7 +271,7 @@ void *PTR__CSysApiInstance_08e81008[94] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)WriteMessageToHostVSlot, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -685,9 +701,33 @@ void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4] = {
 
 int EvaDataPlaceholder_08eabce8 = 0;
 
+/*
+ * FIX (CBatchDiskMainTask::PreloadDir() investigation, 2026-07-26):
+ * PTR__CDirEntry_08e81908's own slot 2 (byte offset 0x8) is installed as this
+ * real forwarder instead of the generic EvaVTableStub. Direct `.rodata` byte
+ * read of ground truth's own vtable (0x08e81908+0x8 = 0x08071500) confirms the
+ * real function there is CDirEntry::HasValidLongNameExt() (dir_entry.h/.cpp) --
+ * and unlike this vtable's other 4 real virtual slots (OnShortNameChanged/
+ * OnShortExtChanged/OnLongNameChanged/OnLongExtChanged, confirmed
+ * byte-identical empty `ret`-only bodies, correctly left EvaVTableStub-backed
+ * below), THIS one is genuinely dispatched through and its return value
+ * consumed: CDirEntry::GetName()/GetExt() (dir_entry.cpp) both call
+ * `(*(this->mVtbl + 0x8))(this)` to decide short-vs-long name/ext. Under the
+ * old EvaVTableStub no-op this would have returned stale/meaningless EAX
+ * garbage instead of a real true/false answer -- same "EvaVTableStub leaves a
+ * consumed return value as garbage" hazard class as every other confirmed
+ * instance of this bug in this project (see AddConstructorVSlot/GetFMApiStub's
+ * own comments above).
+ */
+extern "C" int CDirEntryHasValidLongNameExtVSlot(void *obj)
+{
+	return ((const CDirEntry *)obj)->HasValidLongNameExt() ? 1 : 0;
+}
+
 /* CDirEntry's own real vtable -- see omega_vtables.h's own header comment. */
 void *PTR__CDirEntry_08e81908[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CDirEntryHasValidLongNameExtVSlot,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub,
 };

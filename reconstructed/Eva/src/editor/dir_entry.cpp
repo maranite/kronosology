@@ -22,3 +22,22 @@ CDirEntry::~CDirEntry()
 	 * cz_util.h), so there is nothing further to release here.
 	 */
 }
+
+/* .text+0x080723b0/0x080723e0. See header comment. */
+const char *CDirEntry::GetName() const
+{
+	typedef int (*Fn)(const CDirEntry *);
+	Fn fn = *(Fn *)((const char *)mVtbl + 0x8);
+	bool useLong = fn(this) != 0;
+	uint32_t raw = useLong ? mLongName.RawPtrField() : mShortName.RawPtrField();
+	return (const char *)(uintptr_t)raw;
+}
+
+const char *CDirEntry::GetExt() const
+{
+	typedef int (*Fn)(const CDirEntry *);
+	Fn fn = *(Fn *)((const char *)mVtbl + 0x8);
+	bool useLong = fn(this) != 0;
+	uint32_t raw = useLong ? mLongExt.RawPtrField() : mShortExt.RawPtrField();
+	return (const char *)(uintptr_t)raw;
+}

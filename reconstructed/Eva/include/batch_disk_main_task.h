@@ -83,6 +83,17 @@
  *                 convention as `COutLink::mLinks` (out_link.h) -- the real
  *                 template container is out of scope, only its
  *                 default-construct-to-empty ctor behavior is reproduced.
+ *                 UPDATE (`PreloadDir()`/`OnLoad()` investigation,
+ *                 2026-07-26): the 3 zeroed pointers at +4/+8/+12 within this
+ *                 buffer (absolute +0xcc/+0xd0/+0xd4) are confirmed to be a
+ *                 real `{begin, end, capacity_end}` triple -- `PreloadDir()`
+ *                 and `OnLoad()` both read/write `+0xcc`/`+0xd0` directly
+ *                 (bypassing any real `TVector` method) as an int-handle
+ *                 push/pop stack of open `FMApi::FindFirstFile()` handles.
+ *                 Still correctly left as an opaque zeroed buffer here --
+ *                 nothing reconstructed ever pushes a real handle onto it
+ *                 (that would require `PreloadDir()`'s own genuinely deep
+ *                 body, see below), so `begin == end == 0` always holds.
  *   +0xd8  mState          int, = 0 -- THE real field `IsBusy()`/
  *                 `IsPreloadRunning()` (0-arg) read back (see below).
  *   +0xdc  int  = 0
@@ -116,13 +127,108 @@
  *
  * `PrepareGroupsForPreload(const char*)` (.text+0x08241340, 1336 bytes),
  * `PreloadGroup()` (.text+0x08241d10, 1148 bytes), `PreloadDir()`
- * (.text+0x082421f0, 2940 bytes), `AddItemToPreload()` (.text+0x08241b80,
- * 359 bytes), `Exec(CMessage&)` (.text+0x08243020, 703 bytes) are the real,
- * genuinely deep, CZ/CRMJob-driven business logic this class was originally
- * deferred for -- STILL Tier-B stubs (real signatures declared, empty
- * bodies), unchanged verdict, this re-check does not force them. `Exec()`
- * (0-arg, .text+0x08242ea0, 377 bytes) is the per-tick task body, same
- * status.
+ * (.text+0x082421f0, 0xc40 = 3136 bytes), `AddItemToPreload()`
+ * (.text+0x08241b80, 359 bytes), `Exec(CMessage&)` (.text+0x08243020,
+ * 703 bytes) are the real, genuinely deep, CZ/CRMJob-driven business logic
+ * this class was originally deferred for -- STILL Tier-B stubs (real
+ * signatures declared, empty bodies), unchanged verdict. `Exec()` (0-arg,
+ * .text+0x08242ea0, 377 bytes) is the per-tick task body, same status.
+ *
+ * UPDATE (dedicated `PreloadDir()` reconstruction attempt, 2026-07-26): fully
+ * disassembled (`objdump -dr -M intel --start-address=0x082421f0
+ * --stop-address=0x08242e30`, the next real symbol) to answer "is this
+ * genuinely deep, or just big" -- **genuinely deep, confirmed with concrete
+ * evidence, not deferred on suspicion**. Real dependencies, each independently
+ * cross-checked via a direct `.rodata` vtable byte read + `nm -C` resolve
+ * (same method as every other Api-vtable slot identification in this
+ * project):
+ *   - `CZ::Insert(char, unsigned)` / `Insert(const char*, unsigned)` /
+ *     `RFind(char, unsigned) const` / `Remove(unsigned, unsigned)`, plus the
+ *     `CZ(const char*, unsigned)` and `CZ(const CZ&, unsigned)` constructors
+ *     (all `.text+0x80ba6xx-0x80bcxxx` range) -- real string-building logic
+ *     (appending `\`, trimming a leading `.`/extension, path-joining) that
+ *     needs actual `CZ` container semantics, not just the 2 raw-offset reads
+ *     `CDirEntry::GetName()`/`GetExt()`/`HasValidLongNameExt()` needed (see
+ *     dir_entry.h, cz_util.h) -- this is exactly the 247-method container
+ *     `config_manager.h`'s `CreateResourceFamilies()` already declared out of
+ *     scope project-wide.
+ *   - `FMApi`'s own vtable slots `+0x270`/`+0x274`/`+0x278` -- confirmed (via
+ *     `CFMApiInstance`'s real vtable at 0x08e87200, address-point
+ *     0x08e87208) to be `FindFirstFile(char const*, int*, CDirEntry*)`
+ *     (0x0811fd50), `FindNextFile(int, CDirEntry*)` (0x0811d420), and
+ *     `FindClose(int)` (0x0810e660) -- a real, stateful directory-scan
+ *     iterator this function drives (open handle stored/popped from
+ *     `mUnknownVec`'s own raw begin/end pointer pair, see below).
+ *   - `RMApi`'s own vtable slots `+0xf0`/`+0xf4`/`+0xf8`/`+0xfc`/`+0x100`/
+ *     `+0x110` -- confirmed (via `CRMApiInstance`'s real vtable at
+ *     0x08e88c40, address-point 0x08e88c48, cross-checked against each
+ *     call site's own real argument count) to be, respectively,
+ *     `GetNumPositions(uchar,uint)` (0x08164e80), `GetMinAbsBank(uchar,uint)`
+ *     (0x081624e0), `GetBankOffset(uchar,uint)` (0x08165080),
+ *     `GetFileName(uchar,uint,int&)` (0x081652e0), `GetExt(uchar,uint)`
+ *     (0x08162f30), and `GetAbsBank(uchar,uint,uchar)` (0x08164cf0, not
+ *     directly seen called in `PreloadDir()` itself but resolved from the
+ *     same vtable read) -- real resource-manager bank/position lookups used
+ *     to check whether the
+ *     current `CDirEntry` is already a known loaded item, tied to the exact
+ *     same `CResMan`/`CJobStack` god-object subsystem `CRMJob`'s own recheck
+ *     already flagged out of scope (see `rm_job.h`'s header comment).
+ *   - `TPtrArray<SLoadBankOffset>` (own real mangled dtor
+ *     `_ZN9TPtrArrayI15SLoadBankOffsetED1Ev`, 0x0818f2c0) and
+ *     `COmegaPtrArray`/`COmegaPtrArray::Add`/`::Destroy` (0x080a6c10/
+ *     0x080a6da0/0x080a6ca0) -- a real grow-by-doubling array-of-3-byte-
+ *     records container (`0xaaaaaaab`-reciprocal-multiply divide-by-3
+ *     pattern, .text+0x8242a63-0x8242cfe) built to accumulate matched
+ *     preload-group entries -- genuinely new container machinery, not
+ *     mechanical repetition of anything already reconstructed.
+ *   - `TVector<int,1>::Append(int const*, int const*)` (0x0818b1d0) on
+ *     `mUnknownVec` (+0xc8) -- confirmed this field's own real identity: a
+ *     3-pointer `{vtbl, begin, end}`-shaped buffer (not just "vtbl + 3
+ *     zeroed pointers" as originally guessed) -- `begin`/`end` are this
+ *     function's OWN open-`FindFirstFile()`-handle stack, read/written via
+ *     raw pointer arithmetic at `this+0xcc`/`this+0xd0` (bypassing any real
+ *     `TVector` method call for push/pop, only `Append()` for the one
+ *     "insert result" case) -- still correctly modeled as opaque, since nothing
+ *     reconstructed populates it (see `mUnknownVec`'s own field comment
+ *     below).
+ * All of the above are genuinely new, real business logic depending on 2
+ * subsystems (the `CZ` string container, the `CResMan`/`CJobStack`
+ * resource-manager god-object) BOTH already independently declared
+ * project-wide out of scope elsewhere -- this is not a "size is not depth"
+ * case; the size comes from real, non-repetitive logic, not
+ * table-driven/mechanical duplication. Left as Tier-B stubs, matching every
+ * other CZ-container-blocked function in this project.
+ *
+ * What WAS extracted from this investigation (not wasted): the first ~0x120
+ * bytes of `PreloadDir()`, before it reaches any `CZ`-internal-writing call,
+ * make 9 plain (non-virtual `call`, not vtable-dispatched) `CDirEntry`
+ * predicate/accessor calls on `this->mDirEntry`, all of which turned out to
+ * be self-contained raw-offset reads needing no `CZ` semantics --
+ * `IsEmpty()`/`IsDeleted()`/`IsReserved()`/`IsLabel()`/`IsDir()`/
+ * `IsParentDir()`/`IsCurrentDir()`/`HasValidLongNameExt()`/`GetName()`/
+ * `GetExt()`, now reconstructed (dir_entry.h/.cpp) -- see that header's own
+ * updated comment.
+ *
+ * Also found and FIXED while tracing `PreloadDir()`'s own neighbor
+ * `CBatchDiskMainTask::OnLoad(int)` (.text+0x08242e30, `_ZThn128_` variant
+ * 0x08242e90 -- the `CRMApiCallBack` virtual override for THIS class): a
+ * stale documentation claim in `rm_api_callback.h` that "ground truth's own
+ * real bodies for all 5 OnXxx slots ARE the empty no-op EvaVTableStub
+ * already provides, confirmed byte-for-byte" -- true for 4 of 5
+ * (`OnSetRes`/`OnLoadRes`/`OnSave`/`OnDelete`) but NOT `OnLoad`, which this
+ * class genuinely overrides with real logic (increments `mUnknown8c`/
+ * `mUnknown90` depending on the result, then calls `FMApi->FindNextFile()`
+ * on the last handle in `mUnknownVec` and tail-calls `PreloadDir()` again).
+ * `OnLoad()` itself is NOT reconstructed here -- it has no reachable caller
+ * in this project's own call graph (only `CResMan`/`CJobStack`'s real
+ * `LoadRes()`-family, out of scope, would ever dispatch it), and its real
+ * body reads `mUnknownVec`'s always-zero handle pointer with a `[ptr - 4]`
+ * dereference that would only be valid once `PrepareGroupsForPreload()`/
+ * `PreloadGroup()` have actually populated it -- writing that logic now
+ * would add a genuinely dereference-a-null-derived-address hazard for zero
+ * present benefit. `PTR__CBatchDiskMainTask_08eabefc[4]` stays
+ * `EvaVTableStub`-backed with a corrected comment (see rm_api_callback.h)
+ * rather than the previous, now-disproven blanket claim.
  *
  * `IsBusy() const` (.text+0x08241230, 18 bytes): real, literal
  * `return mState != 0;` -- confirmed byte-exact match to `mState`'s own

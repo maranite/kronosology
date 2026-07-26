@@ -811,11 +811,16 @@ extern void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4];
  * re-check batch, 2026-07-26). Confirmed byte-exact via direct `.rodata`
  * reads at 0x08e81900 (`vtable for CDirEntry`): slot0 at 0x08e81908, next
  * symbol (`typeinfo-name`) at 0x08e81924 -> (0x924-0x908)/4 = 7 slots (dtor
- * D1/D0 + 5 real virtual overrides, none named/reconstructed -- see
- * dir_entry.h's own header comment for why only ctor/dtor are in scope).
- * Entirely EvaVTableStub-backed -- install-only, no reconstructed code
- * dispatches through it (CDirEntry is only ever ctor/dtor'd as an embedded
- * CBatchDiskMainTask member, batch_disk_main_task.h).
+ * D1/D0 + 5 real virtual overrides).
+ *
+ * UPDATE (`PreloadDir()` investigation, 2026-07-26): slot 2
+ * (HasValidLongNameExt(), .text+0x08071500) is REAL and genuinely dispatched
+ * through by `GetName()`/`GetExt()` (dir_entry.cpp) -- fixed, see
+ * `CDirEntryHasValidLongNameExtVSlot`'s own comment in omega_vtables.cpp.
+ * Slots 3-6 (OnShortNameChanged/OnShortExtChanged/OnLongNameChanged/
+ * OnLongExtChanged, .text+0x081806a0..0x081806d0) ARE confirmed
+ * byte-identical empty (`ret` only) -- correctly stay EvaVTableStub-backed,
+ * not merely assumed safe.
  */
 extern void *PTR__CDirEntry_08e81908[7];
 
@@ -831,10 +836,17 @@ extern void *PTR__CDirEntry_08e81908[7];
  * exactly (rm_api_callback.h). All 3 groups entirely EvaVTableStub-backed --
  * same "never CModuleManager-dispatched, only ever CModule::Add()ed" status
  * as every other CTask-derived per-instance vtable in this project
- * (CChunkServerTask, CPanelIfcTask, CEditTask above). The tertiary group's
- * own 5 OnXxx slots being EvaVTableStub is not a compromise -- ground
- * truth's real bodies for all 5 ARE empty no-ops, confirmed byte-for-byte
- * (rm_api_callback.h's own header comment).
+ * (CChunkServerTask, CPanelIfcTask, CEditTask above).
+ *
+ * UPDATE (`PreloadDir()` investigation, 2026-07-26): the tertiary group's
+ * `OnSetRes`/`OnLoadRes`/`OnSave`/`OnDelete` slots being EvaVTableStub is
+ * confirmed correct (ground truth's own real bodies ARE empty no-ops,
+ * byte-for-byte). `OnLoad` is NOT -- this class genuinely overrides it with
+ * real logic at 0x08242e30 (thunk 0x08242e90) -- left EvaVTableStub-backed
+ * anyway (no reachable caller, real body needs a populated container this
+ * project doesn't build yet) but no longer under the old, disproven blanket
+ * claim. See rm_api_callback.h's own corrected header comment for the full
+ * writeup.
  */
 extern void *PTR__CBatchDiskMainTask_08eabec8[8];
 extern void *PTR__CBatchDiskMainTask_08eabee8[3];

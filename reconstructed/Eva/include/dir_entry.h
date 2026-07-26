@@ -15,6 +15,61 @@
  * unimplemented, same "opaque past ctor/dtor" convention `CEditClient`
  * (edit_man.h) already established for a similarly out-of-proportion class.
  *
+ * UPDATE (`CBatchDiskMainTask::PreloadDir()` reconstruction attempt, 2026-07-26):
+ * `PreloadDir()` (.text+0x082421f0) turned out to be genuinely out of scope (see
+ * batch_disk_main_task.h's own updated header comment for why), BUT its first
+ * ~120 bytes -- before it touches anything CZ-container-internal -- directly call
+ * 9 more `CDirEntry` predicate/accessor methods on `this->mDirEntry`, ALL of which
+ * are plain (non-virtual) `call`s in ground truth, not vtable dispatch, and NONE
+ * of which need real `CZ` string semantics -- only raw offset reads (own fields,
+ * or `CZ::RawPtrField()`/`RawFlagField()`, cz_util.h). These 9, plus the one real
+ * virtual query they collectively depend on, are now reconstructed:
+ *   `IsEmpty()`        .text+0x08072660, `return mUnknown5c;` (raw field, not
+ *                       normalized to 0/1 -- ground truth's own 2 call sites use
+ *                       both a `== 1` and a `!= 0` check against it, so returning
+ *                       the raw value matches either).
+ *   `IsDeleted()`      .text+0x08072670, `return mUnknown58;` (same raw-field
+ *                       shape as IsEmpty()).
+ *   `IsReserved()`     .text+0x08072680, `return (mUnknown50 & 0xf) == 0xf;`
+ *   `IsLabel()`        .text+0x08072650, `return (mUnknown50 & 0x8) != 0;`
+ *   `IsDir()`          .text+0x08072640, `return (mUnknown50 & 0x10) != 0;`
+ *   `IsParentDir()`    .text+0x080726d0, `return mUnknown60 != 0 &&
+ *                       (mUnknown50 & 0x10) != 0;`
+ *   `IsCurrentDir()`   .text+0x080726f0, same shape as IsParentDir() but tests
+ *                       `mUnknown64` instead of `mUnknown60`.
+ *   `HasValidLongNameExt()` .text+0x08071500 -- THE real per-instance virtual
+ *                       this class's own vtable slot 2 (offset+0x8) dispatches to
+ *                       (confirmed via direct `.rodata` byte read at
+ *                       0x08e81908+0x8 = 0x08071500; FIXED this batch --
+ *                       omega_vtables.cpp's `PTR__CDirEntry_08e81908[2]` was
+ *                       `EvaVTableStub` before, and `GetName()`/`GetExt()` below
+ *                       genuinely dispatch through and consume that slot's
+ *                       return value, same "EvaVTableStub leaves EAX as
+ *                       meaningless garbage" hazard class already fixed
+ *                       elsewhere in this project -- see omega_vtables.cpp's own
+ *                       comment for this slot). Real body:
+ *                       `return mLongName.RawFlagField() != 0 ||
+ *                       mLongExt.RawFlagField() != 0;`. This class's other 4
+ *                       real virtual slots (`OnShortNameChanged`/
+ *                       `OnShortExtChanged`/`OnLongNameChanged`/
+ *                       `OnLongExtChanged`, .text+0x081806a0..0x081806d0) ARE
+ *                       confirmed byte-identical empty (`ret` only, no other
+ *                       instruction) -- correctly stay `EvaVTableStub`-backed.
+ *   `GetName()`        .text+0x080723b0, `HasValidLongNameExt() ? mLongName :
+ *                       mShortName`, dispatched via `this->mVtbl + 0x8` (not a
+ *                       direct call, matching ground truth's own indirect-call
+ *                       shape), returns that CZ's `RawPtrField()` cast to
+ *                       `const char*`. Always NULL in this reconstruction today
+ *                       (both candidate CZ's `RawPtrField()`s are always 0,
+ *                       nothing populates them -- see cz_util.h).
+ *   `GetExt()`         .text+0x080723e0, identical shape to GetName() but on
+ *                       `mLongExt`/`mShortExt`.
+ * None of the above required decoding `CZ::Insert`/`RFind`/`Remove`/the string
+ * ctors -- only raw offset reads, matching this project's usual convention for
+ * fields/behavior whose surrounding container stays opaque. The remaining ~29
+ * Set/Copy/Reset/operator= methods are unchanged from the original verdict above
+ * (no reachable caller either way).
+ *
  * REAL LAYOUT (from CDirEntry::CDirEntry()/~CDirEntry()'s own disassembly):
  *   +0x00  vtbl (7 slots: dtor D1/D0 + 5 real virtual overrides, not named
  *          here -- EvaVTableStub-backed, see omega_vtables.h)
@@ -67,6 +122,32 @@ public:
 	 * no-op, see cz_util.h).
 	 */
 	~CDirEntry();
+
+	/* All 9 below: real, self-contained, no CZ-internal decoding needed --
+	 * see header comment for exact addresses/bodies. */
+	int  IsEmpty() const      { return mUnknown5c; }
+	int  IsDeleted() const    { return mUnknown58; }
+	bool IsReserved() const   { return (mUnknown50 & 0xf) == 0xf; }
+	bool IsLabel() const      { return (mUnknown50 & 0x8) != 0; }
+	bool IsDir() const        { return (mUnknown50 & 0x10) != 0; }
+	bool IsParentDir() const  { return mUnknown60 != 0 && (mUnknown50 & 0x10) != 0; }
+	bool IsCurrentDir() const { return mUnknown64 != 0 && (mUnknown50 & 0x10) != 0; }
+
+	/* .text+0x08071500. Real body -- see header comment. This is the real
+	 * per-instance virtual THIS class's own vtable slot 2 dispatches to
+	 * (fixed in omega_vtables.cpp this batch).
+	 */
+	bool HasValidLongNameExt() const
+	{
+		return mLongName.RawFlagField() != 0 || mLongExt.RawFlagField() != 0;
+	}
+
+	/* .text+0x080723b0/0x080723e0. Real bodies -- see header comment.
+	 * Both dispatch through `mVtbl + 0x8` (matching ground truth's own
+	 * indirect-call shape), not a direct call to HasValidLongNameExt().
+	 */
+	const char *GetName() const;
+	const char *GetExt() const;
 
 private:
 	void         *mVtbl;

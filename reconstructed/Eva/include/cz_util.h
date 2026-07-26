@@ -40,10 +40,32 @@
  * (config_manager.h's `CreateResourceFamilies()`) says not to do. `mOpaque` is never
  * read or written by this stub -- any real caller that actually needs `CZ`'s string
  * contents is, by definition, not yet in scope.
+ *
+ * UPDATE (CBatchDiskMainTask::PreloadDir() investigation, 2026-07-26): added two
+ * tiny raw-offset PEEK accessors (`RawPtrField()`/`RawFlagField()`), not full
+ * container methods. Ground truth's own `CDirEntry::GetName()`/`GetExt()`/
+ * `HasValidLongNameExt()` (dir_entry.h/.cpp) read exactly 2 raw dword fields out of
+ * an embedded `CZ`'s own opaque buffer -- offset 0 (used as a `const char*` -- a
+ * small-buffer-optimized string's "current data pointer", plausibly either into an
+ * inline buffer inside the same 16 bytes or a real heap block, never decoded
+ * further) and offset 8 (used only as a nonzero/zero flag -- plausibly a length or
+ * "is-heap-allocated" field, also not decoded further). Reading these two named
+ * offsets is NOT the same as implementing `Insert`/`RFind`/`Remove`/the real
+ * `CZ(const char*, unsigned)`/`CZ(const CZ&, unsigned)` constructors that
+ * `PreloadDir()`'s own genuinely deep body needs (batch_disk_main_task.h) --
+ * those still require real container semantics and stay out of scope. Since this
+ * project's own `CZ(unsigned)` ctor never writes to `mOpaque`, both fields are
+ * always 0 for every `CZ` instance built by reconstructed code today -- reading
+ * them is real and byte-exact, it just always observes "unpopulated" for now,
+ * same "field always 0, nothing populates it yet" status as
+ * `CBatchDiskMainTask::mGroupListHead`.
  */
 
 #ifndef CZ_UTIL_H
 #define CZ_UTIL_H
+
+#include <stdint.h>
+#include <string.h>
 
 class CZ {
 public:
@@ -62,13 +84,50 @@ public:
 	 * and discarded (every ground-truth call site found so far passes the literal
 	 * `1`; real meaning not decoded).
 	 */
-	explicit CZ(unsigned capacity) { (void)capacity; }
+	/* Zero-fills mOpaque -- confirmed necessary (not just defensive) by ground
+	 * truth's own CDirEntry::CDirEntry() (.text+0x08071640): immediately after
+	 * each of its 4 embedded CZ(1) ctor calls, it separately writes a literal
+	 * 0 to that CZ's own +8 field (e.g. `mov DWORD PTR[ebx+0xc],0` right after
+	 * mShortName's ctor call) -- i.e. ground truth itself does not trust the
+	 * real CZ ctor alone to leave that field at a known 0 state for this use
+	 * (or is being explicit/defensive about it). Without this zero-fill,
+	 * RawFlagField()/RawPtrField() read uninitialized stack/heap bytes --
+	 * undefined behavior, not "always 0" as this header otherwise documents
+	 * -- caught by verify/test_dir_entry.cpp before this fix (3 nondeterministic
+	 * failures in the default-constructed-state checks).
+	 */
+	explicit CZ(unsigned capacity) { (void)capacity; memset(mOpaque, 0, sizeof mOpaque); }
 	~CZ() {}
 
+	/* Raw offset 0 -- see header comment. Returned as `uint32_t`, not `char*`,
+	 * deliberately: this is a target-32-bit-wide field inside a byte buffer, not
+	 * a real host pointer, and this project's convention (verify/'s own I32/U8
+	 * helpers) is to never widen a raw target field through a native pointer
+	 * type. Callers that need it as an address (CDirEntry::GetName()/GetExt())
+	 * cast explicitly at the point of use.
+	 */
+	uint32_t RawPtrField() const
+	{
+		uint32_t v;
+		memcpy(&v, mOpaque + 0, sizeof v);
+		return v;
+	}
+
+	/* Raw offset 8 -- see header comment. */
+	uint32_t RawFlagField() const
+	{
+		uint32_t v;
+		memcpy(&v, mOpaque + 8, sizeof v);
+		return v;
+	}
+
 private:
-	unsigned char mOpaque[0x10]; /* real sizeof(CZ) -- see header comment. Never
-	                               * touched; reserved purely for correct placement
-	                               * of any embedding class's OWN later members. */
+	unsigned char mOpaque[0x10]; /* real sizeof(CZ) -- see header comment. Only
+	                               * offsets 0/8 are ever read (via the 2
+	                               * accessors above), and only by CDirEntry;
+	                               * never written by anything reconstructed. */
+
+	friend struct CZTestHooks;
 };
 
 #endif /* CZ_UTIL_H */
