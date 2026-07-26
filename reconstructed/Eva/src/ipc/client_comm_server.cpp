@@ -29,8 +29,11 @@
  * still-Tier-B stub bodies declared below, same "real code, opaque helper" layering
  * already established elsewhere in this project (CConfigManager, etc).
  *
- * Remaining 12 methods are still Tier B (empty, real signature) -- see header comment
- * for the specific, examined reason each one is deferred.
+ * That leaves only `OnReceiveMessage(const CMessage&)` still Tier B (empty, real
+ * signature) -- see header comment for the specific, examined reason it stays
+ * deferred (needs `CMessage` reconstructed). [Stale "12 methods" count from an
+ * earlier pass corrected 2026-07-26 -- this file only has the 1 Tier-B stub below;
+ * header comment (`client_comm_server.h`) already stated 1/26 correctly.]
  */
 
 #include "client_comm_server.h"
