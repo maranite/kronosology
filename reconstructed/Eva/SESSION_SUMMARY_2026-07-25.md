@@ -33,6 +33,25 @@ shut down cleanly" *interpretation* of those live-boot tests is wrong. See
 writeup, and this project's `.claude/agent-memory` for
 `eva_ceditor_construction_confirmed_2026-07-26.md`.
 
+**Third update (2026-07-26, later same day)**: this document's line ~110
+("`CModule::Add(CTask*)` ... is itself boot-path-reachable via `CEditor::
+Setup() -> CModuleManager::Setup()`") is true about the two functions it
+names being real and called from one another, but reads as a stronger
+claim than was actually verified at the time — `CModuleManager::Setup()`
+itself only reaches `CEditor::Setup()` at all through a per-instance
+vtable dispatch (`PTR__CEditor_08f29b88`'s own Setup slot) that, as of
+this update, was STILL the generic install-only `EvaVTableStub`, meaning
+`CEditor::Setup()` was not actually reachable via that specific mechanism
+when this line was written. Fixed and live-boot-confirmed (a real
+`CEditor::Setup()`-body debug marker was observed firing in
+`eva_stdout.log` on an actual VM boot) later the same day — see
+`README.md`'s "Stage 6: `CEditor` vtable-dispatch gap closed, live-boot
+confirmed" section and agent-memory
+`eva_ceditor_vtable_dispatch_fixed_2026-07-26.md` for the full writeup.
+The underlying function reconstructions this document catalogues are
+unaffected; only the "already confirmed live-reachable via
+`CModuleManager`" framing needed this correction.
+
 20+ commits landed today under `reconstructed/Eva/` (17 code-reconstruction/fix
 commits, 3 documentation-only or manifest-reconciliation commits, plus more
 after this doc was first written — see note above). Eva's boot

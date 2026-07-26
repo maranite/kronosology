@@ -26,6 +26,7 @@
 #include "editor.h"
 #include "panel_ifc_task.h"
 #include "alpha_keyb_ifc_task.h"
+#include "omega_vtables.h"
 
 /* Pokes CEditor's private mAlphaKeybIfcTask -- see editor.h's own friend
  * declaration. Added 2026-07-26 alongside wiring CAlphaKeybIfcTask into
@@ -35,6 +36,8 @@
 struct EditorTestHooks {
 	static CAlphaKeybIfcTask *GetAlphaKeybIfcTask(CEditor &e) { return e.mAlphaKeybIfcTask; }
 	static CEditor::CChunkServerTask *GetChunkServerTask(CEditor &e) { return e.mChunkServerTask; }
+	static CEditor::CMainTask *GetMainTask(CEditor &e) { return e.mMainTask; }
+	static void SetMainTask(CEditor &e, CEditor::CMainTask *t) { e.mMainTask = t; }
 };
 
 /* Pokes CChunkServer's protected fields -- see chunk_server.h's own friend
@@ -293,6 +296,36 @@ int main()
 		CEditor::CPanelIfcTask fakeOwner;
 		(void)fakeOwner;
 		check("default-constructible CPanelIfcTask (CTask test-only placeholder ctor)", true);
+	}
+
+	printf("[11] PTR__CEditor_08f29b88's own Setup slot -- real CModuleManager-shape raw dispatch\n");
+	printf("     (2026-07-26 follow-up fix: same class of gap as CPanel's own vtable, see\n");
+	printf("     omega_vtables.h's header comment on PTR__CEditor_08f29b88; ground-truth\n");
+	printf("     confirmed via objdump -dr on the real, unstripped Decomp/EVA_Decomp/Eva --\n");
+	printf("     slot2/3/4 = CEditor::Setup/Config/Start at 0x08249b60/0x082498a0/0x082498b0)\n");
+	{
+		CEditor editor("EditorTest8", 0);
+
+		/* mMainTask is genuinely uninitialized garbage right after the real ctor
+		 * (same "preserved ground-truth quirk" status as CPanel's mPoller,
+		 * panel.h's own header comment) -- force a known sentinel rather than
+		 * assume it starts null, and confirm the real raw dispatch overwrites it.
+		 */
+		CEditor::CMainTask *sentinel = (CEditor::CMainTask *)0xdeadbeef;
+		EditorTestHooks::SetMainTask(editor, sentinel);
+		check("mMainTask forced to sentinel", EditorTestHooks::GetMainTask(editor) == sentinel);
+
+		typedef void (*VCallFn)(void *);
+		void *vtbl = *(void **)(void *)&editor; /* offset 0 = CModule::mVtbl */
+		check("vtbl == PTR__CEditor_08f29b88", vtbl == (void *)PTR__CEditor_08f29b88);
+
+		VCallFn setupSlot = *(VCallFn *)((char *)vtbl + 8); /* CModuleManager::Setup()'s
+		                                                      * own CallVSlot(module, 8) */
+		setupSlot(&editor);
+		check("raw vtbl+8 dispatch genuinely ran CEditor::Setup() (mMainTask no longer "
+		      "the sentinel -- an EvaVTableStub no-op would have left it unchanged)",
+		      EditorTestHooks::GetMainTask(editor) != sentinel &&
+		          EditorTestHooks::GetMainTask(editor) != 0);
 	}
 
 	printf("=============================================\n");

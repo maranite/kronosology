@@ -363,9 +363,18 @@ private:
 
 /* CEditor::CChunkServerTask -- own nested class, base CChunkServer
  * (chunk_server.h). Reconstructed 2026-07-26 alongside the CAlphaKeybIfcTask
- * wiring, once CEditor::Setup() itself was confirmed live-boot-reachable --
- * see editor.h's own header comment above and chunk_server.h for the base
- * class's own full writeup.
+ * wiring, once CConfigManager::CreateUserModules() was confirmed to
+ * genuinely construct a live CEditor object -- see editor.h's own header
+ * comment above and chunk_server.h for the base class's own full writeup.
+ * CORRECTION (2026-07-26, later same day): at the time this comment was
+ * written, "CEditor::Setup() itself" being live-boot-reachable was NOT yet
+ * actually verified -- that specifically requires CModuleManager::Setup()'s
+ * own vtable+8 raw dispatch through PTR__CEditor_08f29b88, which still had
+ * this exact slot stubbed (EvaVTableStub) until a later batch fixed it and
+ * confirmed the fix live via a debug marker. See README.md's "Stage 6:
+ * CEditor vtable-dispatch gap closed" section for the full story -- the
+ * fan-out reconstructed here IS now genuinely live-reachable, just not for
+ * the reason originally stated.
  *
  * REAL LAYOUT: no new fields of its own (`CChunkServerTask@08245f50.c`, 52
  * bytes, base-constructs `CChunkServer::CChunkServer(owner, 0)` [EAccessMode

@@ -278,12 +278,17 @@ int CEditor::Setup()
 			/* CAlphaKeybIfcTask -- top-level (not nested under CEditor, see
 			 * editor.h). Now real (alpha_keyb_ifc_task.h/.cpp, Stage 6
 			 * breadth sweep 2026-07-25) -- wired in here now that
-			 * `CEditor::Setup()` itself is confirmed live-boot-reachable
+			 * `CConfigManager::CreateUserModules()` is confirmed to
+			 * genuinely construct a live `CEditor`
 			 * (eva_createusermodules_editor_unlock_2026-07-26): the real
 			 * `s_atCreateInfo` row for "EditorClass" passes literal string
 			 * "ALPHAKEYBOARD=Yes" as this ctor's own `alphaKeybParam`
 			 * argument (config_info.cpp), so this branch is NOT a dead
 			 * condition on the real, now-unlocked boot path -- it is taken.
+			 * (`CEditor::Setup()` ITSELF only became genuinely live-boot-
+			 * reachable -- via `CModuleManager::Setup()`'s own vtable
+			 * dispatch -- in a later same-day batch; see README.md's
+			 * "Stage 6: CEditor vtable-dispatch gap closed" section.)
 			 */
 			mAlphaKeybIfcTask = new CAlphaKeybIfcTask(*this);
 			Add(mAlphaKeybIfcTask);

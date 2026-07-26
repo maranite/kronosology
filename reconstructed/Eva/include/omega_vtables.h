@@ -53,6 +53,15 @@
  *     installed vtable) to be CSysApiInstance::AddConstructor() -- wired to the real
  *     AddConstructorVSlot forwarder (omega_vtables.cpp) instead of EvaVTableStub,
  *     Stage 6 breadth sweep, 2026-07-25 -- see sysapi_instance.h/module_manager.h.
+ *     +0xac (slot 43) is likewise wired to a real forwarder (LookupResourceStub,
+ *     omega_vtables.cpp) instead of EvaVTableStub, found 2026-07-26 during the
+ *     CEditor vtable-fix's own live-boot verification: CPoller::CPoller()
+ *     (poller.cpp) calls this slot as a named-resource lookup and dereferences
+ *     a non-null return value through IT'S OWN vtbl+0x10 -- with the old
+ *     EvaVTableStub no-op leaving EAX as post-call garbage, this was a live,
+ *     reproducible segfault the very first time CPanel::Setup() (and therefore
+ *     CPoller's ctor) ran via CModuleManager's real dispatch on an actual VM
+ *     boot. See LookupResourceStub's own header comment for the full story.
  *   TNamedPtrArray<CDriverBase>    08e811a8 -> 08e811b8 (next vtable header) = 4 slots
  *   TNamedPtrArray<CApiDescriptor> 08e811c0 -> 08e811e0 (CSystemApi)         = 8 slots
  *     (SysApiInstance's own 2 embedded COmegaPtrArray sub-objects install these --
@@ -539,8 +548,25 @@ extern void *PTR__TVector_08e88ba8[2];
  *                     this-adjusted view -- same object, same functions, two
  *                     vtables per the Itanium ABI's multiple-inheritance rule.
  *
- * All three confirmed install-only (never actually dispatched through by any
- * reconstructed code) -- same status as CModule's own base vtable.
+ * FIX (2026-07-26, follow-up to the CPanel unlock batch): the primary array
+ * (PTR__CEditor_08f29b88) is NOT install-only -- `CModuleManager::Setup()`/
+ * `Config()`/`Start()` (module_manager.cpp, Tier A/real) genuinely
+ * raw-dispatch through slots 2/3/4 (byte offsets 8/0xc/0x10) for every module
+ * in the real `mModules` array, and `CConfigManager::CreateUserModules()`
+ * (also Tier A/real) adds a freshly-constructed `CEditor` straight into that
+ * array. Slots 2/3/4 are wired to real forwarders (CEditorSetupVSlot/
+ * CEditorConfigVSlot/CEditorStartVSlot, omega_vtables.cpp) instead of
+ * EvaVTableStub -- see PTR__CPanel_08f7c328's own header comment below for
+ * the full precedent this follows (same fix, same reasoning, found to apply
+ * here too via a dedicated ground-truth re-check rather than assumed). Slots
+ * 0/1/5/6 (dtor/dtor-deleting/Destroy/GetErrorMsg) stay EvaVTableStub for the
+ * same "genuinely never dispatched by any reconstructed code" reason
+ * CPanel's own dtor/Destroy/GetErrorMsg slots do.
+ *
+ * The two secondary (this-adjustment thunk) arrays below, CEditClient thunk
+ * (08f29bac) and CEditServer thunk (08f29bc0), remain confirmed install-only
+ * -- nothing in this reconstruction dispatches through CEditor via either of
+ * its non-primary base-class views.
  */
 extern void *PTR__CEditor_08f29b88[7];
 extern void *PTR__CEditor_08f29bac[3];
@@ -654,14 +680,10 @@ extern void *PTR__CIfcClient_08f7c3c8[6];
  * dispatched by any reconstructed code" reason CModule's own base array leaves them
  * stubbed.
  *
- * OPEN FINDING, NOT FIXED HERE (out of scope for this batch -- different class):
- * `PTR__CEditor_08f29b88` above has the IDENTICAL real gap -- `CEditor::Setup()`/
- * `Config()`/`Start()` are themselves fully reconstructed (editor.cpp) and `CEditor`
- * instances also land in the real `mModules` via `CreateUserModules()`, but that
- * array's own Setup/Config/Start slots are still plain EvaVTableStub, meaning
- * `CModuleManager::Setup()` would currently no-op instead of running
- * `CEditor::Setup()` on the real dispatch path. Flagged for whoever next touches
- * `CEditor`'s own vtable wiring -- same fix shape as this one.
+ * FOLLOW-UP, FIXED (2026-07-26, same day): `PTR__CEditor_08f29b88` above had the
+ * IDENTICAL real gap and has now been fixed the same way -- see its own header
+ * comment above for the ground-truth re-verification (byte-identical vtable shape,
+ * confirmed via a fresh `objdump -dr -M intel` read, not assumed from this comment).
  */
 extern void *PTR__CPanel_08f7c328[7];
 }

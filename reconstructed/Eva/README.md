@@ -2818,3 +2818,127 @@ CPanel`, `CPanel::Setup`, `CPanel::Config`, `CPanel::Start`, `CPanel::~CPanel`
 be the natural next step" line). `CPanelConstructor::CPanelConstructor()`
 deliberately NOT added — confirmed unreachable, see above. Regenerated:
 439 → 446 of 37,795.
+
+## Stage 6: `CEditor` vtable-dispatch gap closed, live-boot confirmed — 2026-07-26
+
+Follow-up to the `CPanel` unlock batch immediately above, which explicitly
+flagged but did not fix an identical gap on `PTR__CEditor_08f29b88`. This
+batch closes it and, for the first time, confirms on a real live VM boot
+that `CEditor::Setup()`'s fan-out (`CPanelIfcTask`, `CChunkServerTask`,
+conditionally `CAlphaKeybIfcTask`) is genuinely reached via
+`CModuleManager`'s real raw-dispatch mechanism — not just structurally
+plausible, not just KAT-covered in isolation.
+
+### The vtable fix itself (mechanical, matches `CPanel`'s precedent exactly)
+
+Re-derived `PTR__CEditor_08f29b88`'s real contents directly from ground
+truth (`objdump -s -j .rodata --start-address=0x08f29b80` on the real,
+unstripped `Decomp/EVA_Decomp/Eva`, not inferred): slot 2 (`+8`) =
+`0x08249b60` (`CEditor::Setup`), slot 3 (`+0xc`) = `0x082498a0`
+(`CEditor::Config`), slot 4 (`+0x10`) = `0x082498b0` (`CEditor::Start`),
+slots 5/6 = `CModule::Destroy`/`GetErrorMsg` (`0x08181c10`/`0x08181c20`) —
+byte-identical shape to `CPanel`'s own vtable. `CEditor::Config()` is
+notably declared `static int Config()` in `editor.h` (ground truth is a
+literal `xor eax,eax; ret`, never touches `this`) — the new
+`CEditorConfigVSlot` forwarder receives but discards `obj` accordingly,
+matching the real callee's own shape instead of pretending it's a normal
+member call. Wired `CEditorSetupVSlot`/`CEditorConfigVSlot`/
+`CEditorStartVSlot` into slots 2/3/4 (`omega_vtables.cpp`), same as
+`CPanel`'s own fix. New KAT check (`verify/test_editor.cpp`, check `[11]`):
+forces a sentinel into `mMainTask`, dispatches through `PTR__CEditor_08f29b88`
+`+8` the exact way `CModuleManager::Setup()`'s own `CallVSlot` does, confirms
+the sentinel is overwritten (an `EvaVTableStub` no-op would have left it
+unchanged). `make -k verify`: 0 new regressions (only the pre-existing,
+already-documented `test_client_comm_server` 6-FAIL, unrelated file, not
+touched by this batch).
+
+### A second, unrelated real bug found and fixed during live-boot verification
+
+Attempting to actually confirm the fix live (not just via KAT) surfaced a
+second, independent, previously-latent bug — the first live boot to ever
+reach `CPanel::Setup()`'s real dispatch via `CModuleManager` (unlocked by
+the immediately-prior `CPanel` batch, never itself live-boot-tested per
+that batch's own "no VM slot available" note) segfaulted inside
+`CPoller::CPoller()` (`poller.cpp`): `Eva[pid]: segfault ... in CPoller::CPoller`.
+Root cause: `PTR__CSysApiInstance_08e81008`'s own slot 43 (`Api+0xac`, a
+named-resource lookup `CPoller`'s ctor calls and immediately dereferences
+the result of) was still the generic `EvaVTableStub` no-op — the exact same
+"`EvaVTableStub` leaves `EAX` as stale, meaningless garbage, and a caller
+that unconditionally uses the return value dereferences that garbage"
+hazard class already fixed twice before on this same vtable (slot 16/`+0x40`
+`AddConstructorVSlot`, slot 40/`+0xa0` `GetFMApiStub`) — just not yet hit
+live because nothing had ever driven execution through `CPoller`'s ctor on
+a real boot before. Fixed the same way: a new `LookupResourceStub` returns
+`NULL`, steering the ctor into its own well-tested, KAT-covered "lookup
+failed" fallback path (`mResource = 0; SetMask(1);` — the same path
+`test_panel.cpp`'s own fake-`Api` setup already modeled). Not a claim about
+what the real `Api+0xac` lookup for `"PanelDriver"` actually returns on real
+hardware — only that a safe, well-defined `NULL` is strictly better than the
+previous undefined-garbage behavior, same disclaimer `GetFMApiStub`'s own
+header comment already carries.
+
+### Live-boot confirmation, definitive
+
+Added a temporary `puts("CEDITOR_SETUP_MARKER: ...")` + `fflush(stdout)` at
+the tail of `CEditor::Setup()` (removed again once confirmed — ground
+truth's own body has no such call), rebuilt via `tools/build_lenny.sh`
+(`LINK OK`), deployed into a freshly isolated `kronosvm` scratch instance
+(`/root/eva_ceditor_setup_verify_20260726`, ports shifted to 4448/4449/2422
+etc. to avoid colliding with two other concurrently-running instances),
+injected offline via `guestfish upload` straight to `/korg/rw/Eva` on
+`/dev/sda6` (sha256-verified both ends), and boot-tested twice:
+
+1. **First boot, pre-`LookupResourceStub` fix**: `Eva[1278]: segfault ... in
+   CPoller::CPoller`, `pid` gone within 8s — the bug described above,
+   caught live before it could mask whether the `CEditor` fix itself
+   worked.
+2. **Second boot, both fixes in place**: zero crash signatures
+   (`segfault|oops|panic|abort|general protection`) across 170s+ continuous
+   observation, same pid throughout (`1278`), `/korg/rw/eva_stdout.log`
+   (read via `guestfish --ro` against the live-running image) shows, in
+   order: `"Eva will run on CPU 2"` → `"begin omega init"` → ... →
+   `"start timing thread"` → **`"CEDITOR_SETUP_MARKER: CEditor::Setup() ran
+   (mMainTask/mPanelIfcTask/mChunkServerTask constructed)"`**. Definitive,
+   literal, non-inferential confirmation that `CEditor::Setup()` — and
+   therefore its whole fan-out — is genuinely reached via
+   `CModuleManager`'s real raw-dispatch path on a real live boot, not
+   merely structurally plausible.
+
+Marker removed, tree rebuilt (`make -k verify`: same 0-new-regressions
+result as above; `tools/build_lenny.sh`: `LINK OK`), canonical
+marker-free binary re-staged at `reconstructed/Eva/Eva`.
+
+### Systemic check: is this gap present elsewhere?
+
+Audited every other 7-slot `CModule`-shape per-instance vtable in
+`omega_vtables.h`/`.cpp` (`CEditMan`, `CMessagePort`/`CViewBase`,
+`CSeqTimer`, `CFileMan`, `CChunkMan`, `CDumpManMod`, plus base `CModule`
+itself) against `mains.cpp`'s own `MMainXxx()` construction sites and, for
+the ones with real reconstructed `Setup()`/`Config()`/`Start()` bodies,
+cross-checked their real vtable slot contents via direct `.rodata` byte
+reads the same way. **Every one of them already has slots 2/3/4 wired to
+real forwarders** — this specific gap was isolated to `CPanel`/`CEditor`,
+both fixed now. Two classes (`CResMan`, `CSysEx`) do still have stubbed
+Setup/Config slots, but for a categorically different reason: those
+classes' `Setup()`/`Config()`/`Start()` methods were never transcribed
+into this reconstruction at all (no C++ body exists to forward to) — not
+the "real method exists, vtable just forgot to point at it" pattern
+`CPanel`/`CEditor` had. Documented, not fixed here (out of this batch's
+scope — would require reconstructing two more classes' methods from
+scratch, not a vtable-wiring fix).
+
+### Correction to prior documentation
+
+The `CEditor` dedicated batch section (line 2338 above) and
+`SESSION_SUMMARY_2026-07-25.md` both describe `CEditor::Setup()`'s fan-out
+in terms that read as already-confirmed live-path-reachable via
+`CModuleManager`. At the time those were written, that framing was
+optimistic — the vtable gap this batch closes meant `CEditor::Setup()` was
+NOT actually reachable via that specific mechanism yet (see the `CPanel`
+batch's own "Open finding, not fixed here" note above, and
+`eva_cpanel_unlock_2026-07-26.md`/`eva_ceditor_vtable_dispatch_fixed_2026-07-26.md`
+in agent-memory for the full before/after). It is reachable now, confirmed
+live as documented above — but any reader citing the earlier sections (or
+`SESSION_SUMMARY_2026-07-25.md`) as proof of live-path reachability prior
+to this batch's own commit would be citing an assumption, not a fact that
+was actually verified at the time it was written.

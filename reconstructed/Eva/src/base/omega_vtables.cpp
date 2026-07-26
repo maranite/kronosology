@@ -5,6 +5,7 @@
 #include "omega_vtables.h"
 #include "sysapi_instance.h"
 #include "panel.h"
+#include "editor.h"
 
 extern "C" void EvaVTableStub()
 {
@@ -84,6 +85,40 @@ extern "C" int ChunkLinkRegisterVSlotStub()
 }
 
 /*
+ * FIX (2026-07-26, found during the CEditor vtable-fix's own live-boot
+ * verification): PTR__CSysApiInstance_08e81008's own slot 43 (byte offset 0xac,
+ * `Api+0xac`) is installed as this real forwarder instead of the generic
+ * EvaVTableStub. Same "EvaVTableStub leaves EAX as stale, meaningless garbage"
+ * hazard class already fixed for the +0x40/+0xa0 slots above
+ * (AddConstructorVSlot/GetFMApiStub) -- CPoller::CPoller() (poller.cpp,
+ * CPanel::Setup()'s own real construction target, itself unlocked by this same
+ * batch's CModuleManager-dispatch fix) calls this slot as a named-resource
+ * lookup and immediately dereferences whatever it returns: `if (resource != 0)
+ * { ...call through resource's own vtbl+0x10... }`. Ground truth's own comment
+ * in poller.h already documents this as "Api+0xac resolves ... tractable now"
+ * (i.e. the CALL SITE was already known-real) but never wired a real target for
+ * the slot itself. With the old EvaVTableStub no-op, EAX held leftover garbage
+ * from the call sequence, `resource != 0` was true, and the ctor dereferenced
+ * that garbage as a vtable pointer -- a real, live segfault (`Eva[pid]: segfault
+ * ... in CPoller::CPoller`), first observed on THIS session's live-boot test,
+ * the first live boot to ever reach CPanel::Setup()'s real dispatch via
+ * CModuleManager (see PTR__CPanel_08f7c328's own header comment for why that
+ * dispatch itself was only unlocked earlier the same day). Fixed by returning
+ * NULL here -- the ctor's own well-tested, KAT-covered "lookup failed" fallback
+ * path (`mResource = 0; SetMask(1);`, matching test_panel.cpp's own fake-Api
+ * setup, which deliberately modeled exactly this NULL-return case). Not a claim
+ * that the real Api+0xac lookup for "PanelDriver" genuinely fails on real
+ * hardware -- only that returning a safe, well-defined NULL here is strictly
+ * better than the previous undefined-garbage behavior, same spirit as
+ * GetFMApiStub's own "safe placeholder, not a claim about the real object"
+ * disclaimer.
+ */
+extern "C" void *LookupResourceStub(void *, const char *)
+{
+	return 0;
+}
+
+/*
  * FIX (2026-07-26, Eva Stage 6 CPanel unlock batch): PTR__CPanel_08f7c328's own
  * Setup/Config/Start slots (byte offsets 8/0xc/0x10) are installed as these 3 real
  * forwarders instead of the generic EvaVTableStub -- see omega_vtables.h's own
@@ -109,6 +144,39 @@ extern "C" void CPanelConfigVSlot(void *obj)
 extern "C" void CPanelStartVSlot(void *obj)
 {
 	((CPanel *)obj)->Start();
+}
+
+/*
+ * FIX (2026-07-26, Eva Stage 6 CEditor unlock follow-up): PTR__CEditor_08f29b88's own
+ * Setup/Config/Start slots (byte offsets 8/0xc/0x10) get the same real-forwarder
+ * treatment as PTR__CPanel_08f7c328 above, for the identical reason -- see
+ * omega_vtables.h's header comment on PTR__CEditor_08f29b88. Ground truth
+ * (`objdump -dr -M intel` on the real, unstripped `Decomp/EVA_Decomp/Eva`) confirms the
+ * real vtable at 0x08f29b88 has slot2=0x08249b60 (CEditor::Setup), slot3=0x082498a0
+ * (CEditor::Config), slot4=0x082498b0 (CEditor::Start) -- byte-identical shape to
+ * CPanel's own vtable, down to slot5/slot6 being CModule::Destroy/GetErrorMsg
+ * (0x08181c10/0x08181c20, same weak symbols CPanel's vtable also points at).
+ *
+ * `CEditor::Config()` is declared `static int Config()` (editor.h) -- real ground
+ * truth is a literal `xor eax,eax; ret`, 3 bytes, that never touches `this` at all.
+ * The forwarder still receives `obj` (CModuleManager::Setup()/Config()/Start()'s own
+ * `CallVSlot` always passes it) but discards it, matching the real callee's own
+ * shape exactly instead of pretending it's a normal member call.
+ */
+extern "C" void CEditorSetupVSlot(void *obj)
+{
+	((CEditor *)obj)->Setup();
+}
+
+extern "C" void CEditorConfigVSlot(void *obj)
+{
+	(void)obj;
+	CEditor::Config();
+}
+
+extern "C" void CEditorStartVSlot(void *obj)
+{
+	((CEditor *)obj)->Start();
 }
 
 extern "C" {
@@ -179,7 +247,7 @@ void *PTR__CSysApiInstance_08e81008[94] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)GetFMApiStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)GetFMApiStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)LookupResourceStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
@@ -370,15 +438,23 @@ void *PTR__TVector_08e88ba8[2] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 
-/* CEditor's own real vtable cluster -- see header comment. All 3 confirmed
- * install-only, same treatment as PTR__CModule_08e81fe8 above (whose own real
- * Destroy()/GetErrorMsg() slots stay EvaVTableStub for the same reason: real,
- * named, ground-truth methods that are simply never dispatched through by any
- * reconstructed caller).
+/* CEditor's own real vtable cluster -- see header comment. The 2 sibling
+ * (nested-class) vtables below are confirmed install-only, same treatment as
+ * PTR__CModule_08e81fe8 (whose own real Destroy()/GetErrorMsg() slots stay
+ * EvaVTableStub for the same reason: real, named, ground-truth methods that
+ * are simply never dispatched through by any reconstructed caller).
+ * PTR__CEditor_08f29b88 itself is the DEPARTURE (2026-07-26 fix, see
+ * omega_vtables.h's own header comment): slots 2/3/4 (Setup/Config/Start) are
+ * wired to real forwarders (CEditorSetupVSlot/CEditorConfigVSlot/
+ * CEditorStartVSlot, above), not EvaVTableStub -- CModuleManager::Setup()/
+ * Config()/Start() (module_manager.cpp, Tier A/real) genuinely dispatch
+ * through exactly these offsets for every module in the real mModules array,
+ * same as PTR__CPanel_08f7c328's own fix.
  */
 void *PTR__CEditor_08f29b88[7] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CEditorSetupVSlot, (void *)CEditorConfigVSlot, (void *)CEditorStartVSlot,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 void *PTR__CEditor_08f29bac[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
