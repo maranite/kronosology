@@ -44,6 +44,24 @@
  *                            now-real `CTask::Add(COutLink*)` (task.h); otherwise 0.
  *                            The previous pass's documented deviation ("always stores
  *                            0 regardless of canTransmit") is fixed.
+ *     +0x8c  mUnknown8c[4]  4 real bytes this class does NOT yet model semantically
+ *                            -- added 2026-07-26 (test_client_comm_server heisenbug
+ *                            root-cause fix). Confirmed real, not invented padding:
+ *                            `CDumpTask` (dump_task.h) places its own first field at
+ *                            +0x90, not +0x8c, per that header's own "own fields
+ *                            start at CSysExMsgTaskBase's own 0x8c end" comment --
+ *                            so ground truth's base class genuinely runs through
+ *                            +0x8f. Before this field existed, sizeof(this class)
+ *                            was understated by 4 bytes, so any stack instance
+ *                            (e.g. a verify/ test's own local) was undersized for
+ *                            `CClientCommServer::MessageToEvent()`'s own deliberate
+ *                            `mClient+0x8c` read (client_comm_server.cpp) -- a real
+ *                            stack-buffer-overflow, confirmed via
+ *                            -fsanitize=address,undefined (100% reproducible), and
+ *                            the actual cause of this project's intermittent
+ *                            `test_client_comm_server` failures (the garbage byte
+ *                            read feeds into `CClientCommServer::mEvTag` bits 8-15,
+ *                            which no reset path in that file ever clears).
  *
  * Real vtable (PTR__CSysExMsgTaskBase_08e84c28 primary + a secondary at +0x8e84c50,
  * both installed by the ctor/dtor now that they're reconstructed -- omega_vtables.h)
@@ -204,6 +222,41 @@ private:
 	unsigned char mCommId;       /* +0x84 */
 	CSysExMsgClientOutLink *mOutLink; /* +0x88, real when ECanTransmit requests it,
 	                                    * else 0 -- see header comment */
+	unsigned char mUnknown8c[4]; /* +0x8c, 4 real ground-truth bytes this class does
+	                               * not yet model semantically -- confirmed to exist
+	                               * (not padding we're inventing) two independent
+	                               * ways: (1) `CClientCommServer::MessageToEvent()`
+	                               * (client_comm_server.cpp) deliberately reads a raw
+	                               * byte at `mClient+0x8c` as "real, but currently
+	                               * unmodeled, memory in a sibling class this file
+	                               * does not own"; (2) `CDumpTask` (dump_task.h), a
+	                               * real derived class, places its OWN first field
+	                               * (`mMachine`) at +0x90, not +0x8c, per that
+	                               * header's own "REAL LAYOUT (0x98 bytes malloc'd;
+	                               * own fields start at CSysExMsgTaskBase's own 0x8c
+	                               * end...)" comment -- i.e. ground truth's own base
+	                               * class genuinely extends 4 bytes past mOutLink.
+	                               * Without this field, sizeof(CSysExMsgTaskBase) was
+	                               * understated by 4 bytes, which made every
+	                               * stack-allocated instance of this class (e.g.
+	                               * verify/test_client_comm_server.cpp's `client`
+	                               * local) 4 bytes too small -- the +0x8c read above
+	                               * landed on whatever unrelated stack memory
+	                               * happened to follow, a genuine stack-buffer-
+	                               * overflow (confirmed via
+	                               * -fsanitize=address,undefined, 100% reproducible)
+	                               * and the root cause of this project's
+	                               * `test_client_comm_server` heisenbug history: the
+	                               * garbage byte read gets folded into
+	                               * `CClientCommServer::mEvTag` bits 8-15, which no
+	                               * reset path in that file ever clears, so it can
+	                               * silently influence later, seemingly-unrelated
+	                               * checks for the rest of the same test run. Kept
+	                               * as an opaque byte array (not typed/named) since
+	                               * the real field's semantics are still unknown --
+	                               * same convention as every other "raw offset,
+	                               * meaning TBD" gap already documented in this
+	                               * project. */
 
 	/* Friend accessor for verify/test_sysex_msg_task_base.cpp -- reads mOutLink so
 	 * the ctor's real ECanTransmit branch can be checked without a public

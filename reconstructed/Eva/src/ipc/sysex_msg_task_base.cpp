@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 
 /* Real, currently-unreconstructed HAL dependencies -- file-local Tier-B stubs, same
@@ -108,6 +109,30 @@ CSysExMsgTaskBase::CSysExMsgTaskBase(const CModule &owner, int canTransmit, int 
 	} else {
 		mOutLink = 0;
 	}
+
+	/* DELIBERATE DEVIATION from ground truth: confirmed via `objdump -dr -M intel`
+	 * on the real ctor (.text+0x080a65e0 through its `ret` at +0x85) that it NEVER
+	 * writes anywhere in +0x8c..+0x8f -- ground truth genuinely leaves this memory
+	 * uninitialized here (see sysex_msg_task_base.h's own "+0x8c mUnknown8c[4]"
+	 * layout comment for why this field exists at all: `CClientCommServer::
+	 * MessageToEvent()`, client_comm_server.cpp, reads a raw byte at `mClient+0x8c`
+	 * as "real, but currently unmodeled, memory in a sibling class this file does
+	 * not own"). In the real firmware this is apparently fine because the actual
+	 * owner of that memory -- evidently `CDumpTask` or another not-yet-
+	 * reconstructed subsystem -- writes it before any code path reads it back; that
+	 * write is out of scope here. In THIS reconstruction, no code path writes
+	 * mUnknown8c at all, so leaving it genuinely uninitialized (byte-faithful to
+	 * ground truth) turned a real ground-truth quirk into outright undefined
+	 * behavior for every stack-allocated instance of this class: a 2026-07-26
+	 * stack-buffer-overflow investigation (test_client_comm_server's long-standing
+	 * intermittent-failure history) traced the exact mechanism -- the garbage byte
+	 * read here gets folded into `CClientCommServer::mEvTag` bits 8-15, which no
+	 * reset path in that file ever clears, silently steering later, unrelated
+	 * checks for the rest of the same process's test run. Zeroing defensively here
+	 * makes every reconstructed instance of this class deterministic without
+	 * guessing at the real field's semantics or value.
+	 */
+	std::memset(mUnknown8c, 0, sizeof(mUnknown8c));
 }
 
 /* Tier A -- .text+0x080a67c0, 247 bytes. Real fixed-point period computation: divides
