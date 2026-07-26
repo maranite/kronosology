@@ -80,11 +80,23 @@
  *   +0x3a0 mZeroBlock     uint32_t[0x10] (64 bytes) -- ctor `rep stos`-zeroes this
  *                         unconditionally, on EVERY path (success or SetMask(1)
  *                         fallback), as the very last step before returning.
- *   +0x3e0 mReserved3e0   unsigned char[0x40] (64 bytes) -- makes sizeof(CPoller) ==
+ *   +0x3e0 mLedBackup     unsigned char[0x40] (64 bytes) -- makes sizeof(CPoller) ==
  *                         0x420 (malloc(0x420) at the real `CPanel::Setup()` call
- *                         site, confirmed), but genuinely NOT touched by the ctor
- *                         itself -- populated by `RegisterClient()`/`InitAnalogs()`/
- *                         `InitButtons()`, all deferred this batch (see below).
+ *                         site, confirmed), genuinely NOT touched by the ctor
+ *                         itself. CORRECTED (2026-07-26, CLEDBlinker/final-
+ *                         prerequisites follow-up batch): an earlier version of
+ *                         this comment guessed it was "populated by
+ *                         RegisterClient()/InitAnalogs()/InitButtons()" -- never
+ *                         actually confirmed, and WRONG: all 3 of those are now
+ *                         real (RegisterClient() fully, InitAnalogs()/
+ *                         InitButtons() as declared Tier-B stubs whose real
+ *                         ground-truth bodies are independently known not to
+ *                         touch this offset) and none of them reference `+0x3e0`.
+ *                         The real, concrete use: `MsgBackupLEDs()` (below) is
+ *                         the sole real reader/writer -- a 64-byte BACKUP COPY of
+ *                         `mZeroBlock`, saved into on one call direction and
+ *                         restored from on the other. Renamed from
+ *                         `mReserved3e0` to `mLedBackup` to reflect this.
  *
  * VTABLE: `CPoller`'s own primary vtable (`vtable for CPoller` @ 08f7c360, byte-read
  * directly, same technique as every other vtable-boundary derivation in this
@@ -205,13 +217,15 @@
  * growth path, and more), out of scope for this batch -- but IS now declared with its
  * real signature so the two `MsgRegisterClientByXxx` wrappers can compile and
  * dispatch a real call, same declare-real/stub-body convention as `InitButtons()`/
- * `InitAnalogs()` above. Genuinely still-deferred, no new angle found this batch:
+ * `InitAnalogs()` above. Genuinely still-deferred at the time this note was written:
  * `MsgSetLed`/`MsgSetLed16bits`/`MsgBackupLEDs` (all three pull in a brand-new,
  * not-yet-reconstructed external singleton class, `CLEDBlinker`, global at
  * `.bss+0x0af09920`, plus reveal that `mZeroBlock` (+0x3a0) is actually a real
  * 512-bit LED-registration bitmap indexed by `ELedCode/16`, not a genuinely-unused
  * scratch block as originally guessed -- worth flagging for whoever reconstructs
- * `CLEDBlinker` next, but out of scope here), `MsgGetClientHandleByRef`/
+ * `CLEDBlinker` next, but out of scope here -- SUPERSEDED, see the "CLEDBlinker/
+ * final-prerequisites follow-up batch" UPDATE below: all 3 are now Tier A),
+ * `MsgGetClientHandleByRef`/
  * `MsgGetClientHandleByVal` (2600B each, pull in `FindRegisteredClient()`),
  * `MsgSetButtonClient` (1505B), `MsgSetAnalogClient` (1085B),
  * `FindRegisteredClient()` (2512B), `RegisterClient()` itself (2603B, see above),
@@ -268,6 +282,41 @@
  * out-of-scope class project-wide (out_link.h's own header comment) -- so the chain
  * is transcribed as opaque raw-offset reads, same license as every other place this
  * project crosses that same boundary (e.g. the `+0x14` "connected" field itself).
+ *
+ * UPDATE (2026-07-26, CLEDBlinker/final-prerequisites follow-up batch): dispatched
+ * to re-check CPoller's own 3 remaining named prerequisites (`CMessage`,
+ * `CLEDBlinker`, `FindRegisteredClient()`'s own siblings) for fresh tractability now
+ * that `CPoller` itself is fully structurally exhausted otherwise
+ * ([[eva_registerclient_reconstruction_2026-07-26]]). `CLEDBlinker` (flagged by the
+ * prior batch as "a brand-new external singleton class, bigger than fits a small-
+ * handler sweep") turned out to be the smallest "whole new class" unlock in this
+ * project so far -- 6 methods, all under 100 bytes, no vtable at all -- see the new
+ * `led_blinker.h`/`led_blinker.cpp` for the full writeup. Reconstructed it, then
+ * used it to promote `MsgSetLed`/`MsgSetLed16bits`/`MsgBackupLEDs` (all three,
+ * per-method comments above) from deferred to Tier A. This ALSO corrected a stale
+ * guess about `mLedBackup` (+0x3e0, previously `mReserved3e0`) -- see that field's
+ * own comment above; it's a real LED-state backup/restore buffer, not something
+ * `RegisterClient()`/`InitAnalogs()`/`InitButtons()` populate.
+ *
+ * UPDATE (2026-07-26, FindRegisteredClient batch, same session): the "concrete next
+ * candidate" flagged just above turned out fully tractable, same session --
+ * `FindRegisteredClient()` (2512B) itself, plus its own real callers
+ * `MsgGetClientHandleByRef()` (2601B) and `MsgGetClientHandleByVal()` (2590B), are
+ * now all Tier A (per-method comments above). Both `Msg*()` wrappers turned out to
+ * be small thin forwarders despite their large raw byte counts -- ground truth
+ * INLINES its own full copy of the connected-client name-match scan into each
+ * wrapper (same "duplicate real ground-truth function per call site" pattern
+ * `RegisterClient()`'s own Phase-2 scan already established) rather than calling a
+ * shared function; modeled here as real calls to `FindRegisteredClient()` instead,
+ * collapsing ~2600 bytes of duplicated scan logic into a real, small wrapper each
+ * (same size-vs-real-depth lesson `CAlphaKeybCtrl`'s own 4289-byte ctor batch
+ * already logged). CPoller's own remaining genuinely-deferred surface after this:
+ * `MsgSetButtonClient` (1505B), `MsgSetAnalogClient` (1085B -- neither pulls in
+ * `CLEDBlinker` or `FindRegisteredClient()`, no new angle tried on either this
+ * session), `Exec(CMessage&)` (6747B, the real per-message dispatcher that would
+ * route to every `Msg*()` handler above), `Exec()` (3213B, the unrelated 0-arg
+ * scheduler-tick override -- confirmed this session, via a direct `objdump -dr`
+ * call-target check, to be `CLEDBlinker::Exec()`'s own real, single caller).
  */
 
 #ifndef POLLER_H
@@ -340,6 +389,143 @@ public:
 	 * channel index), not a pointer}`.
 	 */
 	int MsgRequestAnalogInputValue(CMessage &msg) const;
+
+	/* .text+0x089eff00, 350 bytes. Tier A (2026-07-26 CLEDBlinker/final-
+	 * prerequisites follow-up batch -- see led_blinker.h for the new CLEDBlinker
+	 * class this unlocks). `CMessage`'s own +0x9 byte bit 0x2 gates this (return 4
+	 * if clear -- a DIFFERENT bit-plane than every single-shot handler above,
+	 * confirmed by direct disassembly, not homogenized); the +0xa length word
+	 * must be exactly 8 (return 5 otherwise). +0x10 is a real payload POINTER to a
+	 * 2-int struct `{ledCode, state}` (dereferenced twice: `**ptr` and `ptr[1]`).
+	 * If `mResource == 0`, returns 0 with no other side effect. Otherwise
+	 * dispatches on `state`:
+	 *   state == 1 ("on"): `CLEDBlinker::Unregister(ledCode)` on the GLOBAL
+	 *     `s_oLEDBlinker` (this LED stops blinking), then sets the corresponding
+	 *     bit in THIS `CPoller` instance's OWN `mZeroBlock` LED-state bitmap
+	 *     (+0x3a0) -- if that bit was ALREADY set, returns 0 immediately with NO
+	 *     notify (a real early-out, transcribed as found); otherwise sets it and
+	 *     falls through to the shared notify tail with opcode 2.
+	 *   state == 2 ("blink"): `CLEDBlinker::Register(ledCode)` on
+	 *     `s_oLEDBlinker` and returns 0 IMMEDIATELY -- no `mZeroBlock` update, no
+	 *     notify at all on this path. A real, preserved quirk: entering blink
+	 *     mode via this handler never itself pushes a notification (presumably
+	 *     `CLEDBlinker::Exec()`'s own real caller, not reconstructed, handles
+	 *     that separately once blinking is actually driven) -- not "fixed."
+	 *   anything else ("off", including 0): `CLEDBlinker::Unregister(ledCode)`,
+	 *     then clears the corresponding `mZeroBlock` bit -- if it was ALREADY
+	 *     clear, returns 0 immediately with no notify (same early-out shape as
+	 *     the "on" case); otherwise clears it and falls through with opcode 1.
+	 * Shared tail (both the "on" and "off" fall-through paths): notifies
+	 * `mResource`'s own vtbl slot +0x1c (index 7, the same opaque slot
+	 * `MsgShortBeep()`/`MsgRequestAnalogInputValue()` above already use) with a
+	 * 2-dword `{opcode (1 or 2), ledCode}` local, then returns 0.
+	 */
+	int MsgSetLed(CMessage &msg);
+
+	/* .text+0x089f0070, 214 bytes. Tier A -- see led_blinker.h. Same +0x9 bit-0x2
+	 * gate and +0xa==8 length check as `MsgSetLed()` above. +0x10 is a payload
+	 * POINTER to a 2-dword struct: `*ptr` (read as a signed 16-bit LED-GROUP
+	 * index, i.e. an absolute word index into `mZeroBlock`, NOT a per-bit
+	 * `ELedCode` to divide/mod -- a real, different interpretation than
+	 * `MsgSetLed()`'s own scalar `ledCode`) and `ptr[1]` (a dword whose low 16
+	 * bits are the NEW state for every masked bit, high 16 bits are the mask of
+	 * WHICH bits this message updates -- i.e. `{mask=high16, newBits=low16}`).
+	 * If `mResource == 0`, returns 0 immediately (no `mZeroBlock` update at all --
+	 * a real, different early-out shape than `MsgSetLed()`, which always updates
+	 * its own bitmap regardless of `mResource`; transcribed as found, not
+	 * homogenized). Otherwise: computes `newWord = (oldWord & ~mask) | (newBits &
+	 * mask)` and writes it into `mZeroBlock`'s word at the given group index;
+	 * calls `CLEDBlinker::Unregister(groupIndex, mask)` on `s_oLEDBlinker` (bulk-
+	 * unregisters every bit in `mask` from the global blink set, REGARDLESS of
+	 * `newBits` -- i.e. this handler always takes the affected LEDs OUT of
+	 * blinking, even if `newBits` would have kept them "on"; a real, preserved
+	 * asymmetry with `MsgSetLed()`'s own state==2 path, which is the only way
+	 * back INTO blinking); if the word's value actually changed, notifies
+	 * `mResource`'s vtbl+0x1c slot with `{opcode=6, value=(newWord<<16)|
+	 * groupIndex}` (a DIFFERENT opcode/payload shape than `MsgSetLed()`'s own
+	 * tail -- reusing the same slot, third distinct real payload shape seen on
+	 * it after `MsgShortBeep()`'s `{7,x}` and `MsgSetLed()`'s `{1/2,ledCode}`).
+	 */
+	int MsgSetLed16bits(CMessage &msg);
+
+	/* .text+0x089f01a0, 620 bytes. Tier A -- see led_blinker.h. `CMessage`'s own
+	 * +0x9 byte bit 0x1 gates this (the "single-shot" bit-plane, same as
+	 * `MsgShortBeep()`/`MsgRequestAnalogInputValue()` above -- NOT the bit-0x2
+	 * plane `MsgSetLed()`/`MsgSetLed16bits()` use, confirmed by direct
+	 * disassembly). +0x10 (a plain scalar int here, not a pointer) selects the
+	 * direction: 0 means RESTORE (copy `mLedBackup` -> `mZeroBlock`, i.e. bring
+	 * back a previously-saved LED-state snapshot); nonzero means SAVE-AND-CLEAR
+	 * (copy `mZeroBlock` -> `mLedBackup`, THEN zero `mZeroBlock`) -- this is
+	 * the real, concrete use of `mLedBackup` (+0x3e0), CORRECTING this header's
+	 * own prior guess ("populated by RegisterClient()/InitAnalogs()/
+	 * InitButtons()," never actually confirmed by any of those 3 methods'
+	 * own real bodies, all already reconstructed and none of which touch
+	 * `+0x3e0`): it is a 64-byte BACKUP COPY of `mZeroBlock`, save/restore driven
+	 * entirely by this one handler. If `mResource != 0`, then unconditionally (on
+	 * EITHER direction) notifies `mResource`'s vtbl+0x1c slot once per word of
+	 * the (now-current) `mZeroBlock`, 32 calls total (`{opcode=6,
+	 * value=(word<<16)|wordIndex}` for `wordIndex` 0..0x1f) -- ground truth is a
+	 * 5-way-unrolled loop; modeled as a plain `for` loop, identical result.
+	 */
+	int MsgBackupLEDs(CMessage &msg);
+
+	/* .text+0x089f25e0, 2512 bytes. Tier A (2026-07-26 FindRegisteredClient
+	 * batch -- direct follow-up to the CLEDBlinker unlock above, per that batch's
+	 * own flag that this is "a concrete, same-scale sibling of the already-real
+	 * RegisterClient(), same objdump -dr register-tracing technique likely
+	 * applies directly"). Confirmed: byte-exact same Duff's-device-unrolled
+	 * connected-client name-match scan `RegisterClient()`'s own Phase-1 already
+	 * uses (identical `+0x1c -> deref -> +0x10 -> +0x3c/+4` and `+4` opaque
+	 * `CLink`-family pointer chain -- see RegisterClient()'s own header comment
+	 * and poller.cpp), collapsed to a plain loop the same way. Real: `nameA ==
+	 * NULL` or empty returns 0 (found nothing, but a distinct return value from
+	 * the genuine "array empty" case below); an empty `nameB` (`*nameB == 0`) is
+	 * treated as `NULL` (matches `RegisterClient()`'s own "empty string
+	 * collapses to null" convention for its own name args); if `mClients` is
+	 * empty, returns -1 (genuinely different from the "nameA missing" 0 case --
+	 * transcribed as found, not homogenized). Scans only CONNECTED clients
+	 * (unconnected ones' own name-pair field is never populated, same
+	 * `RegisterClient()` rationale); if `nameB == NULL`, matches on `nameA`
+	 * alone; otherwise requires BOTH names to match. Returns the found client's
+	 * index, or -1 if the scan completes with no match.
+	 */
+	int FindRegisteredClient(const char *nameA, const char *nameB) const;
+
+	/* .text+0x089f0470, 2601 bytes. Tier A (2026-07-26 FindRegisteredClient
+	 * batch). Code-bit-0x200 gate (return 4 if clear, same bit-plane
+	 * `MsgRegisterClientByVal/ByRef()` use). Length must be `>= 0xc` (ground
+	 * truth writes this as `< 0xc` -> return 5, the same effective threshold as
+	 * `MsgRegisterClientByRef()`'s own `<= 0xb`, just spelled the other way).
+	 * `+0x10` is a real payload pointer to a 3-dword struct: `payload[0]` is the
+	 * write-back handle output slot, `payload[1]` is a `char*` name A (must be
+	 * non-null AND non-empty, else return 6), `payload[2]` is an OPTIONAL `char*`
+	 * name B (empty string collapses to `NULL`, same convention
+	 * `FindRegisteredClient()` itself uses -- no return-6 check on this one,
+	 * unlike `MsgRegisterClientByRef()`'s own mandatory-both-names gate, since a
+	 * lookup can legitimately search by name A alone). Ground truth INLINES its
+	 * own full byte-exact copy of the scan `FindRegisteredClient()` above
+	 * implements (same project-wide "duplicate real ground-truth function per
+	 * call site" pattern already established for `RegisterClient()`'s own
+	 * Phase-2 reuse scan) -- modeled here as a real call to
+	 * `FindRegisteredClient()` instead, semantically identical, not a
+	 * simplification of behavior. Writes the result to `payload[0]` and always
+	 * returns 0 (no failure return past the initial 3 gates).
+	 */
+	int MsgGetClientHandleByRef(CMessage &msg) const;
+
+	/* .text+0x089f0f00, 2590 bytes. Tier A (2026-07-26 FindRegisteredClient
+	 * batch). Same code-bit-0x200 gate. Length must be `>= 0x64` (100 decimal --
+	 * ground truth writes `< 100`, the identical numeric threshold as
+	 * `MsgRegisterClientByVal()`'s own `<= 0x63`). `+0x10` is a real payload
+	 * pointer into a fixed embedded-buffer layout, same shape as
+	 * `MsgRegisterClientByVal()`'s own payload: name A lives at `payload+4`
+	 * (must be non-empty, else return 6), name B lives at `payload+0x34`
+	 * (OPTIONAL -- empty string collapses to `NULL`, no return-6 check, same
+	 * "search by name A alone" allowance as `MsgGetClientHandleByRef()` above).
+	 * Same real inlined-scan-modeled-as-a-`FindRegisteredClient()`-call
+	 * treatment. Writes the result to `payload[0]` and always returns 0.
+	 */
+	int MsgGetClientHandleByVal(CMessage &msg) const;
 
 	/* .text+0x089f1990, 128 bytes. Tier A. Same code-bit-0x100 gate (return 4 if
 	 * clear). Reads `CMessage`'s own +0x10 dword as a plain client HANDLE (not a
@@ -467,7 +653,7 @@ private:
 	unsigned int   mField398;      /* +0x398 */
 	unsigned int   mField39c;      /* +0x39c */
 	unsigned int   mZeroBlock[0x10]; /* +0x3a0 */
-	unsigned char  mReserved3e0[0x40]; /* +0x3e0, pads sizeof(CPoller) to real 0x420 */
+	unsigned char  mLedBackup[0x40]; /* +0x3e0, pads sizeof(CPoller) to real 0x420 */
 
 	friend struct PollerTestHooks;
 };

@@ -32,9 +32,25 @@
  * the vector-insert self-aliasing-range guards, and the CZ name-string dance). See
  * poller.h's own top-of-file and per-method header comments for the full writeup,
  * including the two deliberate simplifications this method uses.
+ *
+ * `MsgSetLed()`/`MsgSetLed16bits()`/`MsgBackupLEDs()` (2026-07-26 CLEDBlinker/
+ * final-prerequisites follow-up batch) transcribed from .text+0x089eff00/0x089f0070/
+ * 0x089f01a0 (350/214/620 bytes), from Ghidra's own decompile directly (small enough
+ * not to need disassembly cross-checking). See poller.h's own per-method header
+ * comments and led_blinker.h for the full derivation, including the real
+ * `mLedBackup` (+0x3e0, formerly `mReserved3e0`) finding this batch made.
+ *
+ * `FindRegisteredClient()`/`MsgGetClientHandleByRef()`/`MsgGetClientHandleByVal()`
+ * (2026-07-26, same session, direct follow-up) transcribed from .text+0x089f25e0/
+ * 0x089f0470/0x089f0f00 (2512/2601/2590 bytes) -- FindRegisteredClient() via direct
+ * `objdump -dr -M intel` register tracing (same technique/opaque pointer chain as
+ * RegisterClient()'s own Phase-1 scan); both Msg*() wrappers from Ghidra's own
+ * decompile, modeled as real calls to FindRegisteredClient() instead of ground
+ * truth's own literal inlined duplicate scan (see poller.h's own header comment).
  */
 
 #include "poller.h"
+#include "led_blinker.h"
 #include "module.h"
 #include "omega_vtables.h"
 #include "system_api.h"
@@ -240,6 +256,264 @@ int CPoller::MsgRequestAnalogInputValue(CMessage &msg) const
 	NotifyFn notify = *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
 	notify(mResource, &local);
 
+	return 0;
+}
+
+/* --- MsgSetLed()/MsgSetLed16bits()/MsgBackupLEDs() (2026-07-26 CLEDBlinker/final-
+ * prerequisites follow-up batch) -- see poller.h's own per-method header comments and
+ * led_blinker.h for the full derivation. All 3 transcribed from Ghidra's own
+ * decompile (small enough not to need direct disassembly cross-checking).
+ */
+
+int CPoller::MsgSetLed(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+	if (*reinterpret_cast<const short *>(raw + 0xa) != 8)
+		return 5;
+
+	int *const *payload = reinterpret_cast<int *const *>(raw + 0x10);
+	int ledCode = **payload;
+	int state   = (*payload)[1];
+
+	if (mResource == 0)
+		return 0;
+
+	int wordIndex = ledCode / 16;
+	int bit       = ledCode % 16;
+	unsigned short mask = (unsigned short)(1 << bit);
+	unsigned short *bitmapWords = reinterpret_cast<unsigned short *>(mZeroBlock);
+
+	struct SResourceMsg {
+		unsigned int opcode;
+		unsigned int value;
+	} local;
+
+	if (state == 1) {
+		/* "on" */
+		s_oLEDBlinker.Unregister(ledCode);
+		if (bitmapWords[wordIndex] & mask)
+			return 0; /* already on -- real early-out, no notify */
+		bitmapWords[wordIndex] |= mask;
+		local.opcode = 2;
+	} else if (state == 2) {
+		/* "blink" -- real: registers with the global blinker and returns
+		 * immediately, no mZeroBlock update, no notify at all on this path.
+		 */
+		s_oLEDBlinker.Register(ledCode);
+		return 0;
+	} else {
+		/* "off" (any other value, including 0) */
+		s_oLEDBlinker.Unregister(ledCode);
+		if (!(bitmapWords[wordIndex] & mask))
+			return 0; /* already off -- real early-out, no notify */
+		bitmapWords[wordIndex] &= (unsigned short)~mask;
+		local.opcode = 1;
+	}
+	local.value = (unsigned int)ledCode;
+
+	typedef void (*NotifyFn)(void *, SResourceMsg *);
+	void *resVtbl = *reinterpret_cast<void **>(mResource);
+	NotifyFn notify = *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+	notify(mResource, &local);
+
+	return 0;
+}
+
+int CPoller::MsgSetLed16bits(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+	if (*reinterpret_cast<const short *>(raw + 0xa) != 8)
+		return 5;
+
+	unsigned int *const *payload = reinterpret_cast<unsigned int *const *>(raw + 0x10);
+	int groupIndex = (int)(short)*reinterpret_cast<const short *>(*payload);
+	unsigned int packed = (*payload)[1];
+
+	if (mResource == 0)
+		return 0;
+
+	unsigned short newBits = (unsigned short)packed;
+	unsigned short mask    = (unsigned short)(packed >> 16);
+
+	unsigned short *bitmapWords = reinterpret_cast<unsigned short *>(mZeroBlock);
+	unsigned short oldWord = bitmapWords[groupIndex];
+	unsigned short newWord = (unsigned short)((~mask & oldWord) | (newBits & mask));
+	bitmapWords[groupIndex] = newWord;
+
+	/* Real: always takes the masked LEDs out of the global blink set, regardless
+	 * of newBits -- see poller.h's own header comment for this real asymmetry.
+	 */
+	s_oLEDBlinker.Unregister(groupIndex, mask);
+
+	if (newWord != oldWord) {
+		struct SResourceMsg {
+			unsigned int opcode;
+			unsigned int value;
+		} local;
+		local.opcode = 6;
+		local.value = ((unsigned int)newWord << 16) | (unsigned int)groupIndex;
+
+		typedef void (*NotifyFn)(void *, SResourceMsg *);
+		void *resVtbl = *reinterpret_cast<void **>(mResource);
+		NotifyFn notify =
+		    *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+		notify(mResource, &local);
+	}
+
+	return 0;
+}
+
+int CPoller::MsgBackupLEDs(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	int direction = *reinterpret_cast<const int *>(raw + 0x10);
+
+	if (direction == 0) {
+		/* RESTORE: bring back the previously-saved snapshot. */
+		memcpy(mZeroBlock, mLedBackup, sizeof(mZeroBlock));
+	} else {
+		/* SAVE-AND-CLEAR: snapshot the current state, then zero it. */
+		memcpy(mLedBackup, mZeroBlock, sizeof(mZeroBlock));
+		memset(mZeroBlock, 0, sizeof(mZeroBlock));
+	}
+
+	if (mResource != 0) {
+		const unsigned short *bitmapWords =
+		    reinterpret_cast<const unsigned short *>(mZeroBlock);
+
+		struct SResourceMsg {
+			unsigned int opcode;
+			unsigned int value;
+		} local;
+
+		typedef void (*NotifyFn)(void *, SResourceMsg *);
+		void *resVtbl = *reinterpret_cast<void **>(mResource);
+		NotifyFn notify =
+		    *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+
+		/* Real: 32 calls, one per mZeroBlock word (ground truth is a 5-way
+		 * unrolled loop -- collapsed to a plain loop, identical result).
+		 */
+		for (unsigned int i = 0; i < 0x20; i++) {
+			local.opcode = 6;
+			local.value = ((unsigned int)bitmapWords[i] << 16) | i;
+			notify(mResource, &local);
+		}
+	}
+
+	return 0;
+}
+
+/* --- FindRegisteredClient()/MsgGetClientHandleByRef()/MsgGetClientHandleByVal()
+ * (2026-07-26 FindRegisteredClient batch) -- see poller.h's own per-method header
+ * comments for the full derivation. FindRegisteredClient() transcribed via direct
+ * `objdump -dr -M intel` register tracing (same technique as RegisterClient(),
+ * same opaque CLink-family pointer chain, confirmed byte-identical to
+ * RegisterClient()'s own Phase-1 scan). Both Msg*() wrappers transcribed from
+ * Ghidra's own decompile, modeled as real calls to FindRegisteredClient() instead
+ * of ground truth's own literal inlined duplicate of the scan (see header comment).
+ */
+
+int CPoller::FindRegisteredClient(const char *nameA, const char *nameB) const
+{
+	if (nameA == 0 || *nameA == 0)
+		return 0;
+	if (nameB != 0 && *nameB == 0)
+		nameB = 0;
+
+	unsigned char **begin = *(unsigned char ***)(mClients + 4);
+	unsigned char **end   = *(unsigned char ***)(mClients + 8);
+	if (end <= begin)
+		return -1;
+
+	for (unsigned char **p = begin; p < end; ++p) {
+		const unsigned char *client = *p;
+		if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+			continue; /* unconnected -- never matched by name */
+
+		int linkP   = *reinterpret_cast<const int *>(client + 0x1c);
+		int linkQ   = *reinterpret_cast<const int *>(linkP);
+		int nameRec = *reinterpret_cast<const int *>(linkQ + 0x10);
+		int nameRecA = *reinterpret_cast<const int *>(nameRec + 0x3c);
+		const char *regNameA = *reinterpret_cast<char *const *>(nameRecA + 4);
+		if (strcmp(regNameA, nameA) != 0)
+			continue;
+
+		if (nameB != 0) {
+			const char *regNameB = *reinterpret_cast<char *const *>(nameRec + 4);
+			if (strcmp(nameB, regNameB) != 0)
+				continue;
+		}
+
+		return (int)(p - begin);
+	}
+
+	return -1;
+}
+
+int CPoller::MsgGetClientHandleByRef(CMessage &msg) const
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+
+	unsigned short taggedLen = *reinterpret_cast<const unsigned short *>(raw + 0xa);
+	if (taggedLen < 0xc)
+		return 5;
+
+	unsigned int *payload = *reinterpret_cast<unsigned int *const *>(raw + 0x10);
+	if (payload == 0)
+		return 6;
+
+	const char *nameA = reinterpret_cast<const char *>(payload[1]);
+	if (nameA == 0 || *nameA == 0)
+		return 6;
+
+	/* nameB is OPTIONAL here -- empty string collapses to NULL, no return-6
+	 * gate (unlike MsgRegisterClientByRef()'s own mandatory-both-names check).
+	 */
+	const char *nameB = reinterpret_cast<const char *>(payload[2]);
+	if (nameB != 0 && *nameB == 0)
+		nameB = 0;
+
+	payload[0] = (unsigned int)FindRegisteredClient(nameA, nameB);
+	return 0;
+}
+
+int CPoller::MsgGetClientHandleByVal(CMessage &msg) const
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+
+	unsigned short taggedLen = *reinterpret_cast<const unsigned short *>(raw + 0xa);
+	if (taggedLen < 0x64)
+		return 5;
+
+	unsigned char *payload = *reinterpret_cast<unsigned char *const *>(raw + 0x10);
+	if (payload == 0)
+		return 6;
+	if (payload[0x4] == 0)
+		return 6;
+
+	const char *nameA = reinterpret_cast<const char *>(payload + 4);
+	const char *nameB = reinterpret_cast<const char *>(payload + 0x34);
+	if (*nameB == 0)
+		nameB = 0;
+
+	*reinterpret_cast<unsigned int *>(payload) = (unsigned int)FindRegisteredClient(nameA, nameB);
 	return 0;
 }
 

@@ -3119,3 +3119,56 @@ was already real from prior batches).
 exhausted for this session's scope: every method not requiring the still-separate
 `CMessage`/`CLEDBlinker`/`FindRegisteredClient()` prerequisites already documented
 above is Tier A.
+
+**UPDATE (2026-07-26, CLEDBlinker/final-prerequisites follow-up batch)**: dispatched
+specifically to re-check whether any of CPoller's 3 named remaining prerequisites had
+become more tractable now that CPoller itself is otherwise exhausted (following
+[[eva_registerclient_reconstruction_2026-07-26]]'s own closing note, and a broader
+task framing that also covered a fresh downstream sweep of the newly-real
+`CPoller`/`CPanel`/`CBatchDiskMan`/`CAlphaKeybCtrl` chains — that broader sweep found
+nothing new; see the batch's own agent-memory writeup for the full negative-result
+detail). `CLEDBlinker` (flagged by the prior batch as "a brand-new external singleton
+class, bigger than fits a small-handler sweep") turned out to be the smallest whole
+new class unlocked in this project so far — 6 methods, all under 100 bytes, no
+vtable at all (`include/led_blinker.h`/`src/hw/led_blinker.cpp`, new). Reconstructed
+it, then used it to promote `CPoller::MsgSetLed()`/`MsgSetLed16bits()`/
+`MsgBackupLEDs()` (350/214/620 bytes) from deferred to Tier A — see poller.h's own
+per-method header comments for the full derivation, including a real, preserved
+quirk (`MsgSetLed()`'s state==2 "blink" path registers with the global blinker and
+returns immediately, with NO `mZeroBlock` update and NO notify — unlike its "on"/
+"off" siblings) and a stale-comment correction this batch made along the way:
+`mReserved3e0` (+0x3e0) was renamed `mLedBackup` after `MsgBackupLEDs()` revealed its
+real, concrete use (a 64-byte save/restore snapshot of `mZeroBlock`) — the prior
+"populated by RegisterClient()/InitAnalogs()/InitButtons()" guess was never actually
+confirmed by any of those 3 methods' own real bodies and turned out to be wrong.
+
+`FindRegisteredClient()` (2512 bytes, `MsgGetClientHandleByRef`/`MsgGetClientHandleByVal`'s
+own real callee) was flagged as a concrete, same-scale sibling of the already-real
+`RegisterClient()` (2603 bytes) — and turned out fully tractable the same session
+via the identical `objdump -dr -M intel` register-tracing technique (byte-identical
+opaque `CLink`-family pointer chain to `RegisterClient()`'s own Phase-1 scan).
+`MsgGetClientHandleByRef()`/`MsgGetClientHandleByVal()` (2601/2590 bytes) turned out
+to be small real wrappers despite their large raw byte counts — ground truth
+INLINES its own full duplicate of the scan into each one (same "duplicate real
+ground-truth function per call site" pattern `RegisterClient()`'s own Phase-2 reuse
+scan already established), modeled here as real calls to `FindRegisteredClient()`
+instead. `CPoller`'s only remaining genuinely-deferred surface after this session:
+`MsgSetButtonClient`/`MsgSetAnalogClient` (1505/1085 bytes, no new angle tried) and
+the two `Exec()` overloads (`Exec(CMessage&)` 6747B the per-message dispatcher,
+`Exec()` 3213B — confirmed this session, via a direct `objdump -dr` call-target
+check, to be `CLEDBlinker::Exec()`'s own real, single caller).
+
+New KAT: `verify/test_led_blinker.cpp` (29 checks, `CLEDBlinker` fully standalone —
+ctor, both `Register`/`Unregister` overloads, the multi-bit-mask overload, the full
+21-tick `Exec()` blink cycle) and `verify/test_poller.cpp` sections `[14]` (27
+checks covering the 3 LED handlers' real gates, state branches, early-outs, and the
+shared global-blinker cross-check) and `[15]` (19 checks covering
+`FindRegisteredClient()`'s own name-only/name-pair search against a hand-built
+connected/unconnected `mClients` array plus both `Msg*()` wrappers' gates and
+real-value forwarding). `make -k objs`: clean. Ran every `verify/` binary
+individually (not just `make -k verify`, which `exit 1`s on first failure): all clean
+except the pre-existing, already-documented
+(`eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`)
+`test_client_comm_server` 6-FAIL, unrelated (this batch never touches `src/ipc/*`).
+`tools/build_lenny.sh`: `LINK OK` (re-confirmed after this extension too). Manifest
+485 → 497 of 37,795 (12 new: 6 `CLEDBlinker` methods + 6 `CPoller` handlers/methods).

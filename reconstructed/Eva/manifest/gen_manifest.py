@@ -962,6 +962,29 @@ RECONSTRUCTED = {
     # function (alpha_keyb_ctrl_task.cpp's own GetDirectIfcPtr()), since it only
     # touches the mCodeIfc sub-object's own self-contained +0x40/+0x44 fields.
     "0807b8e0",  # COutLinkIfcBase::GetDirectIfcPtr(COutLinkIfcBase::CLevelLocker&) const
+
+    # --- 2026-07-26 (CLEDBlinker/CPoller final-prerequisites follow-up batch):
+    # new CLEDBlinker class (led_blinker.h/.cpp) -- the smallest "whole new class"
+    # unlock in this project so far (6 methods, no vtable) -- reconstructed to close
+    # CPoller's own last 3 deferred small handlers (see poller.h's own UPDATE note).
+    "089ee1d0",  # CLEDBlinker::CLEDBlinker()
+    "089ee200",  # CLEDBlinker::~CLEDBlinker()
+    "089ee210",  # CLEDBlinker::Register(ELedCode)
+    "089ee270",  # CLEDBlinker::Unregister(ELedCode)
+    "089ee2c0",  # CLEDBlinker::Unregister(int, unsigned short)
+    "089ee300",  # CLEDBlinker::Exec()
+    "089eff00",  # CPoller::MsgSetLed(CMessage&)
+    "089f0070",  # CPoller::MsgSetLed16bits(CMessage&)
+    "089f01a0",  # CPoller::MsgBackupLEDs(CMessage&)
+
+    # --- 2026-07-26 (same session, FindRegisteredClient batch): the concrete next
+    # candidate the CLEDBlinker batch's own closing note flagged -- see poller.h's
+    # own per-method header comments. Both Msg*() wrappers' large raw byte counts
+    # (2601B/2590B) turned out to be ground truth's own inlined DUPLICATE of the
+    # scan, not real depth -- modeled as real calls to FindRegisteredClient() instead.
+    "089f25e0",  # CPoller::FindRegisteredClient(char const*, char const*) const
+    "089f0470",  # CPoller::MsgGetClientHandleByRef(CMessage&) const
+    "089f0f00",  # CPoller::MsgGetClientHandleByVal(CMessage&) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

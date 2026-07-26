@@ -48,12 +48,36 @@
  *        Api+0x44 tail notify firing with the real owner/task/client/nameA/nameB
  *        args, and the real "reuse a still-unconnected slot" quirk on a 2nd call
  *        (does NOT append a 2nd client or rebind the slot's name)
+ *   [15] FindRegisteredClient()/MsgGetClientHandleByRef()/MsgGetClientHandleByVal()
+ *        (2026-07-26 FindRegisteredClient batch): name-only vs name-pair search
+ *        against a hand-built mClients array of connected/unconnected fake clients
+ *        (own +0x1c/+0x10/+0x3c/+4/+4 pointer chain poked directly, same technique
+ *        RegisterClient()'s own [13] KAT would need if it exercised Phase-1), both
+ *        real "not found"/"array empty"/"nameA missing" distinct return codes, and
+ *        both Msg*() wrappers' own gates (code bit, length threshold, embedded vs
+ *        pointer payload shape, optional nameB) forwarding correctly to the real
+ *        FindRegisteredClient() and writing the result back to the right slot.
+ *   [14] MsgSetLed()/MsgSetLed16bits()/MsgBackupLEDs() (2026-07-26 CLEDBlinker/
+ *        final-prerequisites follow-up batch): the +0x9 bit-0x2 gate + length==8
+ *        check, the real "mResource == 0 -> return 0 with NO CLEDBlinker call at
+ *        all" early-out both handlers share (confirmed: ground truth nests the
+ *        entire CLEDBlinker::Register/Unregister dispatch inside the mResource
+ *        check, not just the notify), all 3 real MsgSetLed() state branches
+ *        (1="on"/2="blink"/other="off") including the real "already in that
+ *        state -> no notify" early-outs and the real "blink never touches
+ *        mZeroBlock or notifies" quirk, MsgSetLed16bits()'s real mask/newBits
+ *        split, and MsgBackupLEDs()'s real save-vs-restore direction switch plus
+ *        the 32-notify sweep on success. Cross-checks CLEDBlinker's own global
+ *        mCount/mBitmap state directly (led_blinker.h), confirming CPoller's
+ *        handlers and CLEDBlinker's own methods agree on the same LED bit.
  */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include "poller.h"
+#include "led_blinker.h"
 #include "module.h"
 #include "system_api.h"
 #include "stg_unsol_msg_handler.h"
@@ -90,6 +114,16 @@ struct PollerTestHooks {
 	}
 	static void *Cursor(const CPoller::CIfcClient &c) { return c.mCursor; }
 	static const unsigned char *RingBuf(const CPoller::CIfcClient &c) { return c.mRingBuf; }
+	static const unsigned char *LedBackup(const CPoller &p) { return p.mLedBackup; }
+};
+
+/* Same friend name led_blinker.h already declares -- separate verify binary from
+ * test_led_blinker.cpp, no ODR conflict (each verify test file links its own
+ * standalone program).
+ */
+struct LEDBlinkerTestHooks {
+	static int Count(const CLEDBlinker &b) { return b.mCount; }
+	static unsigned short Bitmap(const CLEDBlinker &b, int i) { return b.mBitmap[i]; }
 };
 
 /* --- fake Api global -------------------------------------------------------- */
@@ -623,6 +657,313 @@ int main()
 		      g_registerNotifyCalls == 2 &&
 		      strcmp(g_lastRegisterNameA, "ClientA") == 0 &&
 		      strcmp(g_lastRegisterNameB, "ClientB") == 0);
+	}
+
+	printf("[14] MsgSetLed()/MsgSetLed16bits()/MsgBackupLEDs() (CLEDBlinker unlock)\n");
+	{
+		new (&s_oLEDBlinker) CLEDBlinker(); /* reset the real global to a clean state */
+
+		g_fakeLookupResult = &g_fakeResObj;
+		g_fakeResourceType = 10;
+		g_fakeConnectResult = 0;
+		CPoller p(owner, "LedRes");
+
+		/* --- MsgSetLed(), mResource == 0 case: no CLEDBlinker call at all --- */
+		{
+			CPoller pNoRes(owner, 0); /* ctor fallback path, mResource stays 0 */
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			int payload[2] = { 3, 1 }; /* ledCode=3, state=1 ("on") */
+			m.SetWord10((unsigned int)(unsigned long)payload);
+			check("MsgSetLed() returns 0 immediately when mResource == 0",
+			      pNoRes.MsgSetLed(m.AsMessage()) == 0);
+			check("MsgSetLed() with mResource==0 never touches CLEDBlinker",
+			      LEDBlinkerTestHooks::Count(s_oLEDBlinker) == 0);
+		}
+
+		/* --- MsgSetLed() gates: code bit + length --- */
+		{
+			FakeMessage m;
+			m.SetFlags(0);
+			check("MsgSetLed() returns 4 when code bit 0x2 clear",
+			      p.MsgSetLed(m.AsMessage()) == 4);
+			m.SetFlags(0x2);
+			m.SetTaggedLen(7);
+			check("MsgSetLed() returns 5 when length != 8",
+			      p.MsgSetLed(m.AsMessage()) == 5);
+		}
+
+		/* --- MsgSetLed() state==1 ("on"): sets mZeroBlock bit, unregisters from
+		 * the blinker, notifies with {opcode=2, ledCode}.
+		 */
+		{
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			int payload[2] = { 5, 1 }; /* ledCode=5, state=1 */
+			m.SetWord10((unsigned int)(unsigned long)payload);
+			g_notifyCalls = 0;
+
+			check("MsgSetLed(on) returns 0", p.MsgSetLed(m.AsMessage()) == 0);
+			const unsigned short *zb =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::ZeroBlock(p));
+			check("MsgSetLed(on) sets mZeroBlock word0 bit5", (zb[0] & (1 << 5)) != 0);
+			check("MsgSetLed(on) notifies {opcode=2, value=ledCode}",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 2 && g_lastNotifyValue == 5);
+
+			/* Real early-out: calling "on" again on an already-on LED returns 0
+			 * with NO further notify.
+			 */
+			g_notifyCalls = 0;
+			check("MsgSetLed(on) on an already-on LED is a no-op notify-wise",
+			      p.MsgSetLed(m.AsMessage()) == 0 && g_notifyCalls == 0);
+		}
+
+		/* --- MsgSetLed() state==2 ("blink"): registers with the global blinker,
+		 * returns immediately -- NO mZeroBlock update, NO notify.
+		 */
+		{
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			int payload[2] = { 9, 2 }; /* ledCode=9, state=2 */
+			m.SetWord10((unsigned int)(unsigned long)payload);
+			g_notifyCalls = 0;
+			int countBefore = LEDBlinkerTestHooks::Count(s_oLEDBlinker);
+
+			check("MsgSetLed(blink) returns 0", p.MsgSetLed(m.AsMessage()) == 0);
+			check("MsgSetLed(blink) registers the LED with the global blinker",
+			      LEDBlinkerTestHooks::Count(s_oLEDBlinker) == countBefore + 1 &&
+			      (LEDBlinkerTestHooks::Bitmap(s_oLEDBlinker, 0) & (1 << 9)) != 0);
+			const unsigned short *zb =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::ZeroBlock(p));
+			check("MsgSetLed(blink) does NOT touch mZeroBlock bit9",
+			      (zb[0] & (1 << 9)) == 0);
+			check("MsgSetLed(blink) fires NO notify", g_notifyCalls == 0);
+		}
+
+		/* --- MsgSetLed() state==other ("off"): mirrors "on", opcode=1 --- */
+		{
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			int payload[2] = { 5, 0 }; /* ledCode=5 (currently ON from above), state=0 */
+			m.SetWord10((unsigned int)(unsigned long)payload);
+			g_notifyCalls = 0;
+
+			check("MsgSetLed(off) returns 0", p.MsgSetLed(m.AsMessage()) == 0);
+			const unsigned short *zb =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::ZeroBlock(p));
+			check("MsgSetLed(off) clears mZeroBlock word0 bit5", (zb[0] & (1 << 5)) == 0);
+			check("MsgSetLed(off) notifies {opcode=1, value=ledCode}",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 1 && g_lastNotifyValue == 5);
+
+			g_notifyCalls = 0;
+			check("MsgSetLed(off) on an already-off LED is a no-op notify-wise",
+			      p.MsgSetLed(m.AsMessage()) == 0 && g_notifyCalls == 0);
+		}
+
+		/* --- MsgSetLed16bits(): mask/newBits split, unconditional CLEDBlinker
+		 * unregister of the masked bits (regardless of newBits), notify only if
+		 * the word actually changed.
+		 */
+		{
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(8);
+			/* group index 1 (a short at the payload's own +0), packed dword:
+			 * low16 = newBits (bits 2,3 set), high16 = mask (bits 0,1,2,3).
+			 */
+			unsigned int payload[2];
+			*reinterpret_cast<short *>(&payload[0]) = 1;
+			payload[1] = (0xfu << 16) | 0xcu;
+			m.SetWord10((unsigned int)(unsigned long)payload);
+			g_notifyCalls = 0;
+
+			check("MsgSetLed16bits() returns 0", p.MsgSetLed16bits(m.AsMessage()) == 0);
+			const unsigned short *zb =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::ZeroBlock(p));
+			check("MsgSetLed16bits() sets bits 2,3 and clears bits 0,1 in word1",
+			      zb[1] == 0xc);
+			check("MsgSetLed16bits() notifies {opcode=6, value=(word<<16)|group}",
+			      g_notifyCalls == 1 && g_lastNotifyOpcode == 6 &&
+			      g_lastNotifyValue == ((0xcu << 16) | 1u));
+
+			/* Real: unregisters ALL 4 masked bits from the global blinker,
+			 * regardless of which ones newBits would keep "on."
+			 */
+			check("MsgSetLed16bits() unregistered all 4 masked bits from the blinker",
+			      (LEDBlinkerTestHooks::Bitmap(s_oLEDBlinker, 1) & 0xf) == 0);
+
+			/* Calling again with the identical word is a real no-notify no-op
+			 * (word unchanged).
+			 */
+			g_notifyCalls = 0;
+			check("MsgSetLed16bits() with an unchanged word fires no notify",
+			      p.MsgSetLed16bits(m.AsMessage()) == 0 && g_notifyCalls == 0);
+		}
+
+		/* --- MsgBackupLEDs(): save-and-clear, then restore --- */
+		{
+			FakeMessage m;
+			m.SetFlags(0);
+			check("MsgBackupLEDs() returns 4 when code bit 0x1 clear",
+			      p.MsgBackupLEDs(m.AsMessage()) == 4);
+			m.SetFlags(0x1);
+
+			const unsigned short *zb =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::ZeroBlock(p));
+			unsigned short word1Before = zb[1]; /* 0xc, from MsgSetLed16bits() above */
+
+			m.SetWord10(1); /* nonzero -> SAVE-AND-CLEAR */
+			g_notifyCalls = 0;
+			check("MsgBackupLEDs(save) returns 0", p.MsgBackupLEDs(m.AsMessage()) == 0);
+			check("MsgBackupLEDs(save) zeroes mZeroBlock", zb[1] == 0);
+			const unsigned short *backup =
+			    reinterpret_cast<const unsigned short *>(PollerTestHooks::LedBackup(p));
+			check("MsgBackupLEDs(save) snapshotted the old value into mLedBackup",
+			      backup[1] == word1Before);
+			check("MsgBackupLEDs(save) fired the real 32-word notify sweep",
+			      g_notifyCalls == 0x20);
+
+			m.SetWord10(0); /* zero -> RESTORE */
+			g_notifyCalls = 0;
+			check("MsgBackupLEDs(restore) returns 0", p.MsgBackupLEDs(m.AsMessage()) == 0);
+			check("MsgBackupLEDs(restore) brings back the saved value",
+			      zb[1] == word1Before);
+			check("MsgBackupLEDs(restore) also fires the 32-word notify sweep",
+			      g_notifyCalls == 0x20);
+		}
+	}
+
+	printf("[15] FindRegisteredClient()/MsgGetClientHandleByRef()/MsgGetClientHandleByVal()\n");
+	{
+		/* Builds the real opaque +0x1c -> deref -> +0x10 -> +0x3c/+4 and +4
+		 * pointer chain FindRegisteredClient()'s Phase-1-style scan walks, so
+		 * this KAT can exercise the real name-match logic end to end rather
+		 * than just the gate checks.
+		 */
+		struct FakeNameChain {
+			unsigned char nameRecA[0x10];
+			unsigned char nameRec[0x44];
+			unsigned char linkQ[0x18];
+			int linkPCell;
+			unsigned char client[0x20];
+
+			FakeNameChain(const char *regNameA, const char *regNameB, bool connected)
+			{
+				memset(nameRecA, 0, sizeof(nameRecA));
+				memset(nameRec, 0, sizeof(nameRec));
+				memset(linkQ, 0, sizeof(linkQ));
+				memset(client, 0, sizeof(client));
+
+				*reinterpret_cast<const char **>(nameRecA + 4) = regNameA;
+				*reinterpret_cast<int *>(nameRec + 0x3c) =
+				    (int)(unsigned long)nameRecA;
+				*reinterpret_cast<const char **>(nameRec + 4) = regNameB;
+				*reinterpret_cast<int *>(linkQ + 0x10) = (int)(unsigned long)nameRec;
+				linkPCell = (int)(unsigned long)linkQ;
+				*reinterpret_cast<int *>(client + 0x14) = connected ? 1 : 0;
+				*reinterpret_cast<int *>(client + 0x1c) =
+				    (int)(unsigned long)&linkPCell;
+			}
+			unsigned char *ClientPtr() { return client; }
+		};
+
+		CPoller p(owner, 0); /* mResource == 0, doesn't matter for this section */
+
+		check("FindRegisteredClient() returns -1 on a genuinely empty mClients",
+		      p.FindRegisteredClient("Alice", 0) == -1);
+
+		FakeNameChain c0("Alice", "Bob", true);      /* connected, matches */
+		FakeNameChain c1("Carol", "Dave", true);     /* connected, no match */
+		FakeNameChain c2("Alice", "Bob", false);     /* UNCONNECTED, would match by name */
+
+		void *elems[3] = { c0.ClientPtr(), c1.ClientPtr(), c2.ClientPtr() };
+		PollerTestHooks::SetClients(p, elems, elems + 3);
+
+		check("FindRegisteredClient() finds an exact (nameA,nameB) match on a "
+		      "connected client",
+		      p.FindRegisteredClient("Alice", "Bob") == 0);
+		check("FindRegisteredClient() name-only search (nameB==NULL) also matches",
+		      p.FindRegisteredClient("Alice", 0) == 0);
+		check("FindRegisteredClient() an empty nameB string is treated as NULL",
+		      p.FindRegisteredClient("Alice", "") == 0);
+		check("FindRegisteredClient() nameA match but wrong nameB -> not found",
+		      p.FindRegisteredClient("Alice", "WrongName") == -1);
+		check("FindRegisteredClient() skips the UNCONNECTED client even though "
+		      "its name would match (index 2, 'Alice'/'Bob')",
+		      p.FindRegisteredClient("Alice", "Bob") != 2);
+		check("FindRegisteredClient() returns 0 (not -1) when nameA itself is NULL",
+		      p.FindRegisteredClient(0, "Bob") == 0);
+		check("FindRegisteredClient() returns 0 when nameA is an empty string",
+		      p.FindRegisteredClient("", "Bob") == 0);
+
+		/* --- MsgGetClientHandleByRef(): gates + real forwarding --- */
+		{
+			FakeMessage m;
+			m.SetFlags(0);
+			check("MsgGetClientHandleByRef() returns 4 when code bit 0x2 clear",
+			      p.MsgGetClientHandleByRef(m.AsMessage()) == 4);
+
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0xb); /* below the real 0xc threshold */
+			check("MsgGetClientHandleByRef() returns 5 below the length threshold",
+			      p.MsgGetClientHandleByRef(m.AsMessage()) == 5);
+
+			m.SetTaggedLen(0xc);
+			unsigned int refBuf[3] = { 0xdeadbeef, 0, 0 };
+			m.SetWord10((unsigned int)(unsigned long)refBuf);
+			check("MsgGetClientHandleByRef() returns 6 when nameA pointer is NULL",
+			      p.MsgGetClientHandleByRef(m.AsMessage()) == 6);
+
+			refBuf[1] = (unsigned int)(unsigned long)"Carol";
+			refBuf[2] = 0; /* nameB omitted -- must still search by nameA alone */
+			int r = p.MsgGetClientHandleByRef(m.AsMessage());
+			check("MsgGetClientHandleByRef() succeeds with nameB==NULL", r == 0);
+			check("MsgGetClientHandleByRef() writes the real found index back (1, "
+			      "'Carol')",
+			      refBuf[0] == 1u);
+
+			refBuf[1] = (unsigned int)(unsigned long)"NoSuchName";
+			p.MsgGetClientHandleByRef(m.AsMessage());
+			check("MsgGetClientHandleByRef() writes -1 back for a genuine miss",
+			      refBuf[0] == 0xffffffffu);
+		}
+
+		/* --- MsgGetClientHandleByVal(): embedded-buffer payload shape --- */
+		{
+			FakeMessage m;
+			m.SetFlags(0x2);
+			m.SetTaggedLen(0x63); /* below the real 0x64 threshold */
+			unsigned char valBuf[0x40];
+			memset(valBuf, 0, sizeof(valBuf));
+			m.SetWord10((unsigned int)(unsigned long)valBuf);
+			check("MsgGetClientHandleByVal() returns 5 below the length threshold",
+			      p.MsgGetClientHandleByVal(m.AsMessage()) == 5);
+
+			m.SetTaggedLen(0x64);
+			check("MsgGetClientHandleByVal() returns 6 when embedded nameA is empty",
+			      p.MsgGetClientHandleByVal(m.AsMessage()) == 6);
+
+			strcpy((char *)valBuf + 4, "Alice");
+			strcpy((char *)valBuf + 0x34, "Bob");
+			int r = p.MsgGetClientHandleByVal(m.AsMessage());
+			check("MsgGetClientHandleByVal() succeeds with both embedded names set",
+			      r == 0);
+			check("MsgGetClientHandleByVal() writes the real found index back (0)",
+			      *(unsigned int *)valBuf == 0u);
+
+			/* empty embedded nameB collapses to NULL -- name-only search */
+			valBuf[0x34] = 0;
+			p.MsgGetClientHandleByVal(m.AsMessage());
+			check("MsgGetClientHandleByVal() with an empty embedded nameB searches "
+			      "by nameA alone",
+			      *(unsigned int *)valBuf == 0u);
+		}
+
+		PollerTestHooks::SetClients(p, 0, 0);
 	}
 
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");
