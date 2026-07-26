@@ -30,8 +30,13 @@
 #include <cstring>
 
 #include "batch_disk_man.h"
+#include "batch_disk_main_task.h"
 #include "omega_vtables.h"
 #include "system_api.h"
+
+struct BatchDiskMainTaskTestHooks {
+	static int State(const CBatchDiskMainTask &t) { return t.mState; }
+};
 
 struct BatchDiskManTestHooks {
 	static CBatchDiskMainTask *MainTask(const CBatchDiskMan &m) { return m.mMainTask; }
@@ -133,7 +138,7 @@ int main()
 
 		printf("[3] CBatchDiskMan::IsBusy()/IsPreloadRunning() forward to mMainTask\n");
 		{
-			check("IsBusy() == mMainTask->IsBusy() (both false, Tier-B substitute)",
+			check("IsBusy() == mMainTask->IsBusy() (both false, real mState field)",
 			      man.IsBusy() == mainTask->IsBusy());
 			check("IsPreloadRunning() == mMainTask->IsPreloadRunning()",
 			      man.IsPreloadRunning() == mainTask->IsPreloadRunning());
@@ -189,6 +194,32 @@ int main()
 		check("DoPreload() did not crash", true);
 		const char *name = task.GetOutLinkName();
 		check("GetOutLinkName() == \"Internal\"", name != 0 && strcmp(name, "Internal") == 0);
+	}
+
+	printf("[8] CBatchDiskMainTask standalone -- real ctor (Eva \"size is not depth\"\n"
+	       "    re-check batch, 2026-07-26): all 3 vtable groups, mState, no crash\n");
+	{
+		CBatchDiskMan owner("BatchDiskMan", 0);
+		CBatchDiskMainTask task(owner, "EditResources.Unlocalized");
+
+		void *vtbl0 = *(void **)(void *)&task;
+		check("vtbl(+0) == PTR__CBatchDiskMainTask_08eabec8 (CTask group)",
+		      vtbl0 == (void *)PTR__CBatchDiskMainTask_08eabec8);
+		void *vtbl8 = *(void **)((char *)&task + 8);
+		check("vtbl(+8) == PTR__CBatchDiskMainTask_08eabee8 (CTask's own mIfcThunk, "
+		      "NOT a separate CEditable vtable -- corrects the prior unlock batch's claim)",
+		      vtbl8 == (void *)PTR__CBatchDiskMainTask_08eabee8);
+		void *vtbl80 = *(void **)((char *)&task + 0x80);
+		check("vtbl(+0x80) == PTR__CBatchDiskMainTask_08eabefc (CRMApiCallBack group, "
+		      "the genuine 3rd base)", vtbl80 == (void *)PTR__CBatchDiskMainTask_08eabefc);
+
+		check("mState == 0 initially", BatchDiskMainTaskTestHooks::State(task) == 0);
+		check("IsBusy() == false", task.IsBusy() == false);
+		check("IsPreloadRunning() == false", task.IsPreloadRunning() == false);
+		check("sizeof(CBatchDiskMainTask) == 0x160 (matches CBatchDiskMan::Setup()'s "
+		      "own real malloc size)", sizeof(CBatchDiskMainTask) == 0x160);
+		check("ctor/dtor did not crash (CTask+CEditable+CRMApiCallBack bases, heap "
+		      "CRMJob, embedded CDirEntry/CZ, heap COutLinkMulti all constructed)", true);
 	}
 
 	printf("=========================\n");

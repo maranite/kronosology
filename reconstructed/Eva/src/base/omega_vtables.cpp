@@ -368,6 +368,10 @@ void *PTR__COutLink_08e82068[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+void *PTR__COutLinkMulti_08e82028[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 void *PTR__TPtrArray_08e820d8[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
@@ -680,4 +684,33 @@ void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4] = {
 };
 
 int EvaDataPlaceholder_08eabce8 = 0;
+
+/* CDirEntry's own real vtable -- see omega_vtables.h's own header comment. */
+void *PTR__CDirEntry_08e81908[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+
+/* CBatchDiskMainTask's own real per-instance vtables -- see omega_vtables.h's
+ * own header comment. */
+void *PTR__CBatchDiskMainTask_08eabec8[8] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CBatchDiskMainTask_08eabee8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CBatchDiskMainTask_08eabefc[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+
+/* TVector<int,1>'s own real vtable -- see omega_vtables.h's own header
+ * comment. */
+void *PTR__TVectorInt_08e86f78[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }

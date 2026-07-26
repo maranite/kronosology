@@ -136,3 +136,10 @@ int CSysExMsgClientOutLink::SendMessage(unsigned char ecb, const unsigned char *
 	 */
 	return OutMono(ecb, const_cast<unsigned char *>(data), len);
 }
+
+COutLinkMulti::COutLinkMulti(const CTask &owner, const char *name, int direction,
+                               unsigned short mode)
+	: COutLink(owner, name, direction, mode, /*lastArg=*/0)
+{
+	mVtbl = (void *)PTR__COutLinkMulti_08e82028;
+}

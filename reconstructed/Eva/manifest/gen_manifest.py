@@ -912,14 +912,13 @@ RECONSTRUCTED = {
     # closing the gap [[eva_mopup_sweep_2026-07-26_negative]] re-verified and
     # correctly deferred (CBatchDiskMan::Setup() constructs 2 brand-new classes).
     # CEditTask is fully real (every real dependency -- CTask/CEditable/COutLinkMono
-    # -- already reconstructed). CBatchDiskMainTask (batch_disk_main_task.h) is a
-    # Tier-B substitute, NOT included below -- its real ctor is genuinely blocked on
-    # the already-project-wide-out-of-scope `CZ` string-set container (247 methods,
-    # cz_util.h/config_manager.h) plus 4 more never-reconstructed supporting classes
-    # (CRMJob/CDirEntry/COutLinkMulti/CRMApiCallBack) and its own heaviest methods
-    # (PreloadDir 2940B, PreloadGroup 1148B, PrepareGroupsForPreload 1336B,
-    # AddItemToPreload 359B, Exec(CMessage&) 703B) -- CChunkServer/CTimerEngine-scale,
-    # confirmed via objdump, not assumed from size alone.
+    # -- already reconstructed). CBatchDiskMainTask (batch_disk_main_task.h) was
+    # ORIGINALLY a Tier-B substitute here -- UPDATE (2026-07-26, "size is not depth"
+    # re-check batch): its real ctor/dtor are now ALSO real, see the dedicated
+    # CBatchDiskMainTask block below. Its own heaviest methods (PreloadDir 2940B,
+    # PreloadGroup 1148B, PrepareGroupsForPreload 1336B, AddItemToPreload 359B,
+    # Exec(CMessage&) 703B) remain genuinely deferred (CZ/CRMJob-driven business
+    # logic, CChunkServer/CTimerEngine-scale) -- NOT included below.
     "08243d80",  # CBatchDiskManConstructor::Create(char const*, char const*, int)
     "082436e0",  # CBatchDiskMan::CBatchDiskMan(char const*, char const*)
     "082435d0",  # CBatchDiskMan::Setup()
@@ -962,6 +961,40 @@ RECONSTRUCTED = {
     # function (alpha_keyb_ctrl_task.cpp's own GetDirectIfcPtr()), since it only
     # touches the mCodeIfc sub-object's own self-contained +0x40/+0x44 fields.
     "0807b8e0",  # COutLinkIfcBase::GetDirectIfcPtr(COutLinkIfcBase::CLevelLocker&) const
+    "0823efb0",  # CAlphaKeybCtrlTask::SetRateDelay() -- "size is not depth" re-check
+                 # batch, 2026-07-26: 6-byte trivial `return 1;`, unrelated to the
+                 # CMarshaller framework, simply missed by the original unlock batch.
+
+    # --- 2026-07-26 (Eva "size is not depth" re-check batch): CBatchDiskMainTask's
+    # own real ctor/dtor, previously a Tier-B substitute (see batch_disk_main_task.h's
+    # own header comment for the full re-derivation). Re-traced via objdump -dr -M
+    # intel with the specific question "is the ctor's OWN logic tractable if CZ stays
+    # opaque" -- yes: every instruction is a subobject ctor call or a literal field
+    # store, no algorithmic depth of its own. Pulled in 4 small, equally-mechanical
+    # dependency classes (CRMJob, CRMApiCallBack, CDirEntry, COutLinkMulti) to make
+    # this real without touching CZ's own internals. Corrected a prior claim (this
+    # class is genuine CTask+CEditable+CRMApiCallBack triple inheritance, not
+    # CTask+CRMApiCallBack with CEditable misattributed to CTask's own +8 mIfcThunk
+    # slot -- see header comment). PrepareGroupsForPreload()/PreloadDir()/
+    # PreloadGroup()/AddItemToPreload()/Exec(CMessage&) remain genuinely deferred
+    # (the real CZ/CRMJob-driven business logic itself).
+    "08241920",  # CBatchDiskMainTask::CBatchDiskMainTask(CModule const&, char const*)
+    "08241040",  # CBatchDiskMainTask::~CBatchDiskMainTask() [D1]
+    "082411d0",  # CBatchDiskMainTask::~CBatchDiskMainTask() [D0, deleting]
+    "08241230",  # CBatchDiskMainTask::IsBusy() const
+    "08241250",  # CBatchDiskMainTask::IsPreloadRunning() const
+    "081660d0",  # CRMJob::CRMJob()
+    "08166180",  # CRMJob::~CRMJob() [D1]
+    "08071640",  # CDirEntry::CDirEntry()
+    "08071540",  # CDirEntry::~CDirEntry() [D1]
+    "080715c0",  # CDirEntry::~CDirEntry() [D0, deleting]
+    "0807d620",  # COutLinkMulti::COutLinkMulti(CTask const&, char const*, COutLink::EDirection, unsigned short)
+    "0818fa20",  # CRMApiCallBack::~CRMApiCallBack() [D1]
+    "0818f1f0",  # CRMApiCallBack::OnSetRes(CRMApiCallBack::ERMResult) -- confirmed empty
+    "0818f200",  # CRMApiCallBack::OnLoadRes(CRMApiCallBack::ERMResult) -- confirmed empty
+    "0818f210",  # CRMApiCallBack::OnLoad(CRMApiCallBack::ERMResult) -- confirmed empty
+    "0818f220",  # CRMApiCallBack::OnSave(CRMApiCallBack::ERMResult) -- confirmed empty
+    "0818f230",  # CRMApiCallBack::OnDelete(CRMApiCallBack::ERMResult) -- confirmed empty
 
     # --- 2026-07-26 (CLEDBlinker/CPoller final-prerequisites follow-up batch):
     # new CLEDBlinker class (led_blinker.h/.cpp) -- the smallest "whole new class"

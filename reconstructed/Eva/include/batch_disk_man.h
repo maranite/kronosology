@@ -15,10 +15,17 @@
  * classes (`CBatchDiskMainTask`, `CEditTask`) and correctly deferred the whole class
  * rather than build a false "unlock" that silently no-ops. This batch does the real
  * unlock: `CBatchDiskMan` itself, `CEditTask` (edit_task.h, fully real), and
- * `CBatchDiskMainTask` (batch_disk_main_task.h, a Tier-B substitute -- see that file's
- * own header comment for exactly why the real class is blocked on the SAME `CZ`
- * container class this project has already, independently, flagged out of scope
- * project-wide, e.g. config_manager.h's `CreateResourceFamilies()`/cz_util.h).
+ * `CBatchDiskMainTask` (batch_disk_main_task.h). UPDATE (Eva "size is not depth"
+ * re-check batch, 2026-07-26): `CBatchDiskMainTask`'s own ctor is now ALSO fully
+ * real -- only its embedded `CZ` member (edit_task.h's own already-established
+ * project-wide out-of-scope container, config_manager.h's `CreateResourceFamilies()`)
+ * stays opaque; the ctor's OWN logic around it (CTask/CEditable/CRMApiCallBack base
+ * construction, heap CRMJob/COutLinkMulti, embedded CDirEntry, field inits) turned
+ * out to be equally mechanical, not the "genuinely deep, CZ-scale" dependency cluster
+ * the original unlock batch assumed -- see batch_disk_main_task.h's own header
+ * comment for the full re-derivation. `PrepareGroupsForPreload()`/`PreloadDir()`/
+ * `PreloadGroup()`/`AddItemToPreload()`/`Exec(CMessage&)` remain genuinely deferred
+ * (the real CZ/CRMJob-driven business logic itself).
  *
  * REAL CLASS SHAPE (CBatchDiskMan : public CModule, public CEditServer -- the SAME
  * CModule+CEditServer shell family es_common.h's own header comment already surveyed

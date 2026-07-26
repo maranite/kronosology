@@ -176,6 +176,16 @@ public:
 	 */
 	void Initialize();
 
+	/* .text+0x0823efb0, 6 bytes. Real, literal `return 1;` -- no state, no
+	 * dependency on mCodeIfc/the CMarshaller framework at all. Missed by
+	 * the original unlock batch (which enumerated `Exec`/`Initialize`/
+	 * `ProcessEvent`/`SetCtrlCondition`/ctor/dtor but not this one) --
+	 * found this "size is not depth" re-check batch (2026-07-26) by cross
+	 * checking symbols.csv's own full CAlphaKeybCtrlTask method list against
+	 * the header.
+	 */
+	static int SetRateDelay() { return 1; }
+
 	/* .text+0x0823efc0, 268 bytes. Real: a small static-local bitmask
 	 * (`s_iStatusBits`) tracking which of 4 "sticky" keys (Alt/Shift/Ctrl/
 	 * CapsLock-ish, keycodes 'X'/';'/'L'/'a') are currently latched, with

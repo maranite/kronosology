@@ -222,4 +222,23 @@ public:
 	int SendMessage(unsigned char ecb, const unsigned char *data, unsigned char len);
 };
 
+/* COutLinkMulti -- Eva "size is not depth" re-check batch, 2026-07-26. Pulled in
+ * while re-tracing `CBatchDiskMainTask::CBatchDiskMainTask()`'s own ctor
+ * (batch_disk_main_task.h), which heap-allocates one (`malloc(0x34)`, matching
+ * `COutLink`'s own base size exactly -- no new fields of its own).
+ *
+ * `COutLinkMulti::COutLinkMulti(CTask const&, char const*, COutLink::EDirection,
+ * unsigned short)` (.text+0x0807d620, 70 bytes) is a PURE forwarder: `COutLink(
+ * owner, name, direction, mode, lastArg=0)` (hardcoded 0, confirmed via direct
+ * register-to-stack-slot tracing of the real disassembly) then installs this
+ * class's own real vtable (`PTR__COutLinkMulti_08e82028`, confirmed via
+ * `_ZTV13COutLinkMulti` at 0x08e82020). No other members, no other real methods
+ * needed by `CBatchDiskMainTask`'s own ctor (which only constructs+`CTask::Add()`s
+ * it, never calls `OutMulti()`).
+ */
+class COutLinkMulti : public COutLink {
+public:
+	COutLinkMulti(const CTask &owner, const char *name, int direction, unsigned short mode);
+};
+
 #endif /* OUT_LINK_H */

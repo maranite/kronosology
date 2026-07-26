@@ -313,6 +313,13 @@ extern void *PTR__TPtrArray_08e820d8[3];
 extern void *PTR__CSysExMsgClientOutLink_08e84b08[8];
 extern void *PTR__CSysExMsgOutLink_08e84b28[8];
 
+/* COutLinkMulti's own real vtable (out_link.h, Eva "size is not depth" re-check
+ * batch, 2026-07-26). 08e82028 -> 08e82040 (COutLinkMono) = 6 slots, matching
+ * COutLink's own family-wide 6-slot size exactly. Install-only -- CBatchDiskMainTask
+ * only constructs+CTask::Add()s this object, never calls OutMulti().
+ */
+extern void *PTR__COutLinkMulti_08e82028[6];
+
 /* CCircByteBuffer/CDumpBuffer/CDumpManStateMachine/CDumpMachine/CDumpTask/
  * CBufferingTask (Stage 6 breadth sweep, 2026-07-25, DumpManager cluster batch --
  * circ_byte_buffer.h/dump_buffer.h/dump_man_state_machine.h/dump_task.h/
@@ -799,6 +806,48 @@ extern int   EvaDataPlaceholder_08eabce8;
  */
 extern void *PTR__COutLinkIfc_AlphaKeybCode_08eabd48[10];
 extern void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4];
+
+/* CDirEntry's own real vtable (dir_entry.h/.cpp, Eva "size is not depth"
+ * re-check batch, 2026-07-26). Confirmed byte-exact via direct `.rodata`
+ * reads at 0x08e81900 (`vtable for CDirEntry`): slot0 at 0x08e81908, next
+ * symbol (`typeinfo-name`) at 0x08e81924 -> (0x924-0x908)/4 = 7 slots (dtor
+ * D1/D0 + 5 real virtual overrides, none named/reconstructed -- see
+ * dir_entry.h's own header comment for why only ctor/dtor are in scope).
+ * Entirely EvaVTableStub-backed -- install-only, no reconstructed code
+ * dispatches through it (CDirEntry is only ever ctor/dtor'd as an embedded
+ * CBatchDiskMainTask member, batch_disk_main_task.h).
+ */
+extern void *PTR__CDirEntry_08e81908[7];
+
+/* CBatchDiskMainTask's own real per-instance vtables (batch_disk_main_task.h/
+ * .cpp, same batch). Confirmed byte-exact via direct `.rodata` reads at
+ * 0x08eabec0 (`vtable for CBatchDiskMainTask`): PRIMARY group (CTask shape)
+ * install 0x08eabec8, 8 slots (0x8eabee8-0x8eabec8)/4; SECONDARY group
+ * (CEditable-thunk) install 0x08eabee8, 3 slots
+ * ((0x8eabefc-8)-0x8eabee8)/4 -- the this-adjusting thunk header itself
+ * occupies the 8 bytes right before 0x8eabefc; TERTIARY group
+ * (CRMApiCallBack-thunk) install 0x08eabefc, 7 slots
+ * (0x8eabf18-0x8eabefc)/4, matching CRMApiCallBack's own 7 named methods
+ * exactly (rm_api_callback.h). All 3 groups entirely EvaVTableStub-backed --
+ * same "never CModuleManager-dispatched, only ever CModule::Add()ed" status
+ * as every other CTask-derived per-instance vtable in this project
+ * (CChunkServerTask, CPanelIfcTask, CEditTask above). The tertiary group's
+ * own 5 OnXxx slots being EvaVTableStub is not a compromise -- ground
+ * truth's real bodies for all 5 ARE empty no-ops, confirmed byte-for-byte
+ * (rm_api_callback.h's own header comment).
+ */
+extern void *PTR__CBatchDiskMainTask_08eabec8[8];
+extern void *PTR__CBatchDiskMainTask_08eabee8[3];
+extern void *PTR__CBatchDiskMainTask_08eabefc[7];
+
+/* TVector<int,1>'s own real vtable -- the opaque raw buffer at
+ * `CBatchDiskMainTask::mUnknownVec` (+0xc8, batch_disk_main_task.h) is
+ * vtable-installed to this identity by ground truth (confirmed via direct
+ * `.rodata` read: slot0 08e86f78 -> next vtable header 08e86f80
+ * (TVector<CMBR::CPartitionInfo,1>) = 2 slots). Install-only, never
+ * dispatched through (the vector is always empty in this reconstruction).
+ */
+extern void *PTR__TVectorInt_08e86f78[2];
 }
 
 #endif /* OMEGA_VTABLES_H */
