@@ -117,6 +117,11 @@ private:
 	 * self-install shape (CEditor@08249cd0.c).
 	 */
 	friend class CEditor;
+
+	/* CPanel (panel.h) installs its own derived vtable inline the same way, Eva
+	 * Stage 6 CPanel unlock batch, 2026-07-26.
+	 */
+	friend class CPanel;
 };
 
 #endif /* MODULE_H */

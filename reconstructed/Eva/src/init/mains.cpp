@@ -71,6 +71,7 @@
 #include "file_man.h"
 #include "res_man.h"
 #include "editor.h"
+#include "panel.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -142,11 +143,28 @@ extern "C" void *PTR__CLinuxDriverConstructor_08fdaab0 = 0;
  * CEditorConstructor itself via direct .rodata read, see below) so every
  * dereference is well-defined.
  *
- * Only CEditorConstructor's own Create slot does real work (placement-
- * constructs a real CEditor -- the actual point of this fix). The other 13
- * (BatchDiskMan/Panel/AlphaKeybCtrl/10x CESxxxModule) route Create through
- * ModuleFactoryCreateStub, a shared "return NULL" stub: their own real
- * per-module classes (CBatchDiskMan/CPanel/CAlphaKeybCtrl, the 10 CESxxx
+ * UPDATE (2026-07-26, Eva Stage 6 CPanel unlock batch): CEditorConstructor is no
+ * longer the only one doing real work -- CPanelConstructor's own Create slot is now
+ * ALSO real (CPanelConstructorCreate, below), placement-constructing a real CPanel
+ * (panel.h/.cpp). This closes the exact gap poller.h's own header comment flagged:
+ * CPoller's real, definitive ground-truth constructor call site is `CPanel::Setup()`,
+ * which was unreachable while CPanelConstructor::Create() routed through the shared
+ * NULL stub. Ground truth verified directly: `CPanelConstructor::Create(char const*,
+ * char const*, int)` (.text+0x089ee340, 112 bytes) real body is `malloc(0x3c)` then
+ * `CPanel::CPanel(name, param2)` (call to `_ZN6CPanelC1EPKcS1_`) -- same
+ * ctorObj-and-counter-unused shape as CEditorConstructorCreate, `sizeof(CPanel)`
+ * used in place of the real binary's own fixed `0x3c` malloc constant (same
+ * established convention as every other MMainXxx-adjacent Create wrapper in this
+ * file). `CPanelConstructor::CPanelConstructor()` itself (.text+0x089ee3b0, a real,
+ * separate ctor with the "PanelClass" name hardcoded) is confirmed NEVER actually
+ * called by `MMainPanel()` -- that wrapper builds its own generic 3-word descriptor
+ * inline instead (same mechanism `RegisterModuleDescriptor()` uses for every other
+ * sibling), so `CPanelConstructor::CPanelConstructor()` has no reachable caller in
+ * ground truth and is not transcribed.
+ *
+ * The remaining 13 (BatchDiskMan/AlphaKeybCtrl/10x CESxxxModule) still route Create
+ * through ModuleFactoryCreateStub, a shared "return NULL" stub: their own real
+ * per-module classes (CBatchDiskMan/CAlphaKeybCtrl, the 10 CESxxx
  * model classes) are not reconstructed in this project, and CreateUserModules()
  * already has a real, ground-truth-faithful "unable to create instance"
  * warning path for exactly this case (config_manager.cpp) -- returning NULL is
@@ -175,6 +193,17 @@ void *CEditorConstructorCreate(void * /*ctorObj*/, void *name, void *alphaKeybPa
 	return new (raw) CEditor((const char *)name, (const char *)alphaKeybParam);
 }
 
+/* .text+0x089ee340's own real Create() (CPanelConstructor::Create,
+ * .text+0x089ee340, 112 bytes): mallocs a fresh CPanel and placement-constructs it
+ * with (param1, param2) -- same ctorObj/counter-unused, sizeof()-not-fixed-malloc-
+ * constant shape as CEditorConstructorCreate above.
+ */
+void *CPanelConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int /*counter*/)
+{
+	void *raw = malloc(sizeof(CPanel));
+	return new (raw) CPanel((const char *)name, (const char *)param2);
+}
+
 } // namespace
 
 extern "C" {
@@ -183,7 +212,7 @@ void *PTR__CAlphaKeybCtrlConstructor_08eabb48[3] = {
 void *PTR__CEditorConstructor_08f29c10[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CEditorConstructorCreate };
 void *PTR__CPanelConstructor_08f7c2f0[3] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CPanelConstructorCreate };
 void *PTR__CBatchDiskManConstructor_08eabe08[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
 void *PTR__CESCommonModuleConstructor_08fbb048[3] = {

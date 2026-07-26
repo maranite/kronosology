@@ -4,6 +4,7 @@
 
 #include "omega_vtables.h"
 #include "sysapi_instance.h"
+#include "panel.h"
 
 extern "C" void EvaVTableStub()
 {
@@ -80,6 +81,34 @@ extern "C" void AddConstructorVSlot(void *obj, void *ctor)
 extern "C" int ChunkLinkRegisterVSlotStub()
 {
 	return 0;
+}
+
+/*
+ * FIX (2026-07-26, Eva Stage 6 CPanel unlock batch): PTR__CPanel_08f7c328's own
+ * Setup/Config/Start slots (byte offsets 8/0xc/0x10) are installed as these 3 real
+ * forwarders instead of the generic EvaVTableStub -- see omega_vtables.h's own
+ * header comment on PTR__CPanel_08f7c328 for the full "why" (CModuleManager::
+ * Setup()/Config()/Start(), module_manager.cpp, genuinely dispatch through exactly
+ * these offsets for every module in the real mModules array, and this is the one
+ * real path that makes CPoller's own construction, panel.cpp's CPanel::Setup(),
+ * live-reachable). `CallVSlot`'s own caller (module_manager.cpp) treats every
+ * slot as `void(*)(void*)` regardless of the real method's own return type --
+ * same cdecl-safe "extra return value in EAX is simply ignored by the caller"
+ * reasoning EvaVTableStub's own header comment already establishes.
+ */
+extern "C" void CPanelSetupVSlot(void *obj)
+{
+	((CPanel *)obj)->Setup();
+}
+
+extern "C" void CPanelConfigVSlot(void *obj)
+{
+	((CPanel *)obj)->Config();
+}
+
+extern "C" void CPanelStartVSlot(void *obj)
+{
+	((CPanel *)obj)->Start();
 }
 
 extern "C" {
@@ -446,5 +475,15 @@ void *PTR__TVector_08f7c3b0[2] = {
 void *PTR__CIfcClient_08f7c3c8[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+/* CPanel's own real per-instance vtable -- see omega_vtables.h's own header comment
+ * for the full derivation and the deliberate departure from this file's usual
+ * install-only convention (slots 2/3/4 are real, not EvaVTableStub).
+ */
+void *PTR__CPanel_08f7c328[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CPanelSetupVSlot, (void *)CPanelConfigVSlot, (void *)CPanelStartVSlot,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 }

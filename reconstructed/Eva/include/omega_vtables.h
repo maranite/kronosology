@@ -620,6 +620,50 @@ extern void *PTR__CPoller_08f7c368[5];
 extern void *PTR__CPoller_08f7c384[3];
 extern void *PTR__TVector_08f7c3b0[2];
 extern void *PTR__CIfcClient_08f7c3c8[6];
+
+/* CPanel's own real per-instance vtable (panel.h/panel.cpp, Eva Stage 6 CPanel unlock
+ * batch, 2026-07-26). Confirmed byte-exact via direct `.rodata` dword read at
+ * 0x08f7c320 -> +8 = 0x08f7c328 install target, 7 slots, the SAME CModule-shape
+ * dtor/dtor-deleting/Setup/Config/Start/Destroy/GetErrorMsg layout as every other
+ * CModule-derived per-instance vtable in this file (CEditor's PTR__CEditor_08f29b88
+ * above, same 7-slot shape): {~CPanel, ~CPanel(deleting), CPanel::Setup,
+ * CPanel::Config, CPanel::Start, CModule::Destroy, CModule::GetErrorMsg} -- the last
+ * 2 are CModule's own un-overridden real implementations (module.h), not stubs,
+ * confirmed identical to CModule's own PTR__CModule_08e81fe8[5]/[6] addresses.
+ *
+ * DEPARTURE FROM THIS FILE'S OWN "install-only, EvaVTableStub-backed" CONVENTION,
+ * documented explicitly because it's a real, deliberate exception: slots 2/3/4
+ * (Setup/Config/Start) are wired to real forwarders
+ * (CPanelSetupVSlot/CPanelConfigVSlot/CPanelStartVSlot, omega_vtables.cpp), NOT
+ * EvaVTableStub. Reason: `CModuleManager::Setup()/Config()/Start()`
+ * (module_manager.cpp, already Tier A/real) genuinely dispatch through exactly
+ * these 3 byte offsets (`CallVSlot(module, 8/0xc/0x10)`) for every module in the
+ * real, now-populated `mModules` array -- and `CConfigManager::CreateUserModules()`
+ * (config_manager.cpp, already Tier A/real) adds freshly-`CPanelConstructorCreate()`d
+ * `CPanel` instances straight into `mModules`. Leaving these 3 slots as
+ * EvaVTableStub (matching CEditor's own sibling array above) would make
+ * `CPanel::Setup()` -- the one real, definitive ground-truth caller of
+ * `CPoller::CPoller()`, per poller.h's own header comment -- silently unreachable
+ * via the real dispatch path even after `CPanelConstructor::Create()` itself was
+ * fixed, defeating the entire point of this batch. Dtor slots (0/1) stay
+ * EvaVTableStub: nothing in `CModuleManager`'s own reconstructed methods ever
+ * dispatches through a module's own dtor slot, and no module is ever destroyed on
+ * Eva's own short-lived boot-and-exit run (same "not on this reconstruction's own
+ * live boot path" status as `~CPanel()`/`~CPoller()` themselves). Destroy/
+ * GetErrorMsg (slots 5/6) also stay EvaVTableStub for the same "genuinely never
+ * dispatched by any reconstructed code" reason CModule's own base array leaves them
+ * stubbed.
+ *
+ * OPEN FINDING, NOT FIXED HERE (out of scope for this batch -- different class):
+ * `PTR__CEditor_08f29b88` above has the IDENTICAL real gap -- `CEditor::Setup()`/
+ * `Config()`/`Start()` are themselves fully reconstructed (editor.cpp) and `CEditor`
+ * instances also land in the real `mModules` via `CreateUserModules()`, but that
+ * array's own Setup/Config/Start slots are still plain EvaVTableStub, meaning
+ * `CModuleManager::Setup()` would currently no-op instead of running
+ * `CEditor::Setup()` on the real dispatch path. Flagged for whoever next touches
+ * `CEditor`'s own vtable wiring -- same fix shape as this one.
+ */
+extern void *PTR__CPanel_08f7c328[7];
 }
 
 #endif /* OMEGA_VTABLES_H */

@@ -857,6 +857,19 @@ RECONSTRUCTED = {
     "089ef670",  # CPoller::CIfcClient::PutAnalogEvt(CPanelOut::SAnalogEvt const&)
     "089ef6f0",  # CPoller::CIfcClient::FlushAnalogEvts()
     "089f7280",  # TVector<CPoller::CIfcClient*,1>::MakeCapacity(unsigned int)
+
+    # --- 2026-07-26 (later same day): CPanel reconstructed (panel.h/.cpp) --
+    # closes the gap poller.h's own header comment flagged (CPanel::Setup() is
+    # CPoller's real, definitive ground-truth constructor call site).
+    # CPanelConstructor::CPanelConstructor() (089ee3b0) is NOT included -- confirmed
+    # unreachable (MMainPanel() builds its own descriptor inline, never calls it).
+    "089ee340",  # CPanelConstructor::Create(char const*, char const*, int)
+    "089ee780",  # CPanel::CPanel(char const*, char const*)
+    "089ee6e0",  # CPanel::Setup()
+    "089ee530",  # CPanel::Config()
+    "089ee520",  # CPanel::Start()
+    "089ee560",  # CPanel::~CPanel() [D0, deleting]
+    "089ee620",  # CPanel::~CPanel() [D1]
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -891,13 +904,13 @@ RECONSTRUCTED = {
 # depth" either (an even earlier batch summary's label, corrected in task.h's own
 # header comment on 2026-07-25 already, then re-verified from scratch this batch) --
 # CPoller is a plain CTask-derived class, not Peg/UI-editor-toolkit-adjacent at all.
-# NEWLY FOUND this batch: CPoller's own real, definitive ground-truth caller is
-# `CPanel::Setup()` (.text+0x089ee6e0) -- `CPanel` itself is a real, not-yet-
-# reconstructed per-module class mains.cpp's own `PTR__CPanelConstructor_08f7c2f0`
-# currently routes through the shared `ModuleFactoryCreateStub` (returns NULL) for
-# exactly the reason `CEditor` once did before `CEditorConstructorCreate()` was
-# added -- reconstructing `CPanel` would be the natural next step to make CPoller
-# live on this reconstruction's own wired boot path. 9 of CPoller's 29 methods (ctor,
+# CPoller's own real, definitive ground-truth caller was found to be
+# `CPanel::Setup()` (.text+0x089ee6e0) -- NOW RECONSTRUCTED (2026-07-26, later same
+# day, panel.h/.cpp) along with the rest of `CPanel` and `CPanelConstructor::Create()`
+# (mains.cpp's `PTR__CPanelConstructor_08f7c2f0` now routes to the real
+# `CPanelConstructorCreate`, same fix shape as `CEditorConstructorCreate()`) --
+# this note is stale/superseded, kept only for its own historical context. 9 of
+# CPoller's 29 methods (ctor,
 # dtor, 3 const accessors, the CIfcClient nested class's 3 methods, and its own
 # TVector<CIfcClient*,1>::MakeCapacity()) are now Tier A; the remaining ~20 (every
 # Msg*(CMessage&) handler, RegisterClient/InitAnalogs/InitButtons, both Exec()

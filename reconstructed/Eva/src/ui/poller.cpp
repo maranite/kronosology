@@ -159,6 +159,18 @@ bool CPoller::IsRegisteredHandle(unsigned int handle) const
 	return *(const int *)(client + 0x14) != 0;
 }
 
+/* Tier-B link-stubs -- see poller.h's own header comment (2026-07-26 CPanel unlock
+ * batch UPDATE). Real bodies (2925B/2919B) genuinely out of scope, same CMessage-
+ * prerequisite reasoning as every other deferred CPoller method.
+ */
+void CPoller::InitButtons()
+{
+}
+
+void CPoller::InitAnalogs()
+{
+}
+
 CPoller::CIfcClient::CIfcClient(const CTask &owner, const char *name, int lastArg)
     : COutLinkMono(owner, name, eDirectionOut, 0x804b)
 {

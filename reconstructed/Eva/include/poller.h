@@ -171,7 +171,6 @@
  * `MsgSetKeyboardClient(CMessage&)` (120B), `MsgSetAnalogClient(CMessage&)` (1085B),
  * `FindRegisteredClient(char const*, char const*) const` (2512B),
  * `RegisterClient(unsigned int&, char const*, char const*)` (2603B),
- * `InitAnalogs()` (2919B), `InitButtons()` (2925B),
  * `MsgRegisterClientByVal(CMessage&)` (116B), `MsgRegisterClientByRef(CMessage&)`
  * (114B), `Exec(CMessage&)` (6747B), `Exec()` (3213B, the 0-arg scheduler-tick
  * override). All real addresses in `manifest/eva_functions.csv`. A dedicated future
@@ -180,6 +179,14 @@
  * reconstructed in this project at all yet, a genuinely separate, larger
  * prerequisite) for every `Msg*(CMessage&)` handler, which is the real reason none
  * of them are attempted here, not any Peg-toolkit or CTask-family depth.
+ *
+ * UPDATE (Eva Stage 6 CPanel unlock batch, 2026-07-26): `InitAnalogs()`/
+ * `InitButtons()` (2919B/2925B, both listed above) are now DECLARED (public, real
+ * signatures) but still Tier-B STUBBED (empty bodies) -- CPoller's own real
+ * ground-truth caller, `CPanel::Config()`, was found and reconstructed this batch
+ * (panel.h/.cpp), so these two needed real call sites even though their own bodies
+ * stay out of scope for the same CMessage-prerequisite reason as their still-fully-
+ * deferred siblings above.
  */
 
 #ifndef POLLER_H
@@ -227,6 +234,23 @@ public:
 	 * field FindUnconnected() itself reads).
 	 */
 	bool IsRegisteredHandle(unsigned int handle) const;
+
+	/* .text+0x089f4830, 2925 bytes. Tier-B link-stub (empty body) -- genuinely
+	 * large, needs the CMessage machinery this project hasn't reconstructed at
+	 * all yet (see "DEFERRED THIS BATCH" above), out of scope for this batch.
+	 * Declared/stubbed so CPoller's own real ground-truth caller,
+	 * `CPanel::Config()` (.text+0x089ee530, panel.h/.cpp -- Eva Stage 6 CPanel
+	 * unlock batch, 2026-07-26), can compile and dispatch a real call, matching
+	 * this project's established declare-real-signature/stub-body convention for
+	 * out-of-scope callees (e.g. CChkApiInstance::SetOwnerModule/
+	 * CRMApiInstance::SetResMan, mains.cpp).
+	 */
+	void InitButtons();
+
+	/* .text+0x089f3c80, 2919 bytes. Tier-B link-stub, same reasoning as
+	 * InitButtons() above -- CPanel::Config()'s other real, unconditional call.
+	 */
+	void InitAnalogs();
 
 	class CIfcClient : public COutLinkMono {
 	public:

@@ -2696,3 +2696,125 @@ PutAnalogEvt`, `CPoller::CIfcClient::FlushAnalogEvts`, `TVector<CPoller::
 CIfcClient*,1>::MakeCapacity`) plus corrections to 2 stale comments (the
 `CPoller` deferral note above the `RECONSTRUCTED` set, and `task.h`'s own
 `CPoller`-surveyed paragraph). Regenerated: 430 → 439 of 37,795.
+
+## Stage 6: `CPanel` unlock, closing the `CPoller` gap — 2026-07-26
+
+Dispatched to check whether `CPanel` has the same "real factory-table entry,
+currently stubbed" gap `CEditor` had before `CEditorConstructorCreate()`
+unlocked it (line 2338 above), since the prior `CPoller` batch (immediately
+above) found `CPanel::Setup()` to be `CPoller`'s own real, definitive
+ground-truth constructor call site. It does, and it's the exact same shape:
+`mains.cpp`'s `PTR__CPanelConstructor_08f7c2f0[2]` ("Create" slot) routed
+through the shared `ModuleFactoryCreateStub` (returns NULL). Fixed the same
+way: `CPanelConstructor::Create(char const*, char const*, int)`
+(`.text+0x089ee340`, 112 bytes) is real, ground-truth-confirmed to be
+`malloc(0x3c)` + `CPanel::CPanel(name, param2)` — same ctorObj/counter-unused,
+`sizeof()`-not-fixed-malloc-constant shape as `CEditorConstructorCreate`.
+`CPanelConstructor::CPanelConstructor()` itself (`.text+0x089ee3b0`) is real
+but confirmed to have NO reachable caller — `MMainPanel()` builds its own
+generic 3-word descriptor inline instead (same mechanism
+`RegisterModuleDescriptor()` uses for every sibling) — so it's not
+transcribed, matching this project's "don't fabricate an unreachable
+function" convention.
+
+**`CPanel` itself** (`include/panel.h`/`src/ui/panel.cpp`, new): `CModule`-
+derived, real size `0x3c` (60 bytes, confirmed from `CPanelConstructor::
+Create()`'s own real `malloc(0x3c)`) = `CModule` (0x2c) + `CPoller *mPoller`
+(+0x2c, 4 bytes) + `CParameterString mParam` (+0x30, 0xc bytes). All 4 real
+methods fully mechanical:
+- **Ctor** (`.text+0x089ee780`, 80 bytes): `CModule::CModule(name)`, install
+  `CPanel`'s own vtable, `CParameterString::CParameterString(&mParam,
+  param2)`. `mPoller` deliberately NOT initialized — same real,
+  preserved-uninitialized-field quirk `CEditor`'s own `mPanelIfcTask`/
+  `mAlphaKeybIfcTask` already established (editor.cpp), safe because
+  `CModuleManager`'s own lifecycle always runs `Setup()` before `Config()`/
+  `Start()`.
+- **`Setup()`** (`.text+0x089ee6e0`, 160 bytes): `mParam.GetParamStr(
+  "PANELDRV")` (the literal key at `.rodata+0x8f7c2d8`, confirmed by direct
+  read — resolves to `"PanelDriver"` for the real `"PANELDRV=PanelDriver"`
+  config string every `s_atCreateInfo` row 1 carries), `malloc(0x420)` +
+  `CPoller::CPoller(raw, *this, panelDrvName)` (the already-real ctor from
+  the batch immediately above — this is the literal call site that batch
+  found and flagged), `CModule::Add(mPoller)`. This is the whole point of
+  the batch: `CPoller`'s own construction is now genuinely reachable.
+- **`Config()`** (`.text+0x089ee530`, 48 bytes): `if (mPoller) {
+  mPoller->InitButtons(); mPoller->InitAnalogs(); }`. Both callees are
+  large (2925B/2919B) and were previously undeclared (deferred entirely,
+  `poller.h`'s own "DEFERRED THIS BATCH" list) — now DECLARED with real
+  signatures but Tier-B STUBBED (empty bodies) in `poller.h`/`.cpp`, so this
+  real call site compiles and dispatches without pulling in the still-out-
+  of-scope `CMessage` machinery their own real bodies need.
+- **`Start()`** (`.text+0x089ee520`, 16 bytes): real, literal `return 0`, no
+  other body.
+- **Dtor** (D0 `.text+0x089ee560`/D1 `.text+0x089ee620`): ground truth
+  inlines `CModule::~CModule()`'s own real body (reinstall vtable, destroy
+  `mTasks` via `COmegaPtrArray::Destroy()`, free `mName`) directly rather
+  than calling it — `CModule` has no explicit dtor in this reconstruction
+  yet, so given the SAME light-touch treatment `CEditor::~CEditor()` already
+  established for the identical situation: rely on the implicit `mParam`
+  member dtor, leave the `CModule` base teardown as a known, already-
+  precedented gap. Not on this reconstruction's own live boot path (nothing
+  destroys a module before Eva exits).
+
+**Vtable finding, the one genuine departure from this file's own usual
+convention**: `PTR__CPanel_08f7c328`'s Setup/Config/Start slots (byte offsets
+8/0xc/0x10) are wired to real forwarders
+(`CPanelSetupVSlot`/`CPanelConfigVSlot`/`CPanelStartVSlot`,
+`omega_vtables.cpp`), NOT the usual install-only `EvaVTableStub`. Reason:
+`CModuleManager::Setup()`/`Config()`/`Start()` (`module_manager.cpp`,
+already Tier A) genuinely dispatch through exactly these byte offsets
+(`CallVSlot(module, 8/0xc/0x10)`) for every module in the real, now-
+populated `mModules` array, and `CConfigManager::CreateUserModules()`
+(already Tier A) adds freshly-constructed `CPanel` instances straight into
+`mModules`. Leaving these 3 slots as `EvaVTableStub` — the way every other
+per-instance vtable in this file, including `CEditor`'s own
+`PTR__CEditor_08f29b88`, currently does — would leave `CPanel::Setup()`
+silently unreachable via the real dispatch path even after the factory fix
+above, defeating the whole point of this batch. **Open finding, not fixed
+here (different class, out of scope)**: `PTR__CEditor_08f29b88` has the
+IDENTICAL gap — `CEditor::Setup()`/`Config()`/`Start()` are themselves fully
+real, and `CEditor` instances land in the same real `mModules`, but that
+array's own Setup/Config/Start slots are still plain `EvaVTableStub`,
+meaning `CModuleManager::Setup()` currently no-ops instead of running
+`CEditor::Setup()` on the real dispatch path. Same fix shape as this one,
+flagged in `omega_vtables.h`'s own header comment for whoever picks it up.
+
+### Verification
+
+New `verify/test_panel.cpp` (13 checks, all passing): ctor vtable install;
+`Setup()` genuinely constructs `mPoller` (confirmed via a real `CPoller`
+method call, `IsValidHandle()`, not just a non-null check) and registers it
+through `CModule::Add()` (`mTasks` count/contents both checked);
+`Config()`/`Start()` real dispatch without crashing; the `CPanelConstructor::
+Create()` factory slot called exactly the way `CreateUserModules()` does,
+end to end, yields a real `CPanel*`; and — the check that matters most for
+this batch's own stated goal — `PTR__CPanel_08f7c328`'s Setup slot, called
+via the exact `CModuleManager::Setup()`-shape raw `vtbl+8` dispatch (a
+sentinel forced into `mPoller` first so the check can't pass by accident),
+genuinely runs `CPanel::Setup()` rather than no-opping. `make -k objs`/
+`make -k verify`: 0 regressions; all verify binaries pass except the
+pre-existing `test_client_comm_server` 6-FAIL (consistently reproducing
+this run, unlike the prior `CPoller` batch's "did not reproduce" — but zero
+file overlap with anything this batch touched, `src/ipc/*`/that test file
+are untouched, so treated as pre-existing and out of scope, not chased).
+`tools/build_lenny.sh` (real on-image ABI): `LINK OK`. No live `kronos_vm`
+boot test this batch — both of the sandbox's qemu instance slots were
+occupied by other concurrent work when this batch ran (one long-running,
+one from a same-day parallel investigation); given the static
+verification (byte-exact ctor/dtor/vtable derivation, all 3 real ground-
+truth addresses cross-checked) plus the KAT suite's direct proof that the
+real raw-vtable dispatch mechanism reaches `CPanel::Setup()`, this was
+judged sufficient without contending for a VM slot — same kind of
+documented, deliberate exception the `CEditor` unlock batch used once
+before.
+
+### Manifest delta
+
+`gen_manifest.py`: added 7 functions (`CPanelConstructor::Create`, `CPanel::
+CPanel`, `CPanel::Setup`, `CPanel::Config`, `CPanel::Start`, `CPanel::~CPanel`
+[D0], `CPanel::~CPanel` [D1]) plus corrections to 2 stale comments (the
+`CPanel`/`CPoller` reachability note above the `RECONSTRUCTED` set, and the
+`CPoller` deferral note's own now-superseded "reconstructing `CPanel` would
+be the natural next step" line). `CPanelConstructor::CPanelConstructor()`
+deliberately NOT added — confirmed unreachable, see above. Regenerated:
+439 → 446 of 37,795.
