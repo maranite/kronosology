@@ -32,8 +32,8 @@ Eva/
 | 3. CKernel/threading substrate | Done for `COmegaInterface::Init`'s own direct callees: `SetConfigInfo`, `Mains` + all 17 `MMainXxx` registration shims, `CKernel::CKernel`/`~CKernel`/`InitSystemLayer`/`GetSysApi`, the 3 `OmegaXxxThread` worker bodies. See "Stage 3" below |
 | 4. Link-completion pass | **Done — reached a real, full link (`LINK OK`).** Every symbol Stage 3 left as a bare call-contract extern now has either a faithful (Tier A) or explicitly-stubbed (Tier B) real definition. See "Stage 4" below for the full breakdown and the tier convention |
 | 4b. Api/SysApiInstance crash fix | **Done — 2026-07-23.** A live `kronos_vm` boot test (the first time the Stage-4 link was actually run) hit a NULL-pointer crash in `MMainEditMan()`: `Api` was never set. Root-caused and fixed — see "Api/SysApiInstance crash fix" below |
-| 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below |
-| 5. Peg toolkit substrate | Confirmed not necessary — Eva reaches its own natural shutdown (`Start closing`/`End closing`) and exits cleanly without it, per the 4c live boot |
+| 4c. Boot-path crash chain closed out | **Done — 2026-07-24. Eva now boots end-to-end in `kronos_vm` with zero crashes.** Two more real bugs found continuing the same live-boot iteration past 4b (undersized `PTR__CXxxApiInstance_*` vtable arrays; one consumed `Api` vtable slot returning garbage instead of a real object) — see "Boot-path crash chain closed out" below. **CORRECTED 2026-07-26 (`3d31c2c`): the "reaches its own natural shutdown" framing was itself a symptom of the `s_bRunning` mis-init bug (see that section's own correction note below) — the process was exiting almost instantly, not completing a real run. The crash fixes in this row are still real; only the "clean shutdown = success" interpretation was wrong.** |
+| 5. Peg toolkit substrate | Still confirmed not necessary so far, but the original evidence for this row (Eva "reaches its own natural shutdown" without it) was the same `s_bRunning` bug — see 4c's correction note. Re-confirm once Stage 6 boot-path work is re-validated against the fixed `s_bRunning` behavior |
 | 6. Breadth sweep | **`CConfigManager`'s remaining `CKernel::InitUserLayer()` bring-up steps done — 2026-07-25.** `CScheduler::Exec()`/`CLevelManagerArray::Add()`/`Find()` (batch 1), `CModule`'s real vtable + `CTaskBuffer` + real `CLevelManager::RunLevel()` (batch 2), `CModuleManager::AddModule()`/`EnableUpdate()` (batch 3), `CCommDriver::setupfifoname()` (batch 4), `CModule::AdjustTaskMask()` (batch 5), `CSTGUnsolMsgHandler` (batch 6, 18/30 methods), 5 more of `CSTGUnsolMsgHandler`'s remaining methods (`CSTGUnsolMsgHandler` batch 2, 23/30 now real), `CClientCommServer`/`CSysExMsgTaskBase` reachability follow-up, plus `CConfigManager::SetupRouting()`/`MakeConnections()`/`RegisterChunkServer()`/`LinkRTRouterTracks()`/`ConfigureSeqTimer()` + new `BPM`/`MPQN` classes (batch 2026-07-25b, see its own section below), plus the separate `CTask::CTask()`/`CLimiterMan`/`CModule::Add()` batch, and (see `SESSION_SUMMARY_2026-07-25.md` and later commits for the rest) `CClientCommServer` closed to 25/26, `CFileMan`/`CResMan` real ctors, and `CSysApiInstance::RegisterApi()` (promoted from an empty Tier-B stub to real -- 7 confirmed boot-path callers via mains.cpp's `MMainXxx(void)` family, the real target of `Api`'s own vtable slot `+0xa4`; see `sysapi_instance.h`), and a dedicated `CEditor` batch (15 direct methods + ctor/dtor, real multiple-inheritance vtable cluster, new self-contained `CParameterString` class -- see that section for the full `Setup()` fan-out analysis and what's deferred), and (see "Stage 6: CEditable/CAlphaKeybIfcTask" below) a
 standalone `CEditable`/`CAlphaKeybIfcTask` batch re-investigating one of `CEditor::
 Setup()`'s two previously-deferred fan-out targets, and a further broad `nm -C`
@@ -905,6 +905,27 @@ blocking forever the way it would on real hardware) is why `main()` reaches its 
 path at all in this VM — expected and fine for the boot-milestone bar, not itself a bug to
 chase. **This closes out the Stage-1-through-4 boot-path effort**; remaining work is
 Stage 6 breadth (see the status table above).
+
+> **CORRECTION (2026-07-26, commit `3d31c2c`):** the paragraph above is wrong about
+> `OmegaTimingThread(0)` returning immediately being "expected and fine." It was not a
+> harmless VM shortcut — it was a real reconstruction bug. `s_bRunning` (`omega_interface.cpp`)
+> was mis-initialized to `0`; ground truth's own `.data` byte at `s_bRunning@0x091ae7d0` is
+> `01 00 00 00` (confirmed both by the fixing commit and independently re-confirmed during
+> this verification pass via `readelf -S` + a raw file-offset byte read). `OmegaTimingThread()`'s
+> first statement is `if (s_bRunning == 0) return;`, so with the old initializer the thread
+> returned on entry instead of blocking, `Init()`/`main()` fell through to `Close()` within
+> milliseconds, and `OmegaInitThread` (which is what actually calls
+> `CKernel::InitUserLayer() -> CConfigManager::CreateUserModules() -> CEditor::CEditor()`)
+> never got meaningfully scheduled. Every "clean boot to Start closing/End closing, zero
+> crashes" observation recorded in this file through 2026-07-25 (this section, and every
+> Stage 6 batch's own "live re-boot confirmed" note below) was this bug, not a genuine full
+> run — the process was exiting almost immediately, not idling through a real timing loop.
+> With the fix, Eva genuinely stays alive indefinitely (confirmed via a `CEDITOR_CTOR_MARKER`
+> probe: absent before the fix, fires exactly once after it). The Stage-1-through-4
+> boot-path milestone itself still stands (the process does reach `main()`, does run
+> `Mains()`/`Omega.Init(0)` without segfaulting), but "reaches its own natural shutdown" was
+> not a demonstration of a working timing loop — see `SESSION_SUMMARY_2026-07-25.md`'s own
+> correction note and commit `3d31c2c` for the full writeup.
 
 ## Stage 6: breadth sweep, first batch — 2026-07-25
 

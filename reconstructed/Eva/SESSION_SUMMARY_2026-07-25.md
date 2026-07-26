@@ -12,6 +12,27 @@ cluster (34 more functions). The specific commit/manifest counts and a few
 and `manifest/eva_functions.csv` for current ground truth; the qualitative
 picture (what kind of work this was, the established techniques) still holds.
 
+**Second update (2026-07-26, commit `3d31c2c`, added by a clean-room verification
+pass)**: every "clean boot", "clean shutdown", "`Start closing`/`End closing` trace
+restored", or "zero crashes/segfaults" claim in this document (including the one
+directly above) was true about the crash-freedom it describes, but rested on a false
+premise about *why* the process reached shutdown. `s_bRunning` (`omega_interface.cpp`)
+was reconstructed as `= 0`; ground truth's own `.data` initializer is `1`
+(`s_bRunning@0x091ae7d0`, independently re-confirmed this pass via `readelf -S` +
+a raw file-offset byte read, not just trusted from the fixing commit). With the wrong
+initializer, `OmegaTimingThread()`'s `if (s_bRunning == 0) return;` fired on thread
+entry, so `Init()`/`main()` never actually blocked in the real timing loop — the
+process exited within milliseconds every time, and `OmegaInitThread` (which drives
+`CKernel::InitUserLayer() -> CConfigManager::CreateUserModules() -> CEditor::CEditor()`)
+never got meaningfully scheduled. So every boot test this document cites as evidence of
+"Eva ran its full boot sequence" was actually observing this bug's near-instant exit,
+not a genuine run. The individual bug fixes and function reconstructions catalogued
+below are unaffected and still real; only the "the process completed a real run and
+shut down cleanly" *interpretation* of those live-boot tests is wrong. See
+`README.md`'s own correction note (same commit) and commit `3d31c2c` for the full
+writeup, and this project's `.claude/agent-memory` for
+`eva_ceditor_construction_confirmed_2026-07-26.md`.
+
 20+ commits landed today under `reconstructed/Eva/` (17 code-reconstruction/fix
 commits, 3 documentation-only or manifest-reconciliation commits, plus more
 after this doc was first written — see note above). Eva's boot
