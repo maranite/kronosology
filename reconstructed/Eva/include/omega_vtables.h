@@ -686,6 +686,51 @@ extern void *PTR__CIfcClient_08f7c3c8[6];
  * confirmed via a fresh `objdump -dr -M intel` read, not assumed from this comment).
  */
 extern void *PTR__CPanel_08f7c328[7];
+
+/* CBatchDiskMan's own real per-instance vtables (batch_disk_man.h/.cpp, Eva Stage 6
+ * CBatchDiskMan unlock batch, 2026-07-26). Confirmed byte-exact via direct `.rodata`
+ * dword reads at 0x08eac040 (`vtable for CBatchDiskMan`): primary group install
+ * 0x08eac048 (7 slots, the SAME CModule-shape as CPanel/CEditor above: {~CBatchDiskMan,
+ * ~CBatchDiskMan(deleting), CBatchDiskMan::Setup, CBatchDiskMan::Config,
+ * CBatchDiskMan::Start, CModule::Destroy, CModule::GetErrorMsg}); secondary group
+ * install 0x08eac06c (5 slots, the CEditServer-subobject shape: {dtor thunk pair,
+ * CEditServer::Get, CEditServer::Set, CEditServer::SetDefault} -- same shape as
+ * PTR__CEditServer_08e817b0, edit_server.h).
+ *
+ * SAME DEPARTURE as PTR__CPanel_08f7c328/PTR__CEditor_08f29b88 above, for the identical
+ * reason: `CModuleManager::Setup()/Config()/Start()` genuinely dispatch through byte
+ * offsets 8/0xc/0x10 of the PRIMARY group for every module in `mModules`, and
+ * `CConfigManager::CreateUserModules()`'s own real "BatchDiskManClass" row (row 0,
+ * config_info.cpp) adds a freshly-`CBatchDiskManConstructorCreate()`d `CBatchDiskMan`
+ * straight into that array (once mains.cpp's own factory slot is wired -- see
+ * batch_disk_man.cpp). Primary slots 2/3/4 wired to real forwarders
+ * (CBatchDiskManSetupVSlot/CBatchDiskManConfigVSlot/CBatchDiskManStartVSlot,
+ * omega_vtables.cpp); slots 0/1/5/6 stay EvaVTableStub for the same "never dispatched
+ * by any reconstructed code" reason as CPanel/CEditor. The SECONDARY group (CEditServer
+ * subobject) stays entirely EvaVTableStub-backed -- `CModuleManager` never dispatches
+ * through a module's secondary vtable, matching CESCommon's own established treatment
+ * of the identical CEditServer-shaped group (es_common.cpp).
+ */
+extern void *PTR__CBatchDiskMan_08eac048[7];
+extern void *PTR__CBatchDiskMan_08eac06c[7]; /* 5 real slots, +2 headroom, same
+                                                * "generously-sized" convention as
+                                                * PTR__CEditServer_08e817b0. */
+
+/* CEditTask's own real per-instance vtables (edit_task.h/.cpp, same batch). Confirmed
+ * byte-exact via direct `.rodata` dword reads at 0x08eac1c0 (`vtable for CEditTask`):
+ * primary group install 0x08eac1c8 (5 slots: {~CEditTask, ~CEditTask(deleting),
+ * CTask::Exec(), CTask::Exec(CMessage&), CTask::ExecMsg(CMessage&)} -- the SAME 5-slot
+ * CTask-family shape as PTR__CPoller_08f7c368[5]); secondary group ("mIfcThunk", this+8,
+ * task.h) install 0x08eac1e4 (3 slots: {dtor thunk pair, non-virtual thunk to
+ * CTask::ExecMsg(CMessage&)} -- the SAME 3-slot shape as PTR__CPoller_08f7c384[3]).
+ * Both install-only, EvaVTableStub-backed -- nothing in this reconstruction's own call
+ * graph dispatches through a CTask-derived task's own vtable (CEditTask is only ever
+ * `CModule::Add()`ed, never handed to CLevelManager/scheduler on this reconstruction's
+ * currently-wired boot path), same status as every other CTask-derived per-instance
+ * vtable in this file.
+ */
+extern void *PTR__CEditTask_08eac1c8[5];
+extern void *PTR__CEditTask_08eac1e4[3];
 }
 
 #endif /* OMEGA_VTABLES_H */

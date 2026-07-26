@@ -898,6 +898,35 @@ RECONSTRUCTED = {
     "089f2110",  # CPoller::MsgSetKeyboardClient(CMessage&)
     "089f53f0",  # CPoller::MsgRegisterClientByVal(CMessage&)
     "089f5470",  # CPoller::MsgRegisterClientByRef(CMessage&)
+
+    # --- 2026-07-26 (later same day): CBatchDiskMan unlock batch (batch_disk_man.h/
+    # .cpp, edit_task.h/.cpp) -- same "CModuleConstructor factory currently stubbed,
+    # real per-module class not yet reconstructed" unlock shape as CPanel above,
+    # closing the gap [[eva_mopup_sweep_2026-07-26_negative]] re-verified and
+    # correctly deferred (CBatchDiskMan::Setup() constructs 2 brand-new classes).
+    # CEditTask is fully real (every real dependency -- CTask/CEditable/COutLinkMono
+    # -- already reconstructed). CBatchDiskMainTask (batch_disk_main_task.h) is a
+    # Tier-B substitute, NOT included below -- its real ctor is genuinely blocked on
+    # the already-project-wide-out-of-scope `CZ` string-set container (247 methods,
+    # cz_util.h/config_manager.h) plus 4 more never-reconstructed supporting classes
+    # (CRMJob/CDirEntry/COutLinkMulti/CRMApiCallBack) and its own heaviest methods
+    # (PreloadDir 2940B, PreloadGroup 1148B, PrepareGroupsForPreload 1336B,
+    # AddItemToPreload 359B, Exec(CMessage&) 703B) -- CChunkServer/CTimerEngine-scale,
+    # confirmed via objdump, not assumed from size alone.
+    "08243d80",  # CBatchDiskManConstructor::Create(char const*, char const*, int)
+    "082436e0",  # CBatchDiskMan::CBatchDiskMan(char const*, char const*)
+    "082435d0",  # CBatchDiskMan::Setup()
+    "08243330",  # CBatchDiskMan::Config()
+    "08243320",  # CBatchDiskMan::Start()
+    "082437c0",  # CBatchDiskMan::IsBusy() const
+    "082437e0",  # CBatchDiskMan::IsPreloadRunning() const
+    "082433c0",  # CBatchDiskMan::~CBatchDiskMan() [D1]
+    "082434c0",  # CBatchDiskMan::~CBatchDiskMan() [D0, deleting]
+    "08243b80",  # CEditTask::CEditTask(CModule const&)
+    "08243ac0",  # CEditTask::DoPreload()
+    "08243ca0",  # CEditTask::GetOutLinkName() const
+    "08243af0",  # CEditTask::~CEditTask() [D1]
+    "08243b20",  # CEditTask::~CEditTask() [D0, deleting]
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -905,11 +934,17 @@ RECONSTRUCTED = {
 # stay NOT in RECONSTRUCTED. RegisterLoader(CBatchDiskMan*) (08243980) -- the one
 # method with a plausible real caller -- was checked directly: zero call sites found
 # anywhere in the 37,795-function export (confirmed by grepping every decompile for
-# the mangled symbol, not just BDApiInstance's own file), and CBatchDiskMan's own
-# constructor is itself never invoked on this project's traced boot path either
-# (same "registered as a module descriptor, never actually instantiated" status as
-# 13 of Mains()'s other 15 registration-shim modules -- see mains.cpp's own Stage 3
-# note). A confirmed, thorough negative result, not a gap in this search.
+# the mangled symbol, not just BDApiInstance's own file). A confirmed, thorough
+# negative result, not a gap in this search -- deliberately NOT reproduced by
+# CBatchDiskManConstructorCreate() (mains.cpp), see that function's own comment.
+#
+# UPDATE (2026-07-26, later same day, CBatchDiskMan unlock batch): the
+# "CBatchDiskMan's own constructor is itself never invoked on this project's traced
+# boot path" claim above is now STALE/CORRECTED -- `PTR__CBatchDiskManConstructor_
+# 08eabe08`'s own Create slot now routes to the real `CBatchDiskManConstructorCreate()`
+# (mains.cpp), the same unlock CPanel/CEditor already got, so `CBatchDiskMan` IS now
+# constructed for real via `CConfigManager::CreateUserModules()`'s own "BatchDiskManClass"
+# row (config_info.cpp row 0). Kept here for its own historical context, not deleted.
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) is NOW in RECONSTRUCTED (2026-07-26, see
 # above) -- this note is stale/superseded, kept only for its own historical context.

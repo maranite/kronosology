@@ -72,6 +72,7 @@
 #include "res_man.h"
 #include "editor.h"
 #include "panel.h"
+#include "batch_disk_man.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -162,15 +163,21 @@ extern "C" void *PTR__CLinuxDriverConstructor_08fdaab0 = 0;
  * sibling), so `CPanelConstructor::CPanelConstructor()` has no reachable caller in
  * ground truth and is not transcribed.
  *
- * The remaining 13 (BatchDiskMan/AlphaKeybCtrl/10x CESxxxModule) still route Create
- * through ModuleFactoryCreateStub, a shared "return NULL" stub: their own real
- * per-module classes (CBatchDiskMan/CAlphaKeybCtrl, the 10 CESxxx
- * model classes) are not reconstructed in this project, and CreateUserModules()
- * already has a real, ground-truth-faithful "unable to create instance"
- * warning path for exactly this case (config_manager.cpp) -- returning NULL is
- * the faithful, safe behavior, not a workaround. Both dtor slots point at the
- * generic EvaVTableStub since nothing in this reconstruction's call graph ever
- * destroys a CModuleConstructor object (mains.cpp only ever registers them).
+ * FOLLOW-UP (2026-07-26, Eva Stage 6 CBatchDiskMan unlock batch): `BatchDiskMan`'s own
+ * slot is unlocked the same way, see `CBatchDiskManConstructorCreate()` below /
+ * batch_disk_man.h. `CBDApiInstance::RegisterLoader()`, the real ctor's own trailing
+ * side effect, is confirmed a genuine dead end (README.md) and deliberately not
+ * reproduced.
+ *
+ * The remaining 12 (AlphaKeybCtrl/10x CESxxxModule) still route Create through
+ * ModuleFactoryCreateStub, a shared "return NULL" stub: their own real per-module
+ * classes (CAlphaKeybCtrl, the 10 CESxxx model classes) are not reconstructed in this
+ * project, and CreateUserModules() already has a real, ground-truth-faithful "unable
+ * to create instance" warning path for exactly this case (config_manager.cpp) --
+ * returning NULL is the faithful, safe behavior, not a workaround. Both dtor slots
+ * point at the generic EvaVTableStub since nothing in this reconstruction's call
+ * graph ever destroys a CModuleConstructor object (mains.cpp only ever registers
+ * them).
  */
 namespace {
 
@@ -204,6 +211,22 @@ void *CPanelConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int 
 	return new (raw) CPanel((const char *)name, (const char *)param2);
 }
 
+/* .text+0x08243d80's own real Create() (CBatchDiskManConstructor::Create,
+ * .text+0x08243d80, 132 bytes): mallocs a fresh CBatchDiskMan and
+ * placement-constructs it with (param1, param2), then calls
+ * `CBDApiInstance::RegisterLoader(this)` -- already independently confirmed a
+ * genuine dead end (zero call sites anywhere in the export, README.md's own
+ * "CBDApiInstance re-checked, confirmed a genuine dead end" section) --
+ * deliberately NOT reproduced here, same "not every real ctor side effect is
+ * worth chasing" license as CEditorConstructorCreate/CPanelConstructorCreate
+ * above already use for their own unused ctorObj/counter args.
+ */
+void *CBatchDiskManConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int /*counter*/)
+{
+	void *raw = malloc(sizeof(CBatchDiskMan));
+	return new (raw) CBatchDiskMan((const char *)name, (const char *)param2);
+}
+
 } // namespace
 
 extern "C" {
@@ -214,7 +237,7 @@ void *PTR__CEditorConstructor_08f29c10[3] = {
 void *PTR__CPanelConstructor_08f7c2f0[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CPanelConstructorCreate };
 void *PTR__CBatchDiskManConstructor_08eabe08[3] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CBatchDiskManConstructorCreate };
 void *PTR__CESCommonModuleConstructor_08fbb048[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
 void *PTR__CESProgModuleConstructor_08fbd218[3] = {

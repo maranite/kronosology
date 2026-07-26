@@ -147,6 +147,17 @@ public:
 	 */
 	int TestResult(int result, CLink *link) const;
 
+	/* Trivial public accessor for mName (below) -- NOT a separate ground-truth
+	 * function of its own. Added for `CEditTask::GetOutLinkName()`
+	 * (edit_task.h, Eva Stage 6 CBatchDiskMan unlock batch, 2026-07-26), whose
+	 * real ground-truth body is a raw `*(char**)(outlink+4)` read (matching
+	 * this class's own +0x04 mName offset exactly) -- same "expose a raw field
+	 * read as a named accessor instead of reaching around encapsulation"
+	 * convention this project already uses elsewhere (e.g. module.h's public
+	 * wrappers around otherwise-private state).
+	 */
+	const char *GetName() const { return mName; }
+
 protected:
 	void          *mVtbl;
 	char          *mName;

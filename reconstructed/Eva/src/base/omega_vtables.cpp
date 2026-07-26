@@ -6,6 +6,7 @@
 #include "sysapi_instance.h"
 #include "panel.h"
 #include "editor.h"
+#include "batch_disk_man.h"
 
 extern "C" void EvaVTableStub()
 {
@@ -561,5 +562,50 @@ void *PTR__CPanel_08f7c328[7] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)CPanelSetupVSlot, (void *)CPanelConfigVSlot, (void *)CPanelStartVSlot,
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+/*
+ * FIX (2026-07-26, Eva Stage 6 CBatchDiskMan unlock batch): PTR__CBatchDiskMan_08eac048's
+ * own Setup/Config/Start slots get the same real-forwarder treatment as
+ * PTR__CPanel_08f7c328/PTR__CEditor_08f29b88 above, for the identical reason -- see
+ * omega_vtables.h's own header comment on PTR__CBatchDiskMan_08eac048.
+ */
+extern "C" void CBatchDiskManSetupVSlot(void *obj)
+{
+	((CBatchDiskMan *)obj)->Setup();
+}
+
+extern "C" void CBatchDiskManConfigVSlot(void *obj)
+{
+	((CBatchDiskMan *)obj)->Config();
+}
+
+extern "C" void CBatchDiskManStartVSlot(void *obj)
+{
+	((CBatchDiskMan *)obj)->Start();
+}
+
+/* CBatchDiskMan's own real per-instance vtables -- see omega_vtables.h's own header
+ * comment for the full derivation. */
+void *PTR__CBatchDiskMan_08eac048[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CBatchDiskManSetupVSlot, (void *)CBatchDiskManConfigVSlot,
+	(void *)CBatchDiskManStartVSlot,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CBatchDiskMan_08eac06c[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+
+/* CEditTask's own real per-instance vtables -- install-only, see omega_vtables.h's own
+ * header comment. */
+void *PTR__CEditTask_08eac1c8[5] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CEditTask_08eac1e4[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 }
