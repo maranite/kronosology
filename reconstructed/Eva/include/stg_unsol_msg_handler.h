@@ -101,14 +101,90 @@
  * handlers' unconditional +0x28/+0x30 dispatch (+0x30/4 = slot 12) -- bumped to 20,
  * see mains.cpp's own WORKAROUND #2 comment.
  *
- * Tier B (real signature, not implemented -- genuinely deep per-subsystem STG message
- * processing reaching into CCombi/CProg/CGlobal/CControlSurface/CMMI/CModeManager/
- * CControlSurface/CDiskUtil/CForm-family classes,voice-model-algorithm-database state this pass does
- * not reconstruct): ControlMsgHandler (4886B, dispatches into CControlSurface/CMMI/
- * CDiskUtil/CForm-family classes,CHelpManager -- by far the deepest),
- * VoiceModelMsgHandler
- * (2487B, CStorage::GetInstance()'s own algorithm-database vtable dispatch,
- * CSTGMultisampleBankUUIDBase, an Api-vtable assertion call, `SetWithoutUpdatingSTG()`).
+ * Tier B (real signature, not implemented): ControlMsgHandler and VoiceModelMsgHandler.
+ * Both were RE-TRACED FROM SCRATCH (2026-07-26, `objdump -dr -M intel` against the real
+ * ground-truth `Eva` binary, not just re-reading prior notes) specifically to check for
+ * the "size is not depth" misdiagnosis pattern this same session caught 8 other times
+ * elsewhere in the project (GCC auto-vectorized loops, IPA clones, inlined duplicate
+ * dispatch, etc.). Real sizes corrected along the way -- both were previously undercounted
+ * by reading Ghidra's own function-size label instead of the real next-symbol gap, same
+ * class of error this file's own EffectSlotMsgHandler header comment already flagged once:
+ *   - ControlMsgHandler: real .text 0x0891ac70..0x0891c090 = 5152 bytes (was documented as
+ *     4886B).
+ *   - VoiceModelMsgHandler: real .text 0x08917100..0x08917ad0 = 2512 bytes (was documented
+ *     as 2487B).
+ *
+ * ControlMsgHandler -- CONFIRMED genuinely deep, not a misdiagnosis. A full call-target
+ * survey of the real disassembly (`objdump | grep call | sort | uniq -c`) shows 18 distinct
+ * out-of-scope subsystems, not a repeated mechanical shape: CMMI::GetInstance() (18x),
+ * CEditor::IsSwitchPressed() (14x), CControlSurface::GetInstance()/MoveKnobFader()/
+ * PressPlayMuteSwitch()/PressControlSwitch()/PressSelectSwitch()/ResetPerfSwitch(),
+ * CHelpManager::ShowHelpPage() (3 overloads, 12x total), CZ::CZ() + CFileOperation::
+ * NotifyOnKSCFileChanges() (the same out-of-scope container as CBatchDiskMan/CEditClient
+ * elsewhere in this project), CDiskUtil::BeginDiskWork()/EndDiskWork()/
+ * SetSwitchStateFlags(), CModeManager::ChangePage(), CSmplModeMgr::aftersampleedit(),
+ * CMMI::OpenDialog(CPegForm*,...)/OpenProcessBoxWithoutBar() and
+ * CFormDlogGlobalAutoPowerOffWarning::Open()/Close() (real Peg-toolkit CForm dialogs --
+ * permanently out of scope per this project's own UI-fidelity boundary), CFormPianoP4Main::
+ * SetupPianoType(), CFormCancelOK ctor, CFormGlobal6::ReloadFromSTG(), CSmplMemManager::
+ * updateramsize(), CMSDSInfo::Refresh(), CSTGUtil::Dump(), raw HAL_DisableInterrupts()/
+ * HAL_EnableInterrupts() critical-section pairs (4x each, real hardware interrupt-mask
+ * manipulation, not the kernel-module RTAI shim this project already treats as a dropped
+ * no-op elsewhere -- e.g. HAL_DisableInterrupts @0891aef8, HAL_EnableInterrupts @0891af0b,
+ * CMMI::OpenDialog @0891af64, CFormDlogGlobalAutoPowerOffWarning::Open @0891b0f0,
+ * CHelpManager::ShowHelpPage(EAnalogDeviceCode) @0891b295). This is real front-panel
+ * button/switch semantic dispatch spanning nearly every out-of-scope UI/control-surface
+ * subsystem this project has already independently flagged elsewhere as permanently
+ * deferred (Peg toolkit, CZ, CStorage, CModeManager) -- not tractable in isolation, and
+ * not a productive target even for a dedicated follow-up batch.
+ *
+ * VoiceModelMsgHandler -- RE-CHARACTERIZED, genuinely more mechanical than previously
+ * documented, but not simple enough to reconstruct in this same pass without real risk of
+ * a subtle bug (matches this file's own CombiMsgHandler precedent for a deliberate,
+ * disciplined "don't rush it" deferral). A full call-target survey shows its ENTIRE
+ * external dependency surface is just 3 already-modeled call targets: `memcpy` (1x),
+ * `SetWithoutUpdatingSTG()` (7x, already stubbed in this file, see below), and
+ * `CStorage::GetInstance()` (1x, already partially modeled in this file via
+ * `CStorageSingleton`/`CPrograms`). Every other real subsystem call (`Api`+0x94 assert,
+ * `EditApi`+0x28 scope lookup) is dispatched through vtable globals this file already owns
+ * (`Api` @0x930a1f4, `EditApi` @0x930aae4 -- see EndHandling()/EditApiGetScopeId() above).
+ * Its overall guard shape is CONFIRMED IDENTICAL to already-reconstructed PatchMsgHandler's
+ * own: `(*(uint*)(p+0xc) == CStorage::sm_ucCurrentProg && target == DAT_0af30549) ||
+ * target == 0xfffe || target == 0xffff` (real addresses 0xaf30548/0xaf30549, both already
+ * declared globals in this file), THEN gated on `(DAT_0af0df1e & 7)` -- PatchMsgHandler
+ * bails outright unless this equals 3; VoiceModelMsgHandler instead branches into two
+ * different bodies depending on it (==3 selects a deep path, else a 17-way mechanical
+ * jump-table dispatch), a real structural variant built from the exact same already-known
+ * primitives, not a new dependency.
+ *   - The MECHANICAL majority (all of JT1's 17 entries at real .rodata 0x08f1bac0, indexed
+ *     by subindex+1 for subindex in {0xffff}u[0,0xf], plus JT2's 6 entries at 0x08f1bb04
+ *     for the `(DAT_0af0df1e&7)==3` path's own subindex in [0,5]) is the same
+ *     EditApiGetScopeId()-then-byte-table-then-`SetWithoutUpdatingSTG()` shape as this
+ *     file's other Tier-A handlers, using only 3 real scope-name strings observed at their
+ *     real addresses: "ESProg" (0x8e79800), "ESSampling" (0x8e7987c), and one NEW name not
+ *     seen elsewhere in this project, "ESMOSS" (0x8e79862) -- confirms the deep leaf below
+ *     is a real, separate edit-server scope, not a guess.
+ *   - The ONE genuine deep leaf: reached only when `(DAT_0af0df1e&7)==3` AND a per-slot
+ *     "type" byte (read from a static array at 0xaf0e049, indexed by the message's own raw
+ *     `value` field * 0x41c -- a real, not-yet-modeled algorithm-descriptor array) is in
+ *     [2,9] AND the subindex sub-field is >5. That single path (real call at .text
+ *     0x08917209, `call CStorage::GetInstance()` then `[eax+0x48]`-vtable dispatch through
+ *     a bounds-checked array of further-vtabled objects, `[obj+0x18]`/`[obj+0x1c]`, plus a
+ *     `memcpy`) is confirmed via a real nearby file-path string
+ *     (`../../../../../OPOS/Projects/x2100/Modules/Storage/MOSSAlgorithm...`, real address
+ *     0x8f25dc4, used as the 2nd `Api`+0x94 assert's own file argument) to be a genuine
+ *     "MOSS algorithm" voice-model database dispatch -- a real, currently entirely
+ *     unmodeled class hierarchy (matches the header's original "CSTGMultisampleBankUUIDBase"
+ *     naming), and IS out of scope for this pass, same as `CToneAdjustTool::
+ *     ConvertParamToLinear` elsewhere in this file (a stub returning a fixed sentinel would
+ *     be the natural way to make this branch safely bail rather than model the real
+ *     algorithm database).
+ * Scaffolded here (jump tables + guard shape + external dependency inventory, all
+ * addresses real, not guessed) for a dedicated follow-up batch -- deliberately not forced
+ * into this same pass given the remaining volume of per-branch register-to-parameter
+ * tracing (2 stacked jump tables, ~16 distinct case bodies, several with bespoke
+ * non-table-driven code/value computation rather than a uniform 2-byte lookup) still
+ * needed to get every branch byte-exact.
  *
  * EffectSlotMsgHandler (real 1856B, .text 0x08917cd0..0x08918410 -- Ghidra's own
  * "size=1796" label undercounts by ~60 bytes of trailing out-of-line branch targets,

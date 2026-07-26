@@ -731,10 +731,32 @@ void CSTGUnsolMsgHandler::CalibrationMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::FrontPanelMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 
-/* --- Tier B link-stubs: genuinely deep per-subsystem processing, not implemented -- */
+/* --- Tier B link-stubs: not implemented -- see this file's own header comment (the
+ * "Tier B" section) for the full 2026-07-26 from-scratch re-trace findings, real jump
+ * table contents/addresses, and exact evidence for each verdict. Summary:
+ *   - ControlMsgHandler: RE-CONFIRMED genuinely deep (18 distinct out-of-scope call
+ *     targets spanning CMMI/CControlSurface/CHelpManager/CModeManager/CDiskUtil/
+ *     CSmplModeMgr/real Peg CForm dialogs/raw HAL interrupt-mask control). Real size
+ *     5152 bytes (0x0891ac70..0x0891c090), corrected from the previously-documented
+ *     4886B (an undercount from trusting Ghidra's own size label over the real
+ *     next-symbol gap).
+ *   - VoiceModelMsgHandler: RE-CHARACTERIZED as ~90% mechanical reuse of this file's own
+ *     already-modeled EditApi/Api/CStorage/SetWithoutUpdatingSTG infrastructure (2 real
+ *     jump tables at 0x08f1bac0/0x08f1bb04, same guard shape as PatchMsgHandler above),
+ *     with exactly ONE genuine deep leaf (a `CStorage::GetInstance()`-based "MOSS
+ *     algorithm" voice-model database dispatch at real call site 0x08917209, confirmed
+ *     via a real nearby file-path string naming
+ *     ".../Storage/MOSSAlgorithm..."). Deliberately left deferred rather than rushed in
+ *     the same pass that found this -- matches this file's own CombiMsgHandler
+ *     precedent for declining to force a risky reconstruction once genuine remaining
+ *     complexity (2 stacked jump tables, ~16 case bodies, several with bespoke
+ *     non-table-driven register math) was confirmed real rather than a decompiler
+ *     artifact. Real size 2512 bytes (0x08917100..0x08917ad0), corrected from the
+ *     previously-documented 2487B (same class of undercount as ControlMsgHandler's).
+ */
 
-void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 4886 bytes. */ }
-void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
+void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 5152 bytes. */ }
+void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2512 bytes. */ }
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
  *
