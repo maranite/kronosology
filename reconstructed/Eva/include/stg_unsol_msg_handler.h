@@ -106,10 +106,7 @@
  * CControlSurface/CDiskUtil/CForm-family classes,voice-model-algorithm-database state this pass does
  * not reconstruct): ControlMsgHandler (4886B, dispatches into CControlSurface/CMMI/
  * CDiskUtil/CForm-family classes,CHelpManager -- by far the deepest),
- * CombiMsgHandler (2951B, CMMI/
- * CModeManager/CPrograms/CToneAdjustTool), ProgramSlotMsgHandler (1792B, CMMI::
- * GetInstance()/CModeManager::IsOnTimbreProgramEditInContext/ChangeToTopPage/
- * CKGMsgProcessor::GetInstance()), ProgramMsgHandler (3114B, CMMI), VoiceModelMsgHandler
+ * VoiceModelMsgHandler
  * (2487B, CStorage::GetInstance()'s own algorithm-database vtable dispatch,
  * CSTGMultisampleBankUUIDBase, an Api-vtable assertion call, `SetWithoutUpdatingSTG()`).
  *
@@ -324,7 +321,6 @@ public:
 	 * see header comment for sizes. Not implemented.
 	 */
 	void ControlMsgHandler(const STGMessage &msg);
-	void CombiMsgHandler(STGMessage &msg);
 	void VoiceModelMsgHandler(STGMessage &msg);
 
 	/* Tier A, batch 2 (2026-07-25) -- real bodies, see header comment. */
@@ -353,6 +349,19 @@ public:
 	 * all stubbed file-local, same convention as SetWithoutUpdatingSTG()).
 	 */
 	void ProgramMsgHandler(STGMessage &msg);
+	/* Tier A, batch 7 (2026-07-26) -- real body, see stg_unsol_msg_handler.cpp's own
+	 * header comment (promoted from Tier B; real 7-way jump table whose physical
+	 * .text layout groups guard/table code BY SCOPE STRING across cases rather than
+	 * by case number -- hand-verified via `objdump -dr -M intel` case-by-case,
+	 * tracing forward from each case's own real `GetScopeId` call site rather than
+	 * trusting physical address proximity. New real dependencies CStorage::
+	 * GetInstance()/CPrograms::GetProgramPointer/CPrograms::IsCopyableBank/
+	 * CToneAdjustTool::ConvertParamToLinear, all stubbed file-local --
+	 * ConvertParamToLinear's return VALUE is genuinely consumed by one branch, not
+	 * just gated; stubbed to a fixed sentinel, same convention as
+	 * SetWithoutUpdatingSTG()/IsOnTimbreProgramEditInContext()'s hardcoded false).
+	 */
+	void CombiMsgHandler(STGMessage &msg);
 
 	/* Real layout is {code* fn; int32 adj} per HandleMessage()'s own decompile --
 	 * kept public/raw (not a real C++ pointer-to-member) so the ctor and

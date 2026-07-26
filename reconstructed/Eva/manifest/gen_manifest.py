@@ -280,8 +280,24 @@ RECONSTRUCTED = {
     # tables all confirmed via direct objdump/raw .rodata reads (including a genuine
     # 2-byte coincidental-overlap between two of them, see .cpp's own header comment).
     # New file-local stubs: HandleProgToneAdjustParam (shared with CombiMsgHandler's
-    # own upcoming case 0), CMMI/CModeManager (reused from ProgramSlotMsgHandler).
+    # own case 3), CMMI/CModeManager (reused from ProgramSlotMsgHandler).
     "08919fd0",  # CSTGUnsolMsgHandler::ProgramMsgHandler
+
+    # --- CSTGUnsolMsgHandler batch 7 (2026-07-26) -- CombiMsgHandler, promoted from
+    # Tier B after this same day's own deferral (see eva_stg_programslot_programmsg_
+    # reconstructed_combimsg_deferred_2026-07-26.md). Real size 3184 bytes
+    # (0x08919360..0x08919fd0 -- same "decompiler undercounts trailing branch targets"
+    # pattern already seen for EffectSlotMsgHandler/ProgramSlotMsgHandler). Physical
+    # .text layout groups guard/table code BY SCOPE STRING across cases rather than by
+    # case number -- every case's own table base was independently re-derived by
+    # tracing forward from its own real GetScopeId call site via objdump -dr, per the
+    # deferred note's own recommended method; several addresses disagree with that
+    # note's own unverified proximity-based guesses. New real dependencies
+    # CStorage::GetInstance()/CPrograms::GetProgramPointer/IsCopyableBank/
+    # CToneAdjustTool::ConvertParamToLinear, all stubbed file-local -- the last one's
+    # RETURN VALUE is genuinely consumed (not just gated) by one branch, stubbed to a
+    # fixed sentinel.
+    "08919360",  # CSTGUnsolMsgHandler::CombiMsgHandler
 
     # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
     # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()

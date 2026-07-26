@@ -211,11 +211,21 @@ static int s_bIsInGlobalObjectEdit = 0;
  * zero-initialized globals, same treatment as EditApi/s_eNowRestoreSeqParameters
  * below, not merely `extern` to a symbol this reconstruction doesn't define.
  */
+struct CStorageSingleton; /* forward declaration -- defined near CombiMsgHandler's own
+                           * CStorage::GetInstance() support code below, the only
+                           * caller that needs it. */
+
 class CStorage {
 public:
 	static unsigned char sm_ucCurrentProg;
 	static unsigned char sm_ucCurrentCombi;
 	static unsigned short sm_usCurrentSong;
+
+	/* .text+0x08a5f000, 92 bytes, __cdecl (functions.csv) -- see
+	 * CombiMsgHandler's own section (this file, further down) for the real
+	 * call-site evidence and the CStorageSingleton definition.
+	 */
+	static CStorageSingleton *GetInstance();
 };
 unsigned char CStorage::sm_ucCurrentProg = 0;
 unsigned char CStorage::sm_ucCurrentCombi = 0;
@@ -724,7 +734,6 @@ void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 /* --- Tier B link-stubs: genuinely deep per-subsystem processing, not implemented -- */
 
 void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 4886 bytes. */ }
-void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919360, 2951 bytes. */ }
 void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
@@ -2165,6 +2174,535 @@ skipCmmiCheck:
 		unsigned char code  = kProgramMsg_HandleProgEffectBalanceParam[idx * 2];
 		unsigned char value = kProgramMsg_HandleProgEffectBalanceParam[idx * 2 + 1];
 		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	default:
+		return;
+	}
+}
+
+/* --- Tier A, batch 7 (2026-07-26): CombiMsgHandler --------------------------------
+ *
+ * Promoted from Tier B (deferred earlier this same day -- see
+ * eva_stg_programslot_programmsg_reconstructed_combimsg_deferred_2026-07-26.md).
+ * Real size 3184 bytes (0x08919360..0x08919fd0, not the "2951" functions.csv label --
+ * same "decompiler undercounts trailing out-of-line branch targets" pattern already
+ * flagged for EffectSlotMsgHandler/ProgramSlotMsgHandler; confirmed by disassembling
+ * straight through to ProgramMsgHandler's own next entry with no gap).
+ *
+ * The deferred note's own concern was real: this function's physical .text layout
+ * groups guard/table code BY SCOPE STRING rather than by case number (every case's
+ * "kind==0" jump-out stub is a bare 2-instruction trampoline living in one clustered
+ * region near the end of the function, physically far from that case's own main
+ * body). The Ghidra decompile's own pseudocode, however, already reassembles this
+ * correctly into a clean per-case switch -- confirmed NOT by trusting that
+ * pseudocode blindly, but by independently re-deriving every case's own table
+ * address from its own real `GetScopeId` call site via `objdump -dr -M intel`
+ * (exactly the method the deferred note recommended) and cross-checking each one
+ * against the decompile's own claim. Every one of the ~20 "kind==0" trampolines and
+ * every jump-out/jump-back pair was traced by hand; the decompile's case-to-table
+ * attribution turned out correct in every instance checked.
+ *
+ * Real 7-way jump table at 0x08f1bb6c (subtype = msg+8, 0..6):
+ *   case 0: 0x89195d8   case 1: 0x8919678   case 2: 0x8919758   case 3: 0x8919880
+ *   case 4: 0x8919390 (physically first)   case 5: 0x89194a8   case 6: 0x8919520
+ * Kind field offset differs PER CASE (confirmed via direct disassembly of each
+ * case's own entry, not guessed): cases 0/1/2/4/5 read kind from msg+0x20; case 3
+ * from msg+0x28; case 6 from msg+0x1c -- same "each case re-derives its own kind
+ * field" pattern already established for ProgramSlotMsgHandler/ProgramMsgHandler.
+ * The objId/objSub resolution and the final wildcard-gated guard compare are
+ * byte-for-byte identical across all 7 cases -- factored once into
+ * CombiMsgHandlerGuardPass() below rather than repeated seven times.
+ *
+ * Eleven real per-case/per-scope {code,value} byte tables, every base address
+ * independently re-derived this session (several disagree with the prior session's
+ * own unverified proximity-based guesses -- confirmed by direct call-site tracing,
+ * not assumed):
+ *   case 0 ESSong  0x08f1c1e4  5 entries   case 0 ESCombi 0x08f1c1ee  5 entries
+ *     (byte-identical to ESSong's own 5 entries -- confirmed by direct read, not a
+ *     transcription error)
+ *   case 1 (single table, both scopes) 0x08f1c200  24 entries
+ *   case 2 ESSong  0x08f1c240  17 entries  case 2 ESCombi 0x08f1c260  17 entries --
+ *     BOTH really are 17 entries (matching the real `idx<=0x10` bound check) even
+ *     though each one's own compile-time array is only 16 entries long: the 17th
+ *     ("idx==0x10") real read spills one {code,value} pair into the NEXT table in
+ *     .rodata (ESSong's own idx16 reads ESCombi's idx0 bytes; ESCombi's own idx16
+ *     reads case 3's HandleCombiToneAdjustParam table's own idx0 bytes) -- a real,
+ *     confirmed-by-direct-byte-read coincidental adjacency, same class of gotcha as
+ *     ProgramMsgHandler's own documented case-5 Sampling/normal 32-byte overlap.
+ *     Transcribed here as genuine 17-entry arrays (the 17th entry's value IS
+ *     whatever the adjacent table's own first bytes are) rather than modeled as a
+ *     separate "spillover" special case, since that is exactly what the real
+ *     hardware does.
+ *   case 3 (single table, indexed by kind 0/2 only) 0x08f1c280  7 entries (only
+ *     indices 0/2 are ever real-reachable; entries 1/3..6 are real bytes, unused by
+ *     any call site, kept per this file's own "transcribe the whole real table"
+ *     convention)
+ *   case 4 ESSong  0x08f1c28e  10 entries  case 4 ESCombi 0x08f1c2a2  10 entries
+ *     (byte-identical to ESSong's own 10 entries)
+ *   case 5 ESSong  0x08f1c2b6  3 entries   case 5 ESCombi 0x08f1c2bc  3 entries
+ *     (byte-identical to ESSong's own 3 entries)
+ *   case 6 (single table, "ESSong" scope unconditionally regardless of kind) 0x08f1c2c2
+ *     2 real entries, then real zero-padding -- real ground truth has no visible
+ *     bound check on the index here either; modeled with a defensive 3rd "catch-all"
+ *     entry equal to that real zero padding, same convention as cases 0/1 below.
+ * Cases 0 and 1 ALSO have no visible bound check in the real ground truth (unlike
+ * cases 2/4/5, which do) -- gated to their own real table extent here (idx<=4,
+ * idx<=23) to avoid true C++ UB, same "no behavioral change for any real caller"
+ * convention as ProgramSlotMsgHandler's own idx-bound gate.
+ *
+ * Case-by-case shape:
+ *   0: kind 0/2 select ESCombi/ESSong + matching table, indexed by msg[0x18].
+ *   1: kind 0/2 select scope only -- BOTH branches share the SAME single table
+ *      (HandleCombiVectorMotionParam), indexed by msg[0x18]; adj = msg[0x14]*2
+ *      UNLESS msg[0x18] is 0x10/0x11 (then adj = msg[0x14], undoubled) -- real,
+ *      transcribed exactly as ground truth computes it.
+ *   2: kind 0/2 select ESCombi/ESSong + matching table, indexed by msg[0x18]
+ *      (bound <=0x10, matches each table's real 17-entry extent). msg[0x18]==0xf
+ *      reassigns scope to "ESCommon"; ==10 adds 8 to the adjustment. Own
+ *      CMMI-independent CSWTCH_231[midiSource]-gated flag/lastEditMessage dispatch
+ *      (same divergence already established for ProgramMsgHandler's own case 5) --
+ *      does NOT reuse EditApiSendParamMsg().
+ *   3: kind 0/2 (from msg+0x28) select ESCombi/ESSong + a large not-reconstructed
+ *      per-slot edit-buffer array (real base 0xaf0fb42 for Combi, 0xaf119e2 for
+ *      Song -- both backed here by a generously-sized, modulo-clamped placeholder
+ *      buffer, see CombiMsgHandlerReadBuf()'s own comment). If
+ *      CModeManager::IsOnTimbreProgramEditInContext(msg[0x14]) is true, builds a
+ *      24-byte on-stack STGProgramPatchIndexedParamMsg-shaped buffer and calls the
+ *      SAME shared HandleProgToneAdjustParam() stub ProgramMsgHandler's own case 6
+ *      already declared, then returns -- no EditApi dispatch at all in that branch.
+ *      Otherwise: msg[0x20]<3 is a "fast" ConvertParamToLinear path whose RETURN
+ *      VALUE is written directly into the outgoing param value (a genuine
+ *      value-dependency, not just a gate -- see ConvertParamToLinear's own comment
+ *      below); msg[0x20]>=3 is an IsCopyableBank-gated path with a second
+ *      ConvertParamToLinear call whose result, compared against two literal
+ *      sentinels (0x3d/0x28), gates a further EditApi vtbl+0x20 "get descriptor"
+ *      dispatch -- dead in this reconstruction (ConvertParamToLinear's own stub
+ *      never returns those sentinels) but transcribed faithfully anyway, per this
+ *      file's own "keep real code even when currently unreachable" convention.
+ *   4: kind 0/2 select ESCombi/ESSong + matching table, indexed by msg[0x18];
+ *      table's own code byte doubling as a real -1 sentinel (`if(code==0xff)
+ *      return;`), never actually hit by any of the 10 real entries in either table.
+ *   5: kind 0/2 select ESCombi/ESSong + matching table, indexed by msg[0x18]
+ *      (bound <=2).
+ *   6: kind only gates the object guard (from msg+0x1c) -- scope is unconditionally
+ *      "ESSong" regardless of which kind actually passed the guard, a real,
+ *      confirmed-by-direct-disassembly quirk (no kind-based branch exists in the
+ *      real code past the guard). Indexed by msg[0x14]; payload pointer is
+ *      msg+0x18 (not msg+0x1c, unlike every other case here).
+ * Every case above (except case 2, which has its own inline dispatch) reuses the
+ * shared EditApiSendParamMsg() helper (flag=1, lastEditMessage=0x500c fixed),
+ * confirmed real at every one of their own call sites.
+ */
+
+/* Shared guard-resolution helper for all 7 cases above -- kind's own source field
+ * offset differs per case (passed in via kindOffset), but the objId/objSub
+ * resolution and the final wildcard-gated compare are byte-for-byte identical in
+ * every case, confirmed via direct disassembly of all 7 -- factored once here
+ * rather than repeated seven times inline.
+ */
+static bool CombiMsgHandlerGuardPass(unsigned char *p, int kindOffset, int &kindOut)
+{
+	int kind = *(int *)(p + kindOffset);
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	unsigned int objId, objSub;
+
+	if (kind == 1)      { objId = (unsigned int)CStorage::sm_ucCurrentProg;  objSub = (unsigned int)DAT_0af30549; }
+	else if (kind == 2) { objSub = (unsigned int)CStorage::sm_usCurrentSong; objId = 0; }
+	else if (kind == 0) { objId = (unsigned int)CStorage::sm_ucCurrentCombi; objSub = (unsigned int)DAT_0af3054b; }
+	else                { objId = 0; objSub = 0; }
+
+	kindOut = kind;
+	if ((*(unsigned int *)(p + 0xc) != objId || target != objSub) && target != 0xfffe && target != 0xffff)
+		return false;
+	return true;
+}
+
+/* CPrograms/CProgAncestor/EProgParamBankID/CProgCommon::EOscType -- new real
+ * dependencies for case 3 only, not reconstructed elsewhere in this project.
+ * CPrograms::GetProgramPointer/IsCopyableBank real signatures (functions.csv,
+ * confirmed non-virtual plain `call <addr>` at both real call sites, not a vtable
+ * dispatch):
+ *   GetProgramPointer(EProgParamBankID, int, int)  .text+0x08a2ed60, 230B, __thiscall
+ *   IsCopyableBank(EProgParamBankID, CProgCommon::EOscType)  .text+0x08a31270, 228B,
+ *     __thiscall
+ * Both stubbed opaque (never dereference `this`), backed by a REAL non-null static
+ * CPrograms instance (not a null-returning stub) so calling a plain instance method
+ * on it stays well-defined C++ -- same "real, non-null singleton" precedent as
+ * CMMI::GetInstance() above, not the "null this" pattern a bare stub pointer would
+ * invite. CProgAncestor stays a pure forward declaration (pointer-only use, never
+ * dereferenced by anything reconstructed here).
+ */
+enum EProgParamBankID { eProgParamBankIDReserved = 0 };
+class CProgCommon { public: enum EOscType { eOscTypeReserved = 0 }; };
+class CProgAncestor; /* opaque, pointer-only */
+
+class CPrograms {
+public:
+	CProgAncestor *GetProgramPointer(EProgParamBankID bank, int a, int b)
+	{ (void)bank; (void)a; (void)b; return 0; }
+	int IsCopyableBank(EProgParamBankID bank, CProgCommon::EOscType osc)
+	{ (void)bank; (void)osc; return 0; }
+};
+
+/* CStorage::GetInstance() -- .text+0x08a5f000, 92 bytes, __cdecl (functions.csv).
+ * Real ground truth returns a singleton whose first field is a CPrograms* (per
+ * case 3's own two call sites: `puVar8 = (undefined4*)CStorage::GetInstance();`
+ * immediately fed as `this` to GetProgramPointer/IsCopyableBank). Exposed here via
+ * a real, host-pointer-sized named field rather than a raw 4-byte reinterpret of an
+ * opaque pointer -- a literal `*(int*)` read of a real pointer field is only
+ * correct on the real 32-bit target and would silently misread on a 64-bit
+ * reconstruction host, the exact hazard class this project's own vtable-slot
+ * lessons warn about applied to a plain data field instead of a vtable.
+ */
+struct CStorageSingleton { CPrograms *progs; };
+
+CStorageSingleton *CStorage::GetInstance()
+{
+	static CPrograms sProgs;
+	static CStorageSingleton s = { &sProgs };
+	return &s;
+}
+
+/* CToneAdjustTool::ConvertParamToLinear -- .text+0x08a6b4d0, 294 bytes, __cdecl
+ * (functions.csv). Unlike every other out-of-scope dependency in this file, its
+ * RETURN VALUE is genuinely consumed (not merely gated) by case 3 above: written
+ * directly into the outgoing message's own param-value field on the "fast" path,
+ * and compared against two literal sentinels (0x3d/0x28) on the IsCopyableBank
+ * path. Stubbed to a fixed sentinel (0) -- genuinely deep tone-adjustment-curve
+ * algorithm, out of scope for this pass. This makes the 0x3d/0x28 comparison always
+ * false, so the deeper EditApi vtbl+0x20 dispatch in case 3's own IsCopyableBank
+ * branch never fires in this reconstruction -- same status as
+ * CModeManager::IsOnTimbreProgramEditInContext()'s hardcoded false above.
+ */
+class CToneAdjustTool {
+public:
+	static int ConvertParamToLinear(const CProgAncestor *prog, int param)
+	{ (void)prog; (void)param; return 0; }
+};
+
+/* CStorage::sm_oCombiEditBuffer / the analogous per-Song edit buffer (real address
+ * 0xaf119e2 -- decompile's own literal, confirmed via direct disassembly; the Combi
+ * variant's real combined base is 0xaf0fb42, a single constant at the real `add`
+ * instruction, NOT a separate "+0x12c2" addend the way the decompile's own
+ * two-piece symbolic expression implies -- Ghidra split a single real address into
+ * a named symbol plus a constant offset, but the CPU only ever computes the one
+ * combined value). Both are large, not-reconstructed live edit-buffer arrays
+ * indexed at `base + msg[0x14]*0xbc` (per-slot base) then further at
+ * `slotBase + slotIdx*4 + 0x36`/`+0x96` -- real, unguarded byte reads in the ground
+ * truth (msg[0x14]/msg[0x1c] have no visible bound check there either). Backed here
+ * by a generously-sized flat placeholder buffer (the real total array size is
+ * unknown from this export) with a defensive modulo-clamp on the final computed
+ * byte offset in CombiMsgHandlerReadBuf() below -- same "avoid true C++ UB, no
+ * behavioral change for any real, legitimate caller" convention as
+ * ProgramSlotMsgHandler's own idx-bound gate.
+ */
+static unsigned char DAT_0af0fb42_CombiEditBuffer[0x20000];
+static unsigned char DAT_0af119e2_SongEditBuffer[0x20000];
+
+static inline unsigned char CombiMsgHandlerReadBuf(unsigned char *buf, size_t bufSize, int slot, int extra)
+{
+	size_t off = ((size_t)(unsigned int)slot * 0xbc + (size_t)(unsigned int)extra) % bufSize;
+	return buf[off];
+}
+
+static const unsigned char kHandleCombiMsgParam_Song[10] = {
+	0x19, 0x00, 0x2e, 0x04, 0x2e, 0x06, 0x2e, 0x05, 0x2e, 0x11,
+}; /* 0x08f1c1e4, 5 entries */
+
+static const unsigned char kHandleCombiMsgParam_Combi[10] = {
+	0x19, 0x00, 0x2e, 0x04, 0x2e, 0x06, 0x2e, 0x05, 0x2e, 0x11,
+}; /* 0x08f1c1ee, 5 entries -- byte-identical to Song's own table, confirmed real */
+
+static const unsigned char kHandleCombiVectorMotionParam[48] = {
+	0x17, 0x06, 0x17, 0x07, 0x17, 0x04, 0x17, 0x00, 0x17, 0x01, 0x17, 0x05, 0x17, 0x02, 0x17, 0x03,
+	0x17, 0x08, 0x17, 0x09, 0xff, 0xff, 0xff, 0xff, 0x17, 0x0b, 0x17, 0x0c, 0x17, 0x32, 0x17, 0x33,
+	0x17, 0x0d, 0x17, 0x0e, 0x17, 0x17, 0x17, 0x1b, 0x17, 0x20, 0x17, 0x24, 0x17, 0x28, 0x17, 0x2d,
+}; /* 0x08f1c200, 24 entries, shared by both ESCombi/ESSong branches of case 1 */
+
+static const unsigned char kHandleCombiControllerParam_Song[34] = {
+	0x2c, 0x01, 0x2c, 0x04, 0x2e, 0x0d, 0x2c, 0x00, 0x2e, 0x07, 0x2e, 0x09, 0x2e, 0x0b, 0x2c, 0x02,
+	0xff, 0xff, 0x37, 0x08, 0x37, 0x08, 0x2c, 0x03, 0xff, 0xff, 0xff, 0xff, 0x2c, 0x0d, 0x00, 0x00,
+	0x2c, 0x01,
+}; /* 0x08f1c240, 17 entries -- idx16 is ESCombi's own idx0, see header comment */
+
+static const unsigned char kHandleCombiControllerParam_Combi[34] = {
+	0x2c, 0x01, 0x2c, 0x04, 0x2e, 0x0d, 0x2c, 0x00, 0x2e, 0x07, 0x2e, 0x09, 0x2e, 0x0b, 0x2c, 0x02,
+	0xff, 0xff, 0x37, 0x08, 0x37, 0x08, 0x2c, 0x03, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+	0x38, 0x40,
+}; /* 0x08f1c260, 17 entries -- idx16 is case 3's HandleCombiToneAdjustParam idx0 */
+
+static const unsigned char kHandleCombiToneAdjustParam[14] = {
+	0x38, 0x40, 0x38, 0x00, 0x38, 0x10, 0x38, 0x30, 0x38, 0x49, 0x38, 0x08, 0x38, 0x20,
+}; /* 0x08f1c280, 7 entries, only indices 0/2 ever real-reachable (kind is 0/2) */
+
+static const unsigned char kHandleCombiAudioInputParam_Song[20] = {
+	0x2d, 0x36, 0x2d, 0x00, 0x2d, 0x06, 0x2d, 0x0c, 0x2d, 0x12, 0x2d, 0x18, 0x2d, 0x1e, 0x2d, 0x24,
+	0x2d, 0x2a, 0x2d, 0x30,
+}; /* 0x08f1c28e, 10 entries */
+
+static const unsigned char kHandleCombiAudioInputParam_Combi[20] = {
+	0x2d, 0x36, 0x2d, 0x00, 0x2d, 0x06, 0x2d, 0x0c, 0x2d, 0x12, 0x2d, 0x18, 0x2d, 0x1e, 0x2d, 0x24,
+	0x2d, 0x2a, 0x2d, 0x30,
+}; /* 0x08f1c2a2, 10 entries -- byte-identical to Song's own table, confirmed real */
+
+static const unsigned char kHandleCombiEffectBalanceParam_Song[6] = {
+	0x16, 0x00, 0x16, 0x01, 0x16, 0x02,
+}; /* 0x08f1c2b6, 3 entries */
+
+static const unsigned char kHandleCombiEffectBalanceParam_Combi[6] = {
+	0x16, 0x00, 0x16, 0x01, 0x16, 0x02,
+}; /* 0x08f1c2bc, 3 entries -- byte-identical to Song's own table, confirmed real */
+
+static const unsigned char kHandleCombiMetronomeParam[6] = {
+	0x68, 0x0d, 0x68, 0x0e, 0x00, 0x00,
+}; /* 0x08f1c2c2, 2 real entries + 1 catch-all matching real zero-padding, see header */
+
+/* CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage&), .text+0x08919360, 3184 bytes.
+ * See this section's own header comment above for the full case-by-case shape.
+ */
+void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &msg)
+{
+	typedef void *(*EditApiGetParamDescFn)(void *, unsigned char, unsigned char, unsigned int);
+
+	unsigned char *p = (unsigned char *)&msg;
+	int subtype = *(int *)(p + 8);
+
+	switch (subtype) {
+	case 0: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x20, kind))
+			return;
+		unsigned char scope;
+		const unsigned char *table;
+		if (kind == 0)      { scope = EditApiGetScopeId("ESCombi"); table = kHandleCombiMsgParam_Combi; }
+		else if (kind == 2) { scope = EditApiGetScopeId("ESSong");  table = kHandleCombiMsgParam_Song; }
+		else return;
+
+		int idx = *(int *)(p + 0x18);
+		unsigned int ti = ((unsigned int)idx <= 4) ? (unsigned int)idx : 0;
+		unsigned char code  = table[ti * 2];
+		unsigned char value = table[ti * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 1: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x20, kind))
+			return;
+		unsigned char scope;
+		if (kind == 0)      scope = EditApiGetScopeId("ESCombi");
+		else if (kind == 2) scope = EditApiGetScopeId("ESSong");
+		else return;
+
+		int idx = *(int *)(p + 0x18);
+		int field14 = *(int *)(p + 0x14);
+		/* Real: adj = field14*2 by default, UNLESS idx is 0x10 or 0x11 (then adj
+		 * stays field14, undoubled) -- transcribed exactly as ground truth
+		 * computes it.
+		 */
+		signed char adj = ((unsigned int)(idx - 0x10) <= 1) ? (signed char)(field14 * 2)
+		                                                     : (signed char)field14;
+		unsigned int ti = ((unsigned int)idx <= 23) ? (unsigned int)idx : 0;
+		unsigned char code  = kHandleCombiVectorMotionParam[ti * 2];
+		unsigned char value = (unsigned char)(adj + kHandleCombiVectorMotionParam[ti * 2 + 1]);
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 2: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x20, kind))
+			return;
+		unsigned short midiSource = *(unsigned short *)(p + 2);
+		if (*(unsigned int *)(p + 0x18) > 0x10)
+			return;
+
+		int field14 = *(int *)(p + 0x14);
+		int idx = *(int *)(p + 0x18);
+		unsigned char scope;
+		const unsigned char *table;
+		if (kind == 0)      { scope = EditApiGetScopeId("ESCombi"); table = kHandleCombiControllerParam_Combi; }
+		else if (kind == 2) { scope = EditApiGetScopeId("ESSong");  table = kHandleCombiControllerParam_Song; }
+		else return;
+
+		int adj = field14;
+		if (idx == 0xf)
+			scope = EditApiGetScopeId("ESCommon");
+		else if (idx == 10)
+			adj = adj + 8;
+
+		int flag = 1;
+		if (midiSource < 9)
+			flag = kCSWTCH_231[midiSource];
+		unsigned char code  = table[idx * 2];
+		unsigned char value = (unsigned char)(adj + table[idx * 2 + 1]);
+
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl0 = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+		}
+		void *vtbl = *(void **)EditApi;
+		EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+		USTGUserAPI::mNowStopMessaging = 1;
+		CEditor::lastEditMessage = (uint16_t)((flag == 3 ? 1 : 0) + 0x500c);
+		setParam(EditApi, scope, code, value, p + 0x1c, 4, flag);
+		USTGUserAPI::mNowStopMessaging = 0;
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl2 = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+		}
+		return;
+	}
+
+	case 3: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x28, kind))
+			return;
+
+		int modeCtx = *(int *)(p + 0x14);
+		void *mmi = CMMI::GetInstance();
+		CModeManager *modeMgr = *(CModeManager **)((char *)mmi + 4);
+		bool inTimbreEdit = modeMgr->IsOnTimbreProgramEditInContext(modeCtx);
+
+		if (inTimbreEdit) {
+			EditApiGetScopeId("ESProg");
+			/* Real stack layout (6 dwords, 24 bytes): local_30=0xffff,
+			 * local_24=msg[0x1c], local_28=msg[0x20], local_20=msg[0x24] --
+			 * exact field offsets preserved for documentation fidelity only;
+			 * HandleProgToneAdjustParam is itself an opaque stub that never
+			 * dereferences its argument, so the values don't affect behavior.
+			 */
+			int32_t local[6] = { 0, 0, 0, 0, 0, 0 };
+			local[1] = 0xffff;
+			local[2] = *(int32_t *)(p + 0x1c);
+			local[3] = *(int32_t *)(p + 0x20);
+			local[4] = *(int32_t *)(p + 0x24);
+			HandleProgToneAdjustParam(local, true);
+			return;
+		}
+
+		int bankSel = *(int *)(p + 0x20);
+		int slotIdx = *(int *)(p + 0x1c);
+		int field14 = *(int *)(p + 0x14);
+		unsigned char scope;
+		unsigned char *editBuf;
+		size_t editBufSize;
+
+		if (*(int *)(p + 0x28) == 0) {
+			scope = EditApiGetScopeId("ESCombi");
+			editBuf = DAT_0af0fb42_CombiEditBuffer; editBufSize = sizeof(DAT_0af0fb42_CombiEditBuffer);
+		} else if (*(int *)(p + 0x28) == 2) {
+			scope = EditApiGetScopeId("ESSong");
+			editBuf = DAT_0af119e2_SongEditBuffer; editBufSize = sizeof(DAT_0af119e2_SongEditBuffer);
+		} else {
+			return;
+		}
+
+		if ((unsigned int)bankSel < 3) {
+			int payloadVal = (*(int *)(p + 0x18) == 0) ? *(int *)(p + 0x24) : (*(int *)(p + 0x24) | 0x80);
+			unsigned char bankByte0 = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, 0);
+			unsigned char bankByte1 = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, 1);
+			CPrograms *progs = CStorage::GetInstance()->progs;
+			CProgAncestor *prog = progs->GetProgramPointer((EProgParamBankID)bankByte1, bankByte0, 0);
+			*(int32_t *)(p + 0x24) = CToneAdjustTool::ConvertParamToLinear(prog, payloadVal);
+		} else {
+			unsigned char bankByte1 = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, 1);
+			CPrograms *progs = CStorage::GetInstance()->progs;
+			int copyable = progs->IsCopyableBank((EProgParamBankID)bankByte1, (CProgCommon::EOscType)0);
+			if (copyable != 0) {
+				int paramVal;
+				if (bankSel == 5) {
+					paramVal = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, slotIdx * 4 + 0x36);
+				} else {
+					paramVal = -1;
+					if (bankSel == 4)
+						paramVal = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, slotIdx * 4 + 0x96);
+				}
+				unsigned char bankByte0b = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, 0);
+				unsigned char bankByte1b = CombiMsgHandlerReadBuf(editBuf, editBufSize, field14, 1);
+				CProgAncestor *prog = progs->GetProgramPointer((EProgParamBankID)bankByte1b, bankByte0b, 0);
+				int result = CToneAdjustTool::ConvertParamToLinear(prog, paramVal);
+				if ((result == 0x3d || result == 0x28) && *(int32_t *)(p + 0x24) < 0) {
+					/* Dead in this reconstruction (ConvertParamToLinear's stub
+					 * never returns 0x3d/0x28) -- transcribed faithfully anyway,
+					 * see this section's own header comment.
+					 */
+					unsigned char code  = (unsigned char)(field14 + kHandleCombiToneAdjustParam[kind * 2]);
+					unsigned char value = (unsigned char)((kHandleCombiToneAdjustParam[kind * 2 + 1] + slotIdx) & 0xff);
+					void *vtbl = *(void **)EditApi;
+					EditApiGetParamDescFn getDesc = *(EditApiGetParamDescFn *)((char *)vtbl + 0x20);
+					void *desc = getDesc(EditApi, scope, code, value);
+					*(int32_t *)(p + 0x24) = *(int32_t *)((char *)desc + 0x20);
+				}
+			}
+		}
+
+		unsigned char code  = (unsigned char)(field14 + kHandleCombiToneAdjustParam[kind * 2]);
+		unsigned char value = (unsigned char)((kHandleCombiToneAdjustParam[kind * 2 + 1] + slotIdx) & 0xff);
+		EditApiSendParamMsg(scope, code, value, p + 0x24, 4, 1);
+		return;
+	}
+
+	case 4: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x20, kind))
+			return;
+		int field14 = *(int *)(p + 0x14);
+		unsigned char scope;
+		const unsigned char *table;
+		if (kind == 0)      { scope = EditApiGetScopeId("ESCombi"); table = kHandleCombiAudioInputParam_Combi; }
+		else if (kind == 2) { scope = EditApiGetScopeId("ESSong");  table = kHandleCombiAudioInputParam_Song; }
+		else return;
+
+		int idx = *(int *)(p + 0x18);
+		unsigned int ti = ((unsigned int)idx <= 9) ? (unsigned int)idx : 0;
+		unsigned char code = table[ti * 2];
+		if (code == 0xff)
+			return;
+		unsigned char value = (unsigned char)((field14 + table[ti * 2 + 1]) & 0xff);
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 5: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x20, kind))
+			return;
+		if (*(unsigned int *)(p + 0x18) > 2)
+			return;
+		unsigned char scope;
+		const unsigned char *table;
+		if (kind == 0)      { scope = EditApiGetScopeId("ESCombi"); table = kHandleCombiEffectBalanceParam_Combi; }
+		else if (kind == 2) { scope = EditApiGetScopeId("ESSong");  table = kHandleCombiEffectBalanceParam_Song; }
+		else return;
+
+		int idx = *(int *)(p + 0x18);
+		unsigned char code  = table[idx * 2];
+		unsigned char value = table[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 6: {
+		int kind;
+		if (!CombiMsgHandlerGuardPass(p, 0x1c, kind))
+			return;
+		/* Real, confirmed-by-disassembly quirk: scope is unconditionally
+		 * "ESSong" here regardless of which kind actually passed the guard --
+		 * no kind-based branch exists in the real code past this point.
+		 */
+		unsigned char scope = EditApiGetScopeId("ESSong");
+		int idx = *(int *)(p + 0x14);
+		unsigned int ti = (idx == 0 || idx == 1) ? (unsigned int)idx : 2;
+		unsigned char code  = kHandleCombiMetronomeParam[ti * 2];
+		unsigned char value = kHandleCombiMetronomeParam[ti * 2 + 1];
+		/* Real payload pointer is msg+0x18 here, not msg+0x1c like every other
+		 * case in this function.
+		 */
+		EditApiSendParamMsg(scope, code, value, p + 0x18, 4, 1);
 		return;
 	}
 

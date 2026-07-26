@@ -1535,6 +1535,275 @@ int main()
 		EditApi = realEditApi;
 	}
 
+	/* [12] CombiMsgHandler (Tier A batch 7, 2026-07-26, real EditApi dispatch) --
+	 * reuses the same fake-EditApi vtable harness. Covers: guard reject, cases 0/1
+	 * (shared-table + doubling quirk)/2 (own CSWTCH_231-flag dispatch + ESCommon
+	 * reassignment)/4 (both branches + the -1 sentinel table shape)/5 (bound
+	 * check)/6 (unconditional "ESSong" scope + msg+0x18 payload, not msg+0x1c), and
+	 * case 3's non-timbre-edit fast path (ConvertParamToLinear's stub always
+	 * returns 0, so the outgoing param value is deterministically 0 -- matches
+	 * this reconstruction's own documented stub behavior). Case 3's
+	 * timbre-edit-context sub-branch is not separately exercised --
+	 * CModeManager::IsOnTimbreProgramEditInContext() is a hardcoded-false opaque
+	 * stub (see .cpp), so that branch is confirmed unreachable from this harness,
+	 * same license already used for ProgramMsgHandler/ProgramSlotMsgHandler's own
+	 * CModeManager-reaching branches above -- it's still smoke-tested via the
+	 * "does not crash" check below.
+	 */
+	printf("[12] CombiMsgHandler (Tier A batch 7, 2026-07-26, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool called;
+			const char *scopeName;
+			unsigned char scope, code, value;
+			unsigned int payload;
+			int len, flag;
+		};
+		static Capture cap;
+
+		struct Fake12 {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeName = name;
+				return 0x40;
+			}
+			static void SetParam(void *, unsigned char scope, unsigned char code, unsigned char value,
+			                     void *payload, int len, int flag)
+			{
+				cap.called = true;
+				cap.scope = scope;
+				cap.code = code;
+				cap.value = value;
+				cap.len = len;
+				cap.flag = flag;
+				cap.payload = 0;
+				if (len > 0 && (size_t)len <= sizeof(cap.payload))
+					memcpy(&cap.payload, payload, (size_t)len);
+			}
+		};
+
+		struct Trap12 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap12::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake12::GetScopeId;
+		fakeVtbl[0x30 / 4] = (void *)Fake12::SetParam;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char buf[64];
+
+		/* Guard: subtype 0, kind=0 (Combi) but msg[0xc] mismatched, no wildcard
+		 * target -> no dispatch.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(int *)(buf + 0x20) = 0;      /* kind = Combi */
+			*(unsigned int *)(buf + 0xc) = 0x99;  /* msg[0xc] != sm_ucCurrentCombi(0) */
+			*(unsigned int *)(buf + 0x10) = 0x1234; /* not 0xfffe/0xffff, not DAT_0af3054b(0) */
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+			check("CombiMsgHandler: guard rejects non-wildcard mismatched target", !cap.called);
+		}
+
+		/* case 0, kind=2 (Song), idx=2: table[2]=(0x2e,0x06) verbatim. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(int *)(buf + 0x20) = 2;
+			*(unsigned int *)(buf + 0x10) = 0xffff; /* wildcard */
+			*(int *)(buf + 0x18) = 2;
+			*(unsigned int *)(buf + 0x1c) = 0x11223344;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case0 idx=2: dispatched", cap.called);
+			check("CombiMsgHandler case0 idx=2: scope name == \"ESSong\"", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+			check("CombiMsgHandler case0 idx=2: code == 0x2e", cap.code == 0x2e);
+			check("CombiMsgHandler case0 idx=2: value == 0x06", cap.value == 0x06);
+			check("CombiMsgHandler case0 idx=2: payload == msg[0x1c] verbatim, len==4", cap.payload == 0x11223344 && cap.len == 4);
+		}
+
+		/* case 1, kind=0 (Combi), idx=0x10 (special: adj STAYS doubled),
+		 * field14=5 -> adj=10; table[0x10]=(0x17,0x0d); value=10+0x0d=0x17.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x20) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 5;
+			*(int *)(buf + 0x18) = 0x10;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case1 idx=0x10: dispatched", cap.called);
+			check("CombiMsgHandler case1 idx=0x10: scope name == \"ESCombi\"", cap.scopeName && strcmp(cap.scopeName, "ESCombi") == 0);
+			check("CombiMsgHandler case1 idx=0x10: code == 0x17", cap.code == 0x17);
+			check("CombiMsgHandler case1 idx=0x10: value == 0x17 (adj stays doubled: 5*2+0x0d)", cap.value == 0x17);
+		}
+
+		/* case 1, kind=0, idx=5 (NOT 0x10/0x11: adj undoubled), field14=5 ->
+		 * adj=5; table[5]=(0x17,0x05); value=5+5=0x0a.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(int *)(buf + 0x20) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 5;
+			*(int *)(buf + 0x18) = 5;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case1 idx=5: dispatched", cap.called);
+			check("CombiMsgHandler case1 idx=5: code == 0x17", cap.code == 0x17);
+			check("CombiMsgHandler case1 idx=5: value == 0x0a (adj undoubled: 5+5)", cap.value == 0x0a);
+		}
+
+		/* case 2, kind=0 (Combi), idx=0: table[0]=(0x2c,0x01); field14=7 ->
+		 * value=7+1=8. midiSource=0 -> flag=kCSWTCH_231[0]=4 (not 3, so
+		 * lastEditMessage stays 0x500c -- not independently observable via this
+		 * capture struct, but flag itself is).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0x20) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned short *)(buf + 2) = 0; /* midiSource */
+			*(int *)(buf + 0x14) = 7;
+			*(int *)(buf + 0x18) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case2 idx=0: dispatched", cap.called);
+			check("CombiMsgHandler case2 idx=0: code == 0x2c", cap.code == 0x2c);
+			check("CombiMsgHandler case2 idx=0: value == 8 (7+1)", cap.value == 8);
+			check("CombiMsgHandler case2 idx=0: flag == 4 (kCSWTCH_231[0])", cap.flag == 4);
+		}
+
+		/* case 2, kind=2 (Song), idx=0xf: real quirk -- scope reassigned to
+		 * "ESCommon" regardless of the kind-selected scope above.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(int *)(buf + 0x20) = 2;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned short *)(buf + 2) = 0;
+			*(int *)(buf + 0x14) = 3;
+			*(int *)(buf + 0x18) = 0xf;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case2 idx=0xf: dispatched", cap.called);
+			check("CombiMsgHandler case2 idx=0xf: scope reassigned to \"ESCommon\"", cap.scopeName && strcmp(cap.scopeName, "ESCommon") == 0);
+		}
+
+		/* case 3, non-timbre-edit path (CModeManager stub hardcodes false), kind=0
+		 * (Combi), bankSel=0 (<3 fast path): ConvertParamToLinear's stub always
+		 * returns 0, so msg[0x24] becomes 0, then the final dispatch payload is
+		 * that same (now-zeroed) field. field14=2 -> code=2+table[0](0x38)=0x3a;
+		 * slotIdx=1 -> value=(table[1](0x40)+1)&0xff=0x41.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 3;
+			*(int *)(buf + 0x28) = 0;      /* kind (case 3's own field offset) */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 2;      /* field14 */
+			*(int *)(buf + 0x1c) = 1;      /* slotIdx */
+			*(int *)(buf + 0x20) = 0;      /* bankSel (<3 fast path) */
+			*(int *)(buf + 0x18) = 0;      /* msg[0x18]==0 branch of payloadVal calc */
+			*(int *)(buf + 0x24) = 0x7fffffff; /* pre-call value, overwritten by the stub */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case3 fast path: does not crash", true);
+			check("CombiMsgHandler case3 fast path: dispatched", cap.called);
+			check("CombiMsgHandler case3 fast path: scope name == \"ESCombi\"", cap.scopeName && strcmp(cap.scopeName, "ESCombi") == 0);
+			check("CombiMsgHandler case3 fast path: code == 0x3a (2+0x38)", cap.code == 0x3a);
+			check("CombiMsgHandler case3 fast path: value == 0x41 (0x40+1)", cap.value == 0x41);
+			check("CombiMsgHandler case3 fast path: payload == 0 (ConvertParamToLinear stub)", cap.payload == 0);
+		}
+
+		/* case 4, kind=0 (Combi), idx=0: table[0]=(0x2d,0x36), never the -1
+		 * sentinel in either real table; field14=1 -> value=(0x36+1)&0xff=0x37.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 4;
+			*(int *)(buf + 0x20) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 1;
+			*(int *)(buf + 0x18) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case4 idx=0: dispatched", cap.called);
+			check("CombiMsgHandler case4 idx=0: code == 0x2d", cap.code == 0x2d);
+			check("CombiMsgHandler case4 idx=0: value == 0x37 (0x36+1)", cap.value == 0x37);
+		}
+
+		/* case 5, bound check: idx>2 returns without dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 5;
+			*(int *)(buf + 0x20) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned int *)(buf + 0x18) = 3;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+			check("CombiMsgHandler case5: idx>2 returns without dispatch", !cap.called);
+		}
+
+		/* case 6, kind (from msg+0x1c, NOT msg+0x20) = 0: real quirk -- scope is
+		 * unconditionally "ESSong" regardless of kind; payload is msg+0x18, not
+		 * msg+0x1c. idx=1 -> table[1]=(0x68,0x0e).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 6;
+			*(int *)(buf + 0x1c) = 0;      /* kind, case 6's own field offset */
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 1;      /* idx */
+			*(unsigned int *)(buf + 0x18) = 0x55667788; /* payload, real offset for this case */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.CombiMsgHandler(msg);
+
+			check("CombiMsgHandler case6 idx=1: dispatched", cap.called);
+			check("CombiMsgHandler case6 idx=1: scope name == \"ESSong\" (unconditional)", cap.scopeName && strcmp(cap.scopeName, "ESSong") == 0);
+			check("CombiMsgHandler case6 idx=1: code == 0x68", cap.code == 0x68);
+			check("CombiMsgHandler case6 idx=1: value == 0x0e", cap.value == 0x0e);
+			check("CombiMsgHandler case6 idx=1: payload == msg[0x18] verbatim (not msg[0x1c])", cap.payload == 0x55667788);
+		}
+
+		EditApi = realEditApi;
+	}
+
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;
 }
