@@ -21,12 +21,17 @@
  *    literal artifact, replaced here with an actual strcpy() of the same bytes; see
  *    RegisterModuleDescriptor()), then overwrite the vtable with the module's own
  *    real PTR__CXxxConstructor vtable and register the descriptor through a
- *    CSystemApi-shaped object's vtable slot +0x40. The 17 real per-module
- *    "ModuleConstructor" vtables this ultimately installs are NOT reconstructed --
- *    each is a distinct real class with its own construction logic, genuinely Stage
- *    4/5 depth (see README.md). Declared here only as opaque extern data symbols
- *    (the real vtables already exist in the binary), installed byte-for-byte
- *    correct, but never dereferenced/dispatched through by this reconstruction.
+ *    CSystemApi-shaped object's vtable slot +0x40.
+ *
+ *    UPDATE (2026-07-25, CreateUserModules() unlock pass): these 15 vtables ARE
+ *    now genuinely dereferenced -- see the dedicated comment right above their
+ *    definitions, below. 14 of the 15 module classes behind them (everything
+ *    except LinuxDriver, whose own descriptor never reaches CreateUserModules(),
+ *    and except CEditor, now real) are still not reconstructed, so those 13
+ *    vtables' own Create slots route through a shared safe "return NULL" stub
+ *    rather than being left as bare, no-longer-safe scalar placeholders (see
+ *    below for why a scalar was never actually safe once config_info.cpp's own
+ *    sm_ptCreateInfo bug was fixed).
  *
  *    12 of the 15 guard with `if (Api == 0) Api = api;` before registering
  *    (Editor/BatchDiskMan/ESCommon/ESProg/ESEffect/ESCombi/ESGlobal/ESMOSS/
@@ -65,6 +70,7 @@
 #include "panel_driver.h"
 #include "file_man.h"
 #include "res_man.h"
+#include "editor.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -107,25 +113,99 @@ extern "C" int DAT_0930b174 = 0;
  * Real definition + real slot count now in omega_vtables.h/.cpp (included above).
  */
 
-/* The 15 real per-module "ModuleConstructor" vtables -- see file header. Real,
- * existing rodata symbols; declared extern, not fabricated, never dereferenced here.
+/* LinuxDriver's own real vtable -- unlike the 14 below, this one is registered
+ * through FMApi's own vtable slot +0x24 (MMainLinuxDriver, below), not through
+ * Api's slot +0x40 / CModuleManager::mConstructors. That slot is still a generic
+ * EvaVTableStub (omega_vtables.cpp) which never dereferences its argument at all
+ * -- so this one genuinely is safe to leave as the old bare, never-dereferenced
+ * scalar placeholder (out of scope for this pass; CreateFMDrivers() stays
+ * disabled, config_info.cpp).
  */
+extern "C" void *PTR__CLinuxDriverConstructor_08fdaab0 = 0;
+
+/* FIX (2026-07-25, CreateUserModules() unlock pass): the 14 real per-module
+ * "ModuleConstructor" vtables below ARE genuinely dereferenced now.
+ * CConfigManager::CreateUserModules() (config_manager.cpp) was a real, safe
+ * no-op as long as its own sm_ptCreateInfo table (config_info.cpp) stayed
+ * zeroed -- now that config_info.cpp's own bug is fixed and sm_ptCreateInfo
+ * points at the REAL 14-entry {name,param1,param2} table (byte-verified
+ * against Eva's own .data at 0x091ada20, config_info.cpp's own header
+ * comment), CreateUserModules() genuinely looks each of these 14 names up in
+ * mConstructors (already real, populated by RegisterModuleDescriptor() below
+ * on every boot regardless of this fix -- Mains() itself was never gated on
+ * CreateUserModules()) and dereferences the found entry's own vtable slot+8
+ * ("Create"). The 14 symbols below were previously bare scalar `void*`
+ * placeholders (always zero, and -- worse -- their ADDRESS was installed as
+ * a fake "vtable", so slot+8 read 8 bytes past a lone 4-byte global, pure
+ * memory-layout luck) -- upgraded to properly-sized 3-slot arrays
+ * ([D1 dtor][D0 dtor][Create], same shape confirmed byte-exact for
+ * CEditorConstructor itself via direct .rodata read, see below) so every
+ * dereference is well-defined.
+ *
+ * Only CEditorConstructor's own Create slot does real work (placement-
+ * constructs a real CEditor -- the actual point of this fix). The other 13
+ * (BatchDiskMan/Panel/AlphaKeybCtrl/10x CESxxxModule) route Create through
+ * ModuleFactoryCreateStub, a shared "return NULL" stub: their own real
+ * per-module classes (CBatchDiskMan/CPanel/CAlphaKeybCtrl, the 10 CESxxx
+ * model classes) are not reconstructed in this project, and CreateUserModules()
+ * already has a real, ground-truth-faithful "unable to create instance"
+ * warning path for exactly this case (config_manager.cpp) -- returning NULL is
+ * the faithful, safe behavior, not a workaround. Both dtor slots point at the
+ * generic EvaVTableStub since nothing in this reconstruction's call graph ever
+ * destroys a CModuleConstructor object (mains.cpp only ever registers them).
+ */
+namespace {
+
+void *ModuleFactoryCreateStub(void *, void *, void *, int)
+{
+	return 0;
+}
+
+/* .text+0x08249fb0's own real Create() (CEditorConstructor::Create,
+ * .text+0x0898fb40, 61 bytes): mallocs a fresh CEditor and placement-
+ * constructs it with (param1, param2) -- the ctorObj ("this") and counter
+ * args are real per the vtable-slot ABI but genuinely unused by the real
+ * disassembly (confirmed via objdump), same as this project's other
+ * MMainPanelDriver/MMainHIDDriver "use our own real sizeof, not the ground
+ * truth's oversized fixed malloc constant" convention (mains.cpp, above).
+ */
+void *CEditorConstructorCreate(void * /*ctorObj*/, void *name, void *alphaKeybParam, int /*counter*/)
+{
+	void *raw = malloc(sizeof(CEditor));
+	return new (raw) CEditor((const char *)name, (const char *)alphaKeybParam);
+}
+
+} // namespace
+
 extern "C" {
-void *PTR__CAlphaKeybCtrlConstructor_08eabb48;
-void *PTR__CLinuxDriverConstructor_08fdaab0;
-void *PTR__CEditorConstructor_08f29c10;
-void *PTR__CPanelConstructor_08f7c2f0;
-void *PTR__CBatchDiskManConstructor_08eabe08;
-void *PTR__CESCommonModuleConstructor_08fbb048;
-void *PTR__CESProgModuleConstructor_08fbd218;
-void *PTR__CESEffectModuleConstructor_08fbb2c8;
-void *PTR__CESCombiModuleConstructor_08fbe028;
-void *PTR__CESGlobalModuleConstructor_08fbea28;
-void *PTR__CESMOSSModuleConstructor_08fbbe48;
-void *PTR__CESSamplingModuleConstructor_08fc6a48;
-void *PTR__CESSetListModuleConstructor_08fd37a8;
-void *PTR__CESSongModuleConstructor_08fc2818;
-void *PTR__CESDiskModuleConstructor_08fcc0a8;
+void *PTR__CAlphaKeybCtrlConstructor_08eabb48[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CEditorConstructor_08f29c10[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CEditorConstructorCreate };
+void *PTR__CPanelConstructor_08f7c2f0[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CBatchDiskManConstructor_08eabe08[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESCommonModuleConstructor_08fbb048[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESProgModuleConstructor_08fbd218[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESEffectModuleConstructor_08fbb2c8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESCombiModuleConstructor_08fbe028[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESGlobalModuleConstructor_08fbea28[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESMOSSModuleConstructor_08fbbe48[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESSamplingModuleConstructor_08fc6a48[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESSetListModuleConstructor_08fd37a8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESSongModuleConstructor_08fc2818[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+void *PTR__CESDiskModuleConstructor_08fcc0a8[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
 }
 
 /* The 2 real driver classes MMainPanelDriver/MMainHIDDriver construct directly.
