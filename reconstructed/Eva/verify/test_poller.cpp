@@ -43,9 +43,11 @@
  *        both returning 9, success storing the handle) against each one's own real
  *        field (mField394/398/39c)
  *   [13] MsgRegisterClientByVal()/MsgRegisterClientByRef(): length-gate thresholds
- *        (0x63/0xb), embedded-buffer vs pointer-to-string payload shapes, the
- *        RegisterClient() stub's outHandle write-back landing at the right spot in
- *        each payload layout
+ *        (0x63/0xb), embedded-buffer vs pointer-to-string payload shapes, the real
+ *        RegisterClient()'s Phase-3 append (fresh mClients, first call), the real
+ *        Api+0x44 tail notify firing with the real owner/task/client/nameA/nameB
+ *        args, and the real "reuse a still-unconnected slot" quirk on a 2nd call
+ *        (does NOT append a 2nd client or rebind the slot's name)
  */
 
 #include <cstdio>
@@ -160,6 +162,32 @@ extern "C" void FakeOutLinkNotify(void *, void *link)
 	g_lastOutLinkNotified = link;
 }
 
+/* Fake for Api's own vtbl slot +0x44 -- CPoller::RegisterClient()'s own tail
+ * notify (system_api.h, poller.cpp). Records all 6 real string/int args so the
+ * KAT can confirm they're forwarded correctly; return value is controllable
+ * (default 1 == success, matches RegisterClient()'s own `result >= 1` gate).
+ */
+static int g_registerNotifyCalls;
+static const char *g_lastRegisterOwnerName;
+static const char *g_lastRegisterTaskName;
+static const char *g_lastRegisterClientName;
+static const char *g_lastRegisterNameA;
+static const char *g_lastRegisterNameB;
+static int g_registerNotifyResult = 1;
+extern "C" int FakeRegisterNotify(void *, const char *ownerName, const char *taskName,
+                                   const char *clientName, const char *nameA,
+                                   const char *nameB, int zero)
+{
+	g_registerNotifyCalls++;
+	g_lastRegisterOwnerName = ownerName;
+	g_lastRegisterTaskName = taskName;
+	g_lastRegisterClientName = clientName;
+	g_lastRegisterNameA = nameA;
+	g_lastRegisterNameB = nameB;
+	check("Api+0x44 notify's trailing arg is 0", zero == 0);
+	return g_registerNotifyResult;
+}
+
 static void *g_fakeApiVtbl[96];
 struct FakeApiObj { void *vtbl; } g_fakeApiObj;
 
@@ -170,6 +198,7 @@ static void setup_fake_api()
 	g_fakeApiVtbl[0x3c / 4] = (void *)FakeScopeIdFn;
 	g_fakeApiVtbl[0xac / 4] = (void *)FakeLookupFn;
 	g_fakeApiVtbl[0x58 / 4] = (void *)FakeOutLinkNotify;
+	g_fakeApiVtbl[0x44 / 4] = (void *)FakeRegisterNotify;
 	g_fakeApiObj.vtbl = g_fakeApiVtbl;
 	Api = (CSystemApi *)&g_fakeApiObj;
 }
@@ -540,8 +569,20 @@ int main()
 		int r = p.MsgRegisterClientByVal(m.AsMessage());
 		check("MsgRegisterClientByVal() succeeds once both names are non-empty",
 		      r == 0);
-		check("RegisterClient() stub's outHandle write-back landed at payload+0",
-		      *(unsigned int *)valBuf == 0xffffffffu);
+		/* Real RegisterClient(): mClients starts empty, so this is a genuine
+		 * Phase-3 "append a brand-new CIfcClient" -- lands at index 0.
+		 */
+		check("RegisterClient() real append landed at index 0 (payload+0 write-back)",
+		      *(unsigned int *)valBuf == 0u);
+		check("Api+0x44 notify fired once, nameA/nameB forwarded verbatim",
+		      g_registerNotifyCalls == 1 &&
+		      strcmp(g_lastRegisterNameA, "X") == 0 &&
+		      strcmp(g_lastRegisterNameB, "Y") == 0);
+		check("Api+0x44 notify got the real owner-module/task names",
+		      g_lastRegisterOwnerName != 0 && strcmp(g_lastRegisterOwnerName, "TestModule") == 0 &&
+		      g_lastRegisterTaskName != 0 && strcmp(g_lastRegisterTaskName, "Poller") == 0);
+		check("mClients now has exactly 1 registered element",
+		      p.IsValidHandle(0) && !p.IsValidHandle(1));
 
 		FakeMessage m2;
 		m2.SetFlags(0x2);
@@ -565,8 +606,23 @@ int main()
 		int r2 = p.MsgRegisterClientByRef(m2.AsMessage());
 		check("MsgRegisterClientByRef() succeeds once both name pointers are set",
 		      r2 == 0);
-		check("RegisterClient() stub's outHandle write-back landed at payload[0]",
-		      refBuf[0] == 0xffffffffu);
+		/* Real, preserved quirk (poller.h's own header comment): the client
+		 * RegisterClient() just created is still "unconnected" (its embedded
+		 * COutLink::mLinks.mCount == 0 -- nothing in RegisterClient() itself
+		 * ever marks a client connected, same "not populated by any ctor in
+		 * this family" quirk out_link.h already documents for mLink). So this
+		 * SECOND call's Phase-2 scan finds THAT SAME slot free and REUSES it
+		 * (index 0 again) instead of appending a second client -- it does NOT
+		 * get rebound to (ClientA, ClientB); the Api+0x44 notify below fires
+		 * with the ORIGINAL "Out_<mID>" name once more.
+		 */
+		check("RegisterClient() reused the SAME still-unconnected slot (index 0), "
+		      "did not append a second client",
+		      refBuf[0] == 0u && p.IsValidHandle(0) && !p.IsValidHandle(1));
+		check("Api+0x44 notify fired a 2nd time, this call's own nameA/nameB forwarded",
+		      g_registerNotifyCalls == 2 &&
+		      strcmp(g_lastRegisterNameA, "ClientA") == 0 &&
+		      strcmp(g_lastRegisterNameB, "ClientB") == 0);
 	}
 
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");

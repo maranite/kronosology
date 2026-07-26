@@ -3030,3 +3030,92 @@ the pre-existing, already-documented (`eva_client_comm_server_6fail_closed_not_a
 `test_client_comm_server` 6-FAIL (independently reconfirmed present on the
 pre-this-batch tree too via `git stash`, so definitively unrelated).
 `tools/build_lenny.sh`: `LINK OK`. Manifest 447 → 455 of 37,795.
+
+## Stage 6: `CPoller::RegisterClient()` reconstruction — 2026-07-26 (follow-up)
+
+Direct follow-up to the broad nm-C sweep above, which left `RegisterClient(unsigned
+int&, char const*, char const*)` itself (`.text+0x089f31c0`, 2603 bytes) Tier-B
+stubbed as `CPoller`'s one remaining substantial gap — the common real callee of
+`MsgRegisterClientByVal()`/`MsgRegisterClientByRef()`. Dispatched specifically to
+reconstruct it for real, applying full rigor given its size (the largest remaining
+`CPoller` gap by a wide margin).
+
+**Method**: `objdump -dr -M intel` register tracing of the whole function, cross-
+checked against Ghidra's own decompile (usable as a first-pass map, but 3 sub-pieces
+needed direct disassembly to resolve correctly: the name-match pointer chain, the
+vector-insert self-aliasing-range guards, and the `CZ` name-string construction).
+
+**Real shape** (fully reconstructed, Tier A): (1) validate both names non-null/
+non-empty, else return 7; (2) linear scan (ground truth: 8-way Duff's-device-
+unrolled) over CONNECTED clients only, looking for an existing registration whose
+name pair already matches `(nameA, nameB)` — if found, return that index with code
+1 ("already registered"); (3) else scan for the first UNCONNECTED slot — if found,
+return that index directly, with **no new object constructed** (a real, preserved
+quirk, see below); (4) else construct a brand-new `CIfcClient` named `"Out_<mID>"`
+and append it to `mClients`, growing capacity via the already-real
+`TVector_CIfcClientPtr_MakeCapacity()` if needed, then call `CTask::Add()` on it;
+(5) every path converges on an unconditional call through `Api`'s own vtbl slot
+`+0x44` (a newly-documented slot, `system_api.h`) with `(Api, ownerModule->mName,
+this->mName, mClients[handle]->mName, nameA, nameB, 0)` — success (`result > 0`)
+returns 0, failure returns 11 and resets `outHandle` to `0xFFFFFFFF`.
+
+**Real quirk found and preserved, not "fixed"**: reusing an unconnected slot (step
+3) does NOT rebind it to the caller's requested `(nameA, nameB)` — nothing in
+`RegisterClient()` ever sets a `CIfcClient`'s own "connected" field (its embedded
+`COutLink::mLinks.mCount`, confirmed via `omega_ptr_array.h`), so a freshly
+*constructed* client (step 4) is itself still "unconnected" the moment it's built.
+A KAT trap this exposed and the test now explicitly covers: two back-to-back
+`RegisterClient()` calls with *different* name pairs against a fresh `CPoller`
+both land on index 0 — the second call doesn't append a second client, it just
+reuses the still-unconnected slot the first call created, firing the tail Api
+notify with the ORIGINAL `"Out_<mID>"` name rather than the second call's own
+names. Confirmed via direct disassembly (`.text+0x089f3648`..`0x89f37f8`), not
+assumed — this is exactly the kind of quirk this project's own discipline says to
+transcribe faithfully rather than "correct."
+
+**Two deliberate simplifications**, neither changing any real caller's observable
+behavior (same license as `edit_task.h`'s own `CBatchDiskCmds`-as-`COutLinkMono`
+substitution):
+1. Ground truth builds the new client's display name via the real `CZ` string-set
+   *container* (`CZ::CZ(buf,0x78,"")` + `CZ::Sprintf("Out_%d", mID)`) — already an
+   established, genuinely separate 247-method out-of-scope dependency (`cz_util.h`'s
+   own header comment, `CConfigManager::CreateResourceFamilies()`). Modeled as a
+   plain `snprintf` into a fixed local buffer instead — the only externally
+   observable effect is the resulting C string handed to `COutLinkMono`'s ctor,
+   which malloc's its own copy regardless of how the source buffer was built.
+2. Ground truth's real "append" is a generic, compiler-emitted `insert(iterator,
+   first, last)` with self-aliasing-range guards (does the 1-element stack-local
+   source range overlap `mClients`'s own heap-backed storage?). Confirmed via direct
+   disassembly (`.text+0x089f38c2`..`0x89f38e9`) that those guards always resolve to
+   the plain grow-then-append path for this call site, given this platform's real
+   address-space layout (a stack address can never alias a heap allocation) —
+   modeled directly as that path, guards omitted as genuinely dead code.
+
+**One opaque pointer chain, not further decoded**: the Phase-1 name-match scan
+walks each connected client's own `+0x1c` field (`client+0x1c` → deref → `+0x10` →
+`+0x3c`/`+4` and `+4`) to recover its registered name pair. This reaches into the
+client's own embedded `COutLink::mLinks` (`CLink`-family) machinery — `CLink` is
+already an established, genuinely out-of-scope class project-wide (`out_link.h`'s
+own header comment) — so the chain is transcribed as opaque raw-offset reads, same
+license as every other place this project crosses that same boundary.
+
+**New KAT coverage**: `verify/test_poller.cpp` section `[13]` rewritten (was
+asserting the old stub's fixed `outHandle = 0xFFFFFFFF` behavior, now asserts the
+real one) plus a new dedicated `Api+0x44` fake (`FakeRegisterNotify`, records all 6
+real args) — confirms the real Phase-3 append lands at index 0 with the tail notify
+firing exactly once with the real owner-module/task/client/nameA/nameB strings, and
+confirms the Phase-2 reuse quirk above end to end (2nd call reuses index 0, does
+NOT append, fires the notify a 2nd time with its own nameA/nameB but the ORIGINAL
+client name). `make -k verify`: every binary clean except the pre-existing,
+already-documented (`eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`)
+`test_client_comm_server` 6-FAIL — independently reconfirmed present on the
+pre-this-batch tree too via `git stash` before committing, definitively ruling this
+batch out as the cause. `tools/build_lenny.sh`: `LINK OK`. Manifest 484 → 485 of
+37,795 (only `RegisterClient()` itself added — every other method it depends on,
+`TVector_CIfcClientPtr_MakeCapacity()`/`CIfcClient::CIfcClient()`/`CTask::Add()`,
+was already real from prior batches).
+
+`CPoller` is now, to the best of this project's own knowledge, structurally
+exhausted for this session's scope: every method not requiring the still-separate
+`CMessage`/`CLEDBlinker`/`FindRegisteredClient()` prerequisites already documented
+above is Tier A.

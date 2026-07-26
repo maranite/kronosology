@@ -24,6 +24,14 @@
  * 0x089f2090/0x089f2110/0x089f53f0/0x089f5470 respectively, all via direct
  * `objdump -dr -M intel` register tracing. See poller.h's own per-method header
  * comments for the full derivation of each.
+ *
+ * `CPoller::RegisterClient()` (2026-07-26 RegisterClient batch) transcribed from
+ * .text+0x089f31c0 (2603 bytes) via direct `objdump -dr -M intel` register tracing
+ * of the whole function -- Ghidra's own decompile was a usable first-pass map but
+ * needed disassembly cross-checking for 3 sub-pieces (the name-match pointer chain,
+ * the vector-insert self-aliasing-range guards, and the CZ name-string dance). See
+ * poller.h's own top-of-file and per-method header comments for the full writeup,
+ * including the two deliberate simplifications this method uses.
  */
 
 #include "poller.h"
@@ -33,6 +41,7 @@
 #include "stg_unsol_msg_handler.h" /* CPanelOut::SAnalogEvt, already real -- see
                                      * header comment. */
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -356,15 +365,165 @@ int CPoller::MsgSetKeyboardClient(CMessage &msg)
 	return 0;
 }
 
-/* Tier-B link-stub -- see poller.h's own header comment. Real 2603-byte body
- * genuinely out of scope this batch; only its one guaranteed unconditional real
- * side effect (outHandle = 0xFFFFFFFF at entry, confirmed via objdump -dr) is
- * reproduced, so MsgRegisterClientByVal()/ByRef()'s own write-back behavior stays
- * observable in a KAT even with this stubbed.
+/* Tier A (2026-07-26 RegisterClient batch) -- see poller.h's own header comment
+ * (both the top-of-file entry and this method's own per-method comment) for the
+ * full derivation, including the two deliberate simplifications (CZ name-string
+ * construction, vector-insert self-aliasing-range guards) and the one opaque
+ * CLink-family pointer chain the Phase-1 name-match scan walks. Transcribed via
+ * direct `objdump -dr -M intel` register tracing of the whole 2603-byte body
+ * (.text+0x089f31c0), cross-checked against Ghidra's own decompile.
  */
-int CPoller::RegisterClient(unsigned int &outHandle, const char *, const char *)
+int CPoller::RegisterClient(unsigned int &outHandle, const char *nameA, const char *nameB)
 {
 	outHandle = 0xffffffff;
+
+	if (nameA == 0 || nameB == 0 || *nameA == 0)
+		return 7;
+	if (*nameB == 0)
+		return 7;
+
+	unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+
+	/* Phase 1: scan CONNECTED clients only for an existing (nameA, nameB)
+	 * registration. Ground truth is an 8-way Duff's-device-unrolled loop;
+	 * collapsed to a plain loop here (identical result, no side effects in the
+	 * comparison itself). The name-pair lookup below is an opaque raw pointer
+	 * chain into the client's own embedded CLink-family machinery (out_link.h's
+	 * mLinks) -- CLink itself is an already-established out-of-scope class
+	 * project-wide, so this is transcribed as raw-offset reads, not further
+	 * decoded.
+	 */
+	unsigned char **matched = 0;
+	for (unsigned char **p = begin; p < end; ++p) {
+		unsigned char *client = *p;
+		if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+			continue; /* unconnected -- never matched by name */
+
+		int linkP    = *reinterpret_cast<int *>(client + 0x1c);
+		int linkQ    = *reinterpret_cast<int *>(linkP);
+		int nameRec  = *reinterpret_cast<int *>(linkQ + 0x10);
+		int nameRecA = *reinterpret_cast<int *>(nameRec + 0x3c);
+		const char *regNameA = *reinterpret_cast<char **>(nameRecA + 4);
+		if (strcmp(regNameA, nameA) != 0)
+			continue;
+		const char *regNameB = *reinterpret_cast<char **>(nameRec + 4);
+		if (strcmp(nameB, regNameB) != 0)
+			continue;
+
+		matched = p;
+		break;
+	}
+
+	unsigned int handle;
+
+	if (matched != 0) {
+		/* Ground truth re-derives begin/end here and re-checks "index ==
+		 * 0xffffffff" before returning -- unreachable in practice (a real
+		 * match's index is always within [0, count)), not modeled, same
+		 * "unreachable defensive arm" treatment as elsewhere in this project.
+		 */
+		handle = (unsigned int)(matched - begin);
+		outHandle = handle;
+		return 1; /* already registered under this exact name pair */
+	}
+
+	/* Phase 2: no name match -- reuse the first UNCONNECTED slot, if any (same
+	 * scan shape as FindUnconnected() above, independently inlined here rather
+	 * than calling it, matching this project's "duplicate real ground-truth
+	 * function per call site" convention). Real, preserved quirk: reusing a
+	 * free slot does NOT rebind it to (nameA, nameB) -- no new CIfcClient is
+	 * built on this path; the slot's own pre-existing name is what the tail
+	 * notify call below fires with.
+	 */
+	unsigned int reuseIdx = 0xffffffff;
+	for (unsigned char **p = begin; p < end; ++p) {
+		if (*reinterpret_cast<const int *>(*p + 0x14) == 0) {
+			reuseIdx = (unsigned int)(p - begin);
+			break;
+		}
+	}
+
+	if (reuseIdx != 0xffffffff) {
+		handle = reuseIdx;
+		outHandle = handle;
+	} else {
+		/* Phase 3: append a brand-new CIfcClient named "Out_<mID>". Ground
+		 * truth builds that name via the real CZ string-set CONTAINER
+		 * (CZ::CZ + CZ::Sprintf) -- a genuinely separate, already
+		 * out-of-scope 247-method dependency (cz_util.h) -- modeled here as
+		 * a plain snprintf into a fixed stack buffer instead (deliberate
+		 * simplification: the ctor below malloc's its own copy of whatever
+		 * string is passed in, out_link.h, so this changes nothing any real
+		 * caller can observe). `this+0x18` is an opaque CTask field (task.h
+		 * doesn't decode it), used here only cosmetically for this
+		 * diagnostic display name.
+		 */
+		char nameBuf[0x78];
+		int mIdLike = *reinterpret_cast<int *>(reinterpret_cast<unsigned char *>(this) + 0x18);
+		snprintf(nameBuf, sizeof(nameBuf), "Out_%d", mIdLike);
+
+		void *raw = malloc(0x80);
+		CIfcClient *client = new (raw) CIfcClient(*this, nameBuf, 0xffffffff);
+
+		/* Append into mClients (TVector<CIfcClient*,1>), growing via the
+		 * already-real MakeCapacity() if needed. Ground truth implements the
+		 * append as a generic, compiler-emitted insert(iterator, first, last)
+		 * with self-aliasing-range guards (does the 1-element source range,
+		 * a stack local, overlap mClients's own heap-backed storage?) --
+		 * confirmed via direct disassembly (.text+0x089f38c2..0x89f38e9) that
+		 * those guards always resolve to the plain grow-then-append path for
+		 * this call site on this platform's real address-space layout (a
+		 * stack address can never alias a heap allocation); modeled directly
+		 * as that path, guards omitted as genuinely dead code.
+		 */
+		unsigned char **clientsEnd = *reinterpret_cast<unsigned char ***>(mClients + 8);
+		unsigned char **clientsCap = *reinterpret_cast<unsigned char ***>(mClients + 0xc);
+		if (clientsEnd >= clientsCap) {
+			unsigned char **clientsBegin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+			unsigned int curCount = (unsigned int)(clientsEnd - clientsBegin);
+			TVector_CIfcClientPtr_MakeCapacity(mClients, curCount + 1);
+			clientsEnd = *reinterpret_cast<unsigned char ***>(mClients + 8);
+		}
+		*clientsEnd = reinterpret_cast<unsigned char *>(client);
+		*reinterpret_cast<unsigned char ***>(mClients + 8) = clientsEnd + 1;
+
+		unsigned char **newBegin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+		unsigned char **newEnd   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+		handle = (unsigned int)(newEnd - newBegin) - 1;
+		outHandle = handle;
+
+		CTask::Add(client);
+	}
+
+	/* Common tail (both Phase 2 and Phase 3 converge here): notify Api's own
+	 * vtbl slot +0x44 (system_api.h, new slot this batch) with (Api,
+	 * ownerModule->mName, this->mName, mClients[handle]->mName, nameA, nameB,
+	 * 0). `this+0x3c` (mOwnerModule) and `this+0x4` (mName) are CTask's own
+	 * private fields (task.h) -- crossed via raw `this` reads, same idiom the
+	 * ctor above already uses for CTask's own private mVtbl.
+	 */
+	unsigned char **finalBegin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char *chosenClient = finalBegin[handle];
+	const char *chosenName = *reinterpret_cast<char **>(chosenClient + 4);
+
+	const unsigned char *ownerModule = *reinterpret_cast<unsigned char *const *>(
+	    reinterpret_cast<const unsigned char *>(this) + 0x3c);
+	const char *ownerModuleName = *reinterpret_cast<char *const *>(ownerModule + 4);
+	const char *taskName =
+	    *reinterpret_cast<char *const *>(reinterpret_cast<const unsigned char *>(this) + 4);
+
+	typedef int (*RegisterNotifyFn)(void *, const char *, const char *, const char *,
+	                                 const char *, const char *, int);
+	void *apiVtbl = *reinterpret_cast<void **>(Api);
+	RegisterNotifyFn registerNotify =
+	    *reinterpret_cast<RegisterNotifyFn *>(reinterpret_cast<char *>(apiVtbl) + 0x44);
+	int result = registerNotify(Api, ownerModuleName, taskName, chosenName, nameA, nameB, 0);
+
+	if (result < 1) {
+		outHandle = 0xffffffff;
+		return 11;
+	}
 	return 0;
 }
 

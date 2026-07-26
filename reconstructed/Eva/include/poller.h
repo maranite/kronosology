@@ -217,6 +217,57 @@
  * `FindRegisteredClient()` (2512B), `RegisterClient()` itself (2603B, see above),
  * `Exec(CMessage&)` (6747B, the real per-message dispatcher that would call all of
  * these), `Exec()` (3213B, the unrelated 0-arg scheduler-tick override).
+ *
+ * UPDATE (2026-07-26, RegisterClient reconstruction batch): `RegisterClient(unsigned
+ * int&, char const*, char const*)` itself (.text+0x089f31c0, 2603 bytes) is now fully
+ * reconstructed (Tier A), via `objdump -dr -M intel` register tracing of the whole
+ * function body (Ghidra's own decompile of it was usable as a first-pass map but
+ * needed direct disassembly cross-checking for the 3 gnarliest sub-pieces: the name-
+ * match scan's raw pointer-chain, the vector-insert self-aliasing-range guards, and
+ * the `CZ` name-string construction -- see poller.cpp's own header comment and the
+ * per-method comment below for exactly what each of those turned out to mean). Real
+ * shape: (1) validate both names non-null/non-empty (return 7); (2) linear scan for
+ * an already-CONNECTED client whose registered name pair already matches (nameA,
+ * nameB) -- if found, return handle=that index, code 1 ("already registered"); (3)
+ * else linear scan for the first UNCONNECTED slot to reuse -- if found, return that
+ * index directly WITHOUT constructing anything new (a real, preserved quirk: reusing
+ * a free slot does not rebind it to the new name pair, it just re-fires the generic
+ * registration notify below using that slot's own pre-existing name); (4) else
+ * construct a brand-new `CIfcClient` (name "Out_<mID>") and append it to `mClients`,
+ * growing capacity via the already-real `TVector_CIfcClientPtr_MakeCapacity()` if
+ * needed; (5) in every case, end with an unconditional call through `Api`'s own vtbl
+ * slot `+0x44` (a new opaque slot, system_api.h) with `(Api, ownerModule->mName,
+ * this->mName, mClients[handle]->mName, nameA, nameB, 0)` -- success (`result > 0`)
+ * returns 0, failure returns 11 and resets `outHandle` to `0xFFFFFFFF`.
+ *
+ * Two deliberate simplifications, neither changing any real caller's observable
+ * behavior (same license as `edit_task.h`'s own `CBatchDiskCmds`-as-`COutLinkMono`
+ * simplification): (a) ground truth builds the new client's display name via the
+ * real `CZ` string-set CONTAINER (`CZ::CZ(buf,0x78,"")` + `CZ::Sprintf("Out_%d",
+ * mID)`) -- that container is a genuinely separate, already-established 247-method
+ * out-of-scope dependency (`cz_util.h`'s own header comment); modeled here as a
+ * plain `snprintf` into a fixed local buffer instead, since the only externally
+ * observable effect is the resulting C string handed to `COutLinkMono`'s ctor, which
+ * malloc's its own copy (out_link.h) regardless of how the source buffer was built.
+ * (b) ground truth's real "append" is a generic, compiler-emitted `insert(iterator,
+ * first, last)` with self-aliasing-range guards (checking whether the source range
+ * `[&tmpLocal, &tmpLocal+1)` overlaps `mClients`'s own heap-backed storage) --
+ * confirmed via direct disassembly (`objdump -dr` at .text+0x089f38c2..0x89f38e9)
+ * that those guards always resolve to the plain grow-then-append path for this call
+ * site, given this platform's real address-space layout (a stack-local source range
+ * can never alias a heap-allocated `mClients` backing array); modeled directly as
+ * that path, guards omitted as genuinely dead code for every real invocation (same
+ * "unreachable defensive arm, not modeled" treatment already used for the ctor/
+ * `MsgUnregisterClient()` family's own dead index-underflow checks below).
+ *
+ * The one raw pointer-chain this reconstruction does NOT further decode: each
+ * connected client's own `+0x1c` field is walked (`client+0x1c` -> deref -> `+0x10`
+ * -> `+0x3c`/`+4` and `+4`) to recover its registered name pair for the Phase-2
+ * match scan. This reaches into the client's own embedded `COutLink::mLinks`
+ * (`CLink`-family) machinery -- `CLink` itself is already an established, genuinely
+ * out-of-scope class project-wide (out_link.h's own header comment) -- so the chain
+ * is transcribed as opaque raw-offset reads, same license as every other place this
+ * project crosses that same boundary (e.g. the `+0x14` "connected" field itself).
  */
 
 #ifndef POLLER_H
@@ -326,15 +377,18 @@ public:
 	int MsgSetTouchPanelClient(CMessage &msg);
 	int MsgSetKeyboardClient(CMessage &msg);
 
-	/* .text+0x089f31c0, 2603 bytes. Tier-B link-stub (empty-ish body, see .cpp) --
-	 * genuinely large real depth (drives `mClients` TVector growth via
-	 * `TVector_CIfcClientPtr_MakeCapacity()` and more), out of scope for this
-	 * batch. Declared with its real signature purely so
-	 * `MsgRegisterClientByVal()`/`MsgRegisterClientByRef()` below can compile and
-	 * dispatch a real call, same convention as `InitButtons()`/`InitAnalogs()`
-	 * above. Ground truth's own real entry unconditionally sets `outHandle =
-	 * 0xFFFFFFFF` before anything else (confirmed via `objdump -dr`) -- the stub
-	 * reproduces exactly that one guaranteed side effect and nothing more.
+	/* .text+0x089f31c0, 2603 bytes. Tier A (2026-07-26 RegisterClient batch -- see
+	 * the top-of-file header comment for the full derivation, including the two
+	 * deliberate simplifications and the one opaque `CLink`-family pointer chain).
+	 * Real: validate both names (return 7 if either is null/empty); if a CONNECTED
+	 * client already has this exact name pair, return its index with code 1; else
+	 * if any UNCONNECTED slot exists, return that slot's index directly (no new
+	 * object built); else construct+append a new `CIfcClient` named "Out_<mID>"
+	 * (growing `mClients` via `TVector_CIfcClientPtr_MakeCapacity()` if needed) and
+	 * call `CTask::Add()` on it. Every path ends by calling through `Api`'s own
+	 * vtbl slot `+0x44` (system_api.h) with `(Api, ownerModule->mName, this->mName,
+	 * mClients[handle]->mName, nameA, nameB, 0)`; success (`result > 0`) returns 0,
+	 * else returns 11 and resets `outHandle` to `0xFFFFFFFF`.
 	 */
 	int RegisterClient(unsigned int &outHandle, const char *nameA, const char *nameB);
 

@@ -887,9 +887,9 @@ RECONSTRUCTED = {
     # (CChunkServer::Exec()/CSysExMsgTaskBase::Exec()) applies here just as well,
     # nobody had actually tried it on CPoller's own smaller handlers yet. See
     # poller.h's own header comment (2026-07-26 UPDATE) for the full per-method
-    # derivation. RegisterClient() itself (089f31c0) stays Tier-B stubbed
-    # (genuine separate 2603-byte depth) -- NOT added here, same convention as
-    # InitButtons()/InitAnalogs() above.
+    # derivation. RegisterClient() itself (089f31c0) stayed Tier-B stubbed at the
+    # time this comment was written -- see the 2026-07-26 RegisterClient batch
+    # entry below, now fully reconstructed.
     "089f0150",  # CPoller::MsgShortBeep(CMessage&)
     "089f0420",  # CPoller::MsgRequestAnalogInputValue(CMessage&) const
     "089f1990",  # CPoller::MsgUnregisterClient(CMessage&)
@@ -898,6 +898,13 @@ RECONSTRUCTED = {
     "089f2110",  # CPoller::MsgSetKeyboardClient(CMessage&)
     "089f53f0",  # CPoller::MsgRegisterClientByVal(CMessage&)
     "089f5470",  # CPoller::MsgRegisterClientByRef(CMessage&)
+
+    # --- 2026-07-26 (RegisterClient reconstruction batch): CPoller::RegisterClient()
+    # itself, the common real callee of the two MsgRegisterClientByXxx() wrappers
+    # above -- see poller.h's own header comment for the full derivation (2603 bytes,
+    # objdump -dr -M intel register tracing, 2 deliberate simplifications, 1 opaque
+    # CLink-family pointer chain).
+    "089f31c0",  # CPoller::RegisterClient(unsigned int&, char const*, char const*)
 
     # --- 2026-07-26 (later same day): CBatchDiskMan unlock batch (batch_disk_man.h/
     # .cpp, edit_task.h/.cpp) -- same "CModuleConstructor factory currently stubbed,

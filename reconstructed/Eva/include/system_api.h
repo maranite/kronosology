@@ -40,6 +40,13 @@
  *          per-element "free element" callback COmegaPtrArray::RemoveAtIndex/Destroy
  *          already dispatch on their own (omega_ptr_array.cpp's CallFreeElement) --
  *          this is an ADDITIONAL, explicit notification straight to Api.
+ *   +0x044 CPoller::RegisterClient()'s own tail call (poller.cpp, 2026-07-26): `int
+ *          (Api, const char *ownerModuleName, const char *taskName, const char
+ *          *clientName, const char *nameA, const char *nameB, int)` -- 7 args, real
+ *          meaning not decoded (a generic "register/notify named client pair"
+ *          shape, by call-site inference only). Result `<= 0` is treated as failure
+ *          by the caller (RegisterClient() returns 11 and resets its own out-handle
+ *          to -1 in that case), `> 0` as success (returns 0).
  */
 
 #ifndef SYSTEM_API_H
