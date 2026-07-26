@@ -274,6 +274,15 @@ RECONSTRUCTED = {
     # convention as SetWithoutUpdatingSTG() above.
     "08918410",  # CSTGUnsolMsgHandler::ProgramSlotMsgHandler
 
+    # --- CSTGUnsolMsgHandler batch 6 (2026-07-26) -- ProgramMsgHandler, promoted from
+    # Tier B as a follow-up to the same session's 5-handler recheck. Real 9-way jump
+    # table on msg+8 (.rodata 0x08f1bb88), 9 real per-subtype {code,value} byte-pair
+    # tables all confirmed via direct objdump/raw .rodata reads (including a genuine
+    # 2-byte coincidental-overlap between two of them, see .cpp's own header comment).
+    # New file-local stubs: HandleProgToneAdjustParam (shared with CombiMsgHandler's
+    # own upcoming case 0), CMMI/CModeManager (reused from ProgramSlotMsgHandler).
+    "08919fd0",  # CSTGUnsolMsgHandler::ProgramMsgHandler
+
     # --- Stage 6: breadth sweep, CTask::CTask() reconstruction batch (2026-07-25).
     # CORRECTS the stale note that used to sit here (see git history) -- CTask::CTask()
     # genuinely IS called in ground truth (CEditor::CPanelIfcTask's and CPoller's own

@@ -725,7 +725,6 @@ void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 
 void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 4886 bytes. */ }
 void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919360, 2951 bytes. */ }
-void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08919fd0, 3114 bytes. */ }
 void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2487 bytes. */ }
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
@@ -1521,6 +1520,18 @@ class CModeManager {
 public:
 	bool IsOnTimbreProgramEditInContext(int ctx) const { (void)ctx; return false; }
 	void ChangeToTopPage(CDesktop *desktop, int flag) { (void)desktop; (void)flag; }
+
+	/* ProgramMsgHandler's own case 5 reads a real int field at raw offset +0x30
+	 * directly off a CModeManager* (`*(int*)(*(int*)(CMMI::GetInstance()+4)+0x30)`,
+	 * purpose not traced) to choose between "ESCombi"/"ESSong" scope -- backing
+	 * storage added (this class has no other data members, so +0x30 lands safely
+	 * inside mRaw) so that raw pointer-offset read stays defined. Always 0 (neither
+	 * 1 nor 2), so that whole branch is a confirmed-dead path in this reconstruction,
+	 * same "real but currently unreachable from an opaque stub" status as
+	 * IsOnTimbreProgramEditInContext()'s hardcoded false above.
+	 */
+	unsigned char mRaw[0x40];
+	CModeManager() { for (int i = 0; i < 0x40; ++i) mRaw[i] = 0; }
 };
 class CMMI {
 	struct Singleton { CDesktop *desktop; CModeManager *modeManager; };
@@ -1727,5 +1738,437 @@ void CSTGUnsolMsgHandler::ProgramSlotMsgHandler(STGMessage &msg)
 	if (s_eNowRestoreSeqParameters != 0) {
 		void *vtbl2 = *(void **)EditApi;
 		(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+	}
+}
+
+/* --- Tier A, batch 6 (2026-07-26): ProgramMsgHandler ------------------------------
+ *
+ * Promoted from Tier B this session (the recheck's own scaffolding: "9-way jump
+ * table on msg+8, case 0 calls the shared file-local HandleProgToneAdjustParam(),
+ * fewer distinct externs than CombiMsgHandler despite being the largest of the
+ * three"). Real size 3114 bytes (0x08919fd0..0x891ac70), a real 9-way jump table on
+ * `*(int*)(msg+8)` (.rodata 0x08f1bb88, index 0 and >8 both alias the same "return"
+ * epilogue -- confirmed via objdump, not guessed) selecting cases 1..8 (no real case
+ * 0). Every case re-checks the SAME Prog-only object guard (msg[0xc]==
+ * CStorage::sm_ucCurrentProg && msg[0x10]==DAT_0af30549, 0xfffe/0xffff wildcard) --
+ * GCC folded the repeated guard fragments across cases into shared jump trampolines
+ * (confirmed real, not an artifact: several cases' guard-fail paths physically jump
+ * into a DIFFERENT case's own guard code and back out again), which does not change
+ * the source-level behavior, only its physical encoding. Every one of the 9 real
+ * EditApi dispatch call sites uses flag=1/CEditor::lastEditMessage=0x500c fixed
+ * EXCEPT case 5's own CMMI-gated sub-branch (flag=kCSWTCH_231[midiSource],
+ * lastEditMessage=(flag==3)+0x500c, same divergence already established for
+ * EffectSlotMsgHandler/ProgramSlotMsgHandler's own generic tails) -- so every other
+ * case legitimately reuses the shared EditApiSendParamMsg() helper.
+ *
+ * Real dependencies new to this handler: `HandleProgToneAdjustParam` (case 6) -- a
+ * real, internal-linkage (`static`) free function per its own mangled name
+ * (`_ZL25HandleProgToneAdjustParamP30STGProgramPatchIndexedParamMsgb`), confirmed
+ * regparm(3) with only 2 real runtime args (STGProgramPatchIndexedParamMsg*, bool),
+ * same shared dependency the 2026-07-26 recheck flagged for CombiMsgHandler -- stubbed
+ * file-local below (opaque, real-signature call-contract extern, same convention as
+ * SetWithoutUpdatingSTG()). `CMMI`/`CModeManager` (case 5's own CModeManager+0x30
+ * raw-offset read, gating an ESCombi/ESSong scope choice) reuse the classes already
+ * declared above for ProgramSlotMsgHandler.
+ *
+ * Nine real per-subtype {code,value} byte-pair tables, all confirmed by direct
+ * `objdump -dr`/raw .rodata byte reads (not the decompile's own table-name framing
+ * alone -- several sit close enough together that a naive "just trust the name"
+ * transcription would have silently spliced two tables' bytes, most notably case 5's
+ * own Sampling/normal pair, whose real bases are exactly 32 bytes apart and share one
+ * coincidentally-identical byte pair at the seam: table1's own last entry
+ * (0x08f1c0e0/e1 = {0x21,0x01}) reads identically to table2's own first entry at the
+ * same address -- two genuinely separate compile-time arrays, confirmed by their
+ * distinct real base addresses in the two call sites' own `lea`/`movzx` immediates,
+ * not a single shared array):
+ *   kProgramMsg_HandleProgramParamForSampling  0x08f1bf40, 48 entries (case 1, Sampling)
+ *   kProgramMsg_HandleProgramParam             0x08f1bfa0, 58 entries (case 1, ESProg)
+ *   kProgramMsg_HandleVectorMotionParam        0x08f1c060, 24 entries (case 2)
+ *   kProgramMsg_HandleCommonLFOParam           0x08f1c020, 17 entries (case 3)
+ *   kProgramMsg_HandleCommonStepSeqParam       0x08f1c090, 13 entries (case 4)
+ *   kProgramMsg_HandleProgControllerParamForSampling 0x08f1c0c0, 17 entries (case 5, Sampling)
+ *   kProgramMsg_HandleProgControllerParam      0x08f1c0e0, 17 entries (case 5, normal)
+ *   kProgramMsg_HandleProgAudioInputParamForSampling 0x08f1c10e, 10 entries (case 7, Sampling)
+ *   kProgramMsg_HandleProgAudioInputParam      0x08f1c122, 10 entries (case 7, normal)
+ *   kProgramMsg_HandleProgEffectBalanceParam   0x08f1c136, 3 entries (case 8, already
+ *     declared above for ProgramSlotMsgHandler's own neighbor-table note -- reused).
+ * Five real scope-name string literals confirmed via `objdump -s -j .rodata`:
+ * "ESProg" (0x8e79800), "ESCombi" (0x8e79831), "ESSong" (0x8e79896), "ESSampling"
+ * (0x8e7987c), "ESCommon" (0x8e798c4).
+ *
+ * Case-by-case shape (msg+8 == subtype):
+ *   1: two branches (target==0xfffe && !s_bIsInGlobalObjectEdit -> Sampling, else ->
+ *      ESProg). ESProg branch has 6 sub-shapes keyed on msg[0x14] (0x25/0x26 do an
+ *      EditApi QueryFlag + bit-merge into a 2-byte payload before the final
+ *      2-byte-payload dispatch; 0x31/0x24 dispatch a 4-byte payload directly with a
+ *      literal code; msg[0x14] in {0xe,0xf} zeroes msg[0x18] after reading it;
+ *      msg[0x14]==0 rewrites msg[0x1c] in place first; every other value is the
+ *      plain table lookup) -- all real, hand-verified against objdump.
+ *   2: single ESProg table, msg[0x14] in {0x10,0x11} doubles the msg[0x18] adjustment.
+ *   3: single ESProg table, no special sub-case.
+ *   4: single ESProg table, msg[0x18] adjustment.
+ *   5: Sampling branch (bound msg[0x14]<=0x10, msg[0x14]==0xf reassigns scope to
+ *      "ESCommon", ==10 adds 8 to the adjustment) vs. normal branch (same 0xf/10
+ *      special-casing, PLUS a msg[0x14]==6 CMMI-gated ESCombi/ESSong reselection
+ *      sub-branch with a literal code and a different flag/lastEditMessage shape --
+ *      the one hand-written call site in this handler).
+ *   6: HandleProgToneAdjustParam(msg+0xc, false), return (no EditApi dispatch here
+ *      at all -- real, matches decompile exactly).
+ *   7: Sampling vs. normal branch, each with its own {code,value} table AND its own
+ *      -1-sentinel-gated early return (`if (cVar6==-1) return;`) -- both branches
+ *      otherwise identical shape.
+ *   8: bound msg[0x14]<=2, single ESProg table, no adjustment.
+ */
+
+/* HandleProgToneAdjustParam -- shared file-local dependency (case 6 here, and
+ * CombiMsgHandler's own case 0, per the 2026-07-26 recheck). Real internal-linkage
+ * (`static`) free function, .text+0x08916390, 585 bytes, confirmed regparm(3) with
+ * only 2 real runtime arguments (STGProgramPatchIndexedParamMsg*, bool) --> EAX/EDX.
+ * Stubbed opaque (genuinely deep tone-adjustment-curve processing, out of scope for
+ * this pass), same "real-signature call-contract extern" convention as
+ * SetWithoutUpdatingSTG() above.
+ */
+static void HandleProgToneAdjustParam(void *msg, bool flag) __attribute__((regparm(3)));
+static void HandleProgToneAdjustParam(void *msg, bool flag)
+{
+	(void)msg; (void)flag;
+}
+
+static const unsigned char kProgramMsg_HandleProgramParamForSampling[96] = {
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00,
+	0xff, 0xff, 0x01, 0x01, 0x01, 0x02, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+}; /* 0x08f1bf40, 48 entries */
+
+static const unsigned char kProgramMsg_HandleProgramParam[116] = {
+	0x23, 0x03, 0x23, 0x06, 0x23, 0x07, 0x23, 0x0a, 0x23, 0x09, 0x23, 0x05, 0x23, 0x12, 0x23, 0x11,
+	0x23, 0x0b, 0x33, 0x4e, 0x23, 0x17, 0x23, 0x18, 0x23, 0x19, 0xff, 0xff, 0x23, 0x28, 0x23, 0x29,
+	0x23, 0x0e, 0x23, 0x0d, 0x23, 0x0f, 0x23, 0x10, 0x23, 0x08, 0x23, 0x1a, 0x23, 0x1c, 0x23, 0x13,
+	0x23, 0x15, 0x23, 0x14, 0x23, 0x16, 0x23, 0x1b, 0x4d, 0x0a, 0x4d, 0x0b, 0x23, 0x0c, 0x23, 0x2c,
+	0x23, 0x2d, 0x23, 0x2e, 0x23, 0x2f, 0xff, 0xff, 0x53, 0x06, 0x23, 0x30, 0x23, 0x30, 0x23, 0x32,
+	0x23, 0x31, 0x23, 0x33, 0x23, 0x34, 0x23, 0x35, 0x23, 0x36, 0x23, 0x37, 0x23, 0x38, 0x23, 0x39,
+	0x23, 0x3a, 0x23, 0x41, 0x23, 0x3b, 0x23, 0x3c, 0x23, 0x3d, 0x23, 0x3e, 0x23, 0x3f, 0x23, 0x40,
+	0x23, 0x4d, 0xff, 0xff,
+}; /* 0x08f1bfa0, 58 entries */
+
+static const unsigned char kProgramMsg_HandleVectorMotionParam[48] = {
+	0x19, 0x06, 0x19, 0x07, 0x19, 0x04, 0x19, 0x00, 0x19, 0x01, 0x19, 0x05, 0x19, 0x02, 0x19, 0x03,
+	0x19, 0x08, 0x19, 0x09, 0x4d, 0x00, 0x4e, 0x00, 0x19, 0x0b, 0x19, 0x0c, 0x19, 0x32, 0x19, 0x33,
+	0x19, 0x0d, 0x19, 0x0e, 0x19, 0x17, 0x19, 0x1b, 0x19, 0x20, 0x19, 0x24, 0x19, 0x28, 0x19, 0x2d,
+}; /* 0x08f1c060, 24 entries */
+
+static const unsigned char kProgramMsg_HandleCommonLFOParam[34] = {
+	0x30, 0x00, 0x30, 0x04, 0x30, 0x05, 0x30, 0x06, 0x30, 0x07, 0x30, 0x09, 0x30, 0x02, 0x30, 0x03,
+	0x30, 0x01, 0x30, 0x08, 0x30, 0x0a, 0x30, 0x0b, 0x30, 0x0c, 0x30, 0x0d, 0x30, 0x0e, 0x30, 0x0f,
+	0x30, 0x10,
+}; /* 0x08f1c020, 17 entries */
+
+static const unsigned char kProgramMsg_HandleCommonStepSeqParam[26] = {
+	0x54, 0x00, 0x54, 0x01, 0x54, 0x02, 0x54, 0x03, 0x54, 0x04, 0x54, 0x05, 0x54, 0x07, 0x54, 0x08,
+	0x54, 0x09, 0x54, 0x0a, 0x54, 0x2a, 0x54, 0x4a, 0x54, 0x06,
+}; /* 0x08f1c090, 13 entries */
+
+static const unsigned char kProgramMsg_HandleProgControllerParamForSampling[34] = {
+	0x26, 0x01, 0x26, 0x04, 0x25, 0x06, 0x26, 0x00, 0x25, 0x00, 0x25, 0x02, 0x25, 0x04, 0x26, 0x02,
+	0xff, 0xff, 0x30, 0x08, 0x30, 0x08, 0x26, 0x03, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+	0x21, 0x01,
+}; /* 0x08f1c0c0, 17 entries */
+
+static const unsigned char kProgramMsg_HandleProgControllerParam[34] = {
+	0x21, 0x01, 0x21, 0x04, 0x23, 0x23, 0x21, 0x00, 0x23, 0x1d, 0x23, 0x1f, 0x23, 0x21, 0x21, 0x02,
+	0xff, 0xff, 0x2d, 0x08, 0x2d, 0x08, 0x21, 0x03, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+	0x2e, 0x40,
+}; /* 0x08f1c0e0, 17 entries */
+
+static const unsigned char kProgramMsg_HandleProgAudioInputParamForSampling[20] = {
+	0xff, 0xff, 0x1c, 0x00, 0x1c, 0x06, 0x1c, 0x0c, 0x1c, 0x12, 0x1c, 0x18, 0x1c, 0x1e, 0x1c, 0x24,
+	0x1c, 0x2a, 0x1c, 0x30,
+}; /* 0x08f1c10e, 10 entries */
+
+static const unsigned char kProgramMsg_HandleProgAudioInputParam[20] = {
+	0x22, 0x36, 0x22, 0x00, 0x22, 0x06, 0x22, 0x0c, 0x22, 0x12, 0x22, 0x18, 0x22, 0x1e, 0x22, 0x24,
+	0x22, 0x2a, 0x22, 0x30,
+}; /* 0x08f1c122, 10 entries */
+
+/* HandleProgEffectBalanceParam(STGProgramIndexedParamMsg*)::s_akbyAP -- real bytes at
+ * 0x08f1c136, 6 bytes, 3 entries (case 8's own idx<=2 bound). Real address
+ * confirmed by the SAME instruction that ends kProgramMsg_HandleProgAudioInputParam's
+ * own 10-entry span immediately above it in .rodata (0x08f1c122+20 = 0x08f1c136,
+ * confirmed exact, no gap).
+ */
+static const unsigned char kProgramMsg_HandleProgEffectBalanceParam[6] = {
+	0x18, 0x00, 0x18, 0x01, 0x18, 0x02,
+}; /* 0x08f1c136, 3 entries */
+
+/* CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage&), .text+0x08919fd0, 3114 bytes.
+ * See this section's own header comment above for the full case-by-case shape.
+ */
+void CSTGUnsolMsgHandler::ProgramMsgHandler(STGMessage &msg)
+{
+	typedef void (*EditApiQueryFlagFn)(void *, unsigned char, int, int, unsigned char *, int);
+
+	unsigned char *p = (unsigned char *)&msg;
+	int subtype = *(int *)(p + 8);
+
+	/* Every real case below targets a "Prog" object only -- the same guard,
+	 * repeated per case in the real ground truth (GCC folded the repeated
+	 * fragments into shared jump trampolines physically, not a behavioral
+	 * difference; see header comment). Factored once here since every case
+	 * needs exactly the same check.
+	 */
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	if ((*(unsigned int *)(p + 0xc) != (unsigned int)CStorage::sm_ucCurrentProg || target != (unsigned int)DAT_0af30549)
+	    && target != 0xfffe && target != 0xffff)
+		return;
+	bool isSampling = (target == 0xfffe && s_bIsInGlobalObjectEdit == 0);
+
+	switch (subtype) {
+	case 1: {
+		int idx = *(int *)(p + 0x14);
+
+		if (isSampling) {
+			unsigned char scope = EditApiGetScopeId("ESSampling");
+			if (idx == 0) {
+				int v = (*(int *)(p + 0x1c) != 3) ? *(int *)(p + 0x1c) : 5;
+				*(int *)(p + 0x1c) = v;
+			}
+			unsigned char code  = (unsigned char)(p[0x18] + kProgramMsg_HandleProgramParamForSampling[idx * 2]);
+			unsigned char value = kProgramMsg_HandleProgramParamForSampling[idx * 2 + 1];
+			EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+			return;
+		}
+
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		unsigned char code, value;
+
+		if (idx == 0x25 || idx == 0x26) {
+			unsigned char tblValue = kProgramMsg_HandleProgramParam[idx * 2 + 1];
+			uint16_t local1e = 0;
+			{
+				void *vtbl = *(void **)EditApi;
+				EditApiQueryFlagFn queryFlag = *(EditApiQueryFlagFn *)((char *)vtbl + 0x2c);
+				queryFlag(EditApi, scope, 0x23, tblValue, (unsigned char *)&local1e, 2);
+			}
+			if (idx == 0x25)
+				local1e = (uint16_t)((local1e & 0x7f) | (unsigned int)(*(int *)(p + 0x1c) << 7));
+			else
+				local1e = (uint16_t)((local1e & 0xff80) | *(uint16_t *)(p + 0x1c));
+			EditApiSendParamMsg(scope, 0x23, tblValue, &local1e, 2, 1);
+			return;
+		}
+
+		if (idx == 0x31) {
+			value = (unsigned char)(p[0x18] + kProgramMsg_HandleProgramParam[idx * 2 + 1]);
+			EditApiSendParamMsg(scope, 0x23, value, p + 0x1c, 4, 1);
+			return;
+		}
+
+		if (idx == 0x24) {
+			value = (unsigned char)(7 - (*(int *)(p + 0x18) == 0 ? 1 : 0));
+			EditApiSendParamMsg(scope, 0x53, value, p + 0x1c, 4, 1);
+			return;
+		}
+
+		int svar10;
+		int iVar9;
+		if ((unsigned int)(idx - 0xe) < 2) {
+			iVar9 = *(int *)(p + 0x18);
+			svar10 = 0;
+			*(int *)(p + 0x18) = 0;
+			iVar9 = iVar9 * 2;
+		} else {
+			if (idx == 0) {
+				int v = (*(int *)(p + 0x1c) != 3) ? *(int *)(p + 0x1c) : 5;
+				*(int *)(p + 0x1c) = v;
+			}
+			svar10 = p[0x18];
+			iVar9 = 0;
+		}
+		code  = (unsigned char)(svar10 + kProgramMsg_HandleProgramParam[idx * 2]);
+		value = (unsigned char)((iVar9 + kProgramMsg_HandleProgramParam[idx * 2 + 1]) & 0xff);
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 2: {
+		if (isSampling)
+			return;
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		int idx = *(int *)(p + 0x14);
+		signed char adj = (signed char)(*(int *)(p + 0x18));
+		if ((unsigned int)(idx - 0x10) < 2)
+			adj = (signed char)(adj * 2);
+		unsigned char code  = kProgramMsg_HandleVectorMotionParam[idx * 2];
+		unsigned char value = (unsigned char)(adj + kProgramMsg_HandleVectorMotionParam[idx * 2 + 1]);
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 3: {
+		if (isSampling)
+			return;
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		int idx = *(int *)(p + 0x14);
+		unsigned char code  = kProgramMsg_HandleCommonLFOParam[idx * 2];
+		unsigned char value = kProgramMsg_HandleCommonLFOParam[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 4: {
+		if (isSampling)
+			return;
+		int idx = *(int *)(p + 0x14);
+		unsigned char value = (unsigned char)(p[0x18] + kProgramMsg_HandleCommonStepSeqParam[idx * 2 + 1]);
+		unsigned char code  = kProgramMsg_HandleCommonStepSeqParam[idx * 2];
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 5: {
+		if (*(unsigned int *)(p + 0x14) > 0x10)
+			return;
+
+		if (isSampling) {
+			unsigned char scope = EditApiGetScopeId("ESSampling");
+			int idx = *(int *)(p + 0x14);
+			signed char adj = (signed char)(p[0x18]);
+			if (idx == 0xf) {
+				scope = EditApiGetScopeId("ESCommon");
+			} else if (idx == 10) {
+				adj = (signed char)(adj + 8);
+			}
+			unsigned char code  = kProgramMsg_HandleProgControllerParamForSampling[idx * 2];
+			unsigned char value = (unsigned char)(adj + kProgramMsg_HandleProgControllerParamForSampling[idx * 2 + 1]);
+			EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+			return;
+		}
+
+		unsigned short midiSource = *(unsigned short *)(p + 2);
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		int idx = *(int *)(p + 0x14);
+		int iVar9 = *(int *)(p + 0x18);
+		signed char adj = (signed char)iVar9;
+
+		/* Real: idx==0xf reassigns scope AND falls into the same "msg[0x14]==6"
+		 * check below (harmless -- idx can't be both 0xf and 6 at once); idx==10
+		 * skips the check entirely via its own real `goto` around it (see header
+		 * comment); every other idx reaches the check with a real chance of
+		 * being 6.
+		 */
+		if (idx == 0xf) {
+			scope = EditApiGetScopeId("ESCommon");
+		} else if (idx == 10) {
+			adj = (signed char)(adj + 8);
+			goto skipCmmiCheck;
+		}
+
+		if (idx == 6) {
+			void *mmi = CMMI::GetInstance();
+			CModeManager *modeMgr = *(CModeManager **)((char *)mmi + 4);
+			int field30 = *(int *)((char *)modeMgr + 0x30);
+			if ((unsigned int)(field30 - 1) < 2) {
+				void *mmi2 = CMMI::GetInstance();
+				CModeManager *modeMgr2 = *(CModeManager **)((char *)mmi2 + 4);
+				int field30b = *(int *)((char *)modeMgr2 + 0x30);
+				scope = (field30b == 1) ? EditApiGetScopeId("ESCombi") : EditApiGetScopeId("ESSong");
+
+				int flag = 1;
+				if (midiSource < 9)
+					flag = kCSWTCH_231[midiSource];
+				unsigned char value = (unsigned char)((iVar9 + 0xb) & 0xff);
+
+				if (s_eNowRestoreSeqParameters != 0) {
+					void *vtbl0 = *(void **)EditApi;
+					(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+				}
+				void *vtbl = *(void **)EditApi;
+				EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+				USTGUserAPI::mNowStopMessaging = 1;
+				CEditor::lastEditMessage = (uint16_t)((flag == 3 ? 1 : 0) + 0x500c);
+				setParam(EditApi, scope, 0x2e, value, p + 0x1c, 4, flag);
+				USTGUserAPI::mNowStopMessaging = 0;
+				if (s_eNowRestoreSeqParameters != 0) {
+					void *vtbl2 = *(void **)EditApi;
+					(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+				}
+				return;
+			}
+		}
+
+skipCmmiCheck:
+		int flag = 1;
+		if (midiSource < 9)
+			flag = kCSWTCH_231[midiSource];
+		unsigned char code  = kProgramMsg_HandleProgControllerParam[idx * 2];
+		unsigned char value = (unsigned char)(adj + kProgramMsg_HandleProgControllerParam[idx * 2 + 1]);
+
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl0 = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtbl0 + 0x3c))(EditApi);
+		}
+		void *vtbl = *(void **)EditApi;
+		EditApiSetParamFn setParam = *(EditApiSetParamFn *)((char *)vtbl + 0x30);
+		USTGUserAPI::mNowStopMessaging = 1;
+		CEditor::lastEditMessage = (uint16_t)((flag == 3 ? 1 : 0) + 0x500c);
+		setParam(EditApi, scope, code, value, p + 0x1c, 4, flag);
+		USTGUserAPI::mNowStopMessaging = 0;
+		if (s_eNowRestoreSeqParameters != 0) {
+			void *vtbl2 = *(void **)EditApi;
+			(*(EditApiVoidSelfFn *)((char *)vtbl2 + 0x38))(EditApi);
+		}
+		return;
+	}
+
+	case 6:
+		if (isSampling)
+			return;
+		HandleProgToneAdjustParam(p + 0xc, false);
+		return;
+
+	case 7: {
+		int idx = *(int *)(p + 0x14);
+		int fieldVal = *(int *)(p + 0x18);
+		unsigned char scope;
+		unsigned char code, value;
+
+		if (isSampling) {
+			scope = EditApiGetScopeId("ESSampling");
+			code = kProgramMsg_HandleProgAudioInputParamForSampling[idx * 2];
+			if (code == 0xff)
+				return;
+			value = kProgramMsg_HandleProgAudioInputParamForSampling[idx * 2 + 1];
+		} else {
+			scope = EditApiGetScopeId("ESProg");
+			code = kProgramMsg_HandleProgAudioInputParam[idx * 2];
+			if (code == 0xff)
+				return;
+			value = kProgramMsg_HandleProgAudioInputParam[idx * 2 + 1];
+		}
+
+		unsigned char sum = (unsigned char)((fieldVal + value) & 0xff);
+		EditApiSendParamMsg(scope, code, sum, p + 0x1c, 4, 1);
+		return;
+	}
+
+	case 8: {
+		if (isSampling)
+			return;
+		if (*(unsigned int *)(p + 0x14) > 2)
+			return;
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		int idx = *(int *)(p + 0x14);
+		unsigned char code  = kProgramMsg_HandleProgEffectBalanceParam[idx * 2];
+		unsigned char value = kProgramMsg_HandleProgEffectBalanceParam[idx * 2 + 1];
+		EditApiSendParamMsg(scope, code, value, p + 0x1c, 4, 1);
+		return;
+	}
+
+	default:
+		return;
 	}
 }

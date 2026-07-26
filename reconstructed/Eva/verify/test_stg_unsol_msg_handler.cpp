@@ -1185,6 +1185,356 @@ int main()
 		EditApi = realEditApi;
 	}
 
+	/* --- Tier A, batch 6 (2026-07-26): ProgramMsgHandler ------------------------
+	 *
+	 * Promoted from Tier B this session. Covers the guard, both Sampling/normal
+	 * branches of cases 1/5/7, the plain cases 2/3/4/8, case 6's no-EditApi-dispatch
+	 * shape, and case 1's own 0x25 QueryFlag+bit-merge sub-shape. Case 5's CMMI-gated
+	 * sub-branch (idx==6) is not separately exercised -- CModeManager's own +0x30
+	 * field is a hardcoded-0 opaque stub (see .cpp), so that branch is confirmed
+	 * unreachable from this test harness, same license as ProgramSlotMsgHandler's
+	 * own CModeManager-reaching branches above.
+	 */
+	printf("[11] ProgramMsgHandler (Tier A batch 6, 2026-07-26, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool called;
+			const char *scopeName;
+			unsigned char scope, code, value;
+			unsigned int payload;
+			int len, flag;
+		};
+		static Capture cap;
+		static uint16_t g_queryFlagOut;
+
+		struct Fake11 {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeName = name;
+				return 0x40;
+			}
+			static void SetParam(void *, unsigned char scope, unsigned char code, unsigned char value,
+			                     void *payload, int len, int flag)
+			{
+				cap.called = true;
+				cap.scope = scope;
+				cap.code = code;
+				cap.value = value;
+				cap.len = len;
+				cap.flag = flag;
+				cap.payload = 0;
+				if (len > 0 && (size_t)len <= sizeof(cap.payload))
+					memcpy(&cap.payload, payload, (size_t)len);
+			}
+			static void QueryFlag(void *, unsigned char, int, int, unsigned char *out, int len)
+			{
+				memcpy(out, &g_queryFlagOut, (size_t)len);
+			}
+		};
+
+		struct Trap11 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap11::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake11::GetScopeId;
+		fakeVtbl[0x2c / 4] = (void *)Fake11::QueryFlag;
+		fakeVtbl[0x30 / 4] = (void *)Fake11::SetParam;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char buf[64];
+
+		/* Guard: subtype 1 but target mismatched (no wildcard) -> no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(unsigned int *)(buf + 0x10) = 0x1234; /* not 0xfffe/0xffff */
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler: guard rejects non-wildcard mismatched target", !cap.called);
+		}
+
+		/* subtype 9 (out of the real 1..8 jump table): no dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 9;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler: subtype 9 (out of range) returns without dispatch", !cap.called);
+		}
+
+		/* case 1, ESProg branch, idx=10 (plain default sub-shape): table[10] =
+		 * (0x23,0x17) -- real formula is code=msg[0x18]+table[idx*2](0x23),
+		 * value=table[idx*2+1](0x17) unmodified (iVar9==0 in this sub-case).
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 10;
+			*(int *)(buf + 0x18) = 5;
+			*(unsigned int *)(buf + 0x1c) = 0xaabbccdd;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case1 idx=10: dispatched", cap.called);
+			check("ProgramMsgHandler case1 idx=10: scope name == \"ESProg\"", cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			check("ProgramMsgHandler case1 idx=10: code == 0x28 (5+0x23)", cap.code == 0x28);
+			check("ProgramMsgHandler case1 idx=10: value == 0x17 (table[10] byte1, unmodified)", cap.value == 0x17);
+			check("ProgramMsgHandler case1 idx=10: payload == msg[0x1c] verbatim, len==4", cap.payload == 0xaabbccdd && cap.len == 4);
+		}
+
+		/* case 1, idx==0x25: QueryFlag(code=0x23,value=table[0x25*2+1]=0x30) ->
+		 * local1e; merge (local1e&0x7f)|(msg[0x1c]<<7); msg[0x1c]=1 -> 0x80 bit set.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0x25;
+			*(int *)(buf + 0x1c) = 1;
+			g_queryFlagOut = 0x0055;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case1 idx=0x25: dispatched", cap.called);
+			check("ProgramMsgHandler case1 idx=0x25: code == 0x23 (literal)", cap.code == 0x23);
+			check("ProgramMsgHandler case1 idx=0x25: value == 0x30 (table[0x25] byte1)", cap.value == 0x30);
+			check("ProgramMsgHandler case1 idx=0x25: payload == 0xd5 ((0x55&0x7f)|(1<<7)), len==2",
+			      cap.payload == 0xd5 && cap.len == 2);
+		}
+
+		/* case 1, Sampling branch (target==0xfffe, s_bIsInGlobalObjectEdit==0),
+		 * idx=25: table_sampling[25] = (0x01,0x01), code=msg[0x18](3)+0x01=4,
+		 * value=0x01.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 1;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(int *)(buf + 0x14) = 25;
+			*(int *)(buf + 0x18) = 3;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case1 Sampling idx=25: dispatched", cap.called);
+			check("ProgramMsgHandler case1 Sampling idx=25: scope name == \"ESSampling\"", cap.scopeName && strcmp(cap.scopeName, "ESSampling") == 0);
+			check("ProgramMsgHandler case1 Sampling idx=25: code == 4 (3+1)", cap.code == 4);
+			check("ProgramMsgHandler case1 Sampling idx=25: value == 1", cap.value == 1);
+		}
+
+		/* case 2, idx=0 (not the 0x10/0x11 doubling special case): table[0] =
+		 * (0x19,0x06), value = msg[0x18](2) + 6 = 8.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 2;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0;
+			*(int *)(buf + 0x18) = 2;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case2: dispatched", cap.called);
+			check("ProgramMsgHandler case2: code == 0x19", cap.code == 0x19);
+			check("ProgramMsgHandler case2: value == 8 (2+6)", cap.value == 8);
+		}
+
+		/* case 3, idx=0: table[0] = (0x30,0x00), no adjustment. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 3;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case3: dispatched", cap.called);
+			check("ProgramMsgHandler case3: code == 0x30", cap.code == 0x30);
+			check("ProgramMsgHandler case3: value == 0", cap.value == 0);
+		}
+
+		/* case 4, idx=0: table[0] = (0x54,0x00), value = msg[0x18](9) + 0. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 4;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0;
+			*(int *)(buf + 0x18) = 9;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case4: dispatched", cap.called);
+			check("ProgramMsgHandler case4: code == 0x54", cap.code == 0x54);
+			check("ProgramMsgHandler case4: value == 9 (9+0)", cap.value == 9);
+		}
+
+		/* case 5, normal branch, idx=0 (not 0xf/10/6): table[0] = (0x21,0x01),
+		 * value = msg[0x18](2) + 1 = 3.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 5;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0;
+			*(int *)(buf + 0x18) = 2;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case5 normal idx=0: dispatched", cap.called);
+			check("ProgramMsgHandler case5 normal idx=0: scope name == \"ESProg\"", cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			check("ProgramMsgHandler case5 normal idx=0: code == 0x21", cap.code == 0x21);
+			check("ProgramMsgHandler case5 normal idx=0: value == 3 (2+1)", cap.value == 3);
+		}
+
+		/* case 5, Sampling branch, idx=0: table_sampling[0] = (0x26,0x01),
+		 * value = msg[0x18](4) + 1 = 5.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 5;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(int *)(buf + 0x14) = 0;
+			*(int *)(buf + 0x18) = 4;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case5 Sampling idx=0: dispatched", cap.called);
+			check("ProgramMsgHandler case5 Sampling idx=0: scope name == \"ESSampling\"", cap.scopeName && strcmp(cap.scopeName, "ESSampling") == 0);
+			check("ProgramMsgHandler case5 Sampling idx=0: code == 0x26", cap.code == 0x26);
+			check("ProgramMsgHandler case5 Sampling idx=0: value == 5 (4+1)", cap.value == 5);
+		}
+
+		/* case 5, bound check: idx>0x10 returns without dispatch (both branches). */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 5;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned int *)(buf + 0x14) = 0x11;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler case5: idx>0x10 returns without dispatch", !cap.called);
+		}
+
+		/* case 6: no EditApi dispatch at all -- just confirm the guard passes and
+		 * HandleProgToneAdjustParam() (opaque stub) is reached without crashing.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 6;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler case6: does not dispatch through EditApi (real: HandleProgToneAdjustParam only)", !cap.called);
+		}
+
+		/* case 7, normal branch, idx=0: table[0] = (0x22,0x36), sum = (msg[0x18](1)+0x36)&0xff = 0x37. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 7;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 0;
+			*(int *)(buf + 0x18) = 1;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case7 normal idx=0: dispatched", cap.called);
+			check("ProgramMsgHandler case7 normal idx=0: code == 0x22", cap.code == 0x22);
+			check("ProgramMsgHandler case7 normal idx=0: value == 0x37 (1+0x36)", cap.value == 0x37);
+		}
+
+		/* case 7, normal branch, idx=... table_sentinel: idx that yields 0xff
+		 * (invalid) must return without dispatch. Real table has no 0xff entry in
+		 * its own 10, so use the Sampling table's own idx=0 (0xff,0xff) instead.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 7;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(int *)(buf + 0x14) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler case7 Sampling idx=0 (0xff sentinel): returns without dispatch", !cap.called);
+		}
+
+		/* case 7, Sampling branch, idx=1: table_sampling[1] = (0x1c,0x00). */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 7;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(int *)(buf + 0x14) = 1;
+			*(int *)(buf + 0x18) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case7 Sampling idx=1: dispatched", cap.called);
+			check("ProgramMsgHandler case7 Sampling idx=1: scope name == \"ESSampling\"", cap.scopeName && strcmp(cap.scopeName, "ESSampling") == 0);
+			check("ProgramMsgHandler case7 Sampling idx=1: code == 0x1c", cap.code == 0x1c);
+		}
+
+		/* case 8, idx=1: table[1] = (0x18,0x01). */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 8;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(int *)(buf + 0x14) = 1;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+
+			check("ProgramMsgHandler case8 idx=1: dispatched", cap.called);
+			check("ProgramMsgHandler case8 idx=1: code == 0x18", cap.code == 0x18);
+			check("ProgramMsgHandler case8 idx=1: value == 1", cap.value == 1);
+		}
+
+		/* case 8, bound check: idx>2 returns without dispatch. */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 8;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(unsigned int *)(buf + 0x14) = 3;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.ProgramMsgHandler(msg);
+			check("ProgramMsgHandler case8: idx>2 returns without dispatch", !cap.called);
+		}
+
+		EditApi = realEditApi;
+	}
+
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

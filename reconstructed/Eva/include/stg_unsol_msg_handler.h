@@ -325,7 +325,6 @@ public:
 	 */
 	void ControlMsgHandler(const STGMessage &msg);
 	void CombiMsgHandler(STGMessage &msg);
-	void ProgramMsgHandler(STGMessage &msg);
 	void VoiceModelMsgHandler(STGMessage &msg);
 
 	/* Tier A, batch 2 (2026-07-25) -- real bodies, see header comment. */
@@ -349,6 +348,11 @@ public:
 	 * file-local in the .cpp, same convention as SetWithoutUpdatingSTG()).
 	 */
 	void ProgramSlotMsgHandler(STGMessage &msg);
+	/* Tier A, batch 6 (2026-07-26) -- real body, see header comment (promoted from
+	 * Tier B; new real dependencies HandleProgToneAdjustParam/CMMI/CModeManager,
+	 * all stubbed file-local, same convention as SetWithoutUpdatingSTG()).
+	 */
+	void ProgramMsgHandler(STGMessage &msg);
 
 	/* Real layout is {code* fn; int32 adj} per HandleMessage()'s own decompile --
 	 * kept public/raw (not a real C++ pointer-to-member) so the ctor and
