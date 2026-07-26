@@ -731,6 +731,74 @@ extern void *PTR__CBatchDiskMan_08eac06c[7]; /* 5 real slots, +2 headroom, same
  */
 extern void *PTR__CEditTask_08eac1c8[5];
 extern void *PTR__CEditTask_08eac1e4[3];
+
+/* CAlphaKeybCtrl's own real per-instance vtable (alpha_keyb_ctrl.h/.cpp, Eva
+ * CAlphaKeybCtrl/CAlphaKeybCtrlTask batch, 2026-07-26). Confirmed byte-exact via
+ * direct `.rodata` dword read at 0x08eabb68, 7 slots, the SAME CModule-shape as
+ * every other per-instance vtable in this file: {~CAlphaKeybCtrl, ~CAlphaKeybCtrl
+ * (deleting), CAlphaKeybCtrl::Setup, CAlphaKeybCtrl::Config, CAlphaKeybCtrl::Start,
+ * CModule::Destroy, CModule::GetErrorMsg}. SAME DEPARTURE as
+ * PTR__CPanel_08f7c328/PTR__CEditor_08f29b88/PTR__CBatchDiskMan_08eac048 above, same
+ * reason: slots 2/3/4 wired to real forwarders
+ * (CAlphaKeybCtrlSetupVSlot/CAlphaKeybCtrlConfigVSlot/CAlphaKeybCtrlStartVSlot,
+ * omega_vtables.cpp) so `CModuleManager::Setup()/Config()/Start()`'s own real
+ * vtbl+8/0xc/0x10 dispatch (module_manager.cpp) actually reaches
+ * `CAlphaKeybCtrl::Setup()` -- CAlphaKeybCtrlTask's own real, definitive
+ * construction site. Slots 0/1/5/6 stay EvaVTableStub, same "never dispatched by
+ * any reconstructed code" reason as every sibling array.
+ */
+extern void *PTR__CAlphaKeybCtrl_08eabb68[7];
+
+/* CAlphaKeybCtrlTask's own real per-instance vtable (alpha_keyb_ctrl_task.h/.cpp,
+ * same batch). Confirmed byte-exact via direct `.rodata` dword read at
+ * 0x08eabcc8, 7 slots, the SAME CTask-family shape as PTR__CPoller_08f7c368
+ * extended by 2 more slots: {~CAlphaKeybCtrlTask, ~CAlphaKeybCtrlTask(deleting),
+ * CAlphaKeybCtrlTask::Exec, CTask::Exec(CMessage&), CTask::ExecMsg(CMessage&),
+ * CAlphaKeybCtrlTask::ProcessEvent}. UNLIKE the CModule-shaped arrays above, this
+ * one needs a real slot for a different reason: `CAlphaKeybCtrlTask::Exec()`'s own
+ * real body self-dispatches `ProcessEvent()` THROUGH slot 5 (`(**(code**)(*this+
+ * 0x14))(this,...)`, not a direct call -- same self-dispatch-through-its-own-vtable
+ * shape `CHIDDriver::GetKeyboardEvent()` already established for slot 5,
+ * hid_driver.h), so slot 5 is wired to a real forwarder
+ * (CAlphaKeybCtrlTaskProcessEventVSlot). Slot 2 (Exec itself) is also wired real
+ * (CAlphaKeybCtrlTaskExecVSlot) for consistency/potential future
+ * `CLevelManager::RunLevel()` dispatch (level_manager_array.h -- that array is
+ * real but never populated in this reconstruction's own call graph, same
+ * "ground-truth-reachable is the bar" precedent as task.h's own CTask::CTask()
+ * note). Slots 0/1 (dtor) and 3/4 (inherited CTask::Exec(CMessage&)/ExecMsg(),
+ * matching PTR__CTask_08e82128's own currently-all-stub state) stay
+ * EvaVTableStub.
+ */
+extern void *PTR__CAlphaKeybCtrlTask_08eabcc8[7];
+
+/* CAlphaKeybCtrlTask's own this+8 install target (CTask's own "mIfcThunk" field,
+ * task.h -- real ground truth: `&DAT_08eabce8`, never dereferenced by any
+ * reconstructed code, same status as CTask's own EvaDataPlaceholder_08e82144 /
+ * CPanelIfcTask's EvaDataPlaceholder_08f29d04 above). Any addressable object is a
+ * safe stand-in.
+ */
+extern int   EvaDataPlaceholder_08eabce8;
+
+/* The "AlphaKeybCode" interface-link sub-object CAlphaKeybCtrlTask's own ctor
+ * builds at +0x80 (mCodeIfc) -- see alpha_keyb_ctrl_task.h's header comment for
+ * the full "why this is opaque, not a real class" derivation. 2 placeholder
+ * vtables, both install-only/EvaVTableStub-backed, named after their real
+ * ground-truth addresses for traceability:
+ *   - primary (buf+0x00, real identity `PTR__COutLinkIfc_08eabd48`): sized 10
+ *     slots to match the real `COutLinkIfcBase` primary vtable's own slot count
+ *     (dtor pair + SendWithAnswer/SendNoAnswer/OnConnect-family, confirmed via a
+ *     direct `.rodata` read at 0x08e81e28..0x08e81e4c) -- never dispatched
+ *     through by any of this class's own reconstructed methods.
+ *   - CMarshaller<IAlphaKeybCode> sub-object (buf+0x48, real identity
+ *     `PTR__CMarshaller_08e89f18`, confirmed via its own adjacent typeinfo-name
+ *     string "11CMarshallerI14IAlphaKeybCodeE" to be this exact specialization):
+ *     4 slots (dtor pair, GetId, ProcessCode -- matching functions.csv's own
+ *     08196670/08196750/08196650/08196410). `ProcessEvent()`'s own real
+ *     dispatch through slot 3 (ProcessCode) resolves to EvaVTableStub -- safe,
+ *     the real caller discards the return value unconditionally.
+ */
+extern void *PTR__COutLinkIfc_AlphaKeybCode_08eabd48[10];
+extern void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4];
 }
 
 #endif /* OMEGA_VTABLES_H */

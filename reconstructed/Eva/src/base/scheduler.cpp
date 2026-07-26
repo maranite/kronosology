@@ -288,3 +288,18 @@ void CLevelManager::RunLevel(void *this_)
 
 	*(int *)(self + 0x1c) = 0;
 }
+
+/* Tier-B stub -- see level_manager_array.h's header comment. Never invoked by any
+ * KAT this batch wrote (CAlphaKeybCtrlTask's own mCodeIfc sub-object never populates
+ * the mDirectTarget field GetDirectIfcPtr() would need to reach here).
+ */
+void CLevelManager::StopForMessage(void * /*this_*/, void * /*stateOut*/)
+{
+}
+
+/* Tier-B stub -- see level_manager_array.h's header comment. Same never-invoked
+ * status as StopForMessage() above.
+ */
+void CLevelManager::ResumeAfterMessage(void * /*this_*/, void * /*state*/)
+{
+}

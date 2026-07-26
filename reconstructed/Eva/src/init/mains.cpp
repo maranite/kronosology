@@ -73,6 +73,7 @@
 #include "editor.h"
 #include "panel.h"
 #include "batch_disk_man.h"
+#include "alpha_keyb_ctrl.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -169,9 +170,13 @@ extern "C" void *PTR__CLinuxDriverConstructor_08fdaab0 = 0;
  * side effect, is confirmed a genuine dead end (README.md) and deliberately not
  * reproduced.
  *
- * The remaining 12 (AlphaKeybCtrl/10x CESxxxModule) still route Create through
+ * `PTR__CAlphaKeybCtrlConstructor_08eabb48`'s own Create slot is unlocked the same
+ * way, see `CAlphaKeybCtrlConstructorCreate()` below / alpha_keyb_ctrl.h (Eva
+ * CAlphaKeybCtrl/CAlphaKeybCtrlTask batch, 2026-07-26).
+ *
+ * The remaining 11 (10x CESxxxModule) still route Create through
  * ModuleFactoryCreateStub, a shared "return NULL" stub: their own real per-module
- * classes (CAlphaKeybCtrl, the 10 CESxxx model classes) are not reconstructed in this
+ * classes (the 10 CESxxx model classes) are not reconstructed in this
  * project, and CreateUserModules() already has a real, ground-truth-faithful "unable
  * to create instance" warning path for exactly this case (config_manager.cpp) --
  * returning NULL is the faithful, safe behavior, not a workaround. Both dtor slots
@@ -227,11 +232,24 @@ void *CBatchDiskManConstructorCreate(void * /*ctorObj*/, void *name, void *param
 	return new (raw) CBatchDiskMan((const char *)name, (const char *)param2);
 }
 
+/* .text+0x0823e6c0's own real Create() (CAlphaKeybCtrlConstructor::Create,
+ * .text+0x0823e6c0, 78 bytes): mallocs a fresh CAlphaKeybCtrl and placement-
+ * constructs it with (param1, param2) -- same ctorObj/counter-unused,
+ * sizeof()-not-fixed-malloc-constant shape as CEditorConstructorCreate/
+ * CPanelConstructorCreate/CBatchDiskManConstructorCreate above. Eva
+ * CAlphaKeybCtrl/CAlphaKeybCtrlTask batch, 2026-07-26 -- see alpha_keyb_ctrl.h.
+ */
+void *CAlphaKeybCtrlConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int /*counter*/)
+{
+	void *raw = malloc(sizeof(CAlphaKeybCtrl));
+	return new (raw) CAlphaKeybCtrl((const char *)name, (const char *)param2);
+}
+
 } // namespace
 
 extern "C" {
 void *PTR__CAlphaKeybCtrlConstructor_08eabb48[3] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)ModuleFactoryCreateStub };
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CAlphaKeybCtrlConstructorCreate };
 void *PTR__CEditorConstructor_08f29c10[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CEditorConstructorCreate };
 void *PTR__CPanelConstructor_08f7c2f0[3] = {

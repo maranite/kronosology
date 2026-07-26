@@ -7,6 +7,8 @@
 #include "panel.h"
 #include "editor.h"
 #include "batch_disk_man.h"
+#include "alpha_keyb_ctrl.h"
+#include "alpha_keyb_ctrl_task.h"
 
 extern "C" void EvaVTableStub()
 {
@@ -608,4 +610,74 @@ void *PTR__CEditTask_08eac1c8[5] = {
 void *PTR__CEditTask_08eac1e4[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+
+/*
+ * FIX (2026-07-26, Eva CAlphaKeybCtrl/CAlphaKeybCtrlTask batch): PTR__CAlphaKeybCtrl_
+ * 08eabb68's own Setup/Config/Start slots get the same real-forwarder treatment as
+ * PTR__CPanel_08f7c328/PTR__CEditor_08f29b88/PTR__CBatchDiskMan_08eac048 above, for
+ * the identical reason -- see omega_vtables.h's own header comment.
+ */
+extern "C" void CAlphaKeybCtrlSetupVSlot(void *obj)
+{
+	((CAlphaKeybCtrl *)obj)->Setup();
+}
+
+extern "C" void CAlphaKeybCtrlConfigVSlot(void *obj)
+{
+	((CAlphaKeybCtrl *)obj)->Config();
+}
+
+extern "C" void CAlphaKeybCtrlStartVSlot(void *obj)
+{
+	((CAlphaKeybCtrl *)obj)->Start();
+}
+
+/* CAlphaKeybCtrl's own real per-instance vtable -- see omega_vtables.h's own header
+ * comment for the full derivation. */
+void *PTR__CAlphaKeybCtrl_08eabb68[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CAlphaKeybCtrlSetupVSlot, (void *)CAlphaKeybCtrlConfigVSlot,
+	(void *)CAlphaKeybCtrlStartVSlot,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+/* CAlphaKeybCtrlTask's own self-dispatch forwarders -- see omega_vtables.h's own
+ * header comment for why slot 5 (ProcessEvent) needs to be real (Exec()'s own real
+ * body dispatches through it, not a direct call).
+ */
+extern "C" void CAlphaKeybCtrlTaskExecVSlot(void *obj)
+{
+	((CAlphaKeybCtrlTask *)obj)->Exec();
+}
+
+extern "C" void CAlphaKeybCtrlTaskProcessEventVSlot(void *obj, void *evt)
+{
+	((CAlphaKeybCtrlTask *)obj)->ProcessEvent((const SKeyboardEvt *)evt);
+}
+
+/* CAlphaKeybCtrlTask's own real per-instance vtable -- see omega_vtables.h's own
+ * header comment. */
+void *PTR__CAlphaKeybCtrlTask_08eabcc8[7] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CAlphaKeybCtrlTaskExecVSlot,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CAlphaKeybCtrlTaskProcessEventVSlot,
+	(void *)EvaVTableStub,
+};
+
+/* The "AlphaKeybCode" interface-link sub-object's own 2 placeholder vtables -- see
+ * omega_vtables.h's own header comment. Both install-only, EvaVTableStub-backed.
+ */
+void *PTR__COutLinkIfc_AlphaKeybCode_08eabd48[10] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__CMarshaller_AlphaKeybCode_08e89f18[4] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+
+int EvaDataPlaceholder_08eabce8 = 0;
 }

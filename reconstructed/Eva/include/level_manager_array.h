@@ -79,6 +79,34 @@ public:
 class CLevelManager {
 public:
 	static void RunLevel(void *this_);
+
+	/* Added Eva CAlphaKeybCtrl/CAlphaKeybCtrlTask batch, 2026-07-26 --
+	 * `COutLinkIfcBase::GetDirectIfcPtr()`'s own real ground-truth body
+	 * (.text+0x0807b8e0, out_link_ifc.cpp) calls a virtual method through
+	 * `this+0x40`'s own vtbl+0x10 slot whenever that field is non-null; a raw
+	 * `nm -C` cross-check confirms the real target is
+	 * `CLevelManager::StopForMessage(SStateRegisterForMsg&)`
+	 * (.text+0x0805e120-ish region, not individually transcribed -- genuine
+	 * scheduler/message-pump depth, same "declare real signature, Tier-B stub
+	 * body" convention as `CPoller::InitButtons()`/`InitAnalogs()`, poller.h).
+	 * `GetDirectIfcPtr()`'s own `this+0x40` field (`mDirectTarget`) is NEVER
+	 * populated by anything in this reconstruction's own call graph (same
+	 * "field never populated, real code handles it gracefully" status as
+	 * `CPanel::mPoller`, panel.h), so this stub is never actually invoked by
+	 * any KAT this batch wrote -- present purely so `GetDirectIfcPtr()`'s own
+	 * real, faithfully-transcribed body links and matches ground truth's
+	 * call shape exactly.
+	 */
+	static void StopForMessage(void *this_, void *stateOut);
+
+	/* Companion of StopForMessage() above -- `CAlphaKeybCtrlTask::
+	 * ProcessEvent()`'s own real body (alpha_keyb_ctrl_task.cpp) calls this
+	 * directly (not through a vtable) whenever `GetDirectIfcPtr()` handed back
+	 * a non-null `CLevelManager*`, which -- for the same reason as
+	 * StopForMessage() above -- never happens in this reconstruction. Tier-B
+	 * stub, same status.
+	 */
+	static void ResumeAfterMessage(void *this_, void *state);
 };
 
 #endif /* LEVEL_MANAGER_ARRAY_H */

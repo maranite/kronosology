@@ -927,6 +927,34 @@ RECONSTRUCTED = {
     "08243ca0",  # CEditTask::GetOutLinkName() const
     "08243af0",  # CEditTask::~CEditTask() [D1]
     "08243b20",  # CEditTask::~CEditTask() [D0, deleting]
+
+    # CAlphaKeybCtrl/CAlphaKeybCtrlTask (Eva CAlphaKeybCtrl/CAlphaKeybCtrlTask batch,
+    # 2026-07-26). Closes the gap [[eva_mopup_sweep_2026-07-26_negative]] correctly
+    # deferred as "same scale as the CChunkServer/CTimerEngine sub-object batches"
+    # purely on CAlphaKeybCtrlTask::CAlphaKeybCtrlTask()'s own raw size (4289 bytes) --
+    # re-investigated and found mechanically table-driven (15x inlined "build one
+    # CKeyboardLayout" sequence, see keyboard_layout.h), not algorithmically deep. The
+    # genuinely deep, out-of-scope piece (COutLinkIfcBase/COutLinkIfc<T>/
+    # CMarshaller<T>) turned out to be much smaller and off to the side -- see
+    # alpha_keyb_ctrl_task.h.
+    "0823e750",  # CAlphaKeybCtrl::CAlphaKeybCtrl(char const*, char const*)
+    "0823e4a0",  # CAlphaKeybCtrl::~CAlphaKeybCtrl() [D1]
+    "0823e560",  # CAlphaKeybCtrl::~CAlphaKeybCtrl() [D0, deleting]
+    "0823e620",  # CAlphaKeybCtrl::Setup()
+    "0823e470",  # CAlphaKeybCtrl::Config()
+    "0823e480",  # CAlphaKeybCtrl::Start()
+    "0823e6c0",  # CAlphaKeybCtrlConstructor::Create(char const*, char const*, int)
+    "0823f2a0",  # CAlphaKeybCtrlTask::CAlphaKeybCtrlTask(CModule const&, char const*)
+    "0823e9d0",  # CAlphaKeybCtrlTask::~CAlphaKeybCtrlTask() [D1]
+    "0823ef00",  # CAlphaKeybCtrlTask::~CAlphaKeybCtrlTask() [D0, deleting]
+    "0823e930",  # CAlphaKeybCtrlTask::Exec()
+    "0823ef50",  # CAlphaKeybCtrlTask::Initialize()
+    "0823efc0",  # CAlphaKeybCtrlTask::SetCtrlCondition(unsigned char, bool)
+    "0823f0f0",  # CAlphaKeybCtrlTask::ProcessEvent(IAlphaKeybEvent::SKeyboardEvt&)
+    # COutLinkIfcBase::GetDirectIfcPtr() -- fully reconstructed for real as a free
+    # function (alpha_keyb_ctrl_task.cpp's own GetDirectIfcPtr()), since it only
+    # touches the mCodeIfc sub-object's own self-contained +0x40/+0x44 fields.
+    "0807b8e0",  # COutLinkIfcBase::GetDirectIfcPtr(COutLinkIfcBase::CLevelLocker&) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
