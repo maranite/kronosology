@@ -251,6 +251,7 @@ struct FakeMessage {
 	void SetFlags(unsigned char f) { raw[9] = f; }
 	void SetTaggedLen(unsigned short len) { *(unsigned short *)(raw + 0xa) = len; }
 	void SetWord10(unsigned int v) { *(unsigned int *)(raw + 0x10) = v; }
+	void SetPtr10(void *p) { *(void **)(raw + 0x10) = p; }
 	CMessage &AsMessage() { return *reinterpret_cast<CMessage *>(raw); }
 };
 
@@ -962,6 +963,152 @@ int main()
 			      "by nameA alone",
 			      *(unsigned int *)valBuf == 0u);
 		}
+
+		PollerTestHooks::SetClients(p, 0, 0);
+	}
+
+	printf("[16] MsgSetAnalogClient()/MsgSetButtonClient() (2026-07-26 CPoller "
+	       "closeout batch)\n");
+	{
+		CPoller p(owner, 0); /* mResource irrelevant -- these never touch it */
+
+		unsigned char blobA[0x18]; memset(blobA, 0, sizeof(blobA));
+		unsigned char blobB[0x18]; memset(blobB, 0, sizeof(blobB));
+		*(int *)(blobA + 0x14) = 1; /* connected */
+		*(int *)(blobB + 0x14) = 0; /* NOT connected */
+		void *elems[2] = { blobA, blobB };
+		PollerTestHooks::SetClients(p, elems, elems + 2);
+
+		struct Payload { unsigned int handle; unsigned int mode; unsigned int code; };
+
+		FakeMessage m;
+		m.SetFlags(0);
+		check("MsgSetAnalogClient() returns 4 when bit 0x2 clear",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 4);
+		check("MsgSetButtonClient() returns 4 when bit 0x2 clear",
+		      p.MsgSetButtonClient(m.AsMessage()) == 4);
+
+		m.SetFlags(0x2);
+		m.SetTaggedLen(7);
+		Payload pl; pl.handle = 0; pl.mode = 0; pl.code = 1;
+		m.SetPtr10(&pl);
+		check("MsgSetAnalogClient() returns 5 when length <= 7",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 5);
+		check("MsgSetButtonClient() returns 5 when length <= 7",
+		      p.MsgSetButtonClient(m.AsMessage()) == 5);
+
+		m.SetTaggedLen(8);
+		m.SetPtr10(0);
+		check("MsgSetAnalogClient() returns 5 for a NULL payload (shares the "
+		      "length gate's own code, not 6)",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 5);
+		check("MsgSetButtonClient() returns 5 for a NULL payload",
+		      p.MsgSetButtonClient(m.AsMessage()) == 5);
+
+		m.SetPtr10(&pl);
+		pl.handle = 1; /* blobB, not connected */
+		check("MsgSetAnalogClient() returns 9 for a not-connected handle",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 9);
+		check("MsgSetButtonClient() returns 9 for a not-connected handle",
+		      p.MsgSetButtonClient(m.AsMessage()) == 9);
+
+		pl.handle = 5; /* out of range, count == 2 */
+		check("MsgSetAnalogClient() returns 9 for an out-of-range handle",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 9);
+		check("MsgSetButtonClient() returns 9 for an out-of-range handle",
+		      p.MsgSetButtonClient(m.AsMessage()) == 9);
+
+		pl.handle = 0xffffffff; /* the "unbind" sentinel -- skips the range/
+		                         * connected check entirely, same real path
+		                         * mode 0/2 use below */
+		pl.mode = 5;   /* invalid mode */
+		check("MsgSetAnalogClient() returns 6 for an invalid mode",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 6);
+		check("MsgSetButtonClient() returns 6 for an invalid mode",
+		      p.MsgSetButtonClient(m.AsMessage()) == 6);
+
+		/* mode 0: real code-table scan, single slot write, handle == 0xFFFFFFFF
+		 * (the "unbind" sentinel) skips the range/connected check entirely.
+		 */
+		pl.handle = 0xffffffff;
+		pl.mode = 0;
+		pl.code = 29; /* s_analogCode[6] == 29 */
+		m.SetTaggedLen(0xb);
+		check("MsgSetAnalogClient() returns 5 when length <= 0xb (mode-0 re-gate)",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 5);
+		m.SetTaggedLen(0xc);
+		check("MsgSetAnalogClient() returns 0 for a matched code (handle=-1)",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 0);
+		check("mHandleTable1[6] == 0xFFFFFFFF (the real slot for code 29)",
+		      PollerTestHooks::HandleTable1(p)[6] == 0xffffffffu);
+
+		pl.handle = 0; /* blobA, connected */
+		pl.code = 999; /* no match anywhere in the real table */
+		check("MsgSetAnalogClient() with an unmatched code is a silent no-op "
+		      "(still returns 0)",
+		      p.MsgSetAnalogClient(m.AsMessage()) == 0);
+		check("mHandleTable1[6] left untouched by the unmatched-code call",
+		      PollerTestHooks::HandleTable1(p)[6] == 0xffffffffu);
+
+		/* mode 2: bulk-fill every mHandleTable1 slot. Real: the handle/connected
+		 * check still applies here (it happens BEFORE the mode is even read) --
+		 * use the "unbind" sentinel to legitimately skip it, same as the
+		 * mode-0 "unmatched code" case above.
+		 */
+		pl.mode = 2;
+		pl.handle = 0xffffffff;
+		m.SetTaggedLen(8); /* mode 2 never re-checks length past the >7 gate */
+		check("MsgSetAnalogClient(mode=2) returns 0", p.MsgSetAnalogClient(m.AsMessage()) == 0);
+		bool allSeven = true;
+		for (int i = 0; i < 0x40; i++)
+			if (PollerTestHooks::HandleTable1(p)[i] != 0xffffffffu) allSeven = false;
+		check("MsgSetAnalogClient(mode=2) filled all 64 mHandleTable1 slots "
+		      "with the handle (0xFFFFFFFF)",
+		      allSeven);
+
+		/* --- MsgSetButtonClient(): same shape, plus the extra mode-1 alt-code
+		 * scan (real table field, uniformly 0 -- only code 0 can ever match,
+		 * landing on slot 0).
+		 */
+		pl.handle = 0;
+		pl.mode = 0;
+		pl.code = 78; /* s_buttonPrimaryCode[78] == 78 (the real identity table) */
+		m.SetTaggedLen(0xc);
+		check("MsgSetButtonClient(mode=0) returns 0 for a matched primary code",
+		      p.MsgSetButtonClient(m.AsMessage()) == 0);
+		check("mHandleTable2[78] == 0 (the real slot for code 78)",
+		      PollerTestHooks::HandleTable2(p)[78] == 0u);
+
+		pl.mode = 1;
+		pl.code = 0; /* the real table's altCode field is uniformly 0 */
+		pl.handle = 0; /* blobA, connected -- a valid, in-range handle */
+		check("MsgSetButtonClient(mode=1, code=0) returns 0 (matches slot 0, "
+		      "the real all-zero altCode table)",
+		      p.MsgSetButtonClient(m.AsMessage()) == 0);
+		check("mHandleTable2[0] == 0 (mode-1 alt-code match landed on slot 0)",
+		      PollerTestHooks::HandleTable2(p)[0] == 0u);
+
+		pl.code = 1; /* no altCode entry is ever 1 -- silent no-op */
+		pl.handle = 0xffffffff;
+		check("MsgSetButtonClient(mode=1, code=1) is a silent no-op (no real "
+		      "altCode entry is ever nonzero)",
+		      p.MsgSetButtonClient(m.AsMessage()) == 0);
+		check("mHandleTable2[0] left untouched (still 0, not the unbind handle)",
+		      PollerTestHooks::HandleTable2(p)[0] == 0u);
+
+		/* mode 2: same "unbind sentinel skips the range/connected check"
+		 * shape as MsgSetAnalogClient()'s own mode-2 test above.
+		 */
+		pl.mode = 2;
+		pl.handle = 0xffffffff;
+		m.SetTaggedLen(8);
+		check("MsgSetButtonClient(mode=2) returns 0", p.MsgSetButtonClient(m.AsMessage()) == 0);
+		bool allFortyTwo = true;
+		for (int i = 0; i < 0x80; i++)
+			if (PollerTestHooks::HandleTable2(p)[i] != 0xffffffffu) allFortyTwo = false;
+		check("MsgSetButtonClient(mode=2) filled all 128 mHandleTable2 slots "
+		      "with the handle (0xFFFFFFFF)",
+		      allFortyTwo);
 
 		PollerTestHooks::SetClients(p, 0, 0);
 	}

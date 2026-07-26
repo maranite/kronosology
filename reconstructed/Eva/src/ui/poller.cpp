@@ -47,6 +47,17 @@
  * RegisterClient()'s own Phase-1 scan); both Msg*() wrappers from Ghidra's own
  * decompile, modeled as real calls to FindRegisteredClient() instead of ground
  * truth's own literal inlined duplicate scan (see poller.h's own header comment).
+ *
+ * `MsgSetAnalogClient()`/`MsgSetButtonClient()` (2026-07-26 CPoller closeout batch)
+ * transcribed from .text+0x089f2190/0x089f1a10 (1085/1505 bytes) via direct
+ * `objdump -dr -M intel` register tracing (Ghidra's own decompile of both timed out
+ * along with the rest of this session's Ghidra attempts; disasm alone was
+ * sufficient). This batch also directly confirmed, via `objdump -s -j .rodata`
+ * byte dumps of each function's own real lookup table, which of `mHandleTable1`/
+ * `mHandleTable2` is the ANALOG vs. BUTTON client-handle table (poller.h's own
+ * field comments previously guessed both the wrong way around) -- see the two new
+ * static tables (`s_analogCode[]`, `s_buttonPrimaryCode[]`/`s_buttonAltCode[]`)
+ * immediately below, copied verbatim from ground truth's own `.rodata`.
  */
 
 #include "poller.h"
@@ -636,6 +647,173 @@ int CPoller::MsgSetKeyboardClient(CMessage &msg)
 		return 9;
 
 	mField39c = handle;
+	return 0;
+}
+
+/* --- MsgSetAnalogClient()/MsgSetButtonClient() (2026-07-26 CPoller closeout batch)
+ * -- see poller.h's own per-method header comments for the full derivation.
+ * Transcribed via direct `objdump -dr -M intel` register tracing (both functions'
+ * SSE `movdqa` bulk-fill loops read more clearly straight from disasm, same
+ * rationale as the ctor). Both real lookup tables below are copied VERBATIM from a
+ * direct `objdump -s -j .rodata` byte dump (not assumed/guessed) -- see each
+ * method's own header comment for what was confirmed.
+ */
+
+/* Real .rodata table @ 0x08f7c060, 64 entries x 8 bytes: `{int32_t code; void
+ * *namePtr;}`. Only `code` is read by MsgSetAnalogClient() -- `namePtr` (always
+ * either NULL or the same single shared address, 0x08f7c260, for every populated
+ * entry) is dead data for this function and not modeled. `code == 0` genuinely
+ * does NOT match slot 0 (whose own real code is 1) -- see header comment.
+ */
+static const int s_analogCode[0x40] = {
+	 1,  3,  0,  0,  0,  0, 29,  5,  2,  4,  0,  0,  0,  0,  7,  6,
+	 8, 16,  0,  0,  0,  0, 28, 14,  9, 17,  0,  0,  0,  0, 27, 15,
+	10, 18,  0,  0,  0,  0, 26, 22, 11, 19,  0,  0,  0,  0,  0, 23,
+	12, 20,  0,  0,  0,  0,  0, 25, 13, 21,  0,  0,  0,  0,  0, 24,
+};
+
+/* Real .rodata table @ 0x08f7b860, 128 entries x 16 bytes: `{int32_t code;
+ * int32_t altCode; int32_t flag; void *namePtr;}`. Only `code` (mode 0) and
+ * `altCode` (mode 1) are read by MsgSetButtonClient() -- `flag` (always 1) and
+ * `namePtr` (always either NULL or the same single shared address for every
+ * populated entry, same convention as the analog table above) are dead data for
+ * this function and not modeled. Verbatim byte dump confirms `code[i] == i` for
+ * i in [0,78] (a real, literal identity mapping in this exact build) and 0 for
+ * i in [79,127] (unused padding slots); `altCode[i] == 0` for EVERY entry, i in
+ * [0,127] -- see header comment for why this is still modeled as a real loop
+ * rather than collapsed to a special case.
+ */
+static const int s_buttonPrimaryCode[0x80] = {
+	 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+	16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+	32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+	48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+	64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78,  0,
+	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+	 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+};
+
+static const int s_buttonAltCode[0x80] = { 0 };
+
+int CPoller::MsgSetAnalogClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+	if (*reinterpret_cast<const short *>(raw + 0xa) <= 7)
+		return 5;
+
+	unsigned int *payload = *reinterpret_cast<unsigned int *const *>(raw + 0x10);
+	if (payload == 0)
+		return 5; /* real: shares the length gate's own return code, ground
+		           * truth never re-sets the return register between the two
+		           * checks -- see header comment. */
+
+	unsigned int handle = payload[0];
+
+	if (handle != 0xffffffff) {
+		unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+		unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+		unsigned int count = (unsigned int)(end - begin);
+		if (handle >= count)
+			return 9;
+		unsigned char *client = begin[handle];
+		if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+			return 9;
+	}
+
+	int mode = (int)payload[1];
+
+	if (mode == 2) {
+		for (unsigned int i = 0; i < 0x40; i++)
+			mHandleTable1[i] = handle;
+		return 0;
+	}
+	if (mode != 0)
+		return 6;
+
+	if (*reinterpret_cast<const short *>(raw + 0xa) <= 0xb)
+		return 5;
+
+	int code = (int)payload[2];
+
+	for (unsigned int i = 0; i < 0x40; i++) {
+		if (s_analogCode[i] == code) {
+			mHandleTable1[i] = handle;
+			break;
+		}
+	}
+	/* Real: an unmatched code is a silent no-op (still returns 0) -- ground
+	 * truth's own loop-fallthrough behavior, not an error path.
+	 */
+	return 0;
+}
+
+int CPoller::MsgSetButtonClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+	if (*reinterpret_cast<const short *>(raw + 0xa) <= 7)
+		return 5;
+
+	unsigned int *payload = *reinterpret_cast<unsigned int *const *>(raw + 0x10);
+	if (payload == 0)
+		return 5; /* same NULL-shares-length-gate-return-code quirk as
+		           * MsgSetAnalogClient() above. */
+
+	unsigned int handle = payload[0];
+
+	if (handle != 0xffffffff) {
+		unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+		unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+		unsigned int count = (unsigned int)(end - begin);
+		if (handle >= count)
+			return 9;
+		unsigned char *client = begin[handle];
+		if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+			return 9;
+	}
+
+	int mode = (int)payload[1];
+
+	if (mode == 2) {
+		for (unsigned int i = 0; i < 0x80; i++)
+			mHandleTable2[i] = handle;
+		return 0;
+	}
+	if (mode != 0 && mode != 1)
+		return 6;
+
+	/* Real: modes 0 and 1 share the identical ">0xb" length gate, independently
+	 * coded at each real call site (same numeric threshold both places).
+	 */
+	if (*reinterpret_cast<const short *>(raw + 0xa) <= 0xb)
+		return 5;
+
+	int code = (int)payload[2];
+
+	if (mode == 1) {
+		for (unsigned int i = 0; i < 0x80; i++) {
+			if (s_buttonAltCode[i] == code) {
+				mHandleTable2[i] = handle;
+				break;
+			}
+		}
+	} else {
+		for (unsigned int i = 0; i < 0x80; i++) {
+			if (s_buttonPrimaryCode[i] == code) {
+				mHandleTable2[i] = handle;
+				break;
+			}
+		}
+	}
+	/* Real: an unmatched code is a silent no-op (still returns 0), same
+	 * fallthrough behavior as MsgSetAnalogClient() above.
+	 */
 	return 0;
 }
 

@@ -62,15 +62,18 @@
  *                         `0xFFFFFFFF`-filled by the ctor (real: an SSE `movdqa`-based
  *                         bulk-fill loop once past the initial scalar alignment
  *                         prologue; collapses to a plain loop here, identical result).
- *                         Real per-slot meaning not decoded (a 64-entry generic handle
- *                         table -- button/keyboard/touch client handles by the size,
- *                         but not confirmed against any of the still-deferred
- *                         `MsgSet*Client`/`RegisterClient` bodies that would populate
- *                         it).
+ *                         CONFIRMED (2026-07-26, CPoller closeout batch, correcting
+ *                         this comment's own prior guess): the 64-entry ANALOG
+ *                         client-handle table -- `MsgSetAnalogClient()`'s (below) real,
+ *                         sole writer, confirmed via direct disassembly, not the
+ *                         "button/keyboard/touch by size" guess this comment
+ *                         previously carried.
  *   +0x190 mHandleTable2 uint32_t[0x80] (512 bytes) -- same fill idiom, second larger
- *                         table (128 entries -- plausibly analog-input client handles
- *                         by relative size, not confirmed for the same reason as
- *                         above).
+ *                         table (128 entries). CONFIRMED (2026-07-26, same batch):
+ *                         the 128-entry BUTTON client-handle table --
+ *                         `MsgSetButtonClient()`'s (below) real, sole writer, NOT the
+ *                         "analog by relative size" guess this comment previously
+ *                         carried.
  *   +0x390 mFlag390      unsigned char, ctor clears to 0. Real meaning not decoded.
  *   +0x394 mField394,
  *   +0x398 mField398,
@@ -562,6 +565,81 @@ public:
 	int MsgSetEncoderClient(CMessage &msg);
 	int MsgSetTouchPanelClient(CMessage &msg);
 	int MsgSetKeyboardClient(CMessage &msg);
+
+	/* .text+0x089f2190, 1085 bytes. Tier A (2026-07-26 CPoller closeout batch).
+	 * CORRECTS this header's own prior "not confirmed against MsgSet*Client"
+	 * guess for `mHandleTable1` (+0x90): direct `objdump -dr -M intel`
+	 * confirms THIS handler is `mHandleTable1`'s real, sole writer, i.e.
+	 * `mHandleTable1` is the 64-entry ANALOG client-handle table (see
+	 * `mHandleTable2`'s own sibling correction on `MsgSetButtonClient()` below).
+	 * Same +0x9 bit-0x2 gate and length `> 7` gate as `MsgSetLed()`/
+	 * `MsgSetButtonClient()` (return 4/5). `+0x10` is a real payload POINTER to
+	 * a 3-dword struct: `payload[0]` (handle to bind), `payload[1]` (mode),
+	 * `payload[2]` (analog channel code, mode-0 only). A NULL payload pointer
+	 * shares the SAME return code (5) as the length gate -- ground truth never
+	 * re-sets the return register between the two checks, transcribed as
+	 * found, not homogenized with `MsgUnregisterClient()`'s own distinct
+	 * "return 6 for a bad payload" convention.
+	 *
+	 * If `payload[0]` (handle) is NOT `0xFFFFFFFF`, it must be a valid,
+	 * CONNECTED `mClients` index (same range/connected checks as
+	 * `MsgSetEncoderClient()` et al. above) or this returns 9 -- checked
+	 * BEFORE `payload[1]`'s mode is even read, confirmed by direct
+	 * disassembly ordering (not assumed from the other `MsgSet*Client`
+	 * siblings' own shape). `0xFFFFFFFF` itself skips this check entirely
+	 * (an explicit "unbind" sentinel that always succeeds).
+	 *
+	 * `payload[1]` (mode) dispatches 3 ways: mode 2 bulk-fills EVERY one of
+	 * `mHandleTable1`'s 64 entries with the handle (ground truth is a
+	 * `movdqa`-based SSE fill loop, collapsed to a plain loop here, identical
+	 * result) and returns 0 -- `payload[2]` is never read on this path. Any
+	 * mode other than 0 or 2 returns 6. Mode 0 re-gates on length `> 0xb`
+	 * (return 5 -- a SEPARATE, independently-coded check at this real call
+	 * site, same numeric threshold as the gate above it), then reads
+	 * `payload[2]` as an analog channel CODE and linearly scans the real,
+	 * ground-truth `.rodata` lookup table @ `.rodata+0x08f7c060` (64 entries,
+	 * 8-byte stride -- byte-dumped directly via `objdump -s`, NOT assumed;
+	 * see `s_analogCode[]` in poller.cpp for the verbatim 64 values) for a
+	 * matching code; the FIRST matching table slot's index becomes
+	 * `mHandleTable1`'s written index. If no slot matches, this is a SILENT
+	 * no-op -- ground truth's own loop-fallthrough returns 0 with no write,
+	 * not an error (same shape `MsgSetButtonClient()`'s own code-scan below
+	 * uses). Real, preserved quirk: code 0 does NOT match slot 0 in this
+	 * table (slot 0's real code is 1) -- it silently binds to whichever
+	 * earlier all-zero PADDING slot the scan reaches first instead (slot 2),
+	 * an asymmetry with `MsgSetButtonClient()`'s own code table (whose slot 0
+	 * genuinely IS code 0) -- transcribed as found, not corrected.
+	 */
+	int MsgSetAnalogClient(CMessage &msg);
+
+	/* .text+0x089f1a10, 1505 bytes. Tier A (2026-07-26 CPoller closeout batch).
+	 * CORRECTS this header's own prior "not confirmed" guess for
+	 * `mHandleTable2` (+0x190): confirmed THIS handler's real, sole writer --
+	 * `mHandleTable2` is the 128-entry BUTTON client-handle table. Same real
+	 * shape as `MsgSetAnalogClient()` above (+0x9 bit-0x2 gate, length `> 7`
+	 * gate, NULL-payload-shares-length's-return-code-5 quirk, handle
+	 * range/connected pre-check before the mode is read, mode-2 bulk-fill of
+	 * the WHOLE table via a collapsed SSE loop, silent-no-op-on-unmatched-code
+	 * scan tail) -- differs only in: table size (128, not 64), field offset
+	 * (`mHandleTable2` @ +0x190, not `mHandleTable1` @ +0x90), and a genuinely
+	 * EXTRA third mode. `payload[1]` dispatches 4 ways here: mode 1 scans a
+	 * DIFFERENT field of the same 128-entry, 16-byte-stride button lookup
+	 * table @ `.rodata+0x08f7b860` (byte-dumped directly; see
+	 * `s_buttonAltCode[]` in poller.cpp) -- its own real "alt code" field,
+	 * confirmed via direct disassembly to be uniformly 0 across all 128 real
+	 * table entries in this exact ground-truth build, i.e. mode 1 only ever
+	 * matches when `payload[2] == 0`, landing on slot 0 (transcribed as a
+	 * real, genuine loop over the verbatim all-zero field, not collapsed to a
+	 * special case, since a differently-built binary's table need not stay
+	 * all-zero). Mode 2 bulk-fills all 128 slots (same shape as
+	 * `MsgSetAnalogClient()`'s own mode 2). Mode 0 (the default, same `> 0xb`
+	 * re-gate) scans the table's own PRIMARY code field (`s_buttonPrimaryCode[]`,
+	 * confirmed via `objdump -s` to be the literal sequential values 0..78 for
+	 * slots 0..78, then 0 for the remaining padding slots 79..127 -- a real,
+	 * verbatim identity mapping in this exact build, not an assumption). Any
+	 * mode other than 0, 1, or 2 returns 6.
+	 */
+	int MsgSetButtonClient(CMessage &msg);
 
 	/* .text+0x089f31c0, 2603 bytes. Tier A (2026-07-26 RegisterClient batch -- see
 	 * the top-of-file header comment for the full derivation, including the two

@@ -1001,6 +1001,22 @@ RECONSTRUCTED = {
     "08079b50",  # CLocaleManager::GetKeyboardLayout(EKeyboardLayout) const
     "08079ba0",  # CKeyboardLayoutManager::AddLayout(CKeyboardLayout const*)
     "08079e30",  # CKeyboardLayoutManager::GetLayout(EKeyboardLayout) const
+
+    # --- 2026-07-26 (CPoller closeout batch): the last 2 genuinely-deferred small
+    # handlers named by the FindRegisteredClient batch's own closing note. Direct
+    # `objdump -dr -M intel` register tracing confirmed which of mHandleTable1/
+    # mHandleTable2 is the ANALOG vs. BUTTON table (poller.h's own field comments
+    # previously guessed both the wrong way around -- corrected this batch), plus
+    # both functions' own real .rodata lookup tables (verbatim byte dump, see
+    # poller.cpp's s_analogCode[]/s_buttonPrimaryCode[]/s_buttonAltCode[]). CPoller's
+    # own remaining surface after this: both Exec() overloads only (see poller.h's
+    # own header comment for why those stay out of scope this batch -- Exec() is a
+    # real 12-way jump-table hardware-event-drain loop, all-real callees but
+    # RegisterClient()-scale depth; Exec(CMessage&) is a MUCH larger, ~6747-byte
+    # name-string command dispatcher with 94 strcmp() call sites, genuinely a
+    # separate, dedicated-batch-scale reconstruction).
+    "089f2190",  # CPoller::MsgSetAnalogClient(CMessage&)
+    "089f1a10",  # CPoller::MsgSetButtonClient(CMessage&)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
