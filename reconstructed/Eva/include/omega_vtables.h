@@ -600,6 +600,26 @@ extern void *PTR__CChunkServer_08e859a8[16];
 extern void *PTR__CChunkServer_08e859f0[3];
 extern void *PTR__CChunkServerTask_08f25b88[16];
 extern void *PTR__CChunkServerTask_08f25bd0[3];
+
+/* CPoller / CPoller::CIfcClient -- see poller.h's own header comment for the
+ * full byte-exact derivation (direct .rodata dword reads at 0x8f7c360/
+ * 0x8f7c3a8/0x8f7c3c0, same technique as the CChunkServer entry above).
+ * CPoller's own primary group is the SAME 5-slot CTask-family shape
+ * (2 dtor + Exec()/Exec(CMessage&)/ExecMsg(CMessage&)) every CTask-derived
+ * class in this project shares; its 3-slot secondary group ("mIfcThunk",
+ * this+8) is likewise the same CTask-family shape. CIfcClient's own 6-slot
+ * group (2 dtor + the 4 COutLinkMono virtuals it inherits unchanged --
+ * CheckDestinationFamily/OnConnect/OnCreateLink/OnDisconnect, out_link.h)
+ * matches PTR__COutLinkMono_08e82048's own established 6-slot size exactly
+ * (same shape, since CIfcClient only overrides the 2 dtor slots). TVector<
+ * CPoller::CIfcClient*,1>'s own 2-slot group (D1/D0 only) matches
+ * PTR__TVector_08e82188's own established 2-slot size for the same reason
+ * (task.h). All EvaVTableStub-backed, install-only.
+ */
+extern void *PTR__CPoller_08f7c368[5];
+extern void *PTR__CPoller_08f7c384[3];
+extern void *PTR__TVector_08f7c3b0[2];
+extern void *PTR__CIfcClient_08f7c3c8[6];
 }
 
 #endif /* OMEGA_VTABLES_H */

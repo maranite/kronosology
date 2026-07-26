@@ -837,6 +837,26 @@ RECONSTRUCTED = {
     # promotion above). See chunk_server.h header comment for the full
     # mAccessMode-keyed tail-call-through-own-vtable derivation.
     "080cbfd0",  # CChunkServer::Load(CChunk*, unsigned long, unsigned char*, unsigned char, unsigned char*, unsigned long)
+
+    # --- 2026-07-26 (later same day): CPoller reassessed with fresh eyes now
+    # that CTask::SetMask() is real -- the ctor is fully tractable, no genuine
+    # Peg-toolkit blocker (that label was always wrong, see poller.h header
+    # comment). 4 of 29 methods promoted this batch (ctor/dtor/3 const
+    # accessors) plus the CIfcClient nested class (ctor/PutAnalogEvt/
+    # FlushAnalogEvts) and its own TVector<CIfcClient*,1>::MakeCapacity(). The
+    # remaining ~20 Msg*/RegisterClient/InitAnalogs/InitButtons/Exec() methods
+    # stay deferred for real reasons (size, and a genuinely separate CMessage
+    # prerequisite this project hasn't reconstructed at all yet) -- see
+    # poller.h's own header comment for the full list and reasoning.
+    "089ef740",  # CPoller::CPoller(CModule const&, char const*)
+    "089ef490",  # CPoller::~CPoller() [D1]
+    "089f3000",  # CPoller::FindUnconnected() const
+    "089f3150",  # CPoller::IsValidHandle(unsigned int) const
+    "089f3180",  # CPoller::IsRegisteredHandle(unsigned int) const
+    "089ef620",  # CPoller::CIfcClient::CIfcClient(CTask const&, char const*, int)
+    "089ef670",  # CPoller::CIfcClient::PutAnalogEvt(CPanelOut::SAnalogEvt const&)
+    "089ef6f0",  # CPoller::CIfcClient::FlushAnalogEvts()
+    "089f7280",  # TVector<CPoller::CIfcClient*,1>::MakeCapacity(unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -860,12 +880,31 @@ RECONSTRUCTED = {
 # OTHER element types, e.g. CRTRouterApi::SConnection/CPool::SPool at the same
 # 539-byte size, are each their own separate ground-truth symbol and stay
 # unreconstructed until something actually needs them).
-# CPoller (29 methods, .text+0x089ef740 ctor) surveyed but NOT pursued --
-# genuinely deeper (~1900-byte ctor) than any Tier-A candidate so far, correctly
-# out of scope (its own CTask::SetMask(EMask) dependency is no longer a blocker as
-# of the Stage 6 SetMask/~CTask batch above -- SetMask() itself is now reconstructed,
-# but CPoller's ctor is still deep for other reasons: 2 large fixed-size handle-table
-# fills plus an Api vtable slot +0xac lookup, task.h/limiter_man.h).
+# CPoller's ctor (.text+0x089ef740) is NOW reconstructed (2026-07-26 reassessment,
+# see RECONSTRUCTED above / poller.h) -- this note is stale/superseded, kept only for
+# its own historical context. Fresh `objdump -dr` verification found the ctor was
+# ALWAYS fully tractable once SetMask() was real: the 2 fixed-size handle-table fills
+# are plain Duff's-device-unrolled 0xFFFFFFFF loops (mechanical, same idiom as every
+# other bulk-fill in this project) and the Api+0xac lookup is the SAME "call shape
+# only, real meaning undecoded" treatment already given to Api+0xa0 (system_api.h) --
+# not a new or deeper kind of blocker. The class was never "genuine Peg-toolkit
+# depth" either (an even earlier batch summary's label, corrected in task.h's own
+# header comment on 2026-07-25 already, then re-verified from scratch this batch) --
+# CPoller is a plain CTask-derived class, not Peg/UI-editor-toolkit-adjacent at all.
+# NEWLY FOUND this batch: CPoller's own real, definitive ground-truth caller is
+# `CPanel::Setup()` (.text+0x089ee6e0) -- `CPanel` itself is a real, not-yet-
+# reconstructed per-module class mains.cpp's own `PTR__CPanelConstructor_08f7c2f0`
+# currently routes through the shared `ModuleFactoryCreateStub` (returns NULL) for
+# exactly the reason `CEditor` once did before `CEditorConstructorCreate()` was
+# added -- reconstructing `CPanel` would be the natural next step to make CPoller
+# live on this reconstruction's own wired boot path. 9 of CPoller's 29 methods (ctor,
+# dtor, 3 const accessors, the CIfcClient nested class's 3 methods, and its own
+# TVector<CIfcClient*,1>::MakeCapacity()) are now Tier A; the remaining ~20 (every
+# Msg*(CMessage&) handler, RegisterClient/InitAnalogs/InitButtons, both Exec()
+# overrides) stay deferred for real reasons -- size, and a genuinely separate
+# `CMessage` prerequisite this project hasn't reconstructed at all -- not toolkit
+# depth. See poller.h's own header comment for the full derivation and the complete
+# deferred-method list.
 # CEditor::CPanelIfcTask's own ctor (.text+0x0824b7e0) is now FULLY reconstructed
 # (Stage 6 dedicated CPanelIfcTask batch, 2026-07-25, see RECONSTRUCTED above) --
 # this note is stale/superseded, kept only for its own historical context (the

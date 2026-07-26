@@ -253,19 +253,19 @@
  * meaning not decoded" note is a single, consistent call site shape used from at least
  * two different real callers now.
  *
- * **CPoller surveyed, NOT pursued this batch** (batch 6 flagged it as "genuinely
- * tempting... directly in the CModule/CTask family", deliberately deferred for
- * territory reasons -- now checked with this territory owned): its own ctor
+ * **CPoller: reassessed 2026-07-26, now real -- see `include/poller.h`.** Its own ctor
  * (`CPoller::CPoller(CModule const&, char const*)`, .text+0x089ef740, 1933 bytes) DOES
  * call `CTask::CTask()` too (a second real, confirmed caller, alongside
- * CPanelIfcTask's), but the ctor body itself is ~1900 bytes of straight-line
- * Duff's-device-unrolled 0xffffffff-fill over 2 large (0x40+0x80 dword) fixed handle
- * tables, plus a real dependency on a NOT-yet-reconstructed `CTask::SetMask(int)`
- * method and Api vtable slot +0xac (a named-resource lookup). Deeper than any single
- * Tier-A candidate reconstructed this batch and pulling in a brand-new CTask method --
- * correctly deferred, same "several-hundred-plus-bytes, pulls in further subsystems"
- * Tier-B-worthy shape as CSysApiInstance::RegisterApi/CModuleManager::AddModule's own
- * precedent, not a hidden dead-code claim.
+ * CPanelIfcTask's). The ctor body is ~1900 bytes of straight-line Duff's-device-
+ * unrolled 0xffffffff-fill over 2 large (0x40+0x80 dword) fixed handle tables, plus a
+ * call through Api vtable slot +0xac (a named-resource lookup) -- both fully
+ * mechanical once `CTask::SetMask(int)` (this same batch, above) was real; a fresh
+ * `objdump -dr` re-check found NO further blocker. CPoller's own ctor/dtor/3 const
+ * accessors, plus its nested `CIfcClient` class and that class's own
+ * `TVector<CIfcClient*,1>::MakeCapacity()`, are now Tier A -- see poller.h for the
+ * full derivation, the real `CPanel::Setup()` reachability finding, and the list of
+ * CPoller's remaining ~20 deferred methods (size/CMessage-prerequisite reasons only,
+ * not toolkit depth).
  *
  * `CEditor::CPanelIfcTask`'s own ctor remains correctly out of scope too (see
  * panel_ifc_task.h's updated note) -- its post-CTask::CTask() tail does real multiple-

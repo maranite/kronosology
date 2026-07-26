@@ -2599,3 +2599,100 @@ reconstructed). Regenerated: 378 → 382 of 37,795 (HEAD was already at 378 via
 the concurrent verification pass's own commits, ahead of this file's own
 stale "363" summary-line count from earlier today — see the Stage 6 table row
 above, now corrected to point at the regenerated number as authoritative).
+
+## Stage 6: `CPoller` reassessment — 2026-07-26
+
+Dispatched specifically to re-check `CPoller` (line 1544 above, and the "genuine
+Peg depth" label at line 2234) now that its own previously-flagged blocker,
+`CTask::SetMask(int)`, is real (Stage 6 SetMask/~CTask batch). Both of those
+earlier notes are now confirmed STALE, not just superseded by more work — the
+"genuine Peg-toolkit depth" label was never accurate (`task.h`'s own header
+comment already corrected this on 2026-07-25, before this batch even started;
+this batch independently re-verified from a fresh `objdump -dr -M intel` read of
+the real ctor, not by trusting that prior correction). `CPoller` is a plain
+`CTask`-derived class, same family as `CEditor::CPanelIfcTask` — nothing in it
+touches the Peg UI toolkit. The real reason it stayed deferred was narrow and
+concrete: the ctor's own `CTask::SetMask(int)` dependency didn't exist yet, and
+an Api vtable slot +0xac call was unverified. Both are now resolved: SetMask()
+is real, and +0xac resolves to the exact same "call shape only, real meaning
+undecoded" treatment this project already gives Api+0xa0 (`system_api.h`).
+
+**Newly found this batch**: `CPoller`'s own real, definitive ground-truth
+constructor call site is `CPanel::Setup()` (`.text+0x089ee6e0`) —
+`malloc(0x420)` (confirming `sizeof(CPoller) == 0x420` exactly), `CPoller::
+CPoller(raw, this, CParameterString::GetParamStr(...))`, then `CModule::
+Add(CTask*)` (already real) — i.e. `CPoller` sits on the SAME already-real
+`CModuleManager::Setup()` → per-module vtable+8 → `CModule::Add()` spine
+`CEditor::Setup()` already uses. `CPanel` itself is a real, NOT-yet-
+reconstructed per-module class (`CPanel::CPanel(char const*, char const*)`,
+`::Setup()`, `::Start()`, `::Config()`, 2 dtors — all real `nm -C` symbols) —
+`mains.cpp`'s own `PTR__CPanelConstructor_08f7c2f0` currently routes its
+creation through the shared `ModuleFactoryCreateStub` (returns NULL) for
+exactly the same reason `CEditor` once did before `CEditorConstructorCreate()`
+was added. Reconstructing `CPanel` (deliberately OUT of this batch's own
+`CPoller`-only scope) would be the natural next step to make `CPoller` live on
+this reconstruction's own wired boot path — flagged for a future batch.
+
+**What landed**: `CPoller::CPoller(CModule const&, char const*)` (1933 bytes),
+`~CPoller()` (D1, 107 bytes), `FindUnconnected()`/`IsValidHandle()`/
+`IsRegisteredHandle()` (336/36/50 bytes), the nested `CPoller::CIfcClient`
+class in full (ctor/`PutAnalogEvt()`/`FlushAnalogEvts()` — a small per-client
+analog-event ring buffer built on the already-real `COutLinkMono::OutMono()`),
+and `TVector<CPoller::CIfcClient*,1>::MakeCapacity()` — a SEPARATE real
+ground-truth symbol from `task.cpp`'s own `TVector<CTask::SRegisteredIfc,1>`
+instantiation, confirmed by direct disassembly to use a DIFFERENT growth
+constant (min capacity 32 elements, not 10) — worth remembering generally:
+each `TVector<T,1>` instantiation in this codebase is its own real symbol with
+its own real constants, never assume a sibling's policy carries over without
+checking. New `include/poller.h`/`src/ui/poller.cpp` — see that header's own
+comment for the full byte-exact ctor/dtor/vtable derivation. 9 of `CPoller`'s
+29 methods are now Tier A; the remaining ~20 (every `Msg*(CMessage&)` handler,
+`RegisterClient`/`InitAnalogs`/`InitButtons`, both `Exec()` overrides) stay
+correctly deferred — real reasons this time (raw size, and a genuinely
+separate `CMessage` prerequisite this project hasn't reconstructed at all
+yet), not toolkit depth, precisely listed in `poller.h`.
+
+**Vtable note**: `CPoller`'s own primary (`0x08f7c368`, 5 slots: 2 dtor +
+`Exec()`/`Exec(CMessage&)`/`ExecMsg(CMessage&)`, the last inherited verbatim
+from `CTask`'s own vtable — confirmed byte-identical via `nm`, i.e. NOT
+overridden) and secondary (`0x08f7c384`, 3 slots: 2 dtor thunks + an
+`ExecMsg` thunk, also inherited verbatim) vtables, plus `CIfcClient`'s own
+(`0x08f7c3c8`, 6 slots, matching `PTR__COutLinkMono_08e82048`'s own
+established size exactly since only the 2 dtor slots are overridden) and its
+embedded `TVector<CIfcClient*,1>`'s own (`0x08f7c3b0`, 2 slots, matching
+`PTR__TVector_08e82188`'s own established size) — all confirmed by direct
+`.rodata` dword reads, all EvaVTableStub-backed install-only arrays, same
+"size the array to the real install-address-relative vfunc count" convention
+the same-day `CChunkServer`/`CEditor::CChunkServerTask` batch established.
+
+### Verification
+
+New `verify/test_poller.cpp` (41 checks): all 4 real ctor gate combinations
+(name NULL / lookup-fails / wrong-type / connect-fails / all-succeed), the
+real `SetMask(1)` fallback + `mResource` clear on every failure path, the
+dtor's real `disconnect(resource, 0)` call (fires iff `mResource != 0`),
+`FindUnconnected()`/`IsValidHandle()`/`IsRegisteredHandle()` against a
+friend-poked `mClients` array, `CIfcClient`'s real 8-slot ring fill +
+flush-and-reset-on-overflow behavior (relying on `OutMono()`'s own real
+empty-`mLinks` early return, same safety `out_link.h`'s own KAT already
+established — no fake `CLink` needed), and `TVector_CIfcClientPtr_
+MakeCapacity()`'s real min-32-then-doubling growth. `make -k objs`/`make -k
+verify`: 0 regressions across all 29 verify binaries (including this one) —
+the previously-flagged intermittent `test_client_comm_server` 6-FAIL did not
+reproduce in this run (consistent with it being a concurrent-build artifact,
+not a real regression, per its own prior write-up). `tools/build_lenny.sh`
+(real on-image ABI): `LINK OK`. No live `kronos_vm` boot test this batch —
+`CPoller` still isn't constructed by this reconstruction's own wired boot
+path (its real caller, `CPanel::Setup()`, needs `CPanel` itself, deliberately
+out of scope here), so a boot test would show zero new signal, same reasoning
+several prior batches in this family have already used.
+
+### Manifest delta
+
+`gen_manifest.py`: added 9 functions (`CPoller::CPoller`, `CPoller::~CPoller`
+[D1], `CPoller::FindUnconnected`, `CPoller::IsValidHandle`, `CPoller::
+IsRegisteredHandle`, `CPoller::CIfcClient::CIfcClient`, `CPoller::CIfcClient::
+PutAnalogEvt`, `CPoller::CIfcClient::FlushAnalogEvts`, `TVector<CPoller::
+CIfcClient*,1>::MakeCapacity`) plus corrections to 2 stale comments (the
+`CPoller` deferral note above the `RECONSTRUCTED` set, and `task.h`'s own
+`CPoller`-surveyed paragraph). Regenerated: 430 → 439 of 37,795.

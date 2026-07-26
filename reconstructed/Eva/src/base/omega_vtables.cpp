@@ -429,4 +429,22 @@ void *PTR__CChunkServerTask_08f25b88[16] = {
 void *PTR__CChunkServerTask_08f25bd0[3] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+
+/* CPoller / CPoller::CIfcClient -- see omega_vtables.h's own header comment
+ * for the full byte-exact derivation.
+ */
+void *PTR__CPoller_08f7c368[5] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CPoller_08f7c384[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__TVector_08f7c3b0[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CIfcClient_08f7c3c8[6] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 }
