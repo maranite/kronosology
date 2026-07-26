@@ -329,9 +329,9 @@
  *     gates nothing -- the write happens unconditionally regardless of `type`'s
  *     actual value, confirmed by reading every branch target.
  *
- * The remaining 12 methods are still Tier B this pass: real signatures (confirmed via
- * `nm -C`/symbols.csv), empty bodies -- see the SCOPE section above for the specific,
- * examined reason for each (not a blanket "didn't get to it").
+ * (At the time of THIS specific pass, 12 methods were still Tier B; later follow-up
+ * passes the same day closed all but one -- see line ~141 above for the current,
+ * final status: only `OnReceiveMessage(const CMessage&)` remains Tier B.)
  *
  * REAL LAYOUT (confirmed from CClientCommServer@0816ecc0.c, ComputeCRCByte@0816f610.c):
  *   +0x00  vtbl         &PTR_OnReceiveMessage_08e898c8 (this class's real, slot-0-named

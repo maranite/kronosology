@@ -594,10 +594,10 @@ void MMainESDisk(CSystemApi *api)
  *      CMessagePort/CSeqTimer/CSysEx-module/CChunkMan/CDumpManMod, no real derived
  *      ctor ever called, same manual-vtable-swap idiom as everywhere else in this
  *      project -- or (b) calls a real, distinct derived-class constructor
- *      (CFileMan::CFileMan/CResMan::CResMan) that itself is hundreds-to-thousands of
- *      bytes deep (0xa5c / 0x21a0 malloc sizes) -- genuinely Stage 4/5 depth, out of
- *      scope for this pass, same boundary as CFileMan/CResMan's own full class bodies
- *      being out of scope everywhere else in this project.
+ *      (CFileMan::CFileMan/CResMan::CResMan, 0xa5c / 0x21a0 malloc sizes) -- both
+ *      promoted to real, Tier A bodies in the 2026-07-25 Stage 6 CFileMan/CResMan
+ *      ctor batch (file_man.cpp/res_man.cpp; see line ~1091/~1166 below), no longer
+ *      Tier-B stubs as an earlier pass's comment here used to say.
  *   3. Registers the new module via CSysApiInstance::AddModule() (real 22-byte
  *      forwarder, reconstructed -- see sysapi_instance.cpp).
  *   4. 3 of the 9 (MMainSysEx/MMainChunkMan/MMainResMan) do one extra step: hand the
@@ -606,8 +606,8 @@ void MMainESDisk(CSystemApi *api)
  *
  * All 9 wrapper functions themselves are transcribed faithfully (Tier A, all under
  * 130 bytes, fully mechanical). Every module CONSTRUCTOR is real (CModule::CModule,
- * module.cpp) except CFileMan::CFileMan/CResMan::CResMan, which are Tier-B link-stubs
- * (empty bodies) -- the two genuinely too-deep derived ctors in this family.
+ * module.cpp; CFileMan::CFileMan/CResMan::CResMan, file_man.cpp/res_man.cpp) -- no
+ * Tier-B stub ctors remain in this family.
  * `CChkApiInstance::SetOwnerModule()`/`CRMApiInstance::SetResMan()` (the item-4 named
  * setters) were promoted to real bodies 2026-07-26 -- see their own definitions below
  * for the real Api+0x94 soft-assert idiom and field offsets. The 6 real per-module

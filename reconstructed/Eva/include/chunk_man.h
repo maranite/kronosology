@@ -1,6 +1,8 @@
 /*
  * chunk_man.h  -  CChunkMan : public CModule, CChkBaseTask : public CTask,
- * CChkCmd : public CChkBaseTask, CChkCmdBG (Tier-B stub) : public CChkBaseTask.
+ * CChkCmd : public CChkBaseTask, CChkCmdBG : public CChkBaseTask (all fully
+ * reconstructed -- see line ~43 below; the "Tier-B stub" label here is stale,
+ * left from before CChkCmdBG's own follow-up batch closed it).
  * Stage 6 breadth sweep, 2026-07-25 (small-derived-module follow-up batch, see
  * dump_man_mod.h / edit_man.h for the shared "MMainXxx 9-member family" context).
  *
