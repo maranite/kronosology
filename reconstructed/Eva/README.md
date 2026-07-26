@@ -45,10 +45,22 @@ special case for `type==0x19`) and, separately, `USTGAPIControl::SaveRandomSeed(
 fork()+execve("/korg/Eva/mumount")+waitpid(), forwarding through the already-real
 `SendSTGMessageWithSource()`) -- `CAlphaKeybIfcTask::ProcessCode()` re-checked and
 confirmed to stay Tier B (genuine `PegMessage`/`PegMessageQueue` toolkit depth, not a
-fresh opportunity). 400 of 37,795 functions reconstructed (per a fresh
-`manifest/gen_manifest.py` regen — this count has run somewhat ahead of this summary
-line between batches; treat the regenerated number as authoritative) — still a small,
-deliberately-scoped slice, not a broad sweep yet |
+fresh opportunity). A further broad `nm -C`/call-graph sweep (2026-07-26) found the
+active surface outside two concurrently-claimed areas (`CConfigManager`/`CEditor`
+construction gating, small dump-cluster leftovers) largely exhausted — every
+callee reachable from currently-real Tier-A code already has a tracked extern, every
+`PTR__ClassName` vtable already has a documented real slot count, and `CClientCommServer`/
+`CSTGUnsolMsgHandler`/base/ipc clusters have zero embedded Tier-B stubs left. One real
+find: `CEvBuffersPool::PostKernelDestructor()` had a stale header comment (claimed a
+free-list-walking leak-report loop) that didn't match its own real 97-byte body
+(`objdump -dr` shows a straight-line soft-assert + `delete[] mSmallPoolBase; delete[]
+mMediumPoolBase;`, no loop) — promoted Tier B -> Tier A and the comment corrected.
+`CTask::RegisterIfc()` re-confirmed correctly deferred (genuine `TVector<T,1>::
+MakeCapacity()` growth-primitive depth, the project's own established "TVector stays an
+unreconstructed template base" boundary). 401 of 37,795 functions reconstructed (per a
+fresh `manifest/gen_manifest.py` regen — this count has run somewhat ahead of this
+summary line between batches; treat the regenerated number as authoritative) — still a
+small, deliberately-scoped slice, not a broad sweep yet |
 
 ## Ground truth
 

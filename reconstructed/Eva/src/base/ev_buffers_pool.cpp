@@ -185,5 +185,8 @@ void *CEvBuffersPool::Lock(void *p)
 
 unsigned long CEvBuffersPool::PostKernelDestructor(unsigned long)
 {
-	return 0; /* Tier B -- see header comment. */
+	/* Real soft assert (mAllocCount != 0, Api+0x94) omitted -- see header comment. */
+	delete[] mSmallPoolBase;
+	delete[] mMediumPoolBase;
+	return 0;
 }

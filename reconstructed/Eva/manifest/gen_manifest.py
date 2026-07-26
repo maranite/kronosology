@@ -769,6 +769,11 @@ RECONSTRUCTED = {
     "0898fbb0",  # CPanelCfg::~CPanelCfg() [D1/D2, comdat-merged]
     "0824be00",  # CEditor::CPanelIfcTask::OnAnalogEvent(CPanelOut::SAnalogEvt const*) -- Stage 6 breadth sweep, 2026-07-25
     "0824bdb0",  # CEditor::CPanelIfcTask::OnEncoderEvent(CPanelOut::SEncoderEvt const*) -- Stage 6 breadth sweep, 2026-07-25
+
+    # --- Stage 6 breadth sweep, 2026-07-26: nm -C sweep found a stale/wrong header
+    # comment on an already-Tier-B CEvBuffersPool method -- re-verified against
+    # objdump -dr directly and promoted to Tier A.
+    "0807f040",  # CEvBuffersPool::PostKernelDestructor(unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

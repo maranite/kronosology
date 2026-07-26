@@ -110,13 +110,19 @@ public:
 	void *Lock(void *p);
 
 	/* .text+0x0807f040, 97 bytes. Overrides CGlobalObjectBase's own no-op
-	 * PostKernelDestructor hook (vtable slot +0x14) -- real body walks the
-	 * medium-pool arena's own already-linked free list and, for every chunk
-	 * NOT on it (i.e. still checked out), does nothing observable this pass
-	 * needs (a debug leak-report loop, gated on data this reconstruction has
-	 * no live caller for -- CKernel's own global-object teardown pass is not
-	 * reconstructed, see global_object_base.h). Given as a real, empty-bodied
-	 * override for vtable-slot fidelity; Tier B.
+	 * PostKernelDestructor hook (vtable slot +0x14). Tier A -- real body
+	 * confirmed via objdump -dr -M intel (no Ghidra decompile ambiguity, the
+	 * function has no loop): a soft assert (Api+0x94, `mAllocCount != 0` --
+	 * i.e. "torn down with chunks still checked out", omitted per this
+	 * project's established convention), then `delete[] mSmallPoolBase;
+	 * delete[] mMediumPoolBase;`. CKernel's own global-object teardown pass
+	 * that would call this virtually is itself not reconstructed, so this is
+	 * dead code on this pass's own live call graph -- same "real, ground-truth-
+	 * reachable, reconstructed on its own merits" bar as CTask/CModule::Add()
+	 * (see task.h). Correcting a stale prior version of this comment, which
+	 * incorrectly described a free-list-walking leak-report loop that does
+	 * not exist in the real 97-byte body -- verified directly against the
+	 * disassembly before writing this, not against the old comment's claim.
 	 */
 	unsigned long PostKernelDestructor(unsigned long);
 

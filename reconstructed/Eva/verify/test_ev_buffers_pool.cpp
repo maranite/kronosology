@@ -18,6 +18,8 @@
  */
 struct EvBuffersPoolTestHooks {
 	static int AllocCount(const CEvBuffersPool &pool) { return pool.mAllocCount; }
+	static void *SmallBase(const CEvBuffersPool &pool) { return pool.mSmallPoolBase; }
+	static void *MediumBase(const CEvBuffersPool &pool) { return pool.mMediumPoolBase; }
 };
 
 static int g_fail;
@@ -150,6 +152,29 @@ int main()
 
 	check("mAllocCount returns to 0 after every alloc above was freed (no leaks)",
 	      EvBuffersPoolTestHooks::AllocCount(pool) == 0);
+
+	/* --- PostKernelDestructor(): real body, own pool, own scope --- */
+	{
+		CEvBuffersPool teardownPool;
+		void *smallBefore = EvBuffersPoolTestHooks::SmallBase(teardownPool);
+		void *mediumBefore = EvBuffersPoolTestHooks::MediumBase(teardownPool);
+		check("PostKernelDestructor: arenas allocated before call",
+		      smallBefore != 0 && mediumBefore != 0);
+
+		unsigned long rc = teardownPool.PostKernelDestructor(0);
+		check("PostKernelDestructor returns 0", rc == 0);
+
+		/* Real ground truth: delete[]s both arenas but never nulls the
+		 * pointer fields (see header comment) -- confirm the pointer VALUES
+		 * are unchanged (not re-read through, which would be a
+		 * use-after-free); the real dtor is also a documented no-op so this
+		 * scope exit does not double-free.
+		 */
+		check("PostKernelDestructor does not null mSmallPoolBase (ground-truth quirk)",
+		      EvBuffersPoolTestHooks::SmallBase(teardownPool) == smallBefore);
+		check("PostKernelDestructor does not null mMediumPoolBase (ground-truth quirk)",
+		      EvBuffersPoolTestHooks::MediumBase(teardownPool) == mediumBefore);
+	}
 
 	printf(g_fail ? "%d check(s) FAILED\n" : "all checks passed\n", g_fail);
 	return g_fail ? 1 : 0;
