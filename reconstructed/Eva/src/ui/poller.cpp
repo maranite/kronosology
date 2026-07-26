@@ -16,6 +16,14 @@
  *
  * Exception-unwind paths are omitted (happy path only), same license as every other
  * ctor/dtor in this project.
+ *
+ * MsgShortBeep()/MsgRequestAnalogInputValue()/MsgUnregisterClient()/
+ * MsgSetEncoderClient()/MsgSetTouchPanelClient()/MsgSetKeyboardClient()/
+ * MsgRegisterClientByVal()/MsgRegisterClientByRef() (2026-07-26 broad nm-C sweep
+ * batch) transcribed from .text+0x089f0150/0x089f0420/0x089f1990/0x089f2010/
+ * 0x089f2090/0x089f2110/0x089f53f0/0x089f5470 respectively, all via direct
+ * `objdump -dr -M intel` register tracing. See poller.h's own per-method header
+ * comments for the full derivation of each.
  */
 
 #include "poller.h"
@@ -157,6 +165,262 @@ bool CPoller::IsRegisteredHandle(unsigned int handle) const
 	unsigned char **begin = *(unsigned char ***)(mClients + 4);
 	const unsigned char *client = begin[handle];
 	return *(const int *)(client + 0x14) != 0;
+}
+
+/* --- Msg*() handlers, promoted Tier B -> Tier A, broad nm-C sweep 2026-07-26 -----
+ *
+ * `CMessage` stays a forward-declared incomplete type throughout (poller.h) -- these
+ * follow the same "raw reinterpret_cast<unsigned char*>(&msg), fixed-offset field
+ * reads" convention `CChunkServer::Exec()`/`CSysExMsgTaskBase::Exec()` already
+ * established (chunk_server.cpp/sysex_msg_task_base.cpp), rather than needing a real
+ * `CMessage` class definition. See poller.h's own per-method header comments for the
+ * full derivation of each; only the non-obvious bits are re-noted here.
+ */
+
+int CPoller::MsgShortBeep(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	if (mResource == 0)
+		return 0;
+
+	/* Real: a 2-dword {opcode, <value>} local passed by pointer through
+	 * mResource's own vtbl slot +0x1c (index 7). Ground truth genuinely never
+	 * initializes the 2nd dword for THIS handler -- left uninitialized here too,
+	 * matching hid_driver.cpp's own established "reproduce the real undefined
+	 * read, don't paper over it" precedent. Safe in practice: mResource's own
+	 * real callee is out of scope/opaque, never dereferences this struct in this
+	 * reconstruction.
+	 */
+	struct SResourceMsg {
+		unsigned int opcode;
+		unsigned int value;
+	} local;
+	local.opcode = 7;
+
+	typedef void (*NotifyFn)(void *, SResourceMsg *);
+	void *resVtbl = *reinterpret_cast<void **>(mResource);
+	NotifyFn notify = *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+	notify(mResource, &local);
+
+	return 0;
+}
+
+int CPoller::MsgRequestAnalogInputValue(CMessage &msg) const
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	if (mResource == 0)
+		return 0;
+
+	struct SResourceMsg {
+		unsigned int opcode;
+		unsigned int value;
+	} local;
+	local.opcode = 5;
+	local.value = *reinterpret_cast<const unsigned int *>(raw + 0x10);
+
+	typedef void (*NotifyFn)(void *, SResourceMsg *);
+	void *resVtbl = *reinterpret_cast<void **>(mResource);
+	NotifyFn notify = *reinterpret_cast<NotifyFn *>(reinterpret_cast<char *>(resVtbl) + 0x1c);
+	notify(mResource, &local);
+
+	return 0;
+}
+
+int CPoller::MsgUnregisterClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	unsigned int handle = *reinterpret_cast<const unsigned int *>(raw + 0x10);
+	if (handle == 0xffffffff)
+		return 9;
+
+	unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+	unsigned int count = (unsigned int)(end - begin);
+	if (handle >= count)
+		return 9;
+
+	unsigned char *client = begin[handle];
+	if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+		return 2;
+
+	/* Real: the SAME Api+0x58 "per-outlink notification" slot CTask::~CTask()
+	 * already documents/calls (system_api.h, task.cpp) -- CIfcClient IS-A
+	 * COutLink via COutLinkMono, so this is a legitimate reuse of that identical
+	 * slot from a different real call site, not a new one.
+	 */
+	typedef void (*NotifyOutLinkFn)(void *, void *);
+	void *apiVtbl = *reinterpret_cast<void **>(Api);
+	NotifyOutLinkFn notifyOutLink =
+	    *reinterpret_cast<NotifyOutLinkFn *>(reinterpret_cast<char *>(apiVtbl) + 0x58);
+	notifyOutLink(Api, client);
+
+	return 0;
+}
+
+int CPoller::MsgSetEncoderClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	mField394 = 0xffffffff;
+
+	unsigned int handle = *reinterpret_cast<const unsigned int *>(raw + 0x10);
+	if (handle == 0xffffffff) {
+		mField394 = handle;
+		return 0;
+	}
+
+	unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+	unsigned int count = (unsigned int)(end - begin);
+	if (handle >= count)
+		return 9;
+
+	unsigned char *client = begin[handle];
+	if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+		return 9;
+
+	mField394 = handle;
+	return 0;
+}
+
+int CPoller::MsgSetTouchPanelClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	mField398 = 0xffffffff;
+
+	unsigned int handle = *reinterpret_cast<const unsigned int *>(raw + 0x10);
+	if (handle == 0xffffffff) {
+		mField398 = handle;
+		return 0;
+	}
+
+	unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+	unsigned int count = (unsigned int)(end - begin);
+	if (handle >= count)
+		return 9;
+
+	unsigned char *client = begin[handle];
+	if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+		return 9;
+
+	mField398 = handle;
+	return 0;
+}
+
+int CPoller::MsgSetKeyboardClient(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x1))
+		return 4;
+
+	mField39c = 0xffffffff;
+
+	unsigned int handle = *reinterpret_cast<const unsigned int *>(raw + 0x10);
+	if (handle == 0xffffffff) {
+		mField39c = handle;
+		return 0;
+	}
+
+	unsigned char **begin = *reinterpret_cast<unsigned char ***>(mClients + 4);
+	unsigned char **end   = *reinterpret_cast<unsigned char ***>(mClients + 8);
+	unsigned int count = (unsigned int)(end - begin);
+	if (handle >= count)
+		return 9;
+
+	unsigned char *client = begin[handle];
+	if (*reinterpret_cast<const int *>(client + 0x14) == 0)
+		return 9;
+
+	mField39c = handle;
+	return 0;
+}
+
+/* Tier-B link-stub -- see poller.h's own header comment. Real 2603-byte body
+ * genuinely out of scope this batch; only its one guaranteed unconditional real
+ * side effect (outHandle = 0xFFFFFFFF at entry, confirmed via objdump -dr) is
+ * reproduced, so MsgRegisterClientByVal()/ByRef()'s own write-back behavior stays
+ * observable in a KAT even with this stubbed.
+ */
+int CPoller::RegisterClient(unsigned int &outHandle, const char *, const char *)
+{
+	outHandle = 0xffffffff;
+	return 0;
+}
+
+int CPoller::MsgRegisterClientByVal(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+
+	unsigned short taggedLen = *reinterpret_cast<const unsigned short *>(raw + 0xa);
+	if (taggedLen <= 0x63)
+		return 5;
+
+	unsigned char *payload = *reinterpret_cast<unsigned char *const *>(raw + 0x10);
+	if (payload == 0)
+		return 6;
+	if (payload[0x4] == 0)
+		return 6;
+	if (payload[0x34] == 0)
+		return 6;
+
+	unsigned int handle = 0xffffffff;
+	int result = RegisterClient(handle, reinterpret_cast<const char *>(payload + 4),
+	                             reinterpret_cast<const char *>(payload + 0x34));
+	*reinterpret_cast<unsigned int *>(payload) = handle;
+	return result;
+}
+
+int CPoller::MsgRegisterClientByRef(CMessage &msg)
+{
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+
+	if (!(raw[9] & 0x2))
+		return 4;
+
+	unsigned short taggedLen = *reinterpret_cast<const unsigned short *>(raw + 0xa);
+	if (taggedLen <= 0xb)
+		return 5;
+
+	unsigned int *payload = *reinterpret_cast<unsigned int *const *>(raw + 0x10);
+	if (payload == 0)
+		return 6;
+
+	const char *nameA = reinterpret_cast<const char *>(payload[1]);
+	if (nameA == 0 || *nameA == 0)
+		return 6;
+
+	const char *nameB = reinterpret_cast<const char *>(payload[2]);
+	if (nameB == 0 || *nameB == 0)
+		return 6;
+
+	unsigned int handle = 0xffffffff;
+	int result = RegisterClient(handle, nameA, nameB);
+	payload[0] = handle;
+	return result;
 }
 
 /* Tier-B link-stubs -- see poller.h's own header comment (2026-07-26 CPanel unlock

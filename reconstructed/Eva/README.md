@@ -2942,3 +2942,91 @@ live as documented above — but any reader citing the earlier sections (or
 `SESSION_SUMMARY_2026-07-25.md`) as proof of live-path reachability prior
 to this batch's own commit would be citing an assumption, not a fact that
 was actually verified at the time it was written.
+
+## Stage 6: broad `nm -C` sweep, `CPoller` `Msg*()` handlers — 2026-07-26
+
+Follow-up to `CChunkServer::Exec()`'s promotion (`eva_chunkserver_exec_promoted_2026-07-26.md`)
+and `CPoller`'s own reassessment above. That reassessment's own header comment
+(`poller.h`) framed CPoller's ~20 remaining `Msg*(CMessage&)` handlers as blocked
+on "a genuinely separate `CMessage` prerequisite this project hasn't reconstructed
+at all yet." Re-checked that framing directly against ground truth rather than
+taking it at face value: **wrong for 8 of the smaller handlers.** This project
+already has an established convention for exactly this situation —
+`CChunkServer::Exec(CMessage&)`/`CSysExMsgTaskBase::Exec(CMessage&)` both keep
+`CMessage` a forward-declared incomplete type and read its fields via
+`reinterpret_cast<unsigned char*>(&msg)` + fixed offsets. Nobody had actually
+applied that same technique to `CPoller`'s own smaller `Msg*` handlers yet — this
+batch did.
+
+8 methods promoted Tier B → Tier A via direct `objdump -dr -M intel` register
+tracing (`.text+0x089f0150`/`0x089f0420`/`0x089f1990`/`0x089f2010`/`0x089f2090`/
+`0x089f2110`/`0x089f53f0`/`0x089f5470`): `MsgShortBeep`, `MsgRequestAnalogInputValue`,
+`MsgUnregisterClient`, `MsgSetEncoderClient`, `MsgSetTouchPanelClient`,
+`MsgSetKeyboardClient`, `MsgRegisterClientByVal`, `MsgRegisterClientByRef`. Full
+per-method derivation is in `poller.h`'s own header comment (2026-07-26 UPDATE).
+
+Highlights:
+- `MsgShortBeep()`/`MsgRequestAnalogInputValue()` share one shape: gated on the
+  `CMessage` code word's own bit 0x100 (its high byte, `+0x9`, bit 0x1 — the SAME
+  field `CChunkServer::Exec()` already established as the "single-shot command"
+  gate), then notify `mResource` (the ctor's own Api+0xac-looked-up object) via its
+  own vtbl slot `+0x1c` with a small `{opcode, value}` local. `MsgShortBeep()`'s own
+  real body genuinely never initializes the 2nd dword of that local — transcribed
+  as found (uninitialized), not papered over, same license as `hid_driver.cpp`'s
+  own documented uninitialized-read precedent.
+- `MsgUnregisterClient()` reuses the *already-documented* `Api+0x58` "per-outlink
+  notification" slot (`system_api.h`, previously only known as `CTask::~CTask()`'s
+  own call) — `CPoller::CIfcClient` IS-A `COutLink` via `COutLinkMono`, so this is a
+  legitimate second real call site for the same slot, a nice cross-check rather
+  than a new undocumented one. Return codes 4/9/2/0 (bit clear / invalid or
+  out-of-range handle / valid-but-not-connected / success) transcribed exactly,
+  not homogenized against the sibling handlers below.
+- `MsgSetEncoderClient()`/`MsgSetTouchPanelClient()`/`MsgSetKeyboardClient()` are
+  one real shape repeated 3× for `mField394`/`mField398`/`mField39c` respectively —
+  transcribed as 3 separate methods (not merged into a shared helper), matching
+  this project's own per-ground-truth-symbol convention. Their own "not connected"
+  case returns 9, a genuinely *different* code than `MsgUnregisterClient()`'s 2 for
+  the analogous case — confirmed via disassembly, not assumed to match.
+- `MsgRegisterClientByVal()`/`MsgRegisterClientByRef()` both forward to
+  `RegisterClient(unsigned int&, const char*, const char*)`, which itself stays
+  Tier-B stubbed (genuine separate 2603-byte depth) but is now declared with its
+  real signature and a minimal stub (`outHandle = 0xFFFFFFFF`, matching ground
+  truth's own unconditional entry side effect) — same declare-real/stub-body
+  convention as `InitButtons()`/`InitAnalogs()`. The two callers differ in payload
+  shape: `ByVal` reads two embedded fixed-offset C-strings (`payload+4`/`payload+0x34`)
+  out of an inline buffer; `ByRef` reads a 3-pointer struct (`payload[0]` = handle
+  out-param, `payload[1]`/`payload[2]` = `char*` name pointers). Both use the
+  `CMessage` code word's bit 0x200 (`+0x9` bit 0x2) as their gate — the SAME
+  bit-plane `CChunkServer::Exec()` already established as its own 10-way-dispatch
+  gate, reused here for a different, simpler 2-way purpose.
+
+Genuinely still out of scope, no new angle found: `MsgSetLed`/`MsgSetLed16bits`/
+`MsgBackupLEDs` all pull in a brand-new, not-yet-reconstructed external singleton
+class (`CLEDBlinker`, global at `.bss+0x0af09920`) and reveal that `CPoller`'s own
+`mZeroBlock` (`+0x3a0`, previously documented as "ctor zeroes it, real meaning not
+decoded") is actually a real 512-bit LED-registration bitmap indexed by
+`ELedCode/16` — worth flagging for whoever reconstructs `CLEDBlinker` next, but a
+new external dependency is a bigger lift than this batch's own scope.
+`MsgGetClientHandleByRef`/`MsgGetClientHandleByVal` (2600B each, pull in
+`FindRegisteredClient()`), `MsgSetButtonClient` (1505B), `MsgSetAnalogClient`
+(1085B), `FindRegisteredClient()` itself (2512B), `RegisterClient()`'s own real
+body (2603B), and both `Exec()` overrides (6747B/3213B) all stay deferred for
+genuine size/depth reasons.
+
+Also surveyed (per this batch's own dispatch instructions) `CSTGUnsolMsgHandler`'s
+`ProgramMsgHandler`/`VoiceModelMsgHandler` swarm-of-siblings blocker
+(`eva_chunkserver_exec_promoted_2026-07-26.md`'s own prior finding) for a
+tractable-in-isolation sibling: re-read both dispatchers' decompiles again this
+session, no new angle found — every one of the 11/14 `Handle*Param` siblings is a
+same-shape, individually-unexamined function of unknown depth, and picking one
+without first triaging the rest would just relocate the swarm problem into a single
+function rather than resolve it. Correctly stays out of scope as previously found.
+
+New KAT: `verify/test_poller.cpp` sections `[10]`–`[13]`, 41 checks (code-bit gates,
+the full `MsgUnregisterClient()`/`MsgSetXxxClient()` return-code matrices, the
+`Api+0x58`/`mResource+0x1c` notify call shapes, both `MsgRegisterClientByXxx()`
+payload layouts and their `RegisterClient()` write-back). `make -k verify`: only
+the pre-existing, already-documented (`eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`)
+`test_client_comm_server` 6-FAIL (independently reconfirmed present on the
+pre-this-batch tree too via `git stash`, so definitively unrelated).
+`tools/build_lenny.sh`: `LINK OK`. Manifest 447 → 455 of 37,795.

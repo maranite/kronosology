@@ -32,6 +32,20 @@
  *       (NOT min-10, confirmed by direct disassembly of .text+0x089f7280 -- a
  *       DIFFERENT real constant from task.cpp's own TVector_SRegisteredIfc_
  *       MakeCapacity(), even though both are TVector<T,1> instantiations)
+ *   [10] MsgShortBeep()/MsgRequestAnalogInputValue(): code-bit-0x100 gate, the
+ *        opaque mResource->vtbl[7] notify (fake resource records the {opcode,value}
+ *        struct actually passed)
+ *   [11] MsgUnregisterClient(): code-bit-0x100 gate, invalid/out-of-range/
+ *        not-connected/success return-code matrix (9/9/2/0), real Api+0x58
+ *        per-outlink notify firing exactly once on success
+ *   [12] MsgSetEncoderClient()/MsgSetTouchPanelClient()/MsgSetKeyboardClient(): the
+ *        shared shape (clear-to-0xFFFFFFFF unset path, out-of-range/not-connected
+ *        both returning 9, success storing the handle) against each one's own real
+ *        field (mField394/398/39c)
+ *   [13] MsgRegisterClientByVal()/MsgRegisterClientByRef(): length-gate thresholds
+ *        (0x63/0xb), embedded-buffer vs pointer-to-string payload shapes, the
+ *        RegisterClient() stub's outHandle write-back landing at the right spot in
+ *        each payload layout
  */
 
 #include <cstdio>
@@ -115,6 +129,15 @@ extern "C" int FakeResDisconnect(void *r, int arg)
 	return 0;
 }
 
+static int g_notifyCalls;
+static unsigned int g_lastNotifyOpcode, g_lastNotifyValue;
+extern "C" void FakeResNotify(void *, unsigned int *msg)
+{
+	g_notifyCalls++;
+	g_lastNotifyOpcode = msg[0];
+	g_lastNotifyValue = msg[1];
+}
+
 static void *g_fakeResVtbl[8];
 struct FakeResObj { void *vtbl; } g_fakeResObj;
 
@@ -125,7 +148,16 @@ static void setup_fake_resource()
 	g_fakeResVtbl[0x8 / 4] = (void *)FakeResConnect;
 	g_fakeResVtbl[0xc / 4] = (void *)FakeResDisconnect;
 	g_fakeResVtbl[0x10 / 4] = (void *)FakeResGetType;
+	g_fakeResVtbl[0x1c / 4] = (void *)FakeResNotify;
 	g_fakeResObj.vtbl = g_fakeResVtbl;
+}
+
+static int g_outLinkNotifyCalls;
+static void *g_lastOutLinkNotified;
+extern "C" void FakeOutLinkNotify(void *, void *link)
+{
+	g_outLinkNotifyCalls++;
+	g_lastOutLinkNotified = link;
 }
 
 static void *g_fakeApiVtbl[96];
@@ -137,9 +169,27 @@ static void setup_fake_api()
 		g_fakeApiVtbl[i] = (void *)FakeApiNoOp;
 	g_fakeApiVtbl[0x3c / 4] = (void *)FakeScopeIdFn;
 	g_fakeApiVtbl[0xac / 4] = (void *)FakeLookupFn;
+	g_fakeApiVtbl[0x58 / 4] = (void *)FakeOutLinkNotify;
 	g_fakeApiObj.vtbl = g_fakeApiVtbl;
 	Api = (CSystemApi *)&g_fakeApiObj;
 }
+
+/* --- fake CMessage: real layout is +0x9 the code word's own high byte (tested
+ * as flag bits 0x1/0x2 by these handlers), +0xa a tagged-length u16, +0x10 a
+ * payload dword (pointer or scalar depending on message type) -- see poller.h's
+ * own per-method header comments. Raw byte buffer, not a struct, to avoid any
+ * compiler-inserted padding disturbing the real fixed offsets these handlers
+ * read via reinterpret_cast, same discipline chunk_server.cpp's own KAT uses.
+ */
+struct FakeMessage {
+	unsigned char raw[0x18];
+
+	FakeMessage() { memset(raw, 0, sizeof(raw)); }
+	void SetFlags(unsigned char f) { raw[9] = f; }
+	void SetTaggedLen(unsigned short len) { *(unsigned short *)(raw + 0xa) = len; }
+	void SetWord10(unsigned int v) { *(unsigned int *)(raw + 0x10) = v; }
+	CMessage &AsMessage() { return *reinterpret_cast<CMessage *>(raw); }
+};
 
 int main()
 {
@@ -334,6 +384,189 @@ int main()
 		check("MakeCapacity() reallocated (new block address)", begin3 != begin1);
 
 		free(*(unsigned char **)(vec + 4));
+	}
+
+	printf("[10] MsgShortBeep()/MsgRequestAnalogInputValue(): code-bit-0x100 gate + "
+	       "opaque mResource notify\n");
+	{
+		g_fakeLookupResult = &g_fakeResObj;
+		g_fakeResourceType = 10;
+		g_fakeConnectResult = 0;
+		CPoller p(owner, "PanelRes");
+
+		FakeMessage m;
+		g_notifyCalls = 0;
+		m.SetFlags(0); /* bit 0x1 clear */
+		check("MsgShortBeep() returns 4 when code bit 0x100 clear",
+		      p.MsgShortBeep(m.AsMessage()) == 4);
+		check("no notify fired", g_notifyCalls == 0);
+
+		m.SetFlags(0x1);
+		check("MsgShortBeep() returns 0 when bit set + mResource live",
+		      p.MsgShortBeep(m.AsMessage()) == 0);
+		check("notify fired exactly once with opcode 7",
+		      g_notifyCalls == 1 && g_lastNotifyOpcode == 7);
+
+		g_notifyCalls = 0;
+		m.SetFlags(0);
+		check("MsgRequestAnalogInputValue() returns 4 when bit clear",
+		      p.MsgRequestAnalogInputValue(m.AsMessage()) == 4);
+		m.SetFlags(0x1);
+		m.SetWord10(42);
+		check("MsgRequestAnalogInputValue() returns 0 when bit set",
+		      p.MsgRequestAnalogInputValue(m.AsMessage()) == 0);
+		check("notify fired with opcode 5, value == msg's own +0x10 (42)",
+		      g_notifyCalls == 1 && g_lastNotifyOpcode == 5 && g_lastNotifyValue == 42);
+	}
+
+	printf("[11] MsgUnregisterClient(): return-code matrix + real Api+0x58 notify\n");
+	{
+		CPoller p(owner, 0); /* mResource irrelevant here */
+
+		unsigned char blobA[0x18]; memset(blobA, 0, sizeof(blobA));
+		unsigned char blobB[0x18]; memset(blobB, 0, sizeof(blobB));
+		*(int *)(blobA + 0x14) = 1; /* connected */
+		*(int *)(blobB + 0x14) = 0; /* NOT connected */
+		void *elems[2] = { blobA, blobB };
+		PollerTestHooks::SetClients(p, elems, elems + 2);
+
+		FakeMessage m;
+		m.SetFlags(0);
+		check("returns 4 when code bit 0x100 clear",
+		      p.MsgUnregisterClient(m.AsMessage()) == 4);
+
+		m.SetFlags(0x1);
+		m.SetWord10(0xffffffff);
+		check("returns 9 for handle == 0xFFFFFFFF",
+		      p.MsgUnregisterClient(m.AsMessage()) == 9);
+
+		m.SetWord10(2); /* out of range, count == 2 */
+		check("returns 9 for out-of-range handle",
+		      p.MsgUnregisterClient(m.AsMessage()) == 9);
+
+		g_outLinkNotifyCalls = 0;
+		m.SetWord10(1); /* blobB, not connected */
+		check("returns 2 for a valid but NOT-connected handle",
+		      p.MsgUnregisterClient(m.AsMessage()) == 2);
+		check("no Api+0x58 notify fired for the not-connected case",
+		      g_outLinkNotifyCalls == 0);
+
+		m.SetWord10(0); /* blobA, connected */
+		check("returns 0 for a valid, connected handle",
+		      p.MsgUnregisterClient(m.AsMessage()) == 0);
+		check("Api+0x58 notify fired exactly once with the real client pointer",
+		      g_outLinkNotifyCalls == 1 && g_lastOutLinkNotified == blobA);
+
+		PollerTestHooks::SetClients(p, 0, 0);
+	}
+
+	printf("[12] MsgSetEncoderClient()/MsgSetTouchPanelClient()/MsgSetKeyboardClient()\n");
+	{
+		CPoller p(owner, 0);
+
+		unsigned char blobA[0x18]; memset(blobA, 0, sizeof(blobA));
+		unsigned char blobB[0x18]; memset(blobB, 0, sizeof(blobB));
+		*(int *)(blobA + 0x14) = 1; /* connected */
+		*(int *)(blobB + 0x14) = 0; /* NOT connected */
+		void *elems[2] = { blobA, blobB };
+		PollerTestHooks::SetClients(p, elems, elems + 2);
+
+		FakeMessage m;
+		m.SetFlags(0);
+		check("MsgSetEncoderClient() returns 4 when bit clear",
+		      p.MsgSetEncoderClient(m.AsMessage()) == 4);
+
+		m.SetFlags(0x1);
+		m.SetWord10(0xffffffff);
+		check("MsgSetEncoderClient(handle=-1) returns 0 (clears the slot)",
+		      p.MsgSetEncoderClient(m.AsMessage()) == 0);
+		check("mField394 == 0xFFFFFFFF after clear",
+		      PollerTestHooks::Field394(p) == 0xffffffffu);
+
+		m.SetWord10(1); /* blobB, not connected */
+		check("MsgSetEncoderClient(not-connected handle) returns 9",
+		      p.MsgSetEncoderClient(m.AsMessage()) == 9);
+		check("mField394 left reset (0xFFFFFFFF), not the failed handle",
+		      PollerTestHooks::Field394(p) == 0xffffffffu);
+
+		m.SetWord10(5); /* out of range */
+		check("MsgSetEncoderClient(out-of-range handle) returns 9",
+		      p.MsgSetEncoderClient(m.AsMessage()) == 9);
+
+		m.SetWord10(0); /* blobA, connected */
+		check("MsgSetEncoderClient(valid connected handle) returns 0",
+		      p.MsgSetEncoderClient(m.AsMessage()) == 0);
+		check("mField394 == 0 (the validated handle)",
+		      PollerTestHooks::Field394(p) == 0u);
+
+		m.SetWord10(0);
+		check("MsgSetTouchPanelClient(valid connected handle) returns 0",
+		      p.MsgSetTouchPanelClient(m.AsMessage()) == 0);
+		check("mField398 == 0", PollerTestHooks::Field398(p) == 0u);
+
+		m.SetWord10(0);
+		check("MsgSetKeyboardClient(valid connected handle) returns 0",
+		      p.MsgSetKeyboardClient(m.AsMessage()) == 0);
+		check("mField39c == 0", PollerTestHooks::Field39c(p) == 0u);
+
+		PollerTestHooks::SetClients(p, 0, 0);
+	}
+
+	printf("[13] MsgRegisterClientByVal()/MsgRegisterClientByRef()\n");
+	{
+		CPoller p(owner, 0);
+
+		FakeMessage m;
+		m.SetFlags(0);
+		check("MsgRegisterClientByVal() returns 4 when code bit 0x200 clear",
+		      p.MsgRegisterClientByVal(m.AsMessage()) == 4);
+
+		m.SetFlags(0x2);
+		m.SetTaggedLen(0x63); /* == threshold, real check is strictly > */
+		check("MsgRegisterClientByVal() returns 5 at the length threshold (0x63)",
+		      p.MsgRegisterClientByVal(m.AsMessage()) == 5);
+
+		m.SetTaggedLen(0x64);
+		unsigned char valBuf[0x40]; memset(valBuf, 0, sizeof(valBuf));
+		m.SetWord10((unsigned int)(unsigned long)valBuf);
+		check("MsgRegisterClientByVal() returns 6 when embedded name A is empty",
+		      p.MsgRegisterClientByVal(m.AsMessage()) == 6);
+
+		valBuf[0x4] = 'X';
+		check("MsgRegisterClientByVal() returns 6 when embedded name B is empty",
+		      p.MsgRegisterClientByVal(m.AsMessage()) == 6);
+
+		valBuf[0x34] = 'Y';
+		int r = p.MsgRegisterClientByVal(m.AsMessage());
+		check("MsgRegisterClientByVal() succeeds once both names are non-empty",
+		      r == 0);
+		check("RegisterClient() stub's outHandle write-back landed at payload+0",
+		      *(unsigned int *)valBuf == 0xffffffffu);
+
+		FakeMessage m2;
+		m2.SetFlags(0x2);
+		m2.SetTaggedLen(0xb);
+		check("MsgRegisterClientByRef() returns 5 at the length threshold (0xb)",
+		      p.MsgRegisterClientByRef(m2.AsMessage()) == 5);
+
+		m2.SetTaggedLen(0xc);
+		unsigned int refBuf[3] = { 0, 0, 0 };
+		m2.SetWord10((unsigned int)(unsigned long)refBuf);
+		check("MsgRegisterClientByRef() returns 6 when name-A pointer is NULL",
+		      p.MsgRegisterClientByRef(m2.AsMessage()) == 6);
+
+		const char *nameA = "ClientA";
+		refBuf[1] = (unsigned int)(unsigned long)nameA;
+		check("MsgRegisterClientByRef() returns 6 when name-B pointer is NULL",
+		      p.MsgRegisterClientByRef(m2.AsMessage()) == 6);
+
+		const char *nameB = "ClientB";
+		refBuf[2] = (unsigned int)(unsigned long)nameB;
+		int r2 = p.MsgRegisterClientByRef(m2.AsMessage());
+		check("MsgRegisterClientByRef() succeeds once both name pointers are set",
+		      r2 == 0);
+		check("RegisterClient() stub's outHandle write-back landed at payload[0]",
+		      refBuf[0] == 0xffffffffu);
 	}
 
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");

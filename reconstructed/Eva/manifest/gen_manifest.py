@@ -879,6 +879,25 @@ RECONSTRUCTED = {
     "089ee520",  # CPanel::Start()
     "089ee560",  # CPanel::~CPanel() [D0, deleting]
     "089ee620",  # CPanel::~CPanel() [D1]
+
+    # --- 2026-07-26 (broad nm-C sweep, third batch): re-examined the "~20 Msg*
+    # methods need a genuinely separate CMessage prerequisite" framing directly
+    # against ground truth. Wrong for 8 of the smaller ones -- this project's own
+    # established CMessage-forward-declared-incomplete-type convention
+    # (CChunkServer::Exec()/CSysExMsgTaskBase::Exec()) applies here just as well,
+    # nobody had actually tried it on CPoller's own smaller handlers yet. See
+    # poller.h's own header comment (2026-07-26 UPDATE) for the full per-method
+    # derivation. RegisterClient() itself (089f31c0) stays Tier-B stubbed
+    # (genuine separate 2603-byte depth) -- NOT added here, same convention as
+    # InitButtons()/InitAnalogs() above.
+    "089f0150",  # CPoller::MsgShortBeep(CMessage&)
+    "089f0420",  # CPoller::MsgRequestAnalogInputValue(CMessage&) const
+    "089f1990",  # CPoller::MsgUnregisterClient(CMessage&)
+    "089f2010",  # CPoller::MsgSetEncoderClient(CMessage&)
+    "089f2090",  # CPoller::MsgSetTouchPanelClient(CMessage&)
+    "089f2110",  # CPoller::MsgSetKeyboardClient(CMessage&)
+    "089f53f0",  # CPoller::MsgRegisterClientByVal(CMessage&)
+    "089f5470",  # CPoller::MsgRegisterClientByRef(CMessage&)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

@@ -187,6 +187,36 @@
  * (panel.h/.cpp), so these two needed real call sites even though their own bodies
  * stay out of scope for the same CMessage-prerequisite reason as their still-fully-
  * deferred siblings above.
+ *
+ * UPDATE (Eva broad nm-C sweep, 2026-07-26, second batch): re-examined the
+ * "needs CMessage machinery" framing directly against ground truth (not assumed) --
+ * WRONG for 8 of the smaller handlers. This project's own already-established
+ * `CMessage`-forward-declared-incomplete-type convention (`CChunkServer::Exec`,
+ * chunk_server.cpp; `CSysExMsgTaskBase::Exec`, sysex_msg_task_base.cpp -- raw
+ * `reinterpret_cast<unsigned char*>(&msg)` field reads at fixed offsets, `CMessage`
+ * itself never given a real definition) applies here just as well; nobody had
+ * actually tried it on CPoller's own smaller Msg* handlers yet. 8 promoted Tier B ->
+ * Tier A this batch: `MsgShortBeep`, `MsgRequestAnalogInputValue`,
+ * `MsgUnregisterClient`, `MsgSetEncoderClient`, `MsgSetTouchPanelClient`,
+ * `MsgSetKeyboardClient`, `MsgRegisterClientByVal`, `MsgRegisterClientByRef`. See
+ * poller.cpp for the full per-method derivation. `RegisterClient()` itself (the
+ * common real callee of the last two) stays Tier-B stubbed -- its own 2603-byte body
+ * is genuine, separate depth (drives `FindRegisteredClient()`, the `mClients` TVector
+ * growth path, and more), out of scope for this batch -- but IS now declared with its
+ * real signature so the two `MsgRegisterClientByXxx` wrappers can compile and
+ * dispatch a real call, same declare-real/stub-body convention as `InitButtons()`/
+ * `InitAnalogs()` above. Genuinely still-deferred, no new angle found this batch:
+ * `MsgSetLed`/`MsgSetLed16bits`/`MsgBackupLEDs` (all three pull in a brand-new,
+ * not-yet-reconstructed external singleton class, `CLEDBlinker`, global at
+ * `.bss+0x0af09920`, plus reveal that `mZeroBlock` (+0x3a0) is actually a real
+ * 512-bit LED-registration bitmap indexed by `ELedCode/16`, not a genuinely-unused
+ * scratch block as originally guessed -- worth flagging for whoever reconstructs
+ * `CLEDBlinker` next, but out of scope here), `MsgGetClientHandleByRef`/
+ * `MsgGetClientHandleByVal` (2600B each, pull in `FindRegisteredClient()`),
+ * `MsgSetButtonClient` (1505B), `MsgSetAnalogClient` (1085B),
+ * `FindRegisteredClient()` (2512B), `RegisterClient()` itself (2603B, see above),
+ * `Exec(CMessage&)` (6747B, the real per-message dispatcher that would call all of
+ * these), `Exec()` (3213B, the unrelated 0-arg scheduler-tick override).
  */
 
 #ifndef POLLER_H
@@ -196,6 +226,7 @@
 #include "out_link.h"
 
 class CModule;
+class CMessage;
 
 namespace CPanelOut {
 struct SAnalogEvt;
@@ -234,6 +265,106 @@ public:
 	 * field FindUnconnected() itself reads).
 	 */
 	bool IsRegisteredHandle(unsigned int handle) const;
+
+	/* .text+0x089f0150, 65 bytes. Tier A. `CMessage`'s command-code byte (+0x9,
+	 * the high byte of the +0x8 16-bit code word, same field every other
+	 * `Msg*`/`Exec(CMessage&)` handler in this project tests) bit 0x1 (== code bit
+	 * 0x100) gates whether this does anything at all -- matches `CChunkServer::
+	 * Exec()`'s own established "bit 0x100 selects single-shot commands" reading of
+	 * the same field. If clear, returns 4 with zero side effects. If set and
+	 * `mResource` is non-null, notifies it via its own vtbl slot +0x1c (index 7,
+	 * real meaning not decoded -- an opaque "trigger" call on the same named
+	 * resource the ctor's own Api+0xac lookup populates, poller.cpp) with a 2-dword
+	 * `{opcode=7, <uninitialized>}` local. Real ground truth genuinely never
+	 * initializes the 2nd dword for THIS handler (unlike
+	 * `MsgRequestAnalogInputValue()` below, which does) -- transcribed as found,
+	 * not papered over, same license as `hid_driver.cpp`'s own documented
+	 * uninitialized-read precedent.
+	 */
+	int MsgShortBeep(CMessage &msg);
+
+	/* .text+0x089f0420, 80 bytes. Tier A. Same code-bit-0x100 gate and same
+	 * `mResource->vtbl[7]` opaque-notify shape as `MsgShortBeep()` above, but
+	 * `{opcode=5, value=msg's own +0x10 dword, read as a plain scalar (an analog
+	 * channel index), not a pointer}`.
+	 */
+	int MsgRequestAnalogInputValue(CMessage &msg) const;
+
+	/* .text+0x089f1990, 128 bytes. Tier A. Same code-bit-0x100 gate (return 4 if
+	 * clear). Reads `CMessage`'s own +0x10 dword as a plain client HANDLE (not a
+	 * pointer -- a different real interpretation of the same generic slot than
+	 * `MsgRegisterClientByVal/ByRef()` below use, both real, both confirmed
+	 * separately via disassembly). Returns 9 if the handle is `0xFFFFFFFF` or
+	 * `>= mClients.Count()`. Returns 2 if the handle is in range but that client's
+	 * own +0x14 "connected" field (the same field `FindUnconnected()`/
+	 * `IsRegisteredHandle()` already read) is 0. Otherwise notifies the real global
+	 * `Api` object's own already-documented `+0x58` "per-outlink" slot
+	 * (system_api.h -- the SAME slot `CTask::~CTask()` already calls, task.cpp;
+	 * `CIfcClient` genuinely IS-A `COutLink` via `COutLinkMono`, so this is the
+	 * identical notification, just fired from a different real call site) with
+	 * `(Api, client)`, then returns 0.
+	 */
+	int MsgUnregisterClient(CMessage &msg);
+
+	/* .text+0x089f2010/0x089f2090/0x089f2110, 128 bytes each. Tier A. All 3 share
+	 * one real shape (transcribed separately, not merged into a shared helper --
+	 * matches this project's own convention of one real ground-truth function per
+	 * method even when byte-identical apart from which field they touch), differing
+	 * only in which of `mField394`/`mField398`/`mField39c` they update:
+	 * code-bit-0x100 gate (return 4 if clear); the target field is unconditionally
+	 * reset to `0xFFFFFFFF` first; `CMessage`'s own +0x10 dword is read as a plain
+	 * client handle (same interpretation as `MsgUnregisterClient()` above). If the
+	 * handle is exactly `0xFFFFFFFF`, the reset value IS the final value -- return 0
+	 * ("clear this client slot" succeeds trivially). Otherwise the handle must be
+	 * in-range AND that client's own +0x14 "connected" field must be non-zero, or
+	 * this returns 9 (a DIFFERENT return code than `MsgUnregisterClient()`'s own
+	 * "not connected" case, which returns 2 -- confirmed via direct disassembly,
+	 * not homogenized). On success the target field is set to the validated handle
+	 * and this returns 0.
+	 */
+	int MsgSetEncoderClient(CMessage &msg);
+	int MsgSetTouchPanelClient(CMessage &msg);
+	int MsgSetKeyboardClient(CMessage &msg);
+
+	/* .text+0x089f31c0, 2603 bytes. Tier-B link-stub (empty-ish body, see .cpp) --
+	 * genuinely large real depth (drives `mClients` TVector growth via
+	 * `TVector_CIfcClientPtr_MakeCapacity()` and more), out of scope for this
+	 * batch. Declared with its real signature purely so
+	 * `MsgRegisterClientByVal()`/`MsgRegisterClientByRef()` below can compile and
+	 * dispatch a real call, same convention as `InitButtons()`/`InitAnalogs()`
+	 * above. Ground truth's own real entry unconditionally sets `outHandle =
+	 * 0xFFFFFFFF` before anything else (confirmed via `objdump -dr`) -- the stub
+	 * reproduces exactly that one guaranteed side effect and nothing more.
+	 */
+	int RegisterClient(unsigned int &outHandle, const char *nameA, const char *nameB);
+
+	/* .text+0x089f53f0, 128 bytes. Tier A. Code-bit-0x200 gate (bit 0x2 of the
+	 * +0x9 byte -- a DIFFERENT bit-plane than the single-shot handlers above,
+	 * matches `CChunkServer::Exec()`'s own established "bit 0x200 gates a
+	 * multi-way dispatch" reading of the same field; return 4 if clear). The
+	 * length field at +0xa (CMessage's own real "tagged length" word, same field
+	 * `CSysExMsgTaskBase::Exec()` already documents) must be `> 0x63` (unsigned),
+	 * else return 5. +0x10 is a real payload POINTER here (unlike
+	 * `MsgUnregisterClient()`'s scalar-handle use of the same slot) into a fixed
+	 * layout: byte +0x4 and byte +0x34 of the payload must both be non-zero
+	 * (non-empty embedded C-strings), else return 6. On success, forwards to
+	 * `RegisterClient(handle, (char*)payload+4, (char*)payload+0x34)` and
+	 * writes the resulting handle back to `payload+0x0`, returning
+	 * `RegisterClient()`'s own return value.
+	 */
+	int MsgRegisterClientByVal(CMessage &msg);
+
+	/* .text+0x089f5470, 128 bytes. Tier A. Same code-bit-0x200 gate. Length must be
+	 * `> 0xb` (unsigned), else return 5. +0x10 is a real payload pointer to a
+	 * SEPARATE 3-pointer struct here (not the embedded-buffer layout
+	 * `MsgRegisterClientByVal()` uses): `payload[0]` is the write-back handle
+	 * output slot, `payload[1]`/`payload[2]` are themselves `char*` pointers to
+	 * the two names (each checked non-null AND non-empty, i.e. `*name != 0`),
+	 * else return 6. On success, forwards to `RegisterClient(handle, payload[1],
+	 * payload[2])` and writes the handle back to `payload[0]`, returning
+	 * `RegisterClient()`'s own return value.
+	 */
+	int MsgRegisterClientByRef(CMessage &msg);
 
 	/* .text+0x089f4830, 2925 bytes. Tier-B link-stub (empty body) -- genuinely
 	 * large, needs the CMessage machinery this project hasn't reconstructed at
