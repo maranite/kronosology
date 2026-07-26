@@ -3238,3 +3238,64 @@ regressions (only the pre-existing, already-documented
 unrelated -- this batch never touches `src/ipc/*`). `tools/build_lenny.sh`: `LINK OK`.
 Manifest 497 → 503 of 37,795 (6 new: `CLocaleManager` ctor/`GetInstance()`/2 wrappers +
 `CKeyboardLayoutManager::AddLayout()`/`GetLayout(EKeyboardLayout)`).
+
+### `CPoller::MsgSetAnalogClient()`/`MsgSetButtonClient()` closeout (2026-07-26)
+
+The pair the `CLocaleManager` batch above collided with and backed off of, retried
+fresh with no concurrent conflict this time (`git log`/`git status` checked first).
+Ghidra's `load_binary` timed out again -- direct `objdump -dr -M intel` register
+tracing was sufficient for both. Both functions share one real shape: the same
+`+0x9` bit-0x2 gate and length `> 7` gate every other `CMessage`-based `Msg*()`
+handler in this file uses, a genuine **NULL-payload-shares-the-length-gate's-own-
+return-code(5)** quirk (ground truth never re-sets the return register between the
+two checks -- a different convention than `MsgUnregisterClient()`'s own "return 6
+for a bad payload" shape), a handle range/connected pre-check that runs BEFORE the
+mode field is even read (skipped only by the `0xFFFFFFFF` "unbind" sentinel, which
+still goes through the full mode dispatch afterward, not a fast exit), a mode-2
+bulk-fill of the whole target table via a collapsed SSE loop, and a silent no-op
+on an unmatched lookup code (loop-fallthrough still returns 0, no write).
+
+**Concrete correction**: `poller.h`'s own field comments had `mHandleTable1`
+(+0x90, 64 entries) and `mHandleTable2` (+0x190, 128 entries) guessed backwards
+("button/keyboard/touch by size" vs. "analog by relative size"). Direct disasm
+confirms the opposite: `MsgSetAnalogClient()` is `mHandleTable1`'s real sole
+writer (ANALOG, 64 entries), `MsgSetButtonClient()` is `mHandleTable2`'s real sole
+writer (BUTTON, 128 entries). Both functions' own real `.rodata` lookup tables
+were byte-dumped directly (`objdump -s -j .rodata`, not assumed) and transcribed
+verbatim: the 64-entry analog table (0x08f7c060) is scattered, not sequential,
+with a real quirk that code 0 does NOT match slot 0 (whose own code is 1) --
+it silently lands on the first empty padding slot instead; the 128-entry button
+table (0x08f7b860) has a genuine literal identity mapping (`code[i] == i` for
+i in [0,78]) for its primary-code field, plus a SEPARATE "alt code" field that is
+uniformly 0 across all 128 real entries -- `MsgSetButtonClient()`'s own extra mode
+1 (a 3rd dispatch mode `MsgSetAnalogClient()` doesn't have) scans that field and
+can therefore only ever match code 0, landing on slot 0; modeled as a real loop
+over the verbatim all-zero data rather than collapsed to a special case, in case
+a differently-built binary's own table isn't as uniform.
+
+`CPoller` is still NOT fully closed -- both `Exec()` overloads remain, now
+characterized concretely rather than just deferred by byte count. `Exec()`
+(3213 bytes, the 0-arg scheduler-tick override, `CLEDBlinker::Exec()`'s own
+confirmed real caller) is a real 12-way jump-table hardware-event-drain loop
+(jump table extracted from `.rodata+0x08f7c268`) with an mClients analog-event
+flush pass and a `CLEDBlinker::Exec()` call at the tail -- every real callee
+(`COutLinkMono::OutMono()`, `CLEDBlinker::Exec()`) is ALREADY reconstructed, no
+missing prerequisite, just genuine `RegisterClient()`-scale depth not attempted
+this session. `Exec(CMessage&)` (6747 bytes, the per-message dispatcher) turned
+out structurally different than expected: NOT a numeric-code switch calling each
+already-real `Msg*()` handler by symbol, but a genuine **name-string command
+dispatcher with 94 separate `strcmp()` call sites** (plus only 4 real calls to
+already-reconstructed methods -- `RegisterClient()`, `MsgSetAnalogClient()`,
+`MsgSetButtonClient()`, `MsgSetLed()` -- and one direct `CLEDBlinker::Unregister()`
+call bypassing `MsgSetLed()`'s own encapsulation for some inline case). This is a
+much larger, genuinely separate, dedicated-batch-scale reconstruction (enumerating
+and characterizing ~94 literal command-name constants), well outside this
+session's own scope.
+
+New KAT: `verify/test_poller.cpp` section `[16]` (30 checks) covering both gates,
+both return-code matrices, the mode-0 code-table scan (matched and unmatched),
+mode-2 bulk-fill, and `MsgSetButtonClient()`'s extra mode-1 alt-code scan. Ran
+every `verify/` binary individually: all clean except the pre-existing,
+already-documented `eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`
+6-FAIL (unrelated). `tools/build_lenny.sh`: `LINK OK`. Manifest 505 → 507 of
+37,795.
