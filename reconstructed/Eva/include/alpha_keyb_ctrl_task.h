@@ -191,10 +191,19 @@ public:
 	 * faithfully-preserved ground-truth literal -- not a bug, see
 	 * keyboard_layout.h), and on success builds an `IAlphaKeybCode::
 	 * SKeyboardCode` and dispatches it through mCodeIfc (see header comment).
-	 * Under this reconstruction's own `CLocaleManager::GetKeyboardLayout()`
-	 * stub (always returns NULL, locale_manager.h), always takes the real
-	 * "lookup failed" branch (`return 1;`) -- structurally faithful,
-	 * quiescent, same status as `Exec()`.
+	 * If the lookup fails (`layout == NULL`), returns 0 immediately.
+	 * UPDATE (2026-07-26, CLocaleManager closeout batch): `CLocaleManager::
+	 * AddKeyboardLayout()`/`GetKeyboardLayout()` are now both real
+	 * (locale_manager.h) -- since this class's own real ctor calls
+	 * `AddKeyboardLayout()` once per built-in layout (including the Default
+	 * layout, `mType == 0x8409`) into that SINGLETON's shared list,
+	 * `GetKeyboardLayout(0x8409)` now genuinely SUCCEEDS once any
+	 * `CAlphaKeybCtrlTask` has been constructed -- the "layout lookup failed,
+	 * return 0" fast path is no longer the only reachable outcome under this
+	 * reconstruction. Once the lookup succeeds, this always returns 1 either
+	 * way (both the "!valid || mapped is a sentinel" early return and the
+	 * full mCodeIfc-dispatch tail return the same real literal) --
+	 * transcribed as found, not homogenized with the lookup-failure case.
 	 */
 	int ProcessEvent(const SKeyboardEvt *evt);
 

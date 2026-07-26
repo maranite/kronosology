@@ -25,8 +25,11 @@
  *       false), matching this reconstruction's own documented stub behavior.
  *   [7] CAlphaKeybCtrlTask::Exec() with mHidResource == 0 -- real fast path:
  *       SetMask(1), returns -1.
- *   [8] CAlphaKeybCtrlTask::ProcessEvent() with CLocaleManager::GetKeyboardLayout()
- *       stubbed to NULL -- real fast path: returns 0, does not crash.
+ *   [8] CAlphaKeybCtrlTask::ProcessEvent() (2026-07-26 UPDATE, CLocaleManager
+ *       closeout batch: CLocaleManager::AddKeyboardLayout()/GetKeyboardLayout() are
+ *       now real, not stubbed -- see locale_manager.h -- so the real Default layout
+ *       genuinely IS found here, real dispatch through mCodeIfc's EvaVTableStub-
+ *       backed vtable, does not crash, returns 1).
  *   [9] CAlphaKeybCtrlTask::SetCtrlCondition() -- direct unit test of the real bit
  *       logic (self-contained, no Api dependency), both down=true and down=false
  *       paths for all 4 recognized keycodes plus the default/unrecognized case.
@@ -170,16 +173,27 @@ int main()
 			check("Exec() returns -1", rc2 == -1);
 		}
 
-		printf("[8] CAlphaKeybCtrlTask::ProcessEvent() -- GetKeyboardLayout() stub "
-		       "returns NULL fast path\n");
+		printf("[8] CAlphaKeybCtrlTask::ProcessEvent() -- real CLocaleManager lookup "
+		       "now succeeds (CLocaleManager closeout batch)\n");
 		{
 			SKeyboardEvt evt;
 			memset(&evt, 0, sizeof(evt));
 			evt.isKeyDown = 1;
 			evt.keycode = 0x1e; /* 'A' scancode-ish, an ordinary (non-sticky) key */
 			int rc2 = task->ProcessEvent(&evt);
-			check("ProcessEvent() returns 0 (layout lookup failed, real fast path)",
-			      rc2 == 0);
+			/* Real: the Default layout (mType == 0x8409) is genuinely in the
+			 * CLocaleManager singleton's shared list by now (every
+			 * CAlphaKeybCtrlTask constructed so far in this test binary,
+			 * including this very `task`, called the now-real
+			 * AddKeyboardLayout() once per built-in layout) -- the lookup
+			 * succeeds for real, so this returns 1 (both ProcessEvent()'s own
+			 * "!valid || mapped sentinel" early return and its full
+			 * mCodeIfc-dispatch tail return the same real literal 1) rather
+			 * than the old stub's "layout lookup failed, return 0" path.
+			 */
+			check("ProcessEvent() returns 1 (real layout lookup succeeds, "
+			      "dispatches without crashing)",
+			      rc2 == 1);
 		}
 	}
 

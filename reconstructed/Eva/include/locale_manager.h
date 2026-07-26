@@ -16,26 +16,36 @@
  * `sm_poInstance`) IS reconstructed for real here (trivial, self-contained).
  *
  * `CKeyboardLayoutManager::AddLayout(CKeyboardLayout*)` (.text+0x08079ba0, 648 bytes)
- * and its 2 `GetLayout()` overloads (.text+0x08079e30, 290 bytes; .text+0x08079f60,
- * 606 bytes) are genuine algorithmic depth -- each manages its own internal
- * `TVector<CKeyboardLayout const*,1>` map with real insert/lookup logic -- correctly
- * OUT OF SCOPE for this batch (same "genuinely disproportionate sub-piece, deferred"
- * bar as `CAlphaKeybIfcTask::ProcessCode()`, alpha_keyb_ifc_task.h). `AddKeyboardLayout()`/
- * `GetKeyboardLayout()` below are declared with their real signatures but Tier-B
- * stub bodies (same "declare real signature, stub body" convention as
- * `CPoller::InitButtons()`/`InitAnalogs()`, poller.h) -- `AddKeyboardLayout()` is a
- * real no-op here (ground truth's own `AddLayout()` is never exercised by any KAT
- * this batch wrote); `GetKeyboardLayout()` always returns NULL, which drives
- * `CAlphaKeybCtrlTask::ProcessEvent()` down its own real, already-handled
- * "layout lookup failed" branch (`uVar5 = 1;` returned, no crash -- same
- * "structurally faithful, quiescent under this reconstruction's own stub"
- * status as `CPoller`'s own `LookupResourceStub`, poller.cpp).
+ * and its `GetLayout(EKeyboardLayout)` overload (.text+0x08079e30, 290 bytes) turned
+ * out fully tractable on a fresh look (2026-07-26, CLocaleManager closeout batch) --
+ * the "genuine algorithmic depth" label above was the same "large raw byte count"
+ * misjudgment this project has now hit repeatedly (`CAlphaKeybCtrl`'s own 4289-byte
+ * ctor, `CPoller::FindRegisteredClient()`'s two 2600-byte wrappers). Both are a plain
+ * `TVector<CKeyboardLayout const*,1>` push_back-with-grow and linear scan
+ * respectively -- see the per-method comments below and locale_manager.cpp for the
+ * full derivation. `GetLayout(char const*)` (.text+0x08079f60, 606 bytes, a second
+ * name-based lookup overload) stays OUT OF SCOPE: no real ground-truth caller reaches
+ * it anywhere in this project's own reconstructed call graph (`CLocaleManager`'s own
+ * public-facing `GetKeyboardLayout()` wraps ONLY the `EKeyboardLayout` overload,
+ * confirmed via `nm -C` -- ground truth's `CLocaleManager` class genuinely never
+ * exposes the string-based lookup at all), not chased further.
  *
  * `CKeyboardLayoutManager` itself is deliberately NOT modeled as a separate C++
- * class here -- since neither of its own real, deep methods is reconstructed,
- * `CLocaleManager` stands in directly for the combined real object (same object
- * identity ground truth's own aliasing already implies), avoiding an empty
- * pass-through class with no purpose of its own.
+ * class here -- `CLocaleManager` stands in directly for the combined real object
+ * (same object identity ground truth's own aliasing already implies), avoiding an
+ * empty pass-through class with no purpose of its own.
+ *
+ * REAL CONSEQUENCE, worth flagging: this closes the loop on
+ * `CAlphaKeybCtrlTask::ProcessEvent()`'s own previously-"structurally faithful,
+ * quiescent" `CLocaleManager::GetKeyboardLayout(0x8409)` call (alpha_keyb_ctrl_task.h)
+ * -- since `AddKeyboardLayout()` is now real too, and `CAlphaKeybCtrlTask`'s own real
+ * ctor genuinely calls it once per built-in layout (including the Default layout,
+ * `kKeyboardLayoutDescs[0]`, whose real `mType == 0x8409`), `GetKeyboardLayout(0x8409)`
+ * now genuinely SUCCEEDS once any `CAlphaKeybCtrlTask` has been constructed (the
+ * layout list lives on this SINGLETON, shared process-wide, not per-task) --
+ * `ProcessEvent()`'s own "layout lookup failed" fast return is no longer the only
+ * reachable path under this reconstruction. See alpha_keyb_ctrl_task.h's own updated
+ * comment and test_alpha_keyb_ctrl.cpp's updated check [8].
  */
 
 #ifndef LOCALE_MANAGER_H
@@ -50,17 +60,41 @@ public:
 	 */
 	static CLocaleManager *GetInstance();
 
-	/* .text+0x08079b40, 13 bytes. Tier-B stub -- real ground truth forwards to
-	 * `CKeyboardLayoutManager::AddLayout()` (648 bytes, out of scope, see header
-	 * comment). No-op here.
+	/* .text+0x08079b40, 13 bytes. Tier A (2026-07-26 CLocaleManager closeout
+	 * batch) -- one-line tail call into `CKeyboardLayoutManager::AddLayout()`
+	 * (.text+0x08079ba0, 648 bytes), now reconstructed for real: a plain
+	 * `TVector<CKeyboardLayout const*,1>` push_back-with-grow, INLINED at its
+	 * own single real call site (no separate MakeCapacity symbol found in the
+	 * disassembly, unlike `CPoller`'s own `CIfcClient*` instantiation). Ground
+	 * truth's own body also carries a compiler-emitted self-aliasing-range
+	 * guard (comparing the address of the STACK-passed `layout` argument
+	 * against the heap-backed `[mBegin,mEnd)` range) -- confirmed dead for
+	 * every real call site on this platform, same "a stack-local source range
+	 * can never alias a heap-allocated backing array" reasoning already
+	 * established for `CPoller::RegisterClient()`'s own analogous guard
+	 * (poller.h); omitted here, not modeled. `layout == NULL` is a real no-op
+	 * (matches ground truth's own leading null check). Growth policy: min 32
+	 * elements then doubling -- the SAME real constant as
+	 * `TVector_CIfcClientPtr_MakeCapacity()` (poller.cpp), confirmed
+	 * independently via THIS function's own disassembly, not assumed from
+	 * that precedent.
 	 */
 	void AddKeyboardLayout(const CKeyboardLayout *layout);
 
-	/* .text+0x08079b50, 13 bytes. Tier-B stub -- real ground truth forwards to
-	 * `CKeyboardLayoutManager::GetLayout(EKeyboardLayout)` (290 bytes, out of
-	 * scope, see header comment). Always returns NULL here -- every real caller
-	 * in this project (`CAlphaKeybCtrlTask::ProcessEvent()`) already has a real,
-	 * well-defined "lookup failed" path for that.
+	/* .text+0x08079b50, 13 bytes. Tier A (2026-07-26 CLocaleManager closeout
+	 * batch) -- one-line tail call into
+	 * `CKeyboardLayoutManager::GetLayout(EKeyboardLayout) const`
+	 * (.text+0x08079e30, 290 bytes), now reconstructed for real: a plain
+	 * linear scan over the same `TVector<CKeyboardLayout const*,1>`, comparing
+	 * each element's own LEADING `unsigned short` field (`CKeyboardLayout`'s
+	 * own `mType`, keyboard_layout.h) against `type`. `CKeyboardLayout` stays
+	 * forward-declared here -- read via a raw leading-`unsigned short` offset,
+	 * same opaque cross-boundary convention this project uses throughout
+	 * (e.g. `CPoller`'s own client `+0x14` reads). Returns the first matching
+	 * element, or NULL if the scan completes with no match (including the
+	 * genuinely-empty-list case, same code path -- ground truth does not
+	 * distinguish "empty" from "not found" here, unlike
+	 * `CPoller::FindRegisteredClient()`'s own distinct -1/0 codes).
 	 */
 	void *GetKeyboardLayout(unsigned int type);
 

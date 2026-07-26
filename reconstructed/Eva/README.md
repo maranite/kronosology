@@ -3172,3 +3172,69 @@ except the pre-existing, already-documented
 `test_client_comm_server` 6-FAIL, unrelated (this batch never touches `src/ipc/*`).
 `tools/build_lenny.sh`: `LINK OK` (re-confirmed after this extension too). Manifest
 485 → 497 of 37,795 (12 new: 6 `CLEDBlinker` methods + 6 `CPoller` handlers/methods).
+
+### CLocaleManager closeout batch (2026-07-26)
+
+Dispatched for a fresh broad `nm -C` sweep (a concurrent agent was working `CPoller`'s
+own last methods the same session -- turned out to be the exact same
+`MsgSetButtonClient`/`MsgSetAnalogClient` pair this batch first investigated
+independently; backed off cleanly once the collision was noticed via git's own
+"modified since read" warning, no code lost on either side). Redirected to
+`locale_manager.h`'s own flagged-but-not-chased deferral: `CKeyboardLayoutManager::
+AddLayout(CKeyboardLayout const*)` (648 bytes) and `GetLayout(EKeyboardLayout) const`
+(290 bytes), previously labeled "genuine algorithmic depth" by the
+`CAlphaKeybCtrl`/`CAlphaKeybCtrlTask` unlock batch.
+
+That label was the same "large raw byte count" misjudgment this project keeps
+re-finding (`CAlphaKeybCtrl`'s own 4289-byte ctor, `CPoller::FindRegisteredClient()`'s
+two ~2600-byte wrappers, `CLEDBlinker`'s "bigger than fits a small-handler sweep"
+flag): both functions are GCC's own Duff's-device-unrolled linear-scan idiom over a
+plain `TVector<CKeyboardLayout const*,1>`, no different in kind from every other
+TVector<T,1> instantiation already reconstructed in this project (`CTask::
+mRegisteredIfcs`, `CPoller::mClients`/`CIfcClient` ring). `AddLayout()`'s own growth
+policy (min 32 elements, then doubling) is confirmed via direct disassembly to be the
+SAME real constant as `TVector_CIfcClientPtr_MakeCapacity()` (poller.cpp) -- a second,
+independent instantiation happening to share that exact policy, not assumed from it.
+The growth-and-copy logic is INLINED at `AddLayout()`'s own single real call site (no
+separate `MakeCapacity()` symbol exists for this instantiation, unlike the `CIfcClient*`
+case) -- reconstructed directly inside `CLocaleManager::AddKeyboardLayout()` rather than
+factored into a same-shaped-but-fake extra symbol. A second `GetLayout(char const*)`
+overload (606 bytes, name-based lookup via `strcmp` against each layout's own `+0x402`
+name field) stays confirmed out of scope -- `CLocaleManager`'s own public-facing
+`GetKeyboardLayout()` wraps ONLY the `EKeyboardLayout` overload; ground truth's
+`CLocaleManager` class genuinely never exposes the string-based lookup at all, and no
+reconstructed caller anywhere in this project reaches `CKeyboardLayoutManager` directly.
+
+Both `CLocaleManager::AddKeyboardLayout()`/`GetKeyboardLayout()` promoted from Tier-B
+no-op stubs to real bodies (`locale_manager.h`/`.cpp`). **Real, worth-flagging
+consequence**: this closes the loop on `CAlphaKeybCtrlTask::ProcessEvent()`'s own
+previously "structurally faithful, quiescent" `GetKeyboardLayout(0x8409)` call
+(`alpha_keyb_ctrl_task.h`) -- since the ctor's own real `AddKeyboardLayout()` calls
+(one per built-in layout, including the Default layout whose real `mType == 0x8409`)
+are no longer no-ops, the lookup now genuinely SUCCEEDS once any `CAlphaKeybCtrlTask`
+has been constructed (the layout list lives on `CLocaleManager`'s own process-wide
+singleton, not per-task) -- `ProcessEvent()`'s "layout lookup failed" fast return is no
+longer the only reachable path under this reconstruction. Both outcomes still return
+the same literal (1) either way, so this is a real behavioral change in code PATH
+taken, not in any return value contract. `test_alpha_keyb_ctrl.cpp`'s existing check
+`[8]` updated accordingly (was asserting the old stub's `rc2 == 0`, now asserts the
+real `rc2 == 1`).
+
+While correcting this, also found and fixed a genuine gap in
+`manifest/gen_manifest.py`: `CLocaleManager`'s own ctor/`GetInstance()`/both wrapper
+methods were ALREADY Tier A (from the earlier `CAlphaKeybCtrl` unlock batch) but had
+never actually been added to the `RECONSTRUCTED` address set -- corrected alongside
+this batch's own 2 new real addresses.
+
+New KAT: `verify/test_locale_manager.cpp` (12 checks, fully standalone against a
+hand-zeroed non-singleton `CLocaleManager`-shaped buffer so it can't interact with
+whatever the process-wide singleton already holds from other verify binaries' own
+construction of `CAlphaKeybCtrlTask` instances) -- `AddKeyboardLayout(NULL)` no-op,
+first-push min-32 capacity, linear-scan find/not-found, the real 32→64 doubling grow
+with every previously-pushed element's identity preserved across the copy.
+`test_alpha_keyb_ctrl.cpp`'s check `[8]` updated (see above). `make -k verify`: 0 new
+regressions (only the pre-existing, already-documented
+`eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md` 6-FAIL, confirmed
+unrelated -- this batch never touches `src/ipc/*`). `tools/build_lenny.sh`: `LINK OK`.
+Manifest 497 → 503 of 37,795 (6 new: `CLocaleManager` ctor/`GetInstance()`/2 wrappers +
+`CKeyboardLayoutManager::AddLayout()`/`GetLayout(EKeyboardLayout)`).

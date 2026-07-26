@@ -985,6 +985,22 @@ RECONSTRUCTED = {
     "089f25e0",  # CPoller::FindRegisteredClient(char const*, char const*) const
     "089f0470",  # CPoller::MsgGetClientHandleByRef(CMessage&) const
     "089f0f00",  # CPoller::MsgGetClientHandleByVal(CMessage&) const
+
+    # --- 2026-07-26 (CLocaleManager closeout batch): CLocaleManager's own ctor/
+    # GetInstance()/wrappers were already Tier A (alpha_keyb_ctrl_task.h's own
+    # CLocaleManager writeup, same-day earlier batch) but never actually added to
+    # this manifest -- correcting that gap here. AddLayout()/GetLayout(EKeyboardLayout)
+    # (previously "genuine algorithmic depth", locale_manager.h) turned out to be the
+    # same "size is not depth" misjudgment this project keeps re-finding -- a plain
+    # TVector<CKeyboardLayout const*,1> push_back-with-grow and linear scan,
+    # reconstructed for real this batch (locale_manager.cpp). GetLayout(char const*)
+    # (08079f60) stays out of scope -- no real caller anywhere in this project.
+    "08079ab0",  # CLocaleManager::CLocaleManager()
+    "08079ad0",  # CLocaleManager::GetInstance()
+    "08079b40",  # CLocaleManager::AddKeyboardLayout(CKeyboardLayout const*)
+    "08079b50",  # CLocaleManager::GetKeyboardLayout(EKeyboardLayout) const
+    "08079ba0",  # CKeyboardLayoutManager::AddLayout(CKeyboardLayout const*)
+    "08079e30",  # CKeyboardLayoutManager::GetLayout(EKeyboardLayout) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
