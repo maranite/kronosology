@@ -1132,6 +1132,46 @@ RECONSTRUCTED = {
     # own real, definitive ground-truth caller, panel.h, is fully real too).
     "089f4830",  # CPoller::InitButtons()
     "089f3c80",  # CPoller::InitAnalogs()
+
+    # --- Bookkeeping fix (2026-07-26): backfills 3 prior commits (4fd12a5, 5960feb,
+    # e11eaa4) that reconstructed real functions but never updated this manifest.
+
+    # 4fd12a5 -- CDirEntry's 9 non-virtual predicate/accessor methods +
+    # HasValidLongNameExt() (the real vtable-slot-2 target GetName()/GetExt()
+    # dispatch through). See include/dir_entry.h.
+    "08072660",  # CDirEntry::IsEmpty() const
+    "08072670",  # CDirEntry::IsDeleted() const
+    "08072680",  # CDirEntry::IsReserved() const
+    "08072650",  # CDirEntry::IsLabel() const
+    "08072640",  # CDirEntry::IsDir() const
+    "080726d0",  # CDirEntry::IsParentDir() const
+    "080726f0",  # CDirEntry::IsCurrentDir() const
+    "08071500",  # CDirEntry::HasValidLongNameExt() const (real vtable slot 2 target)
+    "080723b0",  # CDirEntry::GetName() const
+    "080723e0",  # CDirEntry::GetExt() const
+
+    # 5960feb -- broad Tier-B recheck sweep, 6 small forwarders/setters promoted
+    # Tier B -> Tier A. (CScheduler::Enable's own address, 08063120, was already
+    # tracked above -- only its return-type fidelity changed, not its address.)
+    "080631c0",  # CScheduler::EnableUpdate(int)
+    "0806b3a0",  # CSysApiInstance::EnableMultiTask(int)
+    "0806aa00",  # CSysApiInstance::WriteMessageToHost(int, int)
+    "0805afb0",  # CErrorHandler::EnableUpdate(int)
+    "0806ce80",  # CTracer::EnableUpdate(int) (ckernel.cpp file-local class)
+    "0804d200",  # HAL_GetSystemTime()
+
+    # e11eaa4 -- CNotifyList, a whole previously-unmodeled small class (7 named
+    # methods, 9 addresses since both D1/D0 dtors are separate symbols, same
+    # convention as every other class in this manifest). See include/notify_list.h.
+    "08070c40",  # CNotifyList::CNotifyList()
+    "08070b40",  # CNotifyList::~CNotifyList() [D1]
+    "08070b60",  # CNotifyList::~CNotifyList() [D0, deleting]
+    "08071000",  # CNotifyList::Put(unsigned char, unsigned char, unsigned char)
+    "080710e0",  # CNotifyList::GetList()
+    "08071120",  # CNotifyList::ReleaseList(SNotifyEvent*, SNotifyEvent*)
+    "08071160",  # CNotifyList::ReleaseList(SNotifyEvent*)
+    "08070e60",  # CNotifyList::GrowEventsList()
+    "08070bb0",  # CNotifyList::PostKernelDestructor(unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

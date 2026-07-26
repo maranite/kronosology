@@ -3447,3 +3447,17 @@ real too, confirmed by direct re-read of `panel.h` -- no gap anywhere on that ch
 
 Manifest 510 -> 512 of 37,795 (`manifest/gen_manifest.py`'s own address-list additions,
 `089f4830`/`089f3c80`).
+
+## Manifest bookkeeping fix (2026-07-26)
+
+The 3 commits immediately following the `510 -> 512` update above (`4fd12a5` — 10
+`CDirEntry` accessors incl. the real `HasValidLongNameExt()` vtable-slot-2 target;
+`5960feb` — 6 small Tier-B-to-Tier-A promotions (`CScheduler::EnableUpdate`,
+`CSysApiInstance::EnableMultiTask`/`WriteMessageToHost`, `CErrorHandler::EnableUpdate`,
+`CTracer::EnableUpdate`, `HAL_GetSystemTime`); `e11eaa4` — the whole 9-address
+`CNotifyList` class, ctor/dtor(D1+D0)/`Put`/`GetList`/`ReleaseList`x2/
+`GrowEventsList`/`PostKernelDestructor`) each reconstructed real ground-truth functions
+but never touched `manifest/gen_manifest.py`'s own `RECONSTRUCTED` address set — a pure
+bookkeeping gap, not a re-opened RE question. All 25 addresses (verified against each
+commit's own header-comment-documented `.text+0x...` values, no new disassembly needed)
+backfilled in one pass. Manifest 512 -> 555 of 37,795.
