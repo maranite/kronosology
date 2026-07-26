@@ -1222,3 +1222,107 @@ generic-USB-MIDI-class accessory Activate/Deactivate methods
   aliasing (fields accessed via addresses relocated against
   `CSTGDrumPadInterface::sInstance+N`) -- not reproducible in a
   clean-room rebuild regardless of real-HW access.
+
+## Virtual-dispatch-invisibility re-check of remaining bar2_stubs.cpp/bar2_stubs_auth.cpp stubs (2026-07-25) — negative result, no real-HW test applicable
+
+Following the `CClientCommServer` precedent from the Eva side (a real
+class reached ONLY through a `.rodata` vtable-slot relocation, invisible
+to a plain call-site grep), re-checked every remaining stub target in
+`bar2_stubs.cpp`/`bar2_stubs_auth.cpp` (56 resolved C++ method targets,
+including all 10 explicitly named in this batch's briefing --
+`CSTGMonitorMixer::RunMonitors`, `CSTGAudioBusManager::
+MixPerformanceOutputs`, `CSTGControllerRTData::OnPerformanceActivate`,
+`CSTGMidiDispatcher::ResetAllControllers`, `CSTGVoiceAllocator::
+DoPendingMoveVoices`, `CSTGPCMPrecacheManager::AfterProcess`,
+`CSTGHDRMiniModel::Initialize`, `CSTGSlotVoiceData::UpdateGlobalTune`,
+`CSTGPianoModel::RescanPianoTypes`, `CSTGEffectRackVars::Initialize`)
+against ground-truth `OA.ko`'s own relocation table (`readelf -rW`),
+classifying every relocation to each target as `R_386_PC32` (a direct
+call/branch instruction -- what the existing direct-call-site sweeps
+already look for) vs `R_386_32` (a data-pointer reference -- what a
+`.rodata` vtable slot uses, and what a call-site grep on the calling
+code can NEVER find, since the call site itself is just `call
+*offset(%reg)` with no symbol).
+
+**Method validated against a known-real positive control** before
+trusting the negative results: `CSTGProgramSlot::
+ProcessPreviousSVDOnProgramChange`/`CSTGProgramModeProgramSlot::
+ProcessPreviousSVDOnProgramChange` (already-confirmed real vtable slot
+56, sec 10.153/batch 47) show up correctly as `R_386_32` hits in their
+owning `.rel.rodata._ZTV*` COMDAT sections -- confirming the
+address-in-relocated-data-vs-address-in-relocated-code distinction
+correctly separates "called by name" from "reached only by vtable slot"
+before drawing any conclusion from its absence.
+
+**Result: all 10 named targets, and all 56 resolved stub targets checked in
+total, have ZERO `R_386_32` relocations anywhere in the entire binary.**
+Every single relocation to every one of them is `R_386_PC32` -- i.e. in
+ground truth itself, none of these functions are ever reached through a
+vtable slot at all; they are exclusively direct-called. Spot-checked
+several call sites (`CSTGEngine::PostAudioTick()` for `RunMonitors`/
+`MixPerformanceOutputs`, `CSTGGlobal::CompletePerformanceActivation()`
+for `OnPerformanceActivate`, `ProcessOACmd` for `RescanPianoTypes`/
+`AfterProcess`, `setup_stg_daemons` for `HDRMiniModel::Initialize`) and
+confirmed this project's own reconstructed code already calls each one
+from the exact same already-real caller, matching ground truth exactly
+-- these are the SAME callers the prior direct-call-site sweeps already
+found and correctly deferred, not new information.
+
+**Four targets DID show up with real `R_386_32` (vtable-slot) hits, and
+each was individually investigated to rule out the `CClientCommServer`
+pattern (an already-real, already-populated, already-dispatched-through
+vtable reaching an unreconstructed callee):**
+
+1. **`CSTGParamsOwner::ValidateParamChange`/`UseDefaults`** -- 303/22
+   `R_386_32` hits respectively, one per derived class across the ENTIRE
+   effects/voice-model/params-owner hierarchy (~300 classes never
+   override either method). Both ARE genuinely, currently dispatched
+   through in this project's own real code -- `CSTGGlobal::
+   ValidateParamChange()`/`UseDefaults()` (global.cpp) each do a real
+   `reinterpret_cast<CSTGParamsOwner*>(this)->ValidateParamChange(...)`/
+   `->UseDefaults()`, a genuine C++ virtual call (not a hand-crafted raw
+   vtable-slot dispatch) that the compiler resolves through
+   `_ZTV10CSTGGlobal`'s own (correctly, compiler-generated, non-
+   placeholder) vtable slot straight back to the already-real stub
+   bodies in `bar2_stubs.cpp`. This is not new: the reconstruction
+   already models it faithfully via real C++ inheritance, already
+   reaches the already-real stub, and was already the documented
+   caller. The 303/22-way fan-out from the wider effects hierarchy adds
+   no new caller -- every one of those derived classes' own vtables in
+   THIS project (`_ZTV11CSTGProgram`/`_ZTV9CSTGCombi`/
+   `_ZTV17CSTGCommonStepSeq`/etc.) are confirmed zero-filled placeholders
+   that nothing currently dispatches through (re-verified fresh, not
+   just trusting the batch-43/44 note -- `SetAudioInSolo()`'s own
+   sec-57 comment shows this project DOES already check for exactly
+   this kind of live dispatch when it matters, e.g. its own real
+   `CSTGPerformance` vtable-slot-27 dispatch, confirmed-dead only
+   because ground truth's own slot resolves to `__cxa_pure_virtual`).
+2. **`CKorgPreloadFile::Load()`** -- 2 `R_386_32` hits
+   (`_ZTV16CKorgPreloadFile`/`_ZTV17CKorgProgBankFile`, both real
+   in this project, batch 54). Not new: `Load()` only has ONE real
+   caller anywhere (`CSTGGlobal::InitializePerformances()`,
+   `init_performances.cpp:121`, `if (!file.Load())` on a concrete,
+   stack-local `CKorgProgBankFile`) and that caller is already
+   reconstructed, already known, already deliberately deferring this
+   exact callee -- the vtable slot existing (because `~CKorgPreloadFile()`
+   is virtual, dragging `Load()` into the same vtable) is irrelevant
+   since the one real call site binds to the concrete type regardless.
+3. **`CSTGExtMIDIClockSync::ProcessClock()`** -- 1 `R_386_32` hit,
+   already flagged in this file's own bar2_stubs.cpp comment
+   ("nothing in this project dispatches through this vtable yet") --
+   re-verified true, no new caller found.
+
+**No promotions made. Zero code changes this session** (pure
+cross-check, matching the discipline of `stub_caller_reachability_
+sweep_2026-07-25.md`'s own prior audit pass). This is a genuine,
+cross-validated negative result: two independent techniques (direct-
+call-site grep, and now ground-truth vtable-relocation analysis) agree
+that OA.ko's remaining structural/hardware-integration stub backlog
+holds no `CClientCommServer`-style hidden reachability gap. Everything
+still deferred is deferred for the reasons already on record (audio-DSP
+scope, filesystem I/O scope, or genuinely larger new-class
+infrastructure than a single pass affords) -- not because anyone missed
+a caller.
+
+No real-HW test applies to this entry -- it is a pure static-analysis
+cross-check with no behavioral claim to verify on hardware.
