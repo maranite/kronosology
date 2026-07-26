@@ -748,15 +748,19 @@ RECONSTRUCTED = {
     # CEditor::Setup()'s "ALPHAKEYBOARD=Yes" fan-out targets, previously flagged
     # "NOT tractable" by the dedicated CEditor batch above -- re-investigated and
     # found genuinely tractable (CEditable is a real, top-level, non-nested class,
-    # not part of the CEditor namespace). Reconstructed standalone, deliberately
-    # NOT wired into editor.cpp/editor.h to avoid the concurrent CEditor/
-    # CPanelIfcTask work this session -- see alpha_keyb_ifc_task.h's own header
-    # comment. ProcessCode (08245960, 963 bytes) stays a Tier-B stub (genuine
-    # per-keycode dispatch depth, same bar as CEditor::CMainTask::Exec()).
+    # not part of the CEditor namespace). Reconstructed standalone this pass;
+    # WIRED into editor.cpp's Setup()/Start() by a later pass (2026-07-26,
+    # eva_alphakeyb_ifc_wiring or similar note -- see README) once
+    # CConfigManager::CreateUserModules() was confirmed live (config_info.cpp's
+    # real "EditorClass" row passes literal "ALPHAKEYBOARD=Yes", so this branch
+    # is genuinely taken on the real boot path, not a dead condition). ProcessCode
+    # (08245960, 963 bytes) stays a Tier-B stub (genuine per-keycode dispatch
+    # depth, same bar as CEditor::CMainTask::Exec()).
     "0806e310",  # CEditable::CEditable(CEditServer*)
     "0806e320",  # CEditable::AddDescriptorsMap(CObjectBase*, SDescriptor*, bool)
     "08245e10",  # CAlphaKeybIfcTask::CAlphaKeybIfcTask(CEditor const&)
     "08245d40",  # CAlphaKeybIfcTask::~CAlphaKeybIfcTask() [D1]
+    "08245eb0",  # CAlphaKeybIfcTask::Setup() -- literal 1-byte `ret`, wired into CEditor::Start()
 
     # CEditor::CPanelIfcTask dedicated batch (Stage 6, 2026-07-25 --
     # panel_ifc_task.h/.cpp), following the CEditor batch's own "finding for a
@@ -790,6 +794,13 @@ RECONSTRUCTED = {
     # comment on an already-Tier-B CEvBuffersPool method -- re-verified against
     # objdump -dr directly and promoted to Tier A.
     "0807f040",  # CEvBuffersPool::PostKernelDestructor(unsigned long)
+
+    # --- 2026-07-26: CTask::RegisterIfc() finally unblocked -- its own
+    # TVector<SRegisteredIfc,1>::MakeCapacity() dependency (the ONLY thing keeping it
+    # Tier B) transcribed directly from objdump -dr, the first real TVector<T,1>::
+    # MakeCapacity() anywhere in this project. See task.h header comment.
+    "0807ec90",  # CTask::RegisterIfc(CIfcUnknown*)
+    "08182220",  # TVector<CTask::SRegisteredIfc,1>::MakeCapacity(unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -803,11 +814,17 @@ RECONSTRUCTED = {
 # 13 of Mains()'s other 15 registration-shim modules -- see mains.cpp's own Stage 3
 # note). A confirmed, thorough negative result, not a gap in this search.
 
-# CTask::RegisterIfc (0807ec90, 472 bytes) stays NOT in RECONSTRUCTED -- Tier B link-
-# stub only (real signature, empty body): genuinely deep dedup-scan +
-# TVector<SRegisteredIfc,1>::MakeCapacity()-driven append, a TVector<T,1> growth
-# routine this project has never generalized anywhere it appears (ckernel.h's own
-# note). CPoller (29 methods, .text+0x089ef740 ctor) surveyed but NOT pursued --
+# CTask::RegisterIfc (0807ec90, 472 bytes) is NOW in RECONSTRUCTED (2026-07-26, see
+# above) -- this note is stale/superseded, kept only for its own historical context.
+# Its own TVector<SRegisteredIfc,1>::MakeCapacity() dependency (08182220, 539 bytes)
+# is also now reconstructed, task.cpp's own static
+# TVector_SRegisteredIfc_MakeCapacity() helper -- the first TVector<T,1>::
+# MakeCapacity() transcription anywhere in this project (ckernel.h's own
+# "unreconstructed template base" note predates this; sibling instantiations for
+# OTHER element types, e.g. CRTRouterApi::SConnection/CPool::SPool at the same
+# 539-byte size, are each their own separate ground-truth symbol and stay
+# unreconstructed until something actually needs them).
+# CPoller (29 methods, .text+0x089ef740 ctor) surveyed but NOT pursued --
 # genuinely deeper (~1900-byte ctor) than any Tier-A candidate so far, correctly
 # out of scope (its own CTask::SetMask(EMask) dependency is no longer a blocker as
 # of the Stage 6 SetMask/~CTask batch above -- SetMask() itself is now reconstructed,

@@ -68,7 +68,48 @@ struct TaskTestHooks {
 		void **arr = *(void ***)((const unsigned char *)&t + 0x0c + 0x14);
 		return arr[i];
 	}
+	/* mRegisteredIfcs lives at CTask+0x50 (task.h), a raw TVector<SRegisteredIfc,1>
+	 * buffer: +0x4 begin, +0x8 end, +0xc cap. SRegisteredIfc is {key, ifc, unused},
+	 * 12 bytes/element (task.h header comment). */
+	static int RegisteredIfcCount(const CTask &t)
+	{
+		unsigned char *begin = *(unsigned char **)(t.mRegisteredIfcs + 4);
+		unsigned char *end   = *(unsigned char **)(t.mRegisteredIfcs + 8);
+		return (int)((end - begin) / 12);
+	}
+	static int RegisteredIfcCap(const CTask &t)
+	{
+		unsigned char *begin = *(unsigned char **)(t.mRegisteredIfcs + 4);
+		unsigned char *cap   = *(unsigned char **)(t.mRegisteredIfcs + 0xc);
+		return (int)((cap - begin) / 12);
+	}
+	static void *RegisteredIfcKeyAt(const CTask &t, int i)
+	{
+		unsigned char *begin = *(unsigned char **)(t.mRegisteredIfcs + 4);
+		return *(void **)(begin + i * 12);
+	}
+	static void *RegisteredIfcPtrAt(const CTask &t, int i)
+	{
+		unsigned char *begin = *(unsigned char **)(t.mRegisteredIfcs + 4);
+		return *(void **)(begin + i * 12 + 4);
+	}
 };
+
+/* --- fake CIfcUnknown, for CTask::RegisterIfc() checks ---------------------- */
+
+static int g_ifcKeyCalls;
+struct FakeIfc {
+	void *vtbl;
+	void *key; /* per-instance, avoids any cross-instance shared-global races */
+};
+extern "C" void *FakeIfcGetKey(void *self)
+{
+	g_ifcKeyCalls++;
+	return static_cast<FakeIfc *>(self)->key;
+}
+/* Slot index 2 (offset 8) is the only one RegisterIfc() ever dispatches through;
+ * slots 0/1 are never called by reconstructed code, left null. */
+static void *g_fakeIfcVtbl[3] = { 0, 0, (void *)FakeIfcGetKey };
 
 struct ModuleTestHooks {
 	static int TaskCount(const CModule &m)
@@ -331,6 +372,67 @@ int main(void)
 		check("notified module == the task's OWN owner module (&m), not the task "
 		      "itself -- the tail-jmp overwrites the args with (Api, mOwnerModule)",
 		      g_lastNotifiedModule == &m);
+	}
+
+	printf("[7] CTask::RegisterIfc(CIfcUnknown*) + TVector<SRegisteredIfc,1>::"
+	       "MakeCapacity() (2026-07-26) -- real dedup-scan/append/growth\n");
+	{
+		CModule m("RegisterIfcModule");
+		CTask t(m, "RegisterIfcTask", 0, 0, 0x804b);
+
+		/* The ctor's own tail call, `RegisterIfc(mLimiterMan)`, already put ONE
+		 * real entry in mRegisteredIfcs before we get here -- see task.cpp. Every
+		 * count/index below is relative to that baseline, not from scratch.
+		 */
+		int base = TaskTestHooks::RegisteredIfcCount(t);
+		check("ctor's own RegisterIfc(mLimiterMan) call left exactly 1 entry",
+		      base == 1);
+		check("initial capacity is 10 (MakeCapacity(1) takes the <=10 default "
+		      "branch)",
+		      TaskTestHooks::RegisteredIfcCap(t) == 10);
+
+		FakeIfc ifcA; ifcA.vtbl = g_fakeIfcVtbl; ifcA.key = (void *)0x1111;
+		g_ifcKeyCalls = 0;
+		t.RegisterIfc(reinterpret_cast<CIfcUnknown *>(&ifcA));
+		check("new key: count goes base -> base+1",
+		      TaskTestHooks::RegisteredIfcCount(t) == base + 1);
+		check("new key: stored key matches",
+		      TaskTestHooks::RegisteredIfcKeyAt(t, base) == (void *)0x1111);
+		check("new key: stored ifc pointer matches",
+		      TaskTestHooks::RegisteredIfcPtrAt(t, base) == (void *)&ifcA);
+		check("new key: getKey() called exactly twice (scan + append, ground "
+		      "truth calls it twice on the not-found path, not cached)",
+		      g_ifcKeyCalls == 2);
+
+		g_ifcKeyCalls = 0;
+		t.RegisterIfc(reinterpret_cast<CIfcUnknown *>(&ifcA));
+		check("duplicate key: count UNCHANGED (soft-assert-and-return path)",
+		      TaskTestHooks::RegisteredIfcCount(t) == base + 1);
+		check("duplicate key: getKey() called exactly once (found on the scan, "
+		      "no second call)",
+		      g_ifcKeyCalls == 1);
+
+		/* Fill past the initial 10-element capacity to exercise MakeCapacity()'s
+		 * real doubling growth (10 -> 20). base=1 (mLimiterMan) + ifcA already
+		 * used 2 slots; register enough distinct new keys to cross 10 total.
+		 */
+		static FakeIfc extra[10];
+		int countBefore = TaskTestHooks::RegisteredIfcCount(t);
+		for (int i = 0; i < 10; i++) {
+			extra[i].vtbl = g_fakeIfcVtbl;
+			extra[i].key = (void *)(0x2000 + i);
+			t.RegisterIfc(reinterpret_cast<CIfcUnknown *>(&extra[i]));
+		}
+		check("10 more distinct keys: count == countBefore + 10",
+		      TaskTestHooks::RegisteredIfcCount(t) == countBefore + 10);
+		check("capacity doubled 10 -> 20 once count exceeded 10",
+		      TaskTestHooks::RegisteredIfcCap(t) == 20);
+		check("last-appended entry's key matches",
+		      TaskTestHooks::RegisteredIfcKeyAt(t, countBefore + 9) ==
+		          (void *)(0x2000 + 9));
+		check("first ifcA entry (index base) is UNMOVED after growth -- "
+		      "MakeCapacity() copied existing elements into the new block",
+		      TaskTestHooks::RegisteredIfcKeyAt(t, base) == (void *)0x1111);
 	}
 
 	printf("(no crash / no leak under a plain run -- CTask objects in every "

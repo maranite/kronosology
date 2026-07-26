@@ -4,7 +4,14 @@
  * CTask::CTask(...) transcribed from CTask@0807ee80.c (330 bytes). Tier A.
  * CTask::~CTask() transcribed from CTask@0807e350.c (800 bytes, D1). Tier A.
  * CTask::SetMask(int) transcribed from CTask@0807e840.c (40 bytes). Tier A.
- * CTask::RegisterIfc(CIfcUnknown*) is Tier B -- see task.h header comment.
+ * CTask::RegisterIfc(CIfcUnknown*) transcribed directly from `objdump -dr` of
+ * .text+0x0807ec90 (472 bytes) -- now Tier A. See task.h header comment for the full
+ * disassembly trace.
+ * TVector_SRegisteredIfc_MakeCapacity() (below) transcribed from `objdump -dr` of
+ * .text+0x08182220 (539 bytes,
+ * _ZN7TVectorIN5CTask14SRegisteredIfcELi1EE12MakeCapacityEj) -- the first real
+ * TVector<T,1>::MakeCapacity() transcription in this project. See task.h header
+ * comment.
  *
  * Exception-unwind paths the real ctor's/dtor's own try/catch regions cover (malloc/
  * COmegaPtrArray-ctor failure cleanup, and the dtor's own 2 real
@@ -115,12 +122,109 @@ void CTask::Add(COutLink *link)
 	notifyModule(Api, mOwnerModule);
 }
 
-void CTask::RegisterIfc(CIfcUnknown *)
+/* TVector<CTask::SRegisteredIfc,1>::MakeCapacity(unsigned int), .text+0x08182220,
+ * 539 bytes -- see task.h header comment for the full algorithm writeup. `tvec` is
+ * mRegisteredIfcs' own raw byte buffer (same "operate by fixed offset on an opaque
+ * unsigned char[]" convention as every other embedded array in this class):
+ *   tvec+0x0  vtbl (untouched here)
+ *   tvec+0x4  mBegin
+ *   tvec+0x8  mEnd
+ *   tvec+0xc  mCap
+ * `SRegisteredIfc` is a real 12-byte (3-dword) POD element, confirmed by this
+ * function's own element-size arithmetic (see below).
+ */
+static void TVector_SRegisteredIfc_MakeCapacity(unsigned char *tvec, unsigned int n)
 {
-	/* Tier B link-stub. Real body: dedup-scan mRegisteredIfcs (keyed by the passed
-	 * interface's own vtable+8 call) then TVector::MakeCapacity()-driven append --
-	 * see task.h header comment for why this stays out of scope.
+	const unsigned int kElemSize = 12;
+
+	unsigned char *begin = *(unsigned char **)(tvec + 4);
+	unsigned char *cap   = *(unsigned char **)(tvec + 0xc);
+	unsigned int curCapElems = (unsigned int)(cap - begin) / kElemSize;
+	if (n <= curCapElems)
+		return;
+
+	unsigned int newCapElems = 10;
+	if (n > 10) {
+		do {
+			newCapElems *= 2;
+		} while (n > newCapElems);
+	}
+	unsigned int newBytes = newCapElems * kElemSize;
+
+	/* Real: HAL_DisableInterrupts()/HAL_EnableInterrupts() bracket both malloc and
+	 * free below -- not modeled, same established convention as every other HAL_*
+	 * bracket in this project (e.g. out_link.cpp, circ_byte_buffer.cpp).
 	 */
+	void *newBlock = malloc(newBytes);
+
+	unsigned char *oldBegin = *(unsigned char **)(tvec + 4);
+	unsigned char *oldEnd   = *(unsigned char **)(tvec + 8);
+	unsigned int copyBytes = 0;
+	if (oldEnd != oldBegin) {
+		copyBytes = (unsigned int)(oldEnd - oldBegin);
+		/* Real: GCC's own Duff's-device-unrolled (x4, mod-4 prologue switch)
+		 * 12-byte element copy loop -- collapsed to memcpy, identical result
+		 * (SRegisteredIfc is trivially-copyable POD, no side effects to preserve).
+		 */
+		memcpy(newBlock, oldBegin, copyBytes);
+	}
+
+	*(unsigned char **)(tvec + 8) = (unsigned char *)newBlock + copyBytes;
+	free(oldBegin);
+	*(unsigned char **)(tvec + 4) = (unsigned char *)newBlock;
+	*(unsigned char **)(tvec + 0xc) = (unsigned char *)newBlock + newBytes;
+}
+
+void CTask::RegisterIfc(CIfcUnknown *ifc)
+{
+	/* Real body -- see task.h header comment for the full disassembly trace. */
+	typedef void *(*IfcKeyFn)(CIfcUnknown *);
+	void *ifcVtbl = *(void **)ifc;
+	IfcKeyFn getKey = *(IfcKeyFn *)((char *)ifcVtbl + 8);
+
+	/* Called unconditionally, even if mRegisteredIfcs is empty -- ground truth does
+	 * this before the empty check, reproduced faithfully. */
+	void *key = getKey(ifc);
+
+	unsigned char *begin = *(unsigned char **)(mRegisteredIfcs + 4);
+	unsigned char *end   = *(unsigned char **)(mRegisteredIfcs + 8);
+
+	unsigned char *found = 0;
+	for (unsigned char *p = begin; p != end; p += 12) {
+		if (*(void **)p == key) {
+			found = p;
+			break;
+		}
+	}
+
+	if (found) {
+		/* Real: two soft, non-enforcing Api diagnostic calls (vtbl+0x90 with the
+		 * literal string "CTask::RegisterIfc - Error: multiple registration for
+		 * same interface", then vtbl+0x94 with this project's standard soft-assert
+		 * shape -- "Assertion failed in module %s, line %i.\n" / "Task.cpp" / 179)
+		 * -- omitted, same established non-enforcing-diagnostic convention as every
+		 * other Api+0x90/+0x94 call site in this project (ev_buffers_pool.h/
+		 * client_comm_server.h/chunk_man.h/etc.). Real behavior after logging:
+		 * return immediately, array untouched.
+		 */
+		return;
+	}
+
+	/* Not found -- append. Real: ifc->vtbl[2](ifc) called a SECOND time here (a
+	 * fresh call, not the cached `key` above) -- reproduced as-is. */
+	void *key2 = getKey(ifc);
+
+	unsigned char *cap = *(unsigned char **)(mRegisteredIfcs + 0xc);
+	if (end == cap) {
+		unsigned int usedElems = (unsigned int)(end - begin) / 12;
+		TVector_SRegisteredIfc_MakeCapacity(mRegisteredIfcs, usedElems + 1);
+		end = *(unsigned char **)(mRegisteredIfcs + 8);
+	}
+
+	*(void **)end       = key2;
+	*(void **)(end + 4) = ifc;
+	*(void **)(end + 8) = 0;
+	*(unsigned char **)(mRegisteredIfcs + 8) = end + 12;
 }
 
 void CTask::SetMask(int mask)

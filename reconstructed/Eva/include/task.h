@@ -68,8 +68,8 @@
  *                         already read/write
  *   +0x50  mRegisteredIfcs TVector<CTask::SRegisteredIfc,1> (vtbl/begin/end/cap, 0x10
  *                         bytes), vtable-swapped to PTR__TVector_08e82188 (2 slots),
- *                         begin/end/cap zeroed -- grown by RegisterIfc() (Tier B, see
- *                         below)
+ *                         begin/end/cap zeroed -- grown by RegisterIfc() (now Tier A,
+ *                         see below)
  *   +0x60  mLimiterMan    embedded CLimiterMan (limiter_man.h, 0x18 bytes),
  *                         placement-constructed with `this` as owner
  *   +0x78  mPeriod        unsigned short, ctor sets 1 -- CLevelManager::RunLevel()'s
@@ -95,16 +95,85 @@
  * This closes the loop batch 5's own AdjustTaskMask() writeup left open ("re-enable
  * un-mask every one of a module's own tasks" -- now confirmed to mean exactly this).
  *
- * `RegisterIfc(CIfcUnknown*)` (.text+0x0807ec90, 472 bytes) is Tier B: real signature,
- * empty body. Real behavior is a linear dedup scan over mRegisteredIfcs (keyed by a
- * virtual call through the passed interface's own vtable+8, presumably a
- * GetInterfaceId()-shaped method) followed by a TVector::MakeCapacity()-driven
- * push_back -- genuinely deep (MakeCapacity alone is 539 bytes, a TVector<T,1> growth
- * routine this project has never generalized -- ckernel.h's own note that
- * `TVector<?>` stays an "unreconstructed template base" throughout this project
- * applies here too) and CIfcUnknown itself (the interface RegisterIfc's argument is
- * typed as) is not reconstructed. Left Tier B rather than fabricating a growth routine
- * this project has consistently deferred everywhere else it appears.
+ * `RegisterIfc(CIfcUnknown*)` (.text+0x0807ec90, 472 bytes) is NOW Tier A (previously
+ * deferred as Tier B pending a real `TVector<T,1>::MakeCapacity()` transcription --
+ * done this pass, see below). Real body, transcribed directly from `objdump -dr`
+ * (Ghidra's own decompile of this one is a GCC Duff's-device/aliasing-check tangle
+ * that resists direct reading -- worked from raw disassembly instead, same as
+ * `CTask::Add()` before it):
+ *
+ *   1. Calls `ifc`'s own vtable+8 (`ifc->vtbl[2](ifc)`, cdecl, this-as-first-arg --
+ *      presumably a `GetInterfaceId()`/`QueryInterface`-shaped method; `CIfcUnknown`
+ *      itself stays opaque, not reconstructed, same as everywhere else it appears in
+ *      this project) to compute a dedup key. Called UNCONDITIONALLY, even when
+ *      mRegisteredIfcs is empty -- reproduced faithfully (not cached across the two
+ *      call sites below) in case the real method has side effects.
+ *   2. Linear scan over mRegisteredIfcs comparing the key against each element's own
+ *      first dword. Real scan is GCC's own 8-way-unrolled Duff's device (a mod-8
+ *      prologue switch computed via the same magic-multiply-divide-by-3 trick
+ *      MakeCapacity() uses below, since element count here is always an exact multiple
+ *      of 3 dwords) -- collapses to a plain linear `for` loop with an identical result.
+ *   3. If found: two Api diagnostic calls (`vtbl+0x90` with the literal string
+ *      `"CTask::RegisterIfc - Error: multiple registration for same interface"`, then
+ *      `vtbl+0x94` with this project's standard soft-assert shape --
+ *      `"Assertion failed in module %s, line %i.\n"` / `"Task.cpp"` / `179` --
+ *      confirmed by reading both rodata strings directly). Both are the SAME
+ *      non-enforcing, return-value-discarded diagnostic convention already
+ *      established at every other Api+0x90/+0x94 call site in this project
+ *      (`ev_buffers_pool.h`/`client_comm_server.h`/`chunk_man.h`/etc.) -- omitted from
+ *      the reconstructed body for that reason, not guessed. Real behavior after
+ *      logging: return immediately, array untouched (a duplicate registration is
+ *      logged, not rejected or merged).
+ *   4. If not found: calls `ifc->vtbl[2](ifc)` a SECOND time (a fresh call, not the
+ *      cached key from step 1 -- ground truth genuinely does this, reproduced as-is),
+ *      builds a 3-dword `{key, ifc, 0}` element, grows via `MakeCapacity(usedElems+1)`
+ *      if `mEnd == mCap` (i.e. exactly full), then appends and advances `mEnd`.
+ *
+ * This establishes `CTask::SRegisteredIfc`'s real layout for the first time: 3 dwords
+ * (12 bytes) -- `{void *mKey, CIfcUnknown *mIfc, void *mUnused}` (the third dword is
+ * always written 0 and never read back by anything reconstructed here). Confirmed two
+ * independent ways: MakeCapacity()'s own element-count arithmetic (divides byte counts
+ * by 3 dwords, exactly, with no remainder, for every real capacity value exercised),
+ * and this function's own element-copy stride (`lea edx,[edx+0xc]` per scan step,
+ * 3 dword writes per appended element).
+ *
+ * `TVector<CTask::SRegisteredIfc,1>::MakeCapacity(unsigned int)` (.text+0x08182220,
+ * 539 bytes, mangled `_ZN7TVectorIN5CTask14SRegisteredIfcELi1EE12MakeCapacityEj`) is
+ * ALSO now Tier A -- the FIRST full transcription of a `TVector<T,1>::MakeCapacity()`
+ * anywhere in this project (ckernel.h's own longstanding "unreconstructed template
+ * base" note predates this). Implemented as a private static helper in task.cpp
+ * (`TVector_SRegisteredIfc_MakeCapacity`), not a real C++ template -- matching this
+ * project's established convention of manually transcribing each real instantiation
+ * rather than writing a generic template the real compiler never actually emitted
+ * this way (every sibling `TVector<T,1>::MakeCapacity()` in `manifest/eva_functions.csv`
+ * -- `CRTRouterApi::SConnection`/`CPool::SPool` at the same 539-byte size, several
+ * others at 506/542/556/etc. for differently-sized `T` -- is its own separate real
+ * symbol in ground truth, not a shared template instantiation folded by the linker;
+ * this project's OWN reconstruction of any of those would likewise be its own separate
+ * transcription if/when pursued, same as every other class in this codebase).
+ * Real algorithm, confirmed by direct `objdump -dr`:
+ *   - `this` (a raw `unsigned char[0x10]` buffer, same convention as mRegisteredIfcs
+ *     itself) and `n` (requested minimum element count) both arrive as plain stack
+ *     args (GNU cdecl, `this` as an ordinary first parameter -- NOT MSVC thiscall,
+ *     despite `manifest/eva_functions.csv`'s own `__thiscall` label for the row,
+ *     which is just that CSV's generic "non-static member function" tag).
+ *   - Current capacity in elements = `(mCap - mBegin) / 12` (a magic-multiply
+ *     divide-by-3-of-dwords trick, exact because capacity is always an integral
+ *     multiple of 3 dwords). If `n <= current capacity`, return immediately (no-op).
+ *   - Otherwise: minimum capacity is 10 elements; if `n > 10`, double repeatedly
+ *     (10, 20, 40, 80, ... ) until `>= n` -- GCC unrolls this 8-doublings-per-block
+ *     with a loop-back for very large `n`, collapses to a plain `do {} while` here.
+ *   - `malloc()`s the new block (real: `HAL_DisableInterrupts()`/
+ *     `HAL_EnableInterrupts()`-bracketed, same as `malloc`/`free` everywhere else in
+ *     this project -- not modeled, per this project's established convention), copies
+ *     `[mBegin, mEnd)` into it (real: another GCC Duff's-device unrolled-by-4 copy
+ *     loop with its own mod-4 prologue switch, byte-identical result to a plain
+ *     `memcpy` since `SRegisteredIfc` is trivially-copyable POD -- collapsed here),
+ *     `free()`s the old block, and installs the new `mBegin`/`mEnd`/`mCap`.
+ *
+ * `CIfcUnknown` itself (RegisterIfc's argument type) stays not reconstructed --
+ * genuinely out of scope (only its vtable+8 call shape is exercised here, same as
+ * `CLimiterMan`'s own base-class relationship to it, limiter_man.h).
  *
  * `SetMask(EMask)` (.text+0x0807e840, 40 bytes) IS reconstructed (Stage 6 SetMask/
  * ~CTask batch, 2026-07-25 -- CSysExMsgTaskBase's own real dependency, see
@@ -236,7 +305,7 @@ public:
 	 */
 	void SetMask(int mask);
 
-	/* .text+0x0807ec90, 472 bytes. Tier B -- see header comment. */
+	/* .text+0x0807ec90, 472 bytes. Tier A -- see header comment / .cpp. */
 	void RegisterIfc(CIfcUnknown *ifc);
 
 	/* .text+0x0807e870, 59 bytes. Tier A -- see header comment / .cpp. Real
