@@ -16,14 +16,22 @@
  *          independent 7-slot vtable, shared with mains.cpp's own RMApiInstance
  *          ctor), then overwritten with the class' own final identity -- see
  *          res_man.cpp / omega_vtables.h.
- *   +0x30  mJob    `CRMJob*`, `malloc(0x54)`'d. Real ctor also calls
- *          `CRMJob::CRMJob()` on it -- NOT reconstructed here (same "Tier-B raw
- *          blob" treatment mains.cpp's own RMApiInstance ctor already uses for
- *          the same class: `CRMJob::CRMJob()` needs 2 embedded `CZ` objects,
- *          the same 247-method "CZ string-set container" dependency
- *          `CConfigManager::CreateResourceFamilies()` already defers project-wide
- *          -- see config_manager.h). This ctor therefore matches that precedent:
- *          malloc, store the pointer, do NOT call the (unimplemented) real ctor.
+ *   +0x30  mJob    `CRMJob*`, `malloc(0x54)`'d then real-constructed via
+ *          `CRMJob::CRMJob()` (confirmed via direct disassembly of
+ *          CResMan::CResMan(), .text+0x081523a0: `call malloc@plt` immediately
+ *          followed by `call CRMJob::CRMJob()` on the fresh block, HAL_Disable/
+ *          EnableInterrupts-wrapped, dropped per this project's usual
+ *          convention). UPDATE (Eva "size is not depth" re-check batch,
+ *          2026-07-26): previously left as a raw untyped `void*`/`malloc`-only
+ *          Tier-B stub because `CRMJob::CRMJob()` itself depended on the
+ *          247-method `CZ` string-set container -- that blocker was resolved
+ *          the same batch (`cz_util.h` gained an opaque `CZ(unsigned)`/`~CZ()`
+ *          sufficient for placement, `rm_job.h`'s `CRMJob::CRMJob()` is now a
+ *          real reconstructed body). This ctor now matches ground truth
+ *          exactly: malloc, then placement-construct the real `CRMJob`. Note
+ *          `mains.cpp`'s own `RMApiInstance` ctor still uses the old raw-blob
+ *          treatment for its own, separate `CRMJob*` -- that one is unrelated
+ *          to this fix and was not touched this pass.
  *   +0x34..+0x74  mUnknown34[0x40]  13 undecoded int/byte scalars the real ctor
  *          writes at fixed offsets within this range (-1 at +0x34, 3 bytes of
  *          0xff at +0x68..+0x6a, 0 everywhere else observed) -- real per-field
@@ -57,6 +65,7 @@
 #include "module.h"
 #include "omega_ptr_array.h"
 #include "chunk_on_demand.h"
+#include "rm_job.h"
 
 class CResMan : public CModule {
 public:
@@ -77,12 +86,14 @@ public:
 
 private:
 	void            *mCallbackVtbl;
-	void            *mJob;
+	CRMJob          *mJob;
 	unsigned char    mUnknown34[0x40];
 	int              mResultCount;
 	COmegaPtrArray   mResults;
 	CChunkOnDemand   mChunks[257];
 	unsigned char    mTail[0x21a0 - 0x20b0];
+
+	friend struct ResManTestHooks;
 };
 
 #endif /* RES_MAN_H */

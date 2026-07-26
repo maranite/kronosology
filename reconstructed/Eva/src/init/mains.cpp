@@ -891,9 +891,13 @@ static void ConstructRTRouterApiInstance()
  * outlier in this group of 7: constructs a real sub-object (CRMJob, malloc(0x54)) in
  * the middle, and its own vtable is written twice (a transient CRMApi/CRMApiCallBack
  * pair, then overwritten with the final, real CRMApiInstance/DAT_08e88d80 pair) --
- * transcribed exactly as found. CRMJob::CRMJob() itself is Tier-B (not
- * reconstructed, raw opaque blob only, same treatment as CTracer/CErrorHandler in
- * ckernel.cpp).
+ * transcribed exactly as found. UPDATE (Eva "size is not depth" re-check batch,
+ * 2026-07-26): `CRMJob::CRMJob()` is now real (rm_job.h -- its own `CZ`-container
+ * blocker was resolved this same batch), and direct disassembly of this exact
+ * function (.text+0x08165f70) confirms `call malloc@plt` is immediately followed by
+ * `call CRMJob::CRMJob()` on the fresh block (HAL_Disable/EnableInterrupts-wrapped,
+ * dropped per this project's usual convention) -- so this is placement-constructed
+ * for real now too, matching `CResMan::CResMan()`'s identical fix (res_man.cpp).
  */
 __attribute__((constructor))
 static void ConstructRMApiInstance()
@@ -902,7 +906,8 @@ static void ConstructRMApiInstance()
 	*(void **)RMApiInstance = &PTR__CRMApi_08e88de8;
 	*(void **)(RMApiInstance + 4) = &PTR__CRMApiCallBack_08e886e8;
 
-	void *job = malloc(0x54); /* CRMJob -- Tier-B, uninitialized raw blob */
+	void *job = malloc(0x54);
+	new (job) CRMJob(); /* real CRMJob::CRMJob() -- see header comment above */
 
 	*(void **)RMApiInstance = PTR__CRMApiInstance_08e88c48;
 	*(void **)(RMApiInstance + 4) = &DAT_08e88d80;

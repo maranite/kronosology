@@ -6,6 +6,7 @@
 #include "omega_vtables.h"
 
 #include <cstdlib>
+#include <new>
 
 /* Real class-static global (symbols.csv: CResMan::SysName, 4 bytes, a `const
  * char*`) -- same "opaque, content not decoded" treatment as file_man.cpp's own
@@ -23,15 +24,13 @@ CResMan::CResMan()
 	 */
 	mCallbackVtbl = (void *)PTR__CRMApiCallBack_08e886e8;
 
-	/* CRMJob -- Tier-B, same "malloc but do not construct" treatment as mains.cpp's
-	 * own RMApiInstance ctor (real HAL_DisableInterrupts()/HAL_EnableInterrupts()
-	 * brackets dropped, same established convention as every other kernel-side
-	 * critical section in this userspace reconstruction -- see e.g. scheduler.cpp).
-	 * CRMJob::CRMJob()'s real body constructs 2 embedded CZ objects, and CZ is the
-	 * same 247-method "string-set container" config_manager.h already defers
-	 * project-wide -- not reconstructed here either, for the same reason.
+	/* CRMJob -- real placement-construction (Eva "size is not depth" re-check
+	 * batch, 2026-07-26; see res_man.h's own updated header comment). Real
+	 * HAL_DisableInterrupts()/HAL_EnableInterrupts() brackets dropped, same
+	 * established convention as every other kernel-side critical section in
+	 * this userspace reconstruction -- see e.g. scheduler.cpp.
 	 */
-	mJob = malloc(0x54);
+	mJob = new (malloc(0x54)) CRMJob();
 
 	/* Manual vtable-swap idiom: install this class' own real (final) vtable now
 	 * that CModule's base ctor has finished. The CRMApiCallBack-interface identity

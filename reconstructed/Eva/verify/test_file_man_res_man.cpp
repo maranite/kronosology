@@ -19,7 +19,10 @@
  *       don't touch any field)
  *   [7] CResMan::CResMan(): sizeof == 0x21a0; doesn't crash (no Api dependency at all);
  *       raw-offset spot checks match the real ctor's own writes (+0x34 == -1,
- *       +0x68..+0x6a == 0xff, +0x20b4 TVector vtable installed)
+ *       +0x68..+0x6a == 0xff, +0x20b4 TVector vtable installed); mJob is now a
+ *       REAL placement-constructed CRMJob (Eva "size is not depth" re-check batch,
+ *       2026-07-26), confirmed via CRMJob's own ctor field writes read back through
+ *       ResManTestHooks
  *   [8] CResMan::Start(): confirmed no-op
  */
 
@@ -119,6 +122,14 @@ static FakeApiObj g_fakeApi;
 static int I32(const void *obj, int off) { return *(const int *)((const char *)obj + off); }
 static unsigned char U8(const void *obj, int off) { return *((const unsigned char *)obj + off); }
 static void *PTR(const void *obj, int off) { return *(void *const *)((const char *)obj + off); }
+
+/* Friend accessor for CResMan::mJob -- Eva "size is not depth" re-check batch,
+ * 2026-07-26. Lets this KAT confirm mJob now points at a REAL, placement-
+ * constructed CRMJob (rm_job.h) rather than raw malloc() garbage.
+ */
+struct ResManTestHooks {
+	static CRMJob *Job(CResMan *rm) { return rm->mJob; }
+};
 
 int main()
 {
@@ -273,6 +284,18 @@ int main()
 		      PTR(rm, 0x20b4) == (void *)PTR__TVector_08e88ba8);
 		check("10th TVector<CResEntryEx,1> vtbl installed at +0x218c",
 		      PTR(rm, 0x218c) == (void *)PTR__TVector_08e88ba8);
+
+		/* mJob -- now real-constructed (Eva "size is not depth" re-check batch,
+		 * 2026-07-26): CRMJob::CRMJob()'s own real field writes (rm_job.h) must
+		 * show up inside the malloc'd block, not just a non-NULL pointer.
+		 */
+		CRMJob *job = ResManTestHooks::Job(rm);
+		check("mJob non-NULL", job != 0);
+		check("mJob->+0x40..+0x42 == 0xff (CRMJob ctor sentinel triple)",
+		      U8(job, 0x40) == 0xff && U8(job, 0x41) == 0xff && U8(job, 0x42) == 0xff);
+		check("mJob->+0x44 == -1 (CRMJob ctor)", I32(job, 0x44) == -1);
+		check("mJob->+0x48 == 0 (CRMJob ctor)", I32(job, 0x48) == 0);
+		check("mJob->+0x50 == 1 (CRMJob ctor)", I32(job, 0x50) == 1);
 
 		/* --- [8] Start() confirmed no-op --- */
 		printf("[8] CResMan::Start() (confirmed empty)\n");

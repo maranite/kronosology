@@ -112,7 +112,10 @@ RECONSTRUCTED = {
     "080cb9e0",  # MMainChunkMan
     "0807fbe0",  # MMainRTRouter
     "080cf850",  # MMainDumpMan
-    "08160db0",  # MMainResMan (wrapper faithful; CResMan::CResMan itself is Tier-B)
+    "08160db0",  # MMainResMan (wrapper faithful; CResMan::CResMan itself is Tier-A
+                 # since the Stage 6 CFileMan/CResMan ctor batch, 2026-07-25 -- this
+                 # comment was stale, see "081523a0" below and the 2026-07-26 mJob
+                 # follow-up fix further down)
 
     # --- Api/SysApiInstance crash fix (2026-07-23): the real mechanism behind Api's
     # own value, found via a live kronos_vm boot test hitting a NULL dereference in
@@ -995,6 +998,27 @@ RECONSTRUCTED = {
     "0818f210",  # CRMApiCallBack::OnLoad(CRMApiCallBack::ERMResult) -- confirmed empty
     "0818f220",  # CRMApiCallBack::OnSave(CRMApiCallBack::ERMResult) -- confirmed empty
     "0818f230",  # CRMApiCallBack::OnDelete(CRMApiCallBack::ERMResult) -- confirmed empty
+
+    # --- 2026-07-26 (Eva "size is not depth" 4-class re-check follow-up, same batch
+    # as CRMJob/CDirEntry/COutLinkMulti above): CRMJob::CRMJob() being made real
+    # unblocked two ALREADY-counted addresses that had stale "malloc but do not
+    # construct" Tier-B annotations -- no new addresses added here, just fidelity
+    # fixes to entries already in this set:
+    #   "081523a0" CResMan::CResMan() -- mJob is now placement-constructed via the
+    #     real CRMJob::CRMJob() (confirmed via direct disasm: malloc@plt immediately
+    #     followed by call CRMJob::CRMJob()), not a raw untyped malloc'd blob.
+    #   "08165f70" global.constructors.keyed.to.RMApiInstance -- same fix, same
+    #     confirmed disasm pattern, for its own separate CRMJob instance.
+    # Checked (via ghidra full disasm + symbols.csv) whether CDirEntry's other ~38
+    # methods, CRMJob::Reset()/CopyObject()/operator=/copy-ctor, or COutLinkMulti's
+    # CheckDestinationFamily/OnConnect/OnDisconnect/OnCreateLink/OutMulti(x4) had any
+    # newly-tractable real caller -- confirmed ZERO direct call sites anywhere in the
+    # 22MB binary for all of the COutLinkMulti/CRMJob candidates (only reachable via
+    # TVector<CRMJob,1>-driven CJobStack machinery or an un-traced vtable dispatch,
+    # both already-documented out-of-scope dependencies); CDirEntry's one in-project
+    # caller (CBatchDiskMainTask::PreloadDir(), 0xc3c/3132 bytes) is itself still
+    # Tier-B and disproportionately large, so none of its sibling accessors were
+    # promoted either. See LESSON_vtable_dispatch_stub_gap.md's own re-check.
 
     # --- 2026-07-26 (CLEDBlinker/CPoller final-prerequisites follow-up batch):
     # new CLEDBlinker class (led_blinker.h/.cpp) -- the smallest "whole new class"
