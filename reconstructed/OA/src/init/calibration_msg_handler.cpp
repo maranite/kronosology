@@ -671,14 +671,33 @@ void CSTGCalibrationMsgHandler::ResetDamper()
  * anything above 0x11 unsigned is a plain no-op return -- matches
  * `sCalibrationOp` never legitimately exceeding 0x12, and even 0x12
  * itself lands on the no-op entry):
- *   {1,4,0xb}   -> real `success` param determines the reply (0/-1)
- *   {2,5,0xc}   -> reply is unconditionally success (0), `success` ignored
- *   {0x11}      -> forces success=true, falls into the 0x10 body
- *   {0x10}      -> the confirmed aftertouch-specific NKS4TestMode/
- *                  HandleAnalogController dispatch (byte-identical
- *                  constants -- deviceCode=7, param2=0, param3=0x3ff --
- *                  to EndAftertouchCalibration's own equivalent block),
- *                  then reply is unconditionally success (0)
+ *   {1,4,0xb}   -> jump target 0xded50: falls straight into the shared
+ *                  tail (0xded02) with `esi` (the real `success` param,
+ *                  untouched) still live -> reply is `success ? 0 : -1`.
+ *   {2,5,0xc}   -> jump target 0xded38: explicitly `xor eax,eax` BEFORE
+ *                  jumping into the tail's mid-point (0xded12), bypassing
+ *                  the `esi`-based sbb computation entirely -> reply is
+ *                  unconditionally success (0), `success` genuinely
+ *                  ignored (confirmed real, not a modeling shortcut).
+ *   {0x11}      -> jump target 0xdecd0: `mov esi,1` (forces success=true)
+ *                  BEFORE falling into the SAME body as 0x10 below --
+ *                  this makes 0x11's reply unconditionally success (0)
+ *                  as a SIDE EFFECT of forcing esi=1, not because the
+ *                  shared tail special-cases it.
+ *   {0x10}      -> jump target 0xdecd5: the confirmed aftertouch-specific
+ *                  NKS4TestMode/HandleAnalogController dispatch
+ *                  (byte-identical constants -- deviceCode=7, param2=0,
+ *                  param3=0x3ff -- to EndAftertouchCalibration's own
+ *                  equivalent block), then falls into the SAME shared
+ *                  tail (0xded02) as {1,4,0xb} with `esi` STILL the real
+ *                  `success` param (nothing here forces it to 1) -- so
+ *                  the reply genuinely IS `success ? 0 : -1` for this
+ *                  state, exactly like {1,4,0xb}, NOT forced to 0.
+ *                  (A prior pass here had this as "unconditionally
+ *                  success (0)", conflating it with 0x11's forced-esi
+ *                  side effect -- fixed 2026-07-27 after re-tracing
+ *                  0xdecd5->0xded02 instruction-by-instruction and
+ *                  finding no `xor eax,eax`/`mov esi,...` between them.)
  *   everything else -> plain no-op return, no reply sent
  */
 void CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult(bool success)
@@ -701,7 +720,7 @@ void CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult(bool success)
 			SendUnsolCalibrationMsg(7, 0x3ff, 0);
 		else if (IsActivePerfVarsInFocus())
 			CSTGFrontPanel::sInstance->HandleAnalogController(7, 0, 0x3ff);
-		SendReply(0);
+		SendReply(success ? 0 : -1);
 		return;
 	default:
 		return;

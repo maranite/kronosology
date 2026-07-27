@@ -285,6 +285,28 @@ int main()
 	check_eq("param3 == 0x3ff", g_hacParam3, 0x3ff);
 	check_eq("reply.result == 0", g_lastReply.result, 0);
 
+	printf("[17b] HandleKeybedCalibrationResult -- state 0x10 (aftertouch END ack, NOT cancel): "
+	       "reply tracks the real `success` param (regression test for a 2026-07-27 fix -- a "
+	       "prior pass had this hardcoded to always reply 0, conflating it with 0x11's forced-"
+	       "success side effect; ground truth's own shared tail (0xded02) reads `esi`, which is "
+	       "untouched -- i.e. the real `success` param -- for state 0x10, unlike state 0x11 which "
+	       "forces esi=1 first)\n");
+	SetNKS4TestMode(false);
+	CSTGCalibrationMsgHandler::StartAftertouchCalibration();  /* op=0xf */
+	CSTGCalibrationMsgHandler::EndAftertouchCalibration();    /* keybed-hw path -> op=0x10 */
+	ResetMockCounters();
+	CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult(false);
+	check_eq("HandleAnalogController called", g_hacCalls, 1);
+	check_eq("deviceCode == 7", g_hacDevice, 7);
+	check_eq("param3 == 0x3ff", g_hacParam3, 0x3ff);
+	check_eq("reply.result == -1 (success=false propagated, NOT forced to 0)", g_lastReply.result, -1);
+
+	CSTGCalibrationMsgHandler::StartAftertouchCalibration();
+	CSTGCalibrationMsgHandler::EndAftertouchCalibration();    /* op=0x10 again */
+	ResetMockCounters();
+	CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult(true);
+	check_eq("reply.result == 0 (success=true)", g_lastReply.result, 0);
+
 	printf("[18] HandleKeybedCalibrationResult -- out-of-range/idle state (0x12): plain no-op, no reply\n");
 	ResetMockCounters();
 	CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult(true);

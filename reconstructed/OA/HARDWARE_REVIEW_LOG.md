@@ -9,6 +9,70 @@ Format: `## <fn/topic>` + what's uncertain + what real-HW test would confirm.
 
 ---
 
+## CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult — real bug fixed 2026-07-27 (state 0x10 reply polarity)
+
+Found during a targeted correctness re-audit (not live-boot serendipity),
+following the 2026-07-27 dynamic-testing session that found the
+literal-vs-relocation and `.ctors`-vs-`.init_array` bug classes elsewhere in
+OA.ko (see `SESSION_SUMMARY_2026-07-25.md`'s 2026-07-27 section). Since
+`CSTGCalibrationMsgHandler` has never actually been live-boot-tested (no
+construction call site exists anywhere in this project yet — confirmed
+separately via the 2026-07-27 `oa_vtable_check.ko` sweep), this was pure
+static re-verification: re-tracing `HandleKeybedCalibrationResult`'s real
+18-entry `.rodata+0x4b31c` jump table instruction-by-instruction against
+`/home/share/Decomp/OA.ko_Decomp/OA.ko` (`objdump -dr`, table dumped via
+`objdump -s -j .rodata`).
+
+**The bug**: the original reconstruction (`bc06fdd`) had jump-table states
+`{2,5,0xc}` (which explicitly force `xor eax,eax` before their shared
+message-building tail) and state `0x10` (which does NOT force this — it
+falls into the SAME shared tail as `{1,4,0xb}`, with `esi` == the real
+`success` parameter still live) both modeled identically as `SendReply(0)`,
+hardcoded. Tracing `0xdecd5` (state `0x10`'s jump target) forward to
+`0xded02` (the shared reply-building tail) found no `xor eax,eax`/
+`mov esi,...` anywhere on that path — meaning state `0x10`'s reply
+genuinely depends on the real `success` argument (`success ? 0 : -1`),
+exactly like states `{1,4,0xb}`. Only state `0x11` (aftertouch CANCEL, not
+END) forces `esi=1` first (`mov esi,0x1` at `0xdecd0`) before falling into
+the identical shared body — so `0x11`'s "always reply 0" behavior is a real
+but state-*11*-specific side effect, not something states `0x10`/`0x11`
+both do by design. The original comment's "then reply is unconditionally
+success (0)" for state `0x10` conflated the two.
+
+**Real-world effect had this shipped**: on a real front-panel aftertouch
+calibration, if the keybed hardware ACKs the calibration END with a genuine
+failure (`success=false`), the reconstruction would have told the UI it
+succeeded (`reply.result=0`) instead of the correct `-1`.
+
+**Why host KAT didn't catch it**: `verify/test_calibration_msg_handler.cpp`
+had a scenario for state `0x11` (`CancelAftertouchCalibration()`, where
+`success` is forced true regardless of the passed-in value, so hardcoding
+`SendReply(0)` happened to produce the right answer) but no scenario at all
+for state `0x10` alone (`EndAftertouchCalibration()`'s keybed-hw path) with
+`success=false` — the exact case that exposes the divergence. Added test
+`[17b]` (2 new sub-checks: `success=false` -> `reply.result==-1`,
+`success=true` -> `reply.result==0`) closes that gap.
+
+**Fix**: `SendReply(0)` -> `SendReply(success ? 0 : -1)` in the `case 0x10:`
+body (`src/init/calibration_msg_handler.cpp`); header comment above the
+function corrected with the full per-entry jump-target trace. Host
+`verify/` suite re-run clean (124 test binaries, 0 failures); `make ko-clean
+&& make ko KDIR=/home/build/linux-kronos` rebuilds clean. Not live-boot
+re-verified (no construction call site exists yet, per the note above) --
+this is a pure static-correctness fix, same category as the `2c539fb`
+literal-vs-relocation fix but caught by re-audit rather than a crash.
+
+Everything else in this cluster's re-audit (all `_vtablePtr =` assignments,
+hand-rolled vtable arrays, and placement-new/`new` construction sites
+project-wide, spot-checked against the 2026-07-27 systemic sweep's
+established "safe" patterns) came back clean -- no further instances of
+either the literal-vs-relocation or `.ctors`-vs-`.init_array` bug classes
+found in `CSTGControlMsgHandler`/`CSTGCalibrationMsgHandler` or their
+neighbors (`CSTGAudioManager`, `CCostProfile`, `CStartupFile`,
+`CKorgPreloadFile`/`CKorgProgBankFile`, the 10 `CSTGVoiceModel` subclasses).
+
+---
+
 ## CSTGKeybedInterface_Startup() / CSTGComPort::Initialize() — VM-only stall trigger?
 
 Uncertain: on the VM (no real W83627 Super-I/O chip), this init-module step
