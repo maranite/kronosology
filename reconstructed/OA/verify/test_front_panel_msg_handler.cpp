@@ -24,6 +24,10 @@ static void check_eq(const char *label, long got, long want)
 	g_fail++;
 }
 
+/* Real vtable data defined in front_panel_msg_handler.cpp -- referenced
+ * here only to confirm the ctor installs the real symbol, not a mock. */
+extern "C" unsigned char _ZTV24CSTGFrontPanelMsgHandler[24];
+
 /* ---- link-satisfying mocks ---- */
 CSTGFrontPanel *CSTGFrontPanel::sInstance;
 
@@ -50,7 +54,16 @@ int main()
 	CSTGFrontPanelMsgHandler *h = &handler;
 
 	printf("== constructor: install-only fields + table population ==\n");
-	check_eq("_vtablePtr installed (non-owning placeholder) is null", (long)(intptr_t)h->_vtablePtr, 0);
+	/* FIXED (2026-07-27): ground truth's own ctor installs a real,
+	 * non-null `&_ZTV24CSTGFrontPanelMsgHandler + 8` vtable pointer
+	 * (confirmed via objdump -dr against OA.ko_Decomp/OA.ko) -- "install
+	 * vs dispatch" means nothing reads it back through a vtable slot,
+	 * not that the field itself is null. */
+	check_eq("_vtablePtr installed (non-owning placeholder) is non-null",
+		 (long)(h->_vtablePtr != 0), 1);
+	check_eq("_vtablePtr == &_ZTV24CSTGFrontPanelMsgHandler + 8",
+		 (long)(intptr_t)h->_vtablePtr,
+		 (long)(intptr_t)(_ZTV24CSTGFrontPanelMsgHandler + 8));
 	check_eq("_msgHandlerTable == &sMsgHandler",
 		 (long)((void *)h->_msgHandlerTable == (void *)CSTGFrontPanelMsgHandler::sMsgHandler), 1);
 	check_eq("_replyTag == 0x05", h->_replyTag, 0x05);

@@ -25,6 +25,24 @@ static void *AsRawFn(T memberFnPtr)
 CSTGFrontPanelMsgHandler *CSTGFrontPanelMsgHandler::sInstance;
 STGFrontPanelMsgHandlerEntry CSTGFrontPanelMsgHandler::sMsgHandler[5];
 
+/*
+ * Real vtable data (24 bytes / 4 slots, confirmed via `readelf -sW`
+ * against ground truth's own `_ZTV24CSTGFrontPanelMsgHandler`).
+ * Zero-filled placeholder, matching this project's established
+ * "install vs dispatch" rule -- nothing in this project dispatches
+ * through it.
+ *
+ * FIXED (2026-07-27): the ctor previously stored a bare literal
+ * `nullptr` here instead of this real symbol. Ground truth's own ctor
+ * (`.text+0xe9f80`) does `mov DWORD PTR [eax],0x8` with a real
+ * `R_386_32 _ZTV24CSTGFrontPanelMsgHandler` relocation -- confirmed via
+ * `objdump -dr` against OA.ko_Decomp/OA.ko -- so a bare null was a
+ * genuine value mismatch ("install vs dispatch" means nothing reads it
+ * back through a vtable slot, not that the field itself should be left
+ * null).
+ */
+extern "C" unsigned char _ZTV24CSTGFrontPanelMsgHandler[24] = { 0 };
+
 /* ------------------------------------------------------------------ */
 /* All 5 methods ignore their own `this` (the CSTGFrontPanelMsgHandler
  * instance) -- confirmed real: EAX is clobbered by the very first
@@ -65,7 +83,7 @@ void CSTGFrontPanelMsgHandler::Beep(const void *, int)
  * SetLED, SetLEDBlinking, ResetLED, SetLED16Bits, Beep. */
 CSTGFrontPanelMsgHandler::CSTGFrontPanelMsgHandler()
 {
-	_vtablePtr = nullptr;	/* install-only placeholder, see header comment */
+	_vtablePtr = _ZTV24CSTGFrontPanelMsgHandler + 8;	/* real value, install-only, see header comment */
 	_msgHandlerTable = &sMsgHandler;
 	_replyTag = 0x05;
 

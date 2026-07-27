@@ -1489,6 +1489,18 @@ unsigned char *ResolveActivePerformanceVarsManagerRaw()
 }
 
 /*
+ * Real vtable data (96 bytes / 22 slots, confirmed via `readelf -sW`/
+ * `-rW` against ground truth's own `_ZTV14CSTGAudioInput`: D1, D0, then
+ * 20 more real relocations including `CSTGParamsOwner::
+ * GetDefaultContext/HandleParamChange/UpdateParamValue`). Zero-filled
+ * placeholder, matching this project's established "install vs
+ * dispatch" rule: nothing in this reconstruction dispatches through
+ * this class's OWN vtable (every `UpdateXXX` method below is called
+ * directly by name, not through a vtable slot).
+ */
+extern "C" unsigned char _ZTV14CSTGAudioInput[96] = { 0 };
+
+/*
  * CSTGAudioInput::CSTGAudioInput() (.text+0xc9ea0, confirmed): sets the
  * vtable pointer, zeroes +0x64..+0x76 (19 bytes) ONLY -- +0x04..+0x63
  * (level/pan/send1/send2) are left as whatever memory already held, a
@@ -1496,10 +1508,22 @@ unsigned char *ResolveActivePerformanceVarsManagerRaw()
  * read-modify-written (bit0 set, bit1 cleared, other bits preserved from
  * pre-existing memory) rather than assigned outright -- also preserved
  * verbatim.
+ *
+ * FIXED (2026-07-27): the vtable-pointer write itself (`mov
+ * DWORD PTR [eax],0x8` + `R_386_32 _ZTV14CSTGAudioInput` in ground
+ * truth's own disassembly, confirmed via `objdump -dr` against
+ * OA.ko_Decomp/OA.ko) was missing from this ctor entirely -- a bare
+ * transcription gap, same bug class as `CSTGMidiOutPort`/
+ * `CSTGDrumPadClient` (see MASTER memory notes on the
+ * "ctor transcribes every field except the vtable pointer" pattern).
+ * `_vtablePtr` was left at whatever bytes the enclosing `CSTGProgram`/
+ * `CSTGCombi` placement-new target already held instead of the real
+ * confirmed value.
  */
 CSTGAudioInput::CSTGAudioInput()
 {
 	unsigned char *base = (unsigned char *)this;
+	_vtablePtr = _ZTV14CSTGAudioInput + 8;
 	unsigned char flags = base[0x77];
 	for (int i = 0x64; i <= 0x76; i++)
 		base[i] = 0;

@@ -50,14 +50,33 @@
 
 #include "oa_setup_global_resources.h"
 
-/* Real vtable data symbol (`_ZTV12CStartupFile`), referenced via the
- * `extern "C"` byte-array trick established sec 10.58/10.60
- * (CSTGRecordEvent/CCostProfile): `~CStartupFile()`'s own out-of-line
- * definition below is this class's Itanium "key function", so the
- * compiler emits the real vtable data for us in this very translation
- * unit -- no separate byte-array definition needed, just this
- * declaration to reference it by its real mangled name. */
-extern "C" unsigned char _ZTV12CStartupFile[];
+/*
+ * Real vtable data symbol (`_ZTV12CStartupFile`), 32 bytes / 6 slots
+ * confirmed via `readelf -rW` against ground truth's own
+ * `.rel.rodata._ZTV12CStartupFile` (D1, D0, Load, Save, then two
+ * `__cxa_pure_virtual` slots -- LoadData/SaveData, real but only ever
+ * meaningfully populated in CCostProfile's own derived vtable,
+ * cost_profile.cpp's `kCCostProfileVtbl`).
+ *
+ * FIXED (2026-07-27): previously an `extern "C" unsigned char[]`
+ * declaration only, relying on GCC auto-emitting this data symbol as
+ * this TU's Itanium "key function" byproduct of a real `virtual
+ * ~CStartupFile()`. That was a genuine bug: it made CStartupFile
+ * actually polymorphic, so the compiler inserted its OWN hidden vtable
+ * pointer ahead of the hand-declared `_vtablePtr` field, silently
+ * shifting every subsequent byte offset (see oa_setup_global_resources.h's
+ * class comment for the full derivation, including the resulting 4-byte
+ * kernel heap overflow in CCostProfile's fixed-size allocation). Now a
+ * plain hand-declared array, matching every other hand-modeled vtabled
+ * class in this project (e.g. `_ZTV18CSTGControllerInfo`,
+ * `kCCostProfileVtbl` itself) -- zero-filled except for the one
+ * genuinely-dispatched slot, since nothing in this project ever
+ * dispatches through CStartupFile's OWN vtable: every real construction
+ * path is via CCostProfile, whose own ctor immediately overwrites
+ * `_vtablePtr` with `kCCostProfileVtbl` before anything reads it
+ * (matching this project's established "install vs dispatch" rule).
+ */
+extern "C" unsigned char _ZTV12CStartupFile[32] = { 0 };
 
 CStartupFile::CStartupFile(const char *name)
 {

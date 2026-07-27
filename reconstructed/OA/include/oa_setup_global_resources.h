@@ -296,28 +296,51 @@ struct CSTGCPUInfo {
  * CStartupFile -- confirmed real base class of CCostProfile (sec 10.60),
  * NOT independently reconstructed in this pass beyond its confirmed
  * shape: `CStartupFile::CStartupFile(char const*)` (.text+0x457c0, 10
- * bytes) and a virtual `~CStartupFile()` both exist as real mangled
- * symbols with their own vtable (`_ZTV12CStartupFile`), and
- * `CCostProfile::CCostProfile()`'s own disassembly proves the
- * inheritance directly: it calls this constructor FIRST (with the
- * literal string "CostProfile", extracted from `.rodata.str1.1+0x603`),
- * then immediately overwrites the vtable pointer with CCostProfile's
- * own (`&_ZTV12CCostProfile + 8`, the standard Itanium "+8 to skip
- * offset-to-top/RTTI" convention) -- but leaves `+0x4` completely
- * untouched (CCostProfile's own zeroing only starts at `+0x8`),
- * confirming `+0x4` is a real CStartupFile-OWNED field (matching this
- * project's earlier note that `CCostProfile::sInstance->_field4` is a
- * "confirmed real" value read by `CSTGCPUInfo::Update()` -- it's real
- * because CStartupFile's own not-yet-reconstructed constructor sets
- * it, not CCostProfile's). Declared here as an opaque 8-byte base
- * (vtable ptr + this one confirmed-to-exist field) -- other methods
- * (`Path()`, `Load()`, `Save(bool)`) are real and confirmed but out of
- * scope for this pass.
+ * bytes) and `~CStartupFile()` (.text+0x45790, 7 bytes) both exist as
+ * real mangled symbols with their own vtable (`_ZTV12CStartupFile`, 32
+ * bytes / 6 slots: D1/D0/Load/Save/2x __cxa_pure_virtual, confirmed via
+ * readelf -rW), and `CCostProfile::CCostProfile()`'s own disassembly
+ * proves the inheritance directly: it calls this constructor FIRST
+ * (with the literal string "CostProfile", extracted from
+ * `.rodata.str1.1+0x603`), then immediately overwrites the vtable
+ * pointer with CCostProfile's own (`&_ZTV12CCostProfile + 8`, the
+ * standard Itanium "+8 to skip offset-to-top/RTTI" convention) -- but
+ * leaves `+0x4` completely untouched (CCostProfile's own zeroing only
+ * starts at `+0x8`), confirming `+0x4` is a real CStartupFile-OWNED
+ * field (matching this project's earlier note that
+ * `CCostProfile::sInstance->_field4` is a "confirmed real" value read
+ * by `CSTGCPUInfo::Update()` -- it's real because CStartupFile's own
+ * not-yet-reconstructed constructor sets it, not CCostProfile's).
+ * Declared here as an opaque 8-byte base (vtable ptr + this one
+ * confirmed-to-exist field) -- other methods (`Path()`, `Load()`,
+ * `Save(bool)`) are real and confirmed but out of scope for this pass.
+ *
+ * NOT a real C++-virtual dispatch target in this project (FIXED
+ * 2026-07-27, was previously `virtual ~CStartupFile()`): matching this
+ * project's established "install vs dispatch" rule (sec 10.153/10.225)
+ * used for every other hand-modeled vtabled class here, the vtable
+ * pointer is a plain hand-installed `_vtablePtr` field, NOT a real C++
+ * `virtual` member. Declaring the destructor `virtual` was a real bug:
+ * it made this class genuinely polymorphic, so GCC inserted its OWN
+ * hidden compiler-managed vtable pointer as the object's true first
+ * member, landing BEFORE `_vtablePtr` rather than being replaced by it
+ * -- confirmed via a throwaway `-m32` sizeof/offsetof reproduction
+ * (`sizeof(CStartupFile)` came back 12, `offsetof(_vtablePtr)` came
+ * back 4, not the ground-truth-confirmed 8/0). That silent 4-byte shift
+ * propagates straight into CCostProfile's own layout: the ACTUAL
+ * compiled `sizeof(CCostProfile)` became 0x12a4, 4 bytes larger than
+ * the fixed-size `::operator new(0x12a0)` allocation
+ * (setup_global_resources.cpp) placement-constructs into -- a genuine
+ * 4-byte kernel heap buffer overflow on every real module load. Fixed
+ * by dropping `virtual` and hand-declaring `_ZTV12CStartupFile` as a
+ * real 32-byte array instead of relying on GCC's "key function"
+ * auto-emission (see startup_file.cpp) -- restores the single-
+ * vtable-pointer-at-+0x0 layout ground truth actually has.
  */
 class CStartupFile {
 public:
 	CStartupFile(const char *name);
-	virtual ~CStartupFile();
+	~CStartupFile();
 	void *_vtablePtr;	/* +0x0 */
 	float _field4;		/* +0x4, real CStartupFile-owned field */
 };

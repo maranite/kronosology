@@ -112,6 +112,27 @@ static bool IsTouchPanelOnlyMode()
 	return *((unsigned char *)STGAPIFrontPanelStatus::sInstance + 0x29124) == 3;
 }
 
+/*
+ * Real vtable data (24 bytes / 4 slots, confirmed via `readelf -sW`
+ * against ground truth's own `_ZTV25CSTGCalibrationMsgHandler`).
+ * Zero-filled placeholder, matching this project's established
+ * "install vs dispatch" rule -- nothing in this project dispatches
+ * through it.
+ *
+ * FIXED (2026-07-27): the ctor previously stored a bare literal `0`
+ * here instead of this real symbol. Ground truth's own ctor
+ * (`.text+0xde910`) does `mov DWORD PTR [eax],0x8` with a real
+ * `R_386_32 _ZTV25CSTGCalibrationMsgHandler` relocation -- confirmed
+ * via `objdump -dr` against OA.ko_Decomp/OA.ko -- so a bare `0` was a
+ * genuine value mismatch (the class WAS installing a real, non-null
+ * vtable pointer in ground truth; "install vs dispatch" means nothing
+ * reads it back through a vtable slot, not that the field itself
+ * should be left null), same bug class as the other "ctor omits/
+ * mis-writes the real vtable-pointer value" instances this project has
+ * hit repeatedly (see MASTER memory notes).
+ */
+extern "C" unsigned char _ZTV25CSTGCalibrationMsgHandler[24] = { 0 };
+
 /* ------------------------------------------------------------------ */
 /* Constructor -- installs the vtable pointer (unused, see header),   */
 /* the msgHandler table pointer, default reply tag, and the 18 real   */
@@ -120,7 +141,7 @@ static bool IsTouchPanelOnlyMode()
 
 CSTGCalibrationMsgHandler::CSTGCalibrationMsgHandler()
 {
-	_vtablePtr = 0; /* real vtable never dispatched through in this project, see header */
+	_vtablePtr = _ZTV25CSTGCalibrationMsgHandler + 8; /* real value, never dispatched through in this project, see header */
 	_msgHandlerTable = &sMsgHandler;
 	_replyTag = 0x12;
 	sInstance = this;

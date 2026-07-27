@@ -34,12 +34,21 @@ extern "C" __attribute__((regparm(0))) int snprintf(char *buf, unsigned long siz
  *   movl $(_ZTV16CKorgPreloadFile+8),(%eax)
  *   mov  %edx,0x4(%eax)
  *   ret
- * Real vtable data auto-emitted here since ~CKorgPreloadFile() (below)
- * is this class's own Itanium "key function" -- same "extern C byte-
- * array trick, no separate definition needed" technique as
- * startup_file.cpp's CStartupFile.
+ *
+ * Real vtable data (24 bytes / 4 slots: D1, D0, Load, one
+ * `__cxa_pure_virtual`, confirmed via `readelf -rW` against ground
+ * truth's own `.rel.rodata._ZTV16CKorgPreloadFile`). FIXED (2026-07-27):
+ * previously relied on GCC auto-emitting this symbol as the "key
+ * function" byproduct of a real `virtual ~CKorgPreloadFile()` -- see
+ * oa_global.h's own class comment for why that was a genuine layout bug
+ * (a spurious hidden compiler vtable pointer ahead of the hand-declared
+ * `_vtablePtr` field, same root cause as the `CStartupFile` fix this
+ * same pass, startup_file.cpp). Hand-declared here instead, zero-filled
+ * placeholder since nothing in this project ever dispatches through it
+ * (Load() is called via plain non-virtual member syntax, matching
+ * "install vs dispatch").
  */
-extern "C" unsigned char _ZTV16CKorgPreloadFile[];
+extern "C" unsigned char _ZTV16CKorgPreloadFile[24] = { 0 };
 
 CKorgPreloadFile::CKorgPreloadFile(const char *name)
 {
@@ -51,9 +60,7 @@ CKorgPreloadFile::CKorgPreloadFile(const char *name)
  * ~CKorgPreloadFile() (D1/D2, .text+0x44cc0, 7 bytes -- both fold to the
  * same address, confirmed via nm, no virtual bases) confirmed real body:
  * ONLY a vtable-pointer reset, no other cleanup (`_name` isn't owned/
- * freed). Written out explicitly (rather than left compiler-implicit)
- * so this TU is this class's own key function, matching the
- * CStartupFile precedent exactly.
+ * freed).
  */
 CKorgPreloadFile::~CKorgPreloadFile()
 {
@@ -73,10 +80,13 @@ CKorgPreloadFile::~CKorgPreloadFile()
  * CKorgProgBankFile's own dtor down to just a vtable-pointer reset, no
  * separate out-of-line D2 symbol) -- reproduced here by NOT declaring an
  * explicit ~CKorgProgBankFile() at all, letting the compiler-synthesized
- * (implicit) derived dtor chain to the base dtor automatically, same
- * technique as the base class's own dtor above.
+ * (implicit) derived dtor chain to the base dtor automatically.
+ *
+ * Real vtable data (24 bytes / 4 slots: D1, D0, Load (inherited slot,
+ * unchanged), LoadData, confirmed via `readelf -rW`). Same
+ * hand-declared-array fix as the base class's own vtable above.
  */
-extern "C" unsigned char _ZTV17CKorgProgBankFile[];
+extern "C" unsigned char _ZTV17CKorgProgBankFile[24] = { 0 };
 
 CKorgProgBankFile::CKorgProgBankFile(const char *name)
 	: CKorgPreloadFile(name)

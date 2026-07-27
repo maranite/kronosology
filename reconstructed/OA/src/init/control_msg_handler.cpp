@@ -55,6 +55,24 @@ static void *AsRawFn(T memberFnPtr)
 
 CSTGControlMsgHandler *CSTGControlMsgHandler::sInstance;
 void *CSTGControlMsgHandler::sMsgHandler[54];
+
+/*
+ * Real vtable data (24 bytes / 4 slots, confirmed via `readelf -sW`
+ * against ground truth's own `_ZTV21CSTGControlMsgHandler`).
+ * Zero-filled placeholder, matching this project's established
+ * "install vs dispatch" rule -- nothing in this project dispatches
+ * through it.
+ *
+ * FIXED (2026-07-27): the ctor previously stored a bare literal `0`
+ * here instead of this real symbol. Ground truth's own ctor
+ * (`.text+0xe8550`) does `mov DWORD PTR [eax],0x8` with a real
+ * `R_386_32 _ZTV21CSTGControlMsgHandler` relocation -- confirmed via
+ * `objdump -dr` against OA.ko_Decomp/OA.ko -- so a bare `0` was a
+ * genuine value mismatch ("install vs dispatch" means nothing reads it
+ * back through a vtable slot, not that the field itself should be left
+ * null).
+ */
+extern "C" unsigned char _ZTV21CSTGControlMsgHandler[24] = { 0 };
 CSTGDrumPadInterface *CSTGDrumPadInterface::sInstance;
 
 /* CSTGMessageHandler::HandleUnsupportedMessage -- shared base-class
@@ -73,7 +91,7 @@ void CSTGDrumPadInterface::StartScanning() { }
 /* ------------------------------------------------------------------ */
 CSTGControlMsgHandler::CSTGControlMsgHandler()
 {
-	_vtablePtr = 0;			/* install-only, see header note */
+	_vtablePtr = _ZTV21CSTGControlMsgHandler + 8;	/* real value, install-only, see header note */
 	_msgHandlerTable = &sMsgHandler;
 	_replyTag = 0x36;
 	sInstance = this;

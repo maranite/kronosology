@@ -3013,24 +3013,40 @@ extern "C" unsigned int GetSTGTickCount(void);
  * `Load()` to return failure.
  * `CKorgPreloadFile::~CKorgPreloadFile()` (D1/D2, both fold to the same
  * address, confirmed via `nm`, no virtual bases) does ONLY a vtable
- * pointer reset, `_ZTV16CKorgPreloadFile+8` -- reproduced here simply by
- * NOT declaring an explicit dtor at all and letting normal C++ RAII
- * scoping do the equivalent (this project's own compiler emits the same
- * shape automatically for a class with a virtual dtor and no other
- * cleanup, exactly matching ground truth's own inlined destructor
- * sequence at `InitializePerformances()`'s own call site).
- * `Load()`'s own confirmed real vtable is 0x18 (24) bytes / 6 slots in
- * ground truth (offset-to-top + RTTI + 4 function slots -- more than
- * just a dtor, so `Path()`/`LoadData()` are very likely ALSO virtual
- * there); this reconstruction's own vtable is deliberately smaller
- * (dtor-only) since nothing in this project ever dispatches through any
- * OTHER slot of it -- an explicitly flagged simplification under the
- * established "install vs dispatch" rule, not a byte-exact claim.
+ * pointer reset, `_ZTV16CKorgPreloadFile+8` -- reproduced here with an
+ * explicit out-of-line dtor body doing exactly that write (init_performances.cpp).
+ * Real vtable confirmed 24 bytes / 4 real slots (`readelf -rW`:
+ * D1, D0, Load, one `__cxa_pure_virtual`) -- `CKorgProgBankFile`'s own
+ * real vtable is likewise 24 bytes (D1, D0, Load (inherited slot,
+ * unchanged), LoadData), confirming `LoadData()` genuinely overrides a
+ * real virtual slot even though it isn't dispatched through it in this
+ * pass (`Load()` itself is fully deferred, per "install vs dispatch").
+ *
+ * NOT a real C++-virtual dispatch target in this project (FIXED
+ * 2026-07-27, was previously `virtual ~CKorgPreloadFile()`): same root
+ * bug as `CStartupFile` (oa_setup_global_resources.h's own class
+ * comment has the full derivation) -- declaring the destructor
+ * `virtual` made this class genuinely polymorphic, so GCC inserted its
+ * OWN hidden compiler-managed vtable pointer ahead of the hand-declared
+ * `_vtablePtr` field, silently shifting `_name`/`_field8` by one
+ * pointer-width and inflating `sizeof(CKorgPreloadFile)`/
+ * `sizeof(CKorgProgBankFile)` past ground truth's confirmed 8/12 bytes.
+ * Currently harmless at runtime here (the object is a plain stack local
+ * in `InitializePerformances()`, sized by whatever the compiler actually
+ * computes, and every access goes through real member syntax rather
+ * than a raw offset cast) but still a real, confirmed layout mismatch
+ * against ground truth and the same latent-hazard shape that caused a
+ * genuine 4-byte kernel heap overflow in the sibling `CStartupFile`
+ * case. Fixed the same way: dropped `virtual`, hand-declared
+ * `_ZTV16CKorgPreloadFile`/`_ZTV17CKorgProgBankFile` as real 24-byte
+ * arrays instead of relying on GCC's "key function" auto-emission (see
+ * init_performances.cpp) -- restores the single-vtable-pointer-at-+0x0
+ * layout ground truth actually has.
  */
 class CKorgPreloadFile {
 public:
 	CKorgPreloadFile(const char *name);
-	virtual ~CKorgPreloadFile();
+	~CKorgPreloadFile();
 
 	/* DEFERRED (bar2_stubs.cpp): genuine SSD file I/O, safe-default
 	 * "succeeds" stub (matches the StartupInitializeROMBank/RAMBank
