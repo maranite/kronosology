@@ -161,8 +161,8 @@ Confirms Eva's IPC surface is exactly the three device nodes `init_module`'s
 direct messages" channel). All three already exist and work once OA.ko is loaded in
 `kronos_vm` — **this is the concrete reason Eva's boot-path milestone was blocked on
 OA.ko's own milestone first** (matches the original `MASTER_REFERENCE.md` §10.36 framing
-recalled in `PLAN.md`). `CSTGHandle::Access` (shared-memory attach, presumably to
-`/proc/.shm`, [[eva_oa_ghidra_coordination]]) is not yet reconstructed — Stage 2.
+recalled in `PLAN.md`). `CSTGHandle::Access` (shared-memory attach to `/proc/.shm`,
+ref-counted cache keyed by `mode`) is real — `src/ipc/stg_handle.cpp`.
 
 ### `USTGAPILCDControl::LoadStoredSettings` (`.text+0x08e1dde0`, 176 bytes)
 
