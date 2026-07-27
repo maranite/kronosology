@@ -525,10 +525,28 @@ hardware" instruction. None of these need their own detailed entry above
 about code this project HAS reconstructed) — but a real-hardware test pass
 should know they exist and are untested/unmodeled, not silently absent.
 
-- **Peg GUI toolkit** (149 classes) — confirmed genuinely unreached by the
-  boot path (Eva reaches its own `Start closing`/`End closing` shutdown
-  without it); not tested on real hardware because nothing in this
-  reconstruction's own call graph ever needs it. See `README.md` Stage 5.
+- **Peg GUI toolkit** (149 classes) — RE-CONFIRMED 2026-07-27, refined: a fresh
+  `grep -rn Peg src/ include/` (not just re-reading README.md's own "Survey B"
+  prose, whose own evidence — "zero real call sites... into any Peg-prefixed
+  class", `grep -rl Peg src/ include/` at the time — is now literally stale,
+  predating the later Stage 6 `CEditor`/`CPanelIfcTask` batch) found this
+  project's own reconstructed code now DOES contain real call sites into a
+  Peg-named symbol: `CEditor::CPanelIfcTask::OnTouchPanelEvent`/`OnButtonEvent`/
+  `Exec(CMessage&)` (`panel_ifc_task.cpp`) call a project-local
+  `PegMessageQueuePush()` stand-in at the exact real ground-truth call target
+  (`.text+0x081a8750`, `PegMessageQueue::Push(PegThing::mpMessageQueue,
+  PegMessage const*)`) — but that stand-in is an inert no-op (`(void)queue;
+  (void)msg;`, confirmed by direct read of its own body), not real Peg-toolkit
+  dispatch, so the SUBSTANTIVE verdict is unchanged: no real Peg-toolkit logic
+  (widget rendering, `PegScreen`/`PegThing` internals, `CForm`-family dialogs)
+  is reconstructed or exercised anywhere in this project, confirmed again by
+  the same "zero Peg-toolkit global constructors run before `main()`" check
+  Survey B already did (nothing has changed there). Not tested on real hardware
+  because the real Peg toolkit itself still has zero functional presence in
+  this reconstruction — only the wording "nothing in this reconstruction's own
+  call graph ever needs it" is now imprecise (the call graph DOES reach a
+  Peg-named call site, just not real Peg internals). See `README.md` Stage 5's
+  "Survey B" section for the original sweep this refines.
 - **`CZ` string container** (247 methods) — confirmed out of scope
   project-wide, kept opaque everywhere it's a dependency (`CBatchDiskMainTask`,
   `CConfigManager::CreateResourceFamilies()`); not tested on real hardware
@@ -751,3 +769,37 @@ should know they exist and are untested/unmodeled, not silently absent.
   boot path (gated behind `CreateUserModules()`'s own placeholder config
   table content) — not a real-hardware behavior question until that gate
   is itself resolved.
+- **`CKGMsgProcessor`** — PARTIALLY PROMOTED 2026-07-27: this class was only ever
+  cited elsewhere in this project as one of `ControlMsgHandler`'s/`GlobalMsg-
+  Handler`'s/`CombiMsgHandler`'s downstream out-of-scope dependencies (README.md),
+  never independently re-examined with its own fresh trace. A from-scratch
+  `objdump -dr -M intel` re-trace of `CKGMsgProcessor::CKGMsgProcessor()`
+  (`.text+0x08913620`, 570 bytes) / `~CKGMsgProcessor()` (`.text+0x08913860`, 134
+  bytes) / `GetInstance()` (`.text+0x089138f0`, 134 bytes) found the SAME "size is
+  not depth" shape already proven for `CJobStack`/`CLimiterBase`/`CEditClient`:
+  9 mallocs + fixed-offset field writes + one already-documented `Api+0x9c`
+  vtable dispatch (`timer_engine.h`'s `ApiGetDefault9c()`, reused verbatim), no
+  `CZ`/`CStorage`/`CMMI`/`CModeManager` dependency of its own — now reconstructed
+  for real (`kg_msg_processor.h`/`.cpp`). Confirms, does not reverse, the existing
+  "genuinely deep" verdict for the REST of the class: `SetGEMax`/`Process`
+  (1110B)/`CheckAndSetChordName`/`CheckAndSetCCsDisplay`/`CheckAndUpdateDisplay`/
+  `CheckAndSetNotesDisplay`/`CheckAndSetRTValueString`/`ClearInvalidNotesCCsDisplay`
+  (1679B)/`GetKarmaNotes` are all genuine Karma-note-generation/display logic
+  dispatching through 7 real, independently-vtable-confirmed but otherwise
+  unreconstructed handler classes (`CKGCommonMsgHandler`/`CKGModuleMsgHandler`/
+  `CKGUIControlMsgHandler`/`CSPRUIControlMsgHandler`/`CSPRUICommonParamMsgHandler`/
+  `CSPRUIAudioTrackParamMsgHandler`/`CSPRUIDrumTrackTrackParamMsgHandler` — 8 to 51
+  real virtual slots each, sizes confirmed via direct `.rodata` byte reads, not
+  `nm -C` size fields), still entirely out of scope. Two real, faithfully-
+  transcribed ground-truth quirks worth flagging for the real-hardware comparison
+  pass: the ctor leaves one byte field (`+0x29`) genuinely uninitialized (never
+  written anywhere in the real ctor, only `+0x28` is), and the destructor frees
+  all 7 polymorphic handler sub-objects via their own real deleting-destructor
+  vtable slot but never the 2 plain (`+0x20`/`+0x24`) data buffers it also owns —
+  a real per-destruction leak, not a bug in this reconstruction. No live caller
+  of this real reconstruction on this project's own traced boot path
+  (`GetInstance()`'s one existing real caller, `ProgramSlotMsgHandler` in
+  `stg_unsol_msg_handler.cpp`, deliberately keeps using its own separate
+  file-local opaque stub rather than this header, to avoid touching that
+  already-verified call site outside this batch's own scope) — reconstructed for
+  structural completeness, same precedent as `CLimiterBase`/`CJobStack` above.

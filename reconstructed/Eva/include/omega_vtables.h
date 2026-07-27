@@ -894,6 +894,35 @@ extern void *PTR__CWrProtCircularQueue_08e81ca8[2];
 extern void *PTR__COutLinkIfc_ILimiterNotify_08e81d28[10];
 extern void *PTR__COutLinkIfc_ILimiterNotify_08e81d50[10];
 extern void *PTR__CMarshaller_ILimiterNotify_08e81f00[4];
+
+/*
+ * CKGMsgProcessor's 7 owned per-instance vtables (kg_msg_processor.h, Eva deferred-
+ * registry re-check, 2026-07-27) -- confirmed byte-exact via direct `.rodata` dword
+ * reads at each address below (offset-to-top=0, RTTI ptr, then the real function
+ * slots -- same Itanium "vptr = vtable symbol + 8" convention used throughout this
+ * project). `CKGMsgProcessor::CKGMsgProcessor()`'s own real disassembly mallocs each
+ * of these 7 sub-objects and writes ONLY the vtable pointer at their own offset 0 --
+ * no further field init, no sub-ctor call -- so each is represented as a raw,
+ * install-only vtable identity, not a modeled C++ object (their own real classes'
+ * further data layout is not recovered). All EvaVTableStub-backed; nothing in this
+ * reconstruction's own call graph dispatches through any of them (`CKGMsgProcessor`
+ * itself has no reconstructed caller on this project's traced boot path -- see
+ * kg_msg_processor.h's own REACHABILITY note).
+ *   _ZTV19CKGCommonMsgHandler                08f752e0, 92 bytes  -> 21 slots
+ *   _ZTV19CKGModuleMsgHandler                08f75280, 92 bytes  -> 21 slots
+ *   _ZTV22CKGUIControlMsgHandler              08f751a0, 212 bytes -> 51 slots
+ *   _ZTV23CSPRUIControlMsgHandler             08f75500, 84 bytes  -> 19 slots
+ *   _ZTV27CSPRUICommonParamMsgHandler         08f754c0, 40 bytes  -> 8 slots
+ *   _ZTV31CSPRUIAudioTrackParamMsgHandler     08f75480, 40 bytes  -> 8 slots
+ *   _ZTV35CSPRUIDrumTrackTrackParamMsgHandler 08f75440, 40 bytes  -> 8 slots
+ */
+extern void *PTR__CKGCommonMsgHandler_08f752e8[21];
+extern void *PTR__CKGModuleMsgHandler_08f75288[21];
+extern void *PTR__CKGUIControlMsgHandler_08f751a8[51];
+extern void *PTR__CSPRUIControlMsgHandler_08f75508[19];
+extern void *PTR__CSPRUICommonParamMsgHandler_08f754c8[8];
+extern void *PTR__CSPRUIAudioTrackParamMsgHandler_08f75488[8];
+extern void *PTR__CSPRUIDrumTrackTrackParamMsgHandler_08f75448[8];
 }
 
 #endif /* OMEGA_VTABLES_H */

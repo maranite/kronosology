@@ -1313,6 +1313,30 @@ RECONSTRUCTED = {
     "0807a270",  # CLimiterBase::~CLimiterBase (D0)
     "0807af80",  # CLimiterBase::SendWithAnswer(uchar, void*, uint) -- real forward
     "0807afa0",  # CLimiterBase::SendNoAnswer(uchar, void const*, uint) -- real forward
+
+    # --- CKGMsgProcessor ctor/dtor/GetInstance() (Eva deferred-registry re-check
+    # batch, 2026-07-27, same "size is not depth" lens re-applied to
+    # HARDWARE_REVIEW_LOG.md's own "CKGMsgProcessor" citation as one of
+    # ControlMsgHandler's still-out-of-scope downstream subsystems -- that verdict
+    # stays accurate for CKGMsgProcessor's own real message-processing methods
+    # (SetGEMax/Process/CheckAndSet*/GetKarmaNotes/ClearInvalidNotesCCsDisplay, all
+    # genuine Karma-note-generation logic, still NOT in this set), but its own
+    # construction/destruction turned out small and fully self-contained: 9 mallocs
+    # + fixed-offset field writes + one already-documented Api+0x9c vtable
+    # dispatch (timer_engine.h's ApiGetDefault9c(), reused verbatim), no CZ/
+    # CStorage/CMMI/CModeManager dependency of its own. See kg_msg_processor.h for
+    # the full per-field writeup, including 2 real, faithfully-transcribed
+    # ground-truth quirks: an uninitialized ctor field (+0x29) and a destructor
+    # that frees its 7 polymorphic handler sub-objects but never its 2 plain data
+    # buffers (+0x20/+0x24). No live caller of this real reconstruction on this
+    # project's own traced boot path (GetInstance()'s one existing real caller,
+    # ProgramSlotMsgHandler in stg_unsol_msg_handler.cpp, deliberately keeps using
+    # its own separate file-local opaque stub -- see kg_msg_processor.h's own
+    # REACHABILITY note) -- reconstructed for structural completeness, same
+    # precedent as CLimiterBase/CJobStack above.
+    "08913620",  # CKGMsgProcessor::CKGMsgProcessor()
+    "08913860",  # CKGMsgProcessor::~CKGMsgProcessor() (D1/D2, identical)
+    "089138f0",  # CKGMsgProcessor::GetInstance()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
