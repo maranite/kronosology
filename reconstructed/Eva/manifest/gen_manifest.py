@@ -1266,6 +1266,26 @@ RECONSTRUCTED = {
     "0806e3f0",  # CEditClient::~CEditClient() [D1]
     "080d1ea0",  # CEditApiInstance::RegisterClient(CEditClient const*)
     "080d1e70",  # CEditApiInstance::UnregisterClient(CEditClient const*)
+
+    # --- ControlMsgHandler re-trace (Eva "size is not depth", 2026-07-27, applying
+    # the same lens used above on CJobStack/CEditClient to the LAST remaining Tier-B
+    # CSTGUnsolMsgHandler handler). Unlike those two, this one stayed MOSTLY Tier B:
+    # a full jump/call-target-vs-owning-case-range audit of the real disassembly found
+    # its 44-entry outer switch has been heavily cross-jumped/tail-merged by GCC into
+    # one ~2KB interconnected CFG hub (physically table slot 20's own code,
+    # 0x0891b890..0891c090, entered by ~20 of the 44 subcodes including both of
+    # subcode 6's/7's own nested sub-jump-tables) -- reconstructing any of those
+    # subcodes requires reconstructing the hub too, which is where essentially all 18
+    # previously-documented out-of-scope subsystem calls live. Exactly 6 of the 44
+    # outer subcodes (9, 10, 11, 16, 37, 38) are provably self-contained (zero
+    # crossjump in either direction) and depend only on already-real targets -- made
+    # real inline inside ControlMsgHandler() itself (not separate symbols, matching
+    # VoiceModelMsgHandler's own inlined-case convention). NOT marking
+    # 0x0891ac70 (ControlMsgHandler itself) reconstructed here -- 38 of its 44
+    # subcodes are still Tier-B stubs, see stg_unsol_msg_handler.h/.cpp for the full
+    # per-subcode evidence. The two NEW real leaf functions this pulled in:
+    "08e1cad0",  # USTGAPIControl::BeginLongErPActivity()
+    "08e1cb10",  # USTGAPIControl::EndLongErPActivity()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

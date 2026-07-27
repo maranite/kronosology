@@ -102,16 +102,21 @@ int USTGAPIFsck::GenericMumount(char *const *argv)
 }
 
 /* USTGAPIControl -- not reconstructed elsewhere in this project. Declared file-local
- * (same convention as ckernel.cpp's own local CTracer) with only the two real static
- * methods EndHandling() needs. Real signatures confirmed from functions.csv:
- *   ForceErPShutdown(.text+0x08e1cbe0, 60 bytes)  cc=__cdecl, ushort param_1
- *   SaveRandomSeed(.text+0x08e1d090, 78 bytes)    cc=__cdecl, void
- * Both static (no `this`).
+ * (same convention as ckernel.cpp's own local CTracer) with only the real static
+ * methods EndHandling() and (2026-07-27) ControlMsgHandler's own two tractable
+ * subcodes need. Real signatures confirmed from functions.csv:
+ *   ForceErPShutdown(.text+0x08e1cbe0, 60 bytes)      cc=__cdecl, ushort param_1
+ *   SaveRandomSeed(.text+0x08e1d090, 78 bytes)        cc=__cdecl, void
+ *   BeginLongErPActivity(.text+0x08e1cad0, 60 bytes)  cc=__cdecl, void
+ *   EndLongErPActivity(.text+0x08e1cb10, 60 bytes)    cc=__cdecl, void
+ * All static (no `this`).
  */
 class USTGAPIControl {
 public:
 	static bool SaveRandomSeed();
 	static void ForceErPShutdown(unsigned short code);
+	static void BeginLongErPActivity();
+	static void EndLongErPActivity();
 };
 
 /* .text+0x08e1d090, 78 bytes. REAL -- `USTGAPIFsck::GenericMumount("/korg/Eva/mumount",
@@ -162,6 +167,38 @@ void USTGAPIControl::ForceErPShutdown(unsigned short code)
 	msg.field8 = 0;
 	msg.field12 = 0x27;
 	msg.payload = code;
+
+	USTGUserAPI::SendSTGMessageWithSource(reinterpret_cast<const STGMessage *>(&msg));
+}
+
+/* .text+0x08e1cad0 / 0x08e1cb10, 60 bytes each. REAL -- byte-for-byte the same
+ * ErPShutdownMsgShape send as ForceErPShutdown() above, just a different field12
+ * "message code" constant (0x24 / 0x25) and a fixed zero payload. Found 2026-07-27
+ * while re-tracing ControlMsgHandler (see stg_unsol_msg_handler.h's Tier B section) --
+ * subcodes 37/38 of ControlMsgHandler's own outer switch turned out to be two fully
+ * isolated (no crossjump in or out) single-call cases, tractable in isolation even
+ * though the function as a whole stays Tier B.
+ */
+void USTGAPIControl::BeginLongErPActivity()
+{
+	ErPShutdownMsgShape msg;
+	msg.length = 0x10;
+	msg.subtype = 1;
+	msg.field8 = 0;
+	msg.field12 = 0x24;
+	msg.payload = 0;
+
+	USTGUserAPI::SendSTGMessageWithSource(reinterpret_cast<const STGMessage *>(&msg));
+}
+
+void USTGAPIControl::EndLongErPActivity()
+{
+	ErPShutdownMsgShape msg;
+	msg.length = 0x10;
+	msg.subtype = 1;
+	msg.field8 = 0;
+	msg.field12 = 0x25;
+	msg.payload = 0;
 
 	USTGUserAPI::SendSTGMessageWithSource(reinterpret_cast<const STGMessage *>(&msg));
 }
@@ -732,21 +769,181 @@ void CSTGUnsolMsgHandler::CalibrationMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::FrontPanelMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 
-/* --- Tier B link-stub: not implemented -- see this file's own header comment (the
- * "Tier B" section) for the full 2026-07-26 from-scratch re-trace findings and exact
- * evidence. Summary:
- *   - ControlMsgHandler: RE-CONFIRMED genuinely deep (18 distinct out-of-scope call
- *     targets spanning CMMI/CControlSurface/CHelpManager/CModeManager/CDiskUtil/
- *     CSmplModeMgr/real Peg CForm dialogs/raw HAL interrupt-mask control). Real size
- *     5152 bytes (0x0891ac70..0x0891c090), corrected from the previously-documented
- *     4886B (an undercount from trusting Ghidra's own size label over the real
- *     next-symbol gap).
- * (VoiceModelMsgHandler was also RE-CHARACTERIZED alongside ControlMsgHandler on
- * 2026-07-26, but has since been promoted to Tier A -- see the "Tier A, batch 8" section
- * further down this file for its real implementation.)
+/* --- ControlMsgHandler: Tier B (majority), Tier A (6 of 44 outer subcodes) --------
+ *
+ * See this file's header comment (the "Tier B" section) for the full 2026-07-26
+ * from-scratch re-trace findings. RE-EXAMINED 2026-07-27 specifically to check for
+ * the "size is not depth, and a sub-piece may be tractable even when the whole class/
+ * function isn't" pattern this same project already applied successfully to
+ * CJobStack's ctor/dtor and CEditClient's ctor/dtor. Result here is a genuine, if
+ * small, partial win -- NOT the "18/23 promotable" scale VoiceModelMsgHandler turned
+ * out to be, because of a structural difference discovered along the way:
+ *
+ * ControlMsgHandler's outer dispatch is a real 44-entry `jmp [subcode*4+0x8f1bbac]`
+ * jump table (subcode = `*(int*)(p+8)`, range [0,0x2b]), same shape as
+ * VoiceModelMsgHandler's own JT1. BUT unlike VoiceModelMsgHandler, GCC has heavily
+ * CROSS-JUMPED/tail-merged this particular switch: dumping every jump/call target in
+ * the real disassembly and bucketing by which case-address-range it lands in (not
+ * just reading each case's own narrow byte range) shows a single ~2KB physical region
+ * (originally table slot 20's own code, 0x0891b890..0891c090) that is ALSO entered
+ * directly by at least: both of subcode 6's and 7's own NESTED sub-jump-tables
+ * (0x8f1bc98 x17 entries, 0x8f1bc5c x15 entries -- 30 of their combined 32 slots
+ * land inside that region) and mid-body conditional branches from subcodes
+ * 0,1,2,3,4,5,8,12,13,14,15,17,21,28,31,42. That region in turn jumps back OUT into
+ * subcode 0's, 31's, and 41's own code ranges. This is a single interconnected CFG
+ * hub, not 44 independent leaves -- reconstructing any one of those ~20 entangled
+ * subcodes faithfully would require reconstructing the hub too, and the hub is where
+ * essentially all 18 of the previously-documented out-of-scope subsystem calls live
+ * (CMMI::GetInstance() alone is called 10 of its 18 times from inside this one
+ * region). This is a stronger, more precise confirmation of the existing "genuinely
+ * deep, not tractable in isolation" verdict for that majority, not a reversal of it --
+ * the shared-hub shape is this function's own version of the "shared setup touching
+ * multiple subsystems before any per-case branch" scenario, just realized as a
+ * shared TAIL reached from many directions instead of a shared head.
+ *
+ * Outside that hub, 6 of the 44 outer subcodes are provably self-contained (zero
+ * crossjump into or out of their own code range, other than the shared bail-to-
+ * epilogue at 0x0891aeb0 every case already uses) and call only already-real
+ * targets -- promoted to Tier A below:
+ *   - subcode 37 -> USTGAPIControl::BeginLongErPActivity()  (single call, isolated)
+ *   - subcode 38 -> USTGAPIControl::EndLongErPActivity()    (single call, isolated)
+ *   - subcode 16 -> CEditor::IsSwitchPressed(9), result discarded (isolated)
+ *   - subcodes 9, 10, 11 -- each does its own bounds-checked byte-table lookup on
+ *     `*(int*)(p+0xc)` then falls into ONE shared block (real address 0x0891b4c8,
+ *     entered directly by subcode 11 and via a backward jump by 9/10 after their own
+ *     guard) that builds a CPanelOut::SButtonEvt-shaped buffer and calls the already-
+ *     real CEditor::CPanelIfcTask::OnButtonEvent(). This exact shared block is ALSO
+ *     reached three more times from inside the out-of-scope hub above (real addresses
+ *     0x0891b93f/0x0891b9b7/0x0891ba88) -- that does not block modeling the block
+ *     itself, since its own only dependency is OnButtonEvent, already real
+ *     (src/ui/panel_ifc_task.cpp). Real button-code lookup tables read directly from
+ *     .rodata (readelf -l VA->file-offset, then raw bytes, not guessed):
+ *       subcode 9  table @0x08f1c500, 14 entries: 0x18..0x25 (code 0..0xd)
+ *       subcode 10 table @0x08f1c538,  2 entries: 0x2d,0x2e   (code 0..1)
+ *       subcode 11 table @0x08f1c540,  9 clean entries: 0x2b,0x2a,0x29,0x28,0x27,
+ *         0x26,0x2c,0x1b,0x1c (code 0..8, excluding 7 -- see below). REAL HAZARD,
+ *         faithfully NOT reproduced: the disassembly (0x0891b4ce/0x0891b4d1) only
+ *         excludes code==7 exactly and has NO upper-bound check at all before
+ *         indexing this table -- reading it for code==9 pulls up 0x201f (a value from
+ *         unrelated adjacent .rodata, not a real button code), and codes 10-15 read
+ *         zeros. This reconstruction adds an explicit `code < 9` bound (matching the
+ *         real "0" no-op behavior, dropping only the one genuinely garbage code==9
+ *         slot) since a literal out-of-bounds C array read is undefined behavior this
+ *         project won't reproduce -- the original's own lack of a bound is a real,
+ *         if apparently harmless-in-practice, quirk of the shipped binary.
+ *
+ * The remaining 38 subcodes (0-8, 12-15, 17-36, 39-44 minus the 6 above) stay
+ * Tier B, routed to a single documented not-implemented stub -- see
+ * ControlMsgHandlerUnimplementedSubcode() just below.
  */
 
-void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 5152 bytes. */ }
+/* Shared tail for outer subcodes 9/10/11 -- see the header comment just above for the
+ * real crossjumped block this models (0x0891b4c8..0x0891b520). SButtonEvt itself
+ * stays the same opaque forward-declared type panel_ifc_task.h already uses --
+ * OnButtonEvent's own real body (panel_ifc_task.cpp) treats it as a raw
+ * `const unsigned int *` too (raw[0]=pressed flag 0/1, raw[1]=button code), so this
+ * builds the identical 16-byte raw layout the real disassembly does
+ * ([esp+0x30]=flag, [esp+0x34]=code, [esp+0x38]/[esp+0x3c]=0) and reinterpret_casts
+ * it, same convention this file already uses for STGMessage itself
+ * (USTGAPIControl::ForceErPShutdown() above).
+ */
+static void ControlMsgHandlerSendButtonEvent(CEditor::CPanelIfcTask *owner, unsigned int buttonCode, bool pressed)
+{
+	unsigned int evt[4];
+	evt[0] = pressed ? 1u : 0u;
+	evt[1] = buttonCode;
+	evt[2] = 0;
+	evt[3] = 0;
+	owner->OnButtonEvent(reinterpret_cast<const CPanelOut::SButtonEvt *>(evt));
+}
+
+/* Tier-B stub for every outer subcode not listed above -- same "stub returning a
+ * fixed sentinel/no-op is the natural bail" convention this file already uses for
+ * VoiceModelMsgHandler's own one deep leaf (VoiceModelMossAlgorithmDispatch, further
+ * down this file) and CombiMsgHandler's CToneAdjustTool::ConvertParamToLinear/
+ * CPrograms::GetProgramPointer stubs.
+ */
+static void ControlMsgHandlerUnimplementedSubcode(unsigned char *p, int subcode)
+{
+	(void)p; (void)subcode;
+	/* TODO: real dispatch, out of scope -- see this file's header comment on
+	 * ControlMsgHandler's own cross-jumped hub for why. */
+}
+
+void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+	int subcode = *(int *)(p + 8);
+
+	if ((unsigned)subcode > 0x2b)
+		return;
+
+	switch (subcode) {
+	case 9: {
+		static const unsigned int kSubcode9Table[14] = {
+			0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e,
+			0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25
+		};
+		int code = *(int *)(p + 0xc);
+		int flag = *(int *)(p + 0x10);
+		if ((unsigned)code > 0xd)
+			break;
+		unsigned int buttonCode = kSubcode9Table[code];
+		if (buttonCode == 0)
+			break;
+		ControlMsgHandlerSendButtonEvent(mOwner, buttonCode, flag != 0);
+		break;
+	}
+	case 10: {
+		static const unsigned int kSubcode10Table[2] = { 0x2d, 0x2e };
+		int code = *(int *)(p + 0xc);
+		int flag = *(int *)(p + 0x10);
+		if ((unsigned)code > 1)
+			break;
+		unsigned int buttonCode = kSubcode10Table[code];
+		if (buttonCode == 0)
+			break;
+		ControlMsgHandlerSendButtonEvent(mOwner, buttonCode, flag != 0);
+		break;
+	}
+	case 11: {
+		/* real: only excludes code==7 exactly, no upper-bound check at all --
+		 * see header comment above for the exact hazard this bounds check
+		 * (code < 9) deliberately narrows away.
+		 */
+		static const unsigned int kSubcode11Table[9] = {
+			0x2b, 0x2a, 0x29, 0x28, 0x27, 0x26, 0x2c, 0x1b, 0x1c
+		};
+		int code = *(int *)(p + 0xc);
+		int flag = *(int *)(p + 0x10);
+		if (code == 7)
+			break;
+		if ((unsigned)code >= 9)
+			break;
+		unsigned int buttonCode = kSubcode11Table[code];
+		if (buttonCode == 0)
+			break;
+		ControlMsgHandlerSendButtonEvent(mOwner, buttonCode, flag != 0);
+		break;
+	}
+	case 16:
+		/* real: return value discarded -- call kept for IsSwitchPressed()'s own
+		 * documented internal side effect (editor.h), matching the real
+		 * disassembly exactly (0x0891b80f, no use of eax after).
+		 */
+		CEditor::IsSwitchPressed(9);
+		break;
+	case 37:
+		USTGAPIControl::BeginLongErPActivity();
+		break;
+	case 38:
+		USTGAPIControl::EndLongErPActivity();
+		break;
+	default:
+		ControlMsgHandlerUnimplementedSubcode(p, subcode);
+		break;
+	}
+}
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
  *

@@ -101,9 +101,14 @@
  * handlers' unconditional +0x28/+0x30 dispatch (+0x30/4 = slot 12) -- bumped to 20,
  * see mains.cpp's own WORKAROUND #2 comment.
  *
- * Tier B (real signature, not implemented): ControlMsgHandler only (VoiceModelMsgHandler,
+ * Tier B (real signature, mostly not implemented): ControlMsgHandler (VoiceModelMsgHandler,
  * described alongside it below for context, was promoted to Tier A batch 8 -- see
  * stg_unsol_msg_handler.cpp's own header comment for the full case-by-case reconstruction).
+ * ControlMsgHandler itself was RE-EXAMINED again 2026-07-27 (see its own header comment in
+ * stg_unsol_msg_handler.cpp for the full finding) and turned out to have 6 of its 44 outer
+ * subcodes (9, 10, 11, 16, 37, 38) genuinely tractable in isolation -- now real. The other
+ * 38 stay Tier B; see below for why the majority is NOT separable the way
+ * VoiceModelMsgHandler's cases were.
  * Both were RE-TRACED FROM SCRATCH (2026-07-26, `objdump -dr -M intel` against the real
  * ground-truth `Eva` binary, not just re-reading prior notes) specifically to check for
  * the "size is not depth" misdiagnosis pattern this same session caught 8 other times
@@ -139,6 +144,24 @@
  * subsystem this project has already independently flagged elsewhere as permanently
  * deferred (Peg toolkit, CZ, CStorage, CModeManager) -- not tractable in isolation, and
  * not a productive target even for a dedicated follow-up batch.
+ *
+ * UPDATE (2026-07-27): re-applied this project's own "size/depth verdict can be right for
+ * the whole while a sub-piece is still tractable" lens (already validated on CJobStack's
+ * and CEditClient's ctor/dtor) to ControlMsgHandler specifically. Its outer dispatch is a
+ * real 44-entry jump table (same shape as VoiceModelMsgHandler's own JT1), but a full
+ * jump/call-target-vs-owning-case-range audit of the real disassembly found GCC has
+ * extensively CROSS-JUMPED/tail-merged this particular switch: one ~2KB physical region
+ * (0x0891b890..0891c090) is entered directly by ~20 of the 44 subcodes (including both of
+ * subcode 6's and 7's own nested sub-jump-tables) and jumps back out into several other
+ * subcodes' own code ranges -- a single interconnected CFG hub carrying essentially all 18
+ * out-of-scope calls above, not 44 independent leaves. This makes the existing verdict
+ * MORE precise, not weaker: most of the 44 subcodes cannot be reconstructed one at a time
+ * without reconstructing the shared hub, which is exactly the permanently-deferred material.
+ * Outside that hub, exactly 6 subcodes are provably self-contained (zero crossjump either
+ * direction) and depend only on already-real targets -- promoted to Tier A. See
+ * stg_unsol_msg_handler.cpp's own ControlMsgHandler header comment for the full per-subcode
+ * evidence (real .rodata button-code tables, the shared OnButtonEvent tail block, and the
+ * one real out-of-bounds-table-read hazard found and deliberately not reproduced).
  *
  * VoiceModelMsgHandler -- PROMOTED TO TIER A (batch 8, 2026-07-27, full follow-up pass on
  * the scaffolding below -- both real jump tables fully case-traced, all real .rodata
