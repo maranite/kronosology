@@ -1122,6 +1122,27 @@ live physical interaction — a normal scoped task, not an open mystery.
   virtualization scope (audio fidelity itself is out of scope; getting the
   module to load and its control-plane logic to run correctly is in
   scope).
+- **A live `insmod` of the current build does NOT yet reach a clean,
+  oops-free `init_module()` return (open as of 2026-07-27).** Two related
+  but distinct bugs were found the same day: (1) ~44 externs added by the
+  2026-07-25 button/analog/MIDI reconstruction batches were never given
+  matching stub bodies across `src/stub/bar2_stubs.cpp` and two sibling
+  virtual-driver `module_main.c` files, which blocked `insmod` outright —
+  **fixed and verified, commit `68853c2`** (insmod now resolves every
+  symbol and real `init_module` code runs to `OA_DEBUG_MARKER 8`); (2) a
+  genuine kernel NULL-pointer-deref Oops in
+  `CSTGAudioInputMixerBase::SetSendBuses()` — partially root-caused and
+  fixed (commit `2c539fb`, a lost `R_386_32` relocation that stored a
+  literal `8` into a vtable-pointer field instead of the real
+  `&vtable+8`), but a SEPARATE, deeper bug in the same function (the
+  vtable pointer reverting to `NULL` again moments later) remains
+  **open, unresolved, not yet root-caused**. Any earlier claim in this
+  project's history that "`OA.ko` loads with zero kernel oops" reflects a
+  staler build than current `HEAD`, not a currently-verifiable fact — see
+  `kronosology/.claude/agent-memory/re-decompiler/oa_insmod_regression_bar2_stub_drift_2026-07-27.md`
+  and `oa_audioinputmixer_vtable_literal8_bug_2026-07-27.md`, and
+  `PROJECT_BRAIN/status.md`'s latest kronosology-section entries, for the
+  authoritative current state.
 
 ## Building and testing
 

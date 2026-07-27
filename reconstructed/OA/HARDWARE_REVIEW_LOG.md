@@ -1402,6 +1402,8 @@ and the two opaque vtable-slot results.
 
 ## CSTGAudioInputMixerBase — vtable slot 3's real target unidentified, safe zero-stub installed (batch 58)
 
+> **SUPERSEDED 2026-07-27 (commit `2c539fb`) — do not treat this entry as describing the current implementation.** Two things changed: (1) the ctor's vtable-pointer install was found to be a real bug, not working reconstruction — it stored the literal integer `8` (a lost `R_386_32` relocation) instead of the real `&vtable+8`, which is what actually caused a live kernel NULL-deref Oops in `SetSendBuses()` on real insmod; (2) slot 3's real target — `CSTGAudioInputMixer::GetOutputBus(int)` — has since been identified and reconstructed for real (indexing a newly-discovered `CSTGAudioBusManager::sSynthesisThreadBusSets`, 960 slots), replacing the `return 0` placeholder described below. The "always zero" caveat in this entry is now stale. **A live boot still Oopses in this function as of the latest entry** — a SEPARATE, deeper bug (the vtable pointer reverting to NULL again moments later) remains open and unresolved; see `PROJECT_BRAIN/status.md`'s latest kronosology-section entries and `kronosology/.claude/agent-memory/re-decompiler/oa_audioinputmixer_vtable_literal8_bug_2026-07-27.md` for the current, authoritative state. Kept below verbatim for history.
+
 Reconstructed (`src/engine/audio_input_mixer.cpp`): the real ctor installs
 a real vtable pointer and the real `SetFXCtrlBus`/`SetHDRBus`/
 `SetSendBuses` methods all genuinely dispatch a RAW indirect call through
