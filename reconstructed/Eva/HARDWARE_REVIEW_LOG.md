@@ -444,9 +444,33 @@ reconstruction against itself.
 7. `CEditor`'s own per-instance vtable (`PTR__CEditor_08f29b88` slots Setup/Config/Start) — commit `552cbe4` (2026-07-26)
 8. `CDirEntry`'s vtable slot 2 (`HasValidLongNameExt`) — commit `4fd12a5` (2026-07-26)
 9. `CSysApiInstance`'s own vtable slots 2-5 (`Pre/PostKernelConstructor`, `Pre/PostKernelDestructor`) — commit `e0758e2` (2026-07-27); live-boot-confirmed on the actual rebuilt binary the same day (see `eva_9th_vtable_fix_live_boot_confirmed_2026-07-27.md`, re-decompiler agent memory)
-10-16. The 7-member `XxxApiInstance` sibling family — `EditApiInstance`, `SeqApiInstance`, `ChkApiInstance`, `DumpApiInstance`, `SysExApiInstance` (all 4 slots fixed, same base no-ops as #9), `RTRouterApiInstance` (fixed with 2 real class-specific override functions, not just the shared base no-ops), `RMApiInstance` (3 of 4 slots fixed; slot 2/`PreKernelConstructor` deliberately left `EvaVTableStub` — it needs an entirely unmodeled `CJobStack` class, precisely scoped and documented rather than forced) — commit `34eda81` (2026-07-27), dynamically re-verified live via 26 real gdbstub hits during a real `CKernel::CKernel()` construction pass on the freshly `tools/build_lenny.sh`-built binary
+10-16. The 7-member `XxxApiInstance` sibling family — `EditApiInstance`, `SeqApiInstance`, `ChkApiInstance`, `DumpApiInstance`, `SysExApiInstance` (all 4 slots fixed, same base no-ops as #9), `RTRouterApiInstance` (fixed with 2 real class-specific override functions, not just the shared base no-ops), `RMApiInstance` (3 of 4 slots fixed; slot 2/`PreKernelConstructor` deliberately left `EvaVTableStub` at the time — it needed an entirely unmodeled `CJobStack` class, precisely scoped and documented rather than forced) — commit `34eda81` (2026-07-27), dynamically re-verified live via 26 real gdbstub hits during a real `CKernel::CKernel()` construction pass on the freshly `tools/build_lenny.sh`-built binary, including confirming `RMApiInstance`'s then-still-stubbed slot 2 was itself live-reached (fires, as a no-op, on every real boot)
 
-Running total: 16, found across three sessions (2026-07-25 through 2026-07-27).
+**UPDATE, same day (commit `7413ad4`): instance #16's remaining stub closed for real.**
+`RMApiInstance`'s slot 2 above is no longer a stub — `CJobStack::CJobStack()`/
+`~CJobStack()` (.text+0x0814da30 / 0x0814d6c0,0x0814d870) turned out small
+and fully self-contained (base-construct-then-vtable-swap, one heap
+`CRMJob`, an always-empty job-queue on the only reachable path), so it was
+reconstructed for real and wired in (`include/job_stack.h`,
+`src/editor/job_stack.cpp`) rather than left stubbed. `RMApiInstance`'s slot
+2 now calls a real `CRMApiInstance_PreKernelConstructor()`. This is the one
+instance of the 16 where the fix added genuinely new reconstructed logic
+(not just a wiring correction to an already-existing function) — see the
+deferred/out-of-scope registry entry below for what's still out of scope
+within `CJobStack` itself. **Not independently live-boot re-verified past
+the prior sweep's confirmation that the call site itself fires on every real
+boot** (the `7413ad4` pass was host-KAT-only, "no real-hardware or live-VM
+access this pass, per task scope") — the 26-hit dynamic trace above confirms
+the slot is genuinely live-reached during `CKernel::CKernel()`, but no
+follow-up gdbstub trace has yet confirmed the dispatch now lands on the new
+real `CJobStack` ctor rather than crashing or silently misbehaving. Worth a
+targeted live re-check (same method as instances 9-16) before/during
+real-hardware bring-up.
+
+Running total: 16, found across three sessions (2026-07-25 through 2026-07-27);
+all 16 now have a real fix (no bare `EvaVTableStub` left standing in for a
+still-out-of-scope class), though #16's fix is not yet dynamically
+re-verified live per the note above.
 Both the count and the commit-by-commit mapping above were independently
 re-verified against this repo's actual `git log`/`git show` output while
 writing this entry (not copied uncritically from agent memory) — all 10
@@ -459,14 +483,20 @@ commit hashes and their descriptions check out against the real diffs.
 binary's actual vtables were never wrong; every fix was derived from and
 verified against a direct byte read of the real binary's own `.rodata`. Once
 fixed, each instance was verified via the host KAT suite, a from-scratch
-rebuild, and — for 9 through 16 specifically — a live dynamic trace against
-the real rebuilt binary showing the dispatch now lands on the correct
-function. There is no known behavioral difference left to test on real
-hardware *for this bug class specifically*: real hardware runs Korg's own
-binary, which never had this defect, and this project's reconstruction has
-now had all 16 known instances of it fixed (with one slot, `RMApiInstance`'s
-`PreKernelConstructor`, deliberately and visibly left as a documented stub
-rather than silently wrong).
+rebuild, and — for 9 through 15, plus the initial (pre-`CJobStack`) wiring
+of 16, specifically — a live dynamic trace against the real rebuilt binary
+showing the dispatch now lands on the correct function (or, for 16 at the
+time, correctly no-ops at a confirmed-reached stub). There is no known
+behavioral difference left to test on real hardware *for this bug class
+specifically*: real hardware runs Korg's own binary, which never had this
+defect, and this project's reconstruction has now had all 16 known instances
+of it given a real fix. **One open verification gap remains**: instance
+#16's stub was subsequently replaced with genuinely new reconstructed logic
+(`CJobStack`, commit `7413ad4`, see the instance list above) after the last
+live dynamic sweep, and that specific replacement has only been host-KAT
+verified so far, not re-confirmed with a live gdbstub trace the way 9-15
+were — worth a targeted live re-check using the same proven method before
+treating it as closed with the same confidence as the other 15.
 
 What *is* worth carrying forward into real-hardware bring-up of the
 reconstructed code: the **methodology**, not the fix list. If reconstructed
@@ -505,18 +535,71 @@ should know they exist and are untested/unmodeled, not silently absent.
   because this reconstruction never implements its real string/set
   semantics, only its `sizeof`.
 - **`CStorage`/`CControlSurface`/`CMMI`/`CModeManager`** — confirmed
-  genuinely deep UI/control-surface state backing the 2 remaining
-  `CSTGUnsolMsgHandler` Tier-B handlers below; not tested on real hardware
-  because none of these classes are modeled beyond stub declarations.
-- **`CSTGUnsolMsgHandler::ControlMsgHandler`/`VoiceModelMsgHandler`** — the
-  last 2 of 30 message handlers, confirmed genuinely deep (re-checked
-  multiple times across the session, no tractable angle found); a real
-  message of either type arriving on real hardware currently hits an
-  unimplemented Tier-B stub in this reconstruction, not real behavior.
-- **`CEditClient`'s hash-table + free-list allocator** — confirmed
-  genuinely deep (an open-chaining hash table comparable in scope to `CZ`
-  itself, re-confirmed with concrete evidence 2026-07-26); not tested on
-  real hardware because `Register()`/`Unregister()` are unimplemented.
+  genuinely deep UI/control-surface state backing `CSTGUnsolMsgHandler`'s
+  remaining Tier-B leaves below (`ControlMsgHandler` in full,
+  `VoiceModelMsgHandler`'s one MOSS-algorithm leaf); not tested on real
+  hardware because none of these classes are modeled beyond stub
+  declarations.
+- **`CSTGUnsolMsgHandler::ControlMsgHandler`** — the last of 30 message
+  handlers still a full Tier-B stub, confirmed genuinely deep (re-checked
+  multiple times across the session, no tractable angle found): a real call-target
+  survey of the ground-truth disassembly shows 18 distinct out-of-scope
+  subsystems (`CMMI`, `CControlSurface`, `CHelpManager`, `CModeManager`,
+  `CZ`, `CDiskUtil`, several real Peg-toolkit `CForm` dialogs, and 4
+  real `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` front-panel
+  interrupt-mask critical sections), not a repeated mechanical shape — real
+  front-panel button/switch semantic dispatch, not tractable in isolation. A
+  real `ControlMsgHandler` message arriving on real hardware currently hits
+  an unimplemented stub in this reconstruction, not real behavior.
+- **`CSTGUnsolMsgHandler::VoiceModelMsgHandler`** — RECONSTRUCTED FOR REAL
+  2026-07-27 (commit `786fcd5`, Tier A batch 8), promoted from Tier B: a
+  from-scratch `objdump -dr -M intel` re-trace of the real 2512-byte
+  function, both real jump tables (17 + 6 entries) fully case-traced against
+  their real `.rodata` bytes. **One leaf stays genuinely out of scope**: a
+  `CStorage::GetInstance()`-based "MOSS algorithm" voice-model-database
+  dispatch (real call site `0x08917209`, confirmed via a real `.rodata`
+  string naming `MOSSAlgorithmDatabase.h`) — an entirely unmodeled class
+  hierarchy, precisely documented (see `include/stg_unsol_msg_handler.h`'s
+  own header comment) rather than guessed at. A real message that reaches
+  specifically this leaf on real hardware (per-slot "type" byte in `[2,9]`
+  AND subindex `>5`, gated on `(DAT_0af0df1e&7)==3`) currently hits an
+  unimplemented stub in this reconstruction; every other case in the handler
+  is real and reconstructed. (This pass also fixed a real, previously-hidden
+  bug the new test coverage caught: several per-case `GetScopeId()` calls
+  had been hoisted above their own case's real bound check, meaning they
+  would have fired even on real out-of-range bail paths — fixed by
+  threading scope resolution through bool-returning `Compute*()` helpers
+  matching real disassembly case-by-case order.)
+- **`CEditClient`'s ctor/dtor** — RECONSTRUCTED FOR REAL 2026-07-27 (commit
+  `386c295`), 3rd re-open of a class previously left "genuinely deep." A
+  fresh `objdump -dr -M intel` trace of `CEditClient::CEditClient()`/
+  `~CEditClient()` found the construction/destruction path never touches the
+  `PointerHash<K,V>` template's own Add/Find/Node/Iterator machinery — a
+  whole-binary xref sweep confirms `PointerHash<CEditControl*, CEditControl>`/
+  `PointerHash<long, CEditControl>` are its ONLY 2 instantiations anywhere,
+  both consumed only by this one ctor (2x malloc + vtable-install +
+  zero-fill, not real hash logic). Also fixed a real latent bug the old
+  Tier-B stub had: it set `mVtbl = 0`, which would have NULL-deref crashed
+  the first time a genuinely-constructed client's vtable got dispatched.
+  **Still genuinely out of scope**: `CEditClient`'s other 4 real named
+  methods (`BlockRegister`/`Register`/`Unregister`/`NotifyControls`) and
+  `PointerHash<K,V>`'s own hash-table methods themselves (comparable in
+  scope to `CZ`) — same "reconstruct only what the traced call graph needs"
+  precedent as `CJobStack` below. **One divergence worth flagging for
+  real-hardware bring-up**: `CEditClient`'s own vtable slot 2 (`OnNotify`,
+  real ground-truth address `.text+0x0806f6e0`) is real and load-bearing —
+  `CEditMan::CMainTask::Notify()` (already reconstructed for real,
+  `include/edit_man.h`) dispatches every registered client through exactly
+  this slot on every real notification fan-out — but `OnNotify` itself is
+  NOT independently reconstructed here and stays `EvaVTableStub` (a silent
+  no-op), out of scope per the same header comment. Since `CEditor`'s own
+  embedded `mEditClient` member is the one confirmed real construction site
+  on this project's currently-wired boot path, a live boot that reaches a
+  real notification fan-out would silently no-op instead of updating
+  whatever real UI/control-surface state `OnNotify` is supposed to touch —
+  a known, documented gap (not a bug), but one that could look like a
+  missing-notification symptom during real-hardware bring-up if this log
+  entry isn't consulted first.
 - **`CDumpManStateMachine` family** — confirmed genuinely deep, deferred;
   real SysEx/dump-protocol state-machine behavior is untested.
 - **`COutLinkIfcBase`/`CMarshaller<T>` framework** — confirmed genuinely
@@ -558,6 +641,32 @@ should know they exist and are untested/unmodeled, not silently absent.
   null/unwired, confirmed this same pass to be a non-issue rather than an 18th
   vtable-dispatch-stub-gap instance, since nothing in the CURRENT
   reconstruction's call graph ever dispatches through it).
+- **`CJobStack` construction/destruction** — RECONSTRUCTED FOR REAL
+  2026-07-27 (commit `7413ad4`), closing `RMApiInstance`'s last stubbed
+  vtable-dispatch-stub-gap slot (see "All 16 confirmed instances" #10-16's
+  own update note above). `CJobStack::CJobStack()`/`~CJobStack()`
+  (`.text+0x0814da30` / `0x0814d6c0`,`0x0814d870`) turned out small and
+  fully self-contained — base-construct-then-vtable-swap, one heap `CRMJob`
+  (already-real), an always-empty job-queue vector on the only reachable
+  path — so it was reconstructed for real (`include/job_stack.h`,
+  `src/editor/job_stack.cpp`) rather than left stubbed. **Still genuinely
+  out of scope, same `CResMan`/`CJobStack` "god object" family as
+  `CBatchDiskMainTask` below**: `CJobStack`'s own 8 `AddLoadRes`/
+  `AddLoadFile`/`AddLoadSingleRes` (x2)/`AddSave`/`AddDelete`/`AddSetRes`/
+  `ExecutePendingCmds` job-queue business-logic methods (real,
+  `.text 0x0814dac0..0x0814f800+`, ~0x2d00 bytes total, `TVector<...>`/
+  `TPtrArray<SLoadBankOffset>`-driven) — zero reachable caller on this
+  project's traced boot path, so a real bank-load/save job queued on real
+  hardware is entirely unmodeled here. Also install-only, never dispatched
+  through by any reconstructed caller: `CJobStack`'s own secondary
+  (multiple-inheritance/IFC) vtable, 2 real, unidentified functions
+  (`.text+0x0818f8b0`/`0x0818fb00`). Verified via new
+  `verify/test_job_stack.cpp` (14 checks) plus the full existing host suite,
+  both green; **not live-boot re-verified this pass** (host-KAT-only, per
+  task scope) — see the vtable-dispatch-stub-gap section's own note above
+  for the specific open follow-up (confirm live that `RMApiInstance`'s slot
+  2 now dispatches into this real ctor, using the same gdbstub method that
+  verified instances 9-15).
 - **`CBatchDiskMainTask`'s 5 heaviest methods** (`PreloadDir`/
   `PreloadGroup`/`PrepareGroupsForPreload`/`AddItemToPreload`/
   `Exec(CMessage&)`) — confirmed `CZ`-container-scale, deferred; real
