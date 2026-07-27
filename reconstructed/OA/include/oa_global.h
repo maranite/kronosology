@@ -1302,19 +1302,38 @@ struct CSTGPerformanceVarsManager {
 	 * fresh `0xb6d0`-byte `CSTGPerformanceVars` object (`CSTGBankMemory::
 	 * AllocAligned(0xb6d0, 0x40)`), fully field-initializing it, and
 	 * committing it into `sInstance[i*4]` (a packed 32-bit pointer) --
-	 * `sInstance[8]` itself is NOT written by `Initialize()` (stays
-	 * whatever it was, typically zero-initialized static storage);
+	 * `sInstance[8]` itself is NOT written by `Initialize()`;
 	 * `AllocPerformanceVars()`'s own already-confirmed toggle logic is
-	 * what actually flips it.
+	 * what flips it thereafter.
+	 *
+	 * RESOLVED 2026-07-27 (systemic `.ctors` sweep): both `sInstance[8]`
+	 * and `sInstance[9]` (below) DO have a real, confirmed initial
+	 * value -- ground truth's own `_GLOBAL__I__ZN26CSTGPerformanceVarsManager
+	 * 9sInstanceE` static ctor (`.text+0xbbfa0`, OA.ko_Decomp/OA.ko)
+	 * unconditionally writes `sInstance[8] = 1` and `sInstance[9] = 1`
+	 * at module load, run by the real kernel's `do_mod_ctors()` before
+	 * `init_module()` is even entered. This project's own raw-byte-array
+	 * model of `sInstance` has no C++ constructor to carry that
+	 * (correctly so -- avoiding one is what keeps this a plain BSS blob
+	 * instead of a `.init_array` dynamic initializer do_mod_ctors()
+	 * would never run). Fixed via an explicit
+	 * `ConstructPerformanceVarsManagerSelectorState()` call, early in
+	 * `init_module()` -- see oa_init.h's own comment on that function's
+	 * declaration for the full trace, including the observable
+	 * divergence this closes (`AllocPerformanceVars()`'s first-call
+	 * toggle direction; `ShouldMute()`'s first comparison).
 	 *
 
 	 * `sInstance[9]` (sec 10.153, confirmed via `CSTGAudioBusManager::
 	 * LRBusIndivMirror()`'s own disassembly): a DIFFERENT single byte
 	 * from `sInstance[8]`'s "active perf-vars slot" toggle -- a 0/1
 	 * "current double-buffer half" selector for
-	 * `CSTGAudioBusManager::sEffectThreadBusSets`. Not confirmed who
-	 * writes it (out of scope for this pass); only that
-	 * LRBusIndivMirror() reads it.
+	 * `CSTGAudioBusManager::sEffectThreadBusSets`, ALSO read by
+	 * `CSTGAudioInputMixer::ShouldMute()`. Nothing in this project's
+	 * reconstructed runtime code writes it (by design -- see the
+	 * RESOLVED note above); only the real static ctor and
+	 * `ConstructPerformanceVarsManagerSelectorState()`'s reproduction
+	 * of it ever set it.
 	 */
 	/* Storage now lives in src/engine/performance_vars_manager_init.cpp,
 	 * alongside the real Initialize() body (batch 53) -- matching the

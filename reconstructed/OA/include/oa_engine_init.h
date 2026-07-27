@@ -1271,6 +1271,26 @@ struct CSTGChannelValues {
 	 * `InitializeLongHand()` itself (.text+0x26820, 550 bytes) is a
 	 * confirmed-real, deliberately deferred dependency -- substantially
 	 * larger, own body not reconstructed this pass; see bar2_stubs.cpp.
+	 *
+	 * RESOLVED 2026-07-27 (systemic `.ctors` sweep): `sTemplate` also
+	 * has a real, confirmed static ctor in ground truth (the compiler
+	 * grouped it under `_GLOBAL__I__ZN17CSTGChannelValues14sTemplateReadyE`'s
+	 * own name, but its relocations target `sTemplate` itself,
+	 * `.text+0x26ee0`, OA.ko_Decomp/OA.ko) -- NOT the same thing as
+	 * `InitializeLongHand()` above, and independent of it: this ctor
+	 * runs at module load (do_mod_ctors(), before init_module()),
+	 * strictly before `InitializeLongHand()` could ever lazily run.
+	 * It sets byte `+0xa`/`+0xb` to `1` for each of 121 12-byte
+	 * sub-records spanning `sTemplate[0..0x5ab]` (120 in a loop plus
+	 * one "tail" record at `sTemplate+0x5a0`) -- every other field
+	 * these records touch is a redundant zero-write already covered by
+	 * plain BSS zero-init. Since `InitializeLongHand()` is currently an
+	 * empty stub, `sTemplate` was getting ZERO real content from any
+	 * source in this project -- fixed via an explicit
+	 * `ConstructChannelValuesTemplate()` call, early in `init_module()`
+	 * (see oa_init.h's own comment on that function's declaration).
+	 * This fix does NOT attempt to reproduce `InitializeLongHand()`
+	 * itself -- that remains separately deferred, as above.
 	 */
 	void Initialize();
 	void InitializeLongHand();

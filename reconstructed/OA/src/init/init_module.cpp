@@ -178,12 +178,23 @@ int init_module(void)
 	 * init_cpp_support() (step 1 below) is confirmed a literal 1-byte
 	 * `ret` precisely BECAUSE the kernel already ran .ctors by this
 	 * point -- not because no ctor mechanism exists. This project's
-	 * host GCC (12.x) has no -fno-use-init-array escape hatch, so
-	 * CKorgUsbAudioDriverMidiPorts::sInstance's real construction
-	 * (midi_korgusb_port.cpp) is called here explicitly, FIRST, to
-	 * match do_mod_ctors()'s real relative timing. See the class
-	 * comment in oa_engine_init.h for the full ground-truth trace. */
+	 * host GCC (12.x) has no -fno-use-init-array escape hatch, so any
+	 * equivalent C++ static/dynamic initializer here compiles into
+	 * `.init_array` instead of `.ctors` -- a section do_mod_ctors()
+	 * never scans -- so each real ctor found by the 2026-07-27 systemic
+	 * sweep is called here explicitly, FIRST, in the SAME relative
+	 * order ground truth's own `.ctors` array lists them (raw byte
+	 * offsets 0x4e0 / -- see each function's own oa_init.h comment for
+	 * its individual ground-truth trace). Third sweep instance
+	 * (CSTGSampleRateMonitor/CW83627/CSTGDrumPadInterface/
+	 * CProfiler/CSTGCalibrationMsgHandler's own real .ctors entries were
+	 * independently checked and confirmed to write only values already
+	 * matching plain BSS zero-init, i.e. genuinely no-ops -- not fixed
+	 * because there is nothing to fix; see re-decompiler agent memory
+	 * for the full 584-entry triage). */
 	ConstructKorgUsbMidiPorts();
+	ConstructPerformanceVarsManagerSelectorState();
+	ConstructChannelValuesTemplate();
 
 	oa_debug_marker(1);
 	init_cpp_support();				/* step 1 */

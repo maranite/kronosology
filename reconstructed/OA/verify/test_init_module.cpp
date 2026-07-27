@@ -51,6 +51,8 @@ void oa_debug_marker(int) { } /* TEMPORARY, matches src/init/debug_marker.cpp */
 void init_cpp_support(void) { log_call("init_cpp_support"); }
 void cleanup_cpp_support(void) { log_call("cleanup_cpp_support"); }
 void ConstructKorgUsbMidiPorts(void) { log_call("ConstructKorgUsbMidiPorts"); }
+void ConstructPerformanceVarsManagerSelectorState(void) { log_call("ConstructPerformanceVarsManagerSelectorState"); }
+void ConstructChannelValuesTemplate(void) { log_call("ConstructChannelValuesTemplate"); }
 
 static unsigned char sFakeTask[0x100];
 static unsigned long sOriginalMask = 0xdeadbeef;
@@ -153,6 +155,8 @@ int main(void)
 	check_eq_str("full step call order",
 		g_log,
 		"ConstructKorgUsbMidiPorts;"
+		"ConstructPerformanceVarsManagerSelectorState;"
+		"ConstructChannelValuesTemplate;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -175,6 +179,8 @@ int main(void)
 	check_eq_str("shallowest unwind: no cleanup calls at all, straight to restore+cpp_support",
 		g_log,
 		"ConstructKorgUsbMidiPorts;"
+		"ConstructPerformanceVarsManagerSelectorState;"
+		"ConstructChannelValuesTemplate;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;stg_log_startup_error;"
@@ -190,6 +196,8 @@ int main(void)
 	check_eq_str("mid-depth unwind: cleanup_global_resources -> ... -> CleanupSharedHeap",
 		g_log,
 		"ConstructKorgUsbMidiPorts;"
+		"ConstructPerformanceVarsManagerSelectorState;"
+		"ConstructChannelValuesTemplate;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -209,6 +217,8 @@ int main(void)
 	check_eq_str("deepest unwind: DrumPad/Keybed cleanup first, then the full cascade",
 		g_log,
 		"ConstructKorgUsbMidiPorts;"
+		"ConstructPerformanceVarsManagerSelectorState;"
+		"ConstructChannelValuesTemplate;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -230,6 +240,8 @@ int main(void)
 	check_eq_str("earliest possible failure: no pinning, no restore, no subsystem setup",
 		g_log,
 		"ConstructKorgUsbMidiPorts;"
+		"ConstructPerformanceVarsManagerSelectorState;"
+		"ConstructChannelValuesTemplate;"
 		"init_cpp_support;cpu_features_ok;stg_log_startup_error;"
 		"cleanup_cpp_support;");
 

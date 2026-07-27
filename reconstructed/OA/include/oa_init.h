@@ -75,6 +75,57 @@ void cleanup_cpp_support(void);
  */
 void ConstructKorgUsbMidiPorts(void);
 
+/*
+ * Manual substitute for a SECOND do_mod_ctors() entry, found by the
+ * 2026-07-27 systemic `.ctors` sweep that followed the
+ * ConstructKorgUsbMidiPorts() fix above: ground truth's real
+ * `_GLOBAL__I__ZN26CSTGPerformanceVarsManager9sInstanceE` ctor
+ * (`.text+0xbbfa0`, OA.ko_Decomp/OA.ko) unconditionally writes
+ * `sInstance[8] = 1` and `sInstance[9] = 1` (the two dwords at +0/+4 it
+ * also zeroes are redundant with plain BSS zero-init, and NOT
+ * reproduced here for that reason). This project's own raw-byte-array
+ * model of `sInstance` (performance_vars_manager_init.cpp) has no C++
+ * constructor at all -- correctly so, since it deliberately avoids a
+ * `.init_array` dynamic initializer for a POD blob -- but that also
+ * means ground truth's real +8/+9 seed values were never being
+ * reproduced anywhere: confirmed via full grep, `sInstance[8]`/`[9]`
+ * were previously only ever READ, never written, anywhere in this
+ * project's non-test source. This is an observable divergence, not
+ * cosmetic: `AllocPerformanceVars()`'s `(sInstance[8]+1)&1` toggle picks
+ * the OPPOSITE first slot (1 then 0, instead of ground truth's 0 then
+ * 1) on the very first call after boot, and `CSTGAudioInputMixer::
+ * ShouldMute()`'s `sInstance[9] == channelCountByte` compare starts
+ * against 0 instead of ground truth's 1. See oa_global.h's
+ * `CSTGPerformanceVarsManager` class comment for the full trace.
+ */
+void ConstructPerformanceVarsManagerSelectorState(void);
+
+/*
+ * Manual substitute for a THIRD do_mod_ctors() entry, found in the same
+ * sweep: ground truth's real `_GLOBAL__I__ZN17CSTGChannelValues14sTemplateReadyE`
+ * ctor (compiler-arbitrary name; its actual target per relocation is
+ * `CSTGChannelValues::sTemplate`, `.text+0x26ee0`, OA.ko_Decomp/OA.ko)
+ * unconditionally sets byte `+0xa`/`+0xb` to `1` for each of 121
+ * 12-byte sub-records spanning `sTemplate[0..0x5ab]` (120 in a loop plus
+ * one more "tail" record at the same +0xa/+0xb offsets within
+ * `sTemplate+0x5a0`) -- every other field these records touch (`+0x0`/
+ * `+0x4` dwords, `+0x8` word) is a redundant zero-write, not reproduced
+ * here. `sTemplate` (bar2_stubs.cpp) is the same "no ctor, raw byte
+ * array" model as `CSTGPerformanceVarsManager::sInstance` above, and its
+ * ONLY runtime populator, `CSTGChannelValues::InitializeLongHand()`, is
+ * itself a confirmed-real, deliberately deferred empty stub -- meaning
+ * `sTemplate` currently gets ZERO real content from any source. This
+ * fix does not attempt to reproduce `InitializeLongHand()` itself (a
+ * separate, substantially larger, still-out-of-scope 550-byte function)
+ * -- only the narrower, independently real and independently
+ * ctors-confirmed +0xa/+0xb seed pattern that runs strictly BEFORE
+ * `InitializeLongHand()` ever could, matching do_mod_ctors()'s real
+ * relative timing (module load, not first-Reset()-call lazy init). See
+ * oa_engine_init.h's `CSTGChannelValues` class comment for the full
+ * trace.
+ */
+void ConstructChannelValuesTemplate(void);
+
 /* Step 3. Already reconstructed (STGEnabler/STGEnabler.c, real
  * signatures confirmed there, EXPORT_SYMBOL'd -- real first parameter is
  * `struct task_struct *`; represented here as `void *` since init_module

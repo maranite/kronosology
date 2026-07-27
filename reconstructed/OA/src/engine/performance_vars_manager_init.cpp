@@ -100,6 +100,23 @@
 
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
 
+/*
+ * FIX (2026-07-27 systemic `.ctors` sweep, see oa_init.h's own comment
+ * on this function's declaration): reproduces ground truth's real
+ * `_GLOBAL__I__ZN26CSTGPerformanceVarsManager9sInstanceE` static ctor,
+ * which this project's raw-byte-array model of `sInstance` has no C++
+ * constructor to carry. Called explicitly, early, from init_module()
+ * (alongside ConstructKorgUsbMidiPorts()/ConstructChannelValuesTemplate())
+ * to match do_mod_ctors()'s real relative timing -- strictly before
+ * CSTGGlobal::Initialize() ever calls Initialize()/AllocPerformanceVars()
+ * on this same storage.
+ */
+extern "C" void ConstructPerformanceVarsManagerSelectorState(void)
+{
+	CSTGPerformanceVarsManager::sInstance[8] = 1;
+	CSTGPerformanceVarsManager::sInstance[9] = 1;
+}
+
 static inline unsigned int ToU32(void *p)
 {
 	return (unsigned int)(unsigned long)p;

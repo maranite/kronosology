@@ -688,6 +688,33 @@ void CSTGProgramSlot::CompleteLoadProgram(CSTGSlotVoiceData *) {}
 unsigned char CSTGChannelValues::sTemplateReady;
 unsigned char CSTGChannelValues::sTemplate[0x92c];
 void CSTGChannelValues::InitializeLongHand() {}
+
+/*
+ * FIX (2026-07-27 systemic `.ctors` sweep, see oa_init.h's own comment
+ * on this function's declaration): reproduces ground truth's real
+ * static ctor for `CSTGChannelValues::sTemplate` (the compiler grouped
+ * it under `_GLOBAL__I__ZN17CSTGChannelValues14sTemplateReadyE`'s own
+ * symbol name, but its relocations target `sTemplate` itself) -- 121
+ * 12-byte sub-records (120 in a loop over `sTemplate[0..0x59f]`, plus
+ * one more "tail" record at `sTemplate+0x5a0`) each get `+0xa`/`+0xb`
+ * set to 1; every other field these records touch is a redundant
+ * zero-write already covered by plain BSS zero-init, not reproduced
+ * here. Does NOT attempt to reproduce `InitializeLongHand()` itself
+ * (still a confirmed-real, deliberately deferred stub, above) -- only
+ * this independently real, independently ctors-confirmed seed pattern,
+ * which ground truth's do_mod_ctors() applies at module load, strictly
+ * before InitializeLongHand() could ever lazily run.
+ */
+extern "C" void ConstructChannelValuesTemplate(void)
+{
+	unsigned char *tmpl = CSTGChannelValues::sTemplate;
+	for (unsigned int i = 0; i < 120; i++) {
+		tmpl[i * 12 + 0xa] = 1;
+		tmpl[i * 12 + 0xb] = 1;
+	}
+	tmpl[0x5a0 + 0xa] = 1;
+	tmpl[0x5a0 + 0xb] = 1;
+}
 void CSTGSlotVoiceData::RunVoiceModelFeedback() {}
 /*
  * UpdateGlobalTune(float) (batch 57 investigation, .text+0xb4860, 335
