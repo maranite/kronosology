@@ -78,6 +78,11 @@
 #include "oa_engine_init.h"
 #include "oa_heapmanager.h"
 
+/* Same real symbol as src/mem/new_delete.cpp's own definition -- plain
+ * extern "C" re-declaration, matching this project's established
+ * "every file declares its own copy" convention. */
+extern "C" void __cxa_pure_virtual(void);
+
 namespace {
 
 /* Same real .rodata tables as midi_in_port_serial.cpp's own
@@ -174,20 +179,83 @@ unsigned int PollNextRegularMessage(CSTGMidiOutPort *port, unsigned char *buf, u
 
 } /* anonymous namespace */
 
+/*
+ * _ZTV15CSTGMidiOutPort -- real base vtable. CONFIRMED via `readelf -rW`
+ * against ground truth OA.ko (`.rel.rodata._ZTV15CSTGMidiOutPort`, 9
+ * entries, symbol size 44 bytes = 2 RTTI header words + 9 function
+ * slots):
+ *   +0x08 (slot0) dtor                  -- __cxa_pure_virtual (still
+ *                                           pure in this base -- see
+ *                                           class comment, oa_engine_init.h)
+ *   +0x0c (slot1) Activate(CSTGMidiQueue*) -- REAL, CSTGMidiOutPort::Activate() below
+ *   +0x10 (slot2) Deactivate()             -- REAL, CSTGMidiOutPort::Deactivate() below
+ *   +0x14 (slot3) BumpTimers()             -- REAL, CSTGMidiOutPort::BumpTimers() below
+ *   +0x18 (slot4) CanSendRealTime() const  -- __cxa_pure_virtual (pure in this base)
+ *   +0x1c (slot5) CanSendRegular() const   -- __cxa_pure_virtual (pure in this base)
+ *   +0x20 (slot6) ProcessRegularMessage()  -- __cxa_pure_virtual (pure in this base)
+ *   +0x24 (slot7) SendRealTime(uchar)      -- __cxa_pure_virtual (pure in this base)
+ *   +0x28 (slot8) SendSingleByte(uchar)    -- __cxa_pure_virtual (pure in this base)
+ * This is the SAME root-cause bug class root-caused in `63f099c`
+ * (`_ZTV22CSTGMidiOutPortKorgUsb`, this file's sibling
+ * midi_korgusb_port.cpp) -- that fix only patched the DERIVED
+ * `CSTGMidiOutPortKorgUsb` ctor's own missing vtable write (the only
+ * currently-live construction site); this base ctor's own write was
+ * left as a bare gap (no assignment to `vtable` at all, not even a
+ * wrong placeholder) despite ground truth's own `.text+0xf827a: mov
+ * DWORD PTR [eax],0x8` + `R_386_32 _ZTV15CSTGMidiOutPort` being the
+ * ctor's own first instruction. Currently dead in practice --
+ * `CSTGMidiOutPortKorgUsb`'s derived ctor immediately overwrites this
+ * field afterward (`CKorgUsbAudioDriverMidiPorts::Construct()`,
+ * midi_korgusb_port.cpp) and `CSTGMidiOutPortSerial` itself has no
+ * construction site anywhere in this project yet (see
+ * midi_port_manager.cpp's own note) -- fixed anyway so a future
+ * construction site that doesn't override it fails into a real,
+ * confirmed pure-virtual trap instead of silently dispatching through
+ * an uninitialized field.
+ */
+namespace {
+void OutPortBase_Activate(void *p, void *q3)
+{
+	((CSTGMidiOutPort *)p)->Activate((CSTGMidiQueue *)q3);
+}
+void OutPortBase_Deactivate(void *p)
+{
+	((CSTGMidiOutPort *)p)->Deactivate();
+}
+void OutPortBase_BumpTimers(void *p)
+{
+	((CSTGMidiOutPort *)p)->BumpTimers();
+}
+const unsigned int _ZTV15CSTGMidiOutPort[11] = {
+	0, 0,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&OutPortBase_Activate,
+	(unsigned int)(unsigned long)&OutPortBase_Deactivate,
+	(unsigned int)(unsigned long)&OutPortBase_BumpTimers,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+};
+}
+
 int CSTGMidiOutPort::sActiveSensingTransmitPeriodTicks;
 int CSTGMidiOutPortSerial::sRunningStatusTimeoutTicks;
 
 /*
  * CSTGMidiOutPort(eSTGMidiPort portType, unsigned int flagsInit) --
  * CONFIRMED real, `.text+0xf8270`, 95 bytes, regparm(3): this=EAX,
- * portType=EDX, flagsInit=ECX. Sets the base vtable, `portIndex =
- * (unsigned char)portType`, `flags` bit0 from `flagsInit & 1`, zeroes
- * all 4 queue-slot Queue* / Buf* pointers (NOT the reader-index/inSysEx
- * bytes -- left uninitialized until Activate()), then calls the
- * already-real CSTGMidiPortManager::RegisterMidiOutPort(this).
+ * portType=EDX, flagsInit=ECX. Sets the base vtable (now genuinely
+ * reproduced -- see `_ZTV15CSTGMidiOutPort`'s own comment above),
+ * `portIndex = (unsigned char)portType`, `flags` bit0 from `flagsInit &
+ * 1`, zeroes all 4 queue-slot Queue* / Buf* pointers (NOT the
+ * reader-index/inSysEx bytes -- left uninitialized until Activate()),
+ * then calls the already-real CSTGMidiPortManager::RegisterMidiOutPort(this).
  */
 CSTGMidiOutPort::CSTGMidiOutPort(int portType, unsigned int flagsInit)
 {
+	vtable = ToU32(_ZTV15CSTGMidiOutPort + 2); /* real: &_ZTV15CSTGMidiOutPort + 8 */
 	portIndex = (signed char)portType;
 	flags = (unsigned char)((flags & 0xfe) | (flagsInit & 1));
 

@@ -116,6 +116,74 @@ alive 8s later, then hit the separate, already-documented (2026-07-27)
 fakefb.ko `register_framebuffer()` stall — identical to the pre-existing
 known issue, unrelated to this fix.
 
+**Follow-up sweep (2026-07-27, same day): the SAME "ctor never writes the
+real vtable pointer" bug found in the 2 BASE classes, `CSTGMidiInPort` and
+`CSTGMidiOutPort`.** Dispatched to check whether every other
+`CSTGMidiXxxPort`/`CSTGMidiInPortXxx`/`CSTGMidiOutPortXxx` variant in this
+project has the same gap. Result:
+
+- `CSTGMidiInPortKorgUsb` — explicitly re-verified CLEAN for this specific
+  pattern: its vtable-pointer field IS correctly written, by
+  `CKorgUsbAudioDriverMidiPorts::Construct()` immediately post-construction
+  (the fix above, item 1). The still-open item there (which real function
+  belongs at slot 0 — `KorgUsbInPortPortQueryStub` is a deliberately labeled
+  safe placeholder, not the resolved real dispatch) is a *different*,
+  already-tracked ambiguity, out of scope for this specific bug class.
+- **Found and fixed**: `CSTGMidiInPort::CSTGMidiInPort()`
+  (`midi_in_port_serial.cpp`) was writing a literal `0` to `self+0x00` where
+  ground truth's own `.text+0xf59aa` writes `&_ZTV14CSTGMidiInPort + 8`
+  (`R_386_32` relocation, confirmed via `objdump -dr -M intel`) — the prior
+  comment on that line ("own vtable not yet reconstructed") was itself the
+  bug marker. `.rel.rodata._ZTV14CSTGMidiInPort` (3 slots) resolves: slot0
+  `__cxa_pure_virtual` (dtor, still pure in this base), slot1
+  `Activate(CSTGMidiQueue*)` (real), slot2 `Deactivate()` (real).
+- **Found and fixed**: `CSTGMidiOutPort::CSTGMidiOutPort()`
+  (`midi_out_port_serial.cpp`) wrote NO vtable field at all — a bare gap,
+  not even a wrong placeholder — where ground truth's own `.text+0xf827a`
+  writes `&_ZTV15CSTGMidiOutPort + 8` (same relocation pattern, confirmed
+  via `readelf -rW`). `.rel.rodata._ZTV15CSTGMidiOutPort` (9 slots)
+  resolves: slot0 `__cxa_pure_virtual` (dtor, pure), slot1 `Activate` (real),
+  slot2 `Deactivate` (real), slot3 `BumpTimers` (real, non-pure base body),
+  slots4-8 `__cxa_pure_virtual` (`CanSendRealTime`/`CanSendRegular`/
+  `ProcessRegularMessage`/`SendRealTime`/`SendSingleByte`, all still pure in
+  this base — matches the class's own already-documented vtable-shape
+  comment exactly).
+- Both fixes use the same free-function-trampoline technique the
+  `_ZTV22CSTGMidiOutPortKorgUsb` fix above established, referencing the
+  already-real `__cxa_pure_virtual` (`new_delete.cpp`) directly for every
+  still-pure slot.
+- **Currently dead in practice**: the only live construction site in this
+  project, `CKorgUsbAudioDriverMidiPorts::Construct()`, already overwrites
+  both fields immediately post-construction with the correct
+  derived-class vtables (see the fix above). Fixed anyway, for the same
+  reason the defensive `PortQuery()`/`PortRegister()` guard above was kept:
+  a future construction site that doesn't override the field should fail
+  into a confirmed pure-virtual trap instead of a silent NULL dispatch.
+- Also confirmed clean, no fix needed: `CSTGMidiInPortGeneric`/
+  `CSTGMidiInPortSerial`/`CSTGMidiOutPortUSB` add no vtable of their own in
+  ground truth (`readelf -sW`/`readelf -rW` confirm no `_ZTVxxx` section and
+  no own constructor symbol for `CSTGMidiInPortSerial` specifically — both
+  are field-less subclasses of the now-fixed base, carrying only their own
+  real method names); `CSTGUSBMidiAccessoryMidiInPort`/`CSTGMidiInPortUSB`
+  have no construction site anywhere in this project at all (already
+  documented as a deliberately deferred scope decision, unrelated to this
+  bug class).
+
+Verified: host `verify/` suite green (124 test binaries, 0 failures,
+including `test_midi_korgusb_port`'s own static-ctor-sanity checks and the
+dedicated `test_midi_in_port_serial`/`test_midi_out_port_serial` KATs).
+Clean `make ko-clean && make ko KDIR=/home/build/linux-kronos` rebuild.
+Live-verified on a disposable `kronosvm` instance (fresh copy of the
+known-good `full_integration_test_20260727` disk image, freshly-built
+`OA.ko` injected via `guestfish upload`, MD5-verified to match the local
+build exactly): reaches `OA_DEBUG_MARKER 17`/`OA: init_module succeeded`/
+`[loadoa] OA.ko: LOADED OK`, Eva alive at 8s, zero `Oops`/`BUG:`/`panic`
+(the only case-insensitive "bug" match in the whole console log is the
+benign, unrelated, pre-existing "MP-BIOS bug: 8254 timer not connected to
+IO-APIC" kernel printk) — identical behavior through the point where the
+separate, already-tracked fakefb `register_framebuffer()` stall takes over.
+VM instance torn down cleanly afterward.
+
 ## CSTGDrumPadClient's own vtable — 6th confirmed `.ctors`-vs-`.init_array` instance, real bug fixed (2026-07-27)
 
 The `CSTGDrumPadClient` reconstruction added earlier the same day (`e00cd3e`,

@@ -83,6 +83,12 @@
 #include "oa_engine_init.h"	/* CSTGMidiQueueWriter::Write(), CSTGMidiQueue::GetNumWritableBytes() */
 #include "oa_heapmanager.h"	/* CSTGHeapManager::sInstance, for Activate()'s resolve_heap_handle() */
 
+/* Same real symbol as src/mem/new_delete.cpp's own definition -- plain
+ * extern "C" re-declaration, matching this project's established
+ * "every file declares its own copy" convention (see
+ * midi_korgusb_port.cpp's RTAI-extern comment for the same precedent). */
+extern "C" void __cxa_pure_virtual(void);
+
 namespace {
 
 /* Real .rodata tables -- see file header comment for the dump. */
@@ -361,6 +367,52 @@ void CSTGMidiInPortSerial::ReceiveBytes(const unsigned char *data, unsigned char
 }
 
 /*
+ * _ZTV14CSTGMidiInPort -- real base vtable (this project's same
+ * hand-modeled-field, non-`virtual` convention as `CSTGMidiOutPort`;
+ * see that class's own "own vtable not yet reconstructed" note this
+ * fix retires). CONFIRMED via `readelf -rW` against ground truth OA.ko
+ * (`.rel.rodata._ZTV14CSTGMidiInPort`, 3 entries, symbol size 20 bytes =
+ * 2 RTTI header words + 3 function slots):
+ *   +0x08 (slot0) dtor               -- __cxa_pure_virtual (still pure
+ *                                        in this base; every concrete
+ *                                        instance in this project is a
+ *                                        `CSTGMidiInPortKorgUsb`, whose
+ *                                        own ctor immediately overwrites
+ *                                        this field post-construction --
+ *                                        see `CKorgUsbAudioDriverMidiPorts::
+ *                                        Construct()`, midi_korgusb_port.cpp)
+ *   +0x0c (slot1) Activate(CSTGMidiQueue*) -- REAL, `CSTGMidiInPort::Activate()` below
+ *   +0x10 (slot2) Deactivate()             -- REAL, `CSTGMidiInPort::Deactivate()` below
+ * Same root-cause class as `_ZTV15CSTGMidiOutPort`
+ * (midi_out_port_serial.cpp) and the already-fixed `13fba9f`/
+ * `63f099c` KorgUsb-side bugs: this ctor's own ground-truth disassembly
+ * (`.text+0xf59aa`: `mov DWORD PTR [eax],0x8` + `R_386_32
+ * _ZTV14CSTGMidiInPort`) was previously transcribed as a literal `= 0`
+ * placeholder instead of the real vtable-pointer write. Currently dead
+ * in practice (the only live construction site overwrites this field
+ * immediately afterward with the KorgUsb-derived vtable), but fixed for
+ * the same reason `63f099c` kept its own analogous guard: a future
+ * construction site that DOESN'T override it should fail into a real,
+ * confirmed pure-virtual trap rather than a silent NULL dereference.
+ */
+namespace {
+void InPort_Activate(void *p, void *q3)
+{
+	((CSTGMidiInPort *)p)->Activate((CSTGMidiQueue *)q3);
+}
+void InPort_Deactivate(void *p)
+{
+	((CSTGMidiInPort *)p)->Deactivate();
+}
+const unsigned int _ZTV14CSTGMidiInPort[5] = {
+	0, 0,
+	(unsigned int)(unsigned long)&__cxa_pure_virtual,
+	(unsigned int)(unsigned long)&InPort_Activate,
+	(unsigned int)(unsigned long)&InPort_Deactivate,
+};
+}
+
+/*
  * CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
  * -- CONFIRMED real (`_ZN14CSTGMidiInPortC2E12eSTGMidiPortj`,
  * `.text+0xf59a0`, 144 bytes, regparm(3): this=EAX, portType=EDX,
@@ -378,7 +430,8 @@ void CSTGMidiInPortSerial::ReceiveBytes(const unsigned char *data, unsigned char
  * and the other 6 bits are left whatever they already were in memory --
  * this is placement-into-existing-storage, NOT a zero-init, matching
  * `CSTGMidiOutPort`'s own base ctor's identical "only touch what I own"
- * pattern); vtable set to `&_ZTV14CSTGMidiInPort + 8`;
+ * pattern); vtable set to `&_ZTV14CSTGMidiInPort + 8` (now genuinely
+ * reproduced -- see `_ZTV14CSTGMidiInPort`'s own comment above);
  * `sysExScratchLen` (+0x24) cleared; `+0x28`/`+0x8c` set to `-1`
  * (sentinel, exact meaning not independently determined -- both fall
  * inside this class's own already-documented `_unrecovered27`/
@@ -405,7 +458,8 @@ CSTGMidiInPort::CSTGMidiInPort(int portType, unsigned int flagsInit)
 
 	self[0x25] = (unsigned char)portType;
 	self[0x26] = (unsigned char)((self[0x26] & 0xfe) | (flagsInit & 1));
-	*(unsigned int *)(self + 0x00) = 0; /* real: &_ZTV14CSTGMidiInPort + 8, own vtable not yet reconstructed as a real class hierarchy -- see class comment */
+	*(unsigned int *)(self + 0x00) =
+		(unsigned int)(unsigned long)(_ZTV14CSTGMidiInPort + 2); /* real: &_ZTV14CSTGMidiInPort + 8 */
 	self[0x24] = 0;
 	*(unsigned int *)(self + 0x28) = 0xffffffffu;
 	*(unsigned int *)(self + 0x8c) = 0xffffffffu;
