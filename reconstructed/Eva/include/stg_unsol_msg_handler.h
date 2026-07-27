@@ -101,7 +101,9 @@
  * handlers' unconditional +0x28/+0x30 dispatch (+0x30/4 = slot 12) -- bumped to 20,
  * see mains.cpp's own WORKAROUND #2 comment.
  *
- * Tier B (real signature, not implemented): ControlMsgHandler and VoiceModelMsgHandler.
+ * Tier B (real signature, not implemented): ControlMsgHandler only (VoiceModelMsgHandler,
+ * described alongside it below for context, was promoted to Tier A batch 8 -- see
+ * stg_unsol_msg_handler.cpp's own header comment for the full case-by-case reconstruction).
  * Both were RE-TRACED FROM SCRATCH (2026-07-26, `objdump -dr -M intel` against the real
  * ground-truth `Eva` binary, not just re-reading prior notes) specifically to check for
  * the "size is not depth" misdiagnosis pattern this same session caught 8 other times
@@ -138,10 +140,12 @@
  * deferred (Peg toolkit, CZ, CStorage, CModeManager) -- not tractable in isolation, and
  * not a productive target even for a dedicated follow-up batch.
  *
- * VoiceModelMsgHandler -- RE-CHARACTERIZED, genuinely more mechanical than previously
- * documented, but not simple enough to reconstruct in this same pass without real risk of
- * a subtle bug (matches this file's own CombiMsgHandler precedent for a deliberate,
- * disciplined "don't rush it" deferral). A full call-target survey shows its ENTIRE
+ * VoiceModelMsgHandler -- PROMOTED TO TIER A (batch 8, 2026-07-27, full follow-up pass on
+ * the scaffolding below -- both real jump tables fully case-traced, all real .rodata
+ * tables read directly, see stg_unsol_msg_handler.cpp's own header comment for the
+ * complete case-by-case reconstruction and exact per-case evidence). RE-CHARACTERIZED
+ * (2026-07-26, before that follow-up pass) as genuinely more mechanical than previously
+ * documented. A full call-target survey shows its ENTIRE
  * external dependency surface is just 3 already-modeled call targets: `memcpy` (1x),
  * `SetWithoutUpdatingSTG()` (7x, already stubbed in this file, see below), and
  * `CStorage::GetInstance()` (1x, already partially modeled in this file via
@@ -179,12 +183,13 @@
  *     ConvertParamToLinear` elsewhere in this file (a stub returning a fixed sentinel would
  *     be the natural way to make this branch safely bail rather than model the real
  *     algorithm database).
- * Scaffolded here (jump tables + guard shape + external dependency inventory, all
- * addresses real, not guessed) for a dedicated follow-up batch -- deliberately not forced
- * into this same pass given the remaining volume of per-branch register-to-parameter
- * tracing (2 stacked jump tables, ~16 distinct case bodies, several with bespoke
- * non-table-driven code/value computation rather than a uniform 2-byte lookup) still
- * needed to get every branch byte-exact.
+ * Scaffolding above (jump tables + guard shape + external dependency inventory, all
+ * addresses real, not guessed) for what was then a dedicated follow-up batch. That
+ * follow-up (batch 8, 2026-07-27) is now DONE: all 2 stacked jump tables' ~16 distinct
+ * case bodies were traced byte-exact, including the several genuinely bespoke
+ * non-table-driven code/value computations flagged above -- see
+ * stg_unsol_msg_handler.cpp's own header comment for the complete reconstruction. Only
+ * the one MOSS-algorithm leaf remains unimplemented, as a precisely-scoped Tier-B stub.
  *
  * EffectSlotMsgHandler (real 1856B, .text 0x08917cd0..0x08918410 -- Ghidra's own
  * "size=1796" label undercounts by ~60 bytes of trailing out-of-line branch targets,
@@ -393,10 +398,18 @@ public:
 	static void FrontPanelMsgHandler(STGMessage &msg);
 	static void KLMMsgHandler(STGMessage &msg);
 
-	/* Tier B -- real signatures only, genuinely deep per-subsystem processing,
-	 * see header comment for sizes. Not implemented.
+	/* Tier B -- real signature only, genuinely deep per-subsystem processing,
+	 * see header comment for size/call-target survey. Not implemented.
 	 */
 	void ControlMsgHandler(const STGMessage &msg);
+
+	/* Tier A, batch 8 (2026-07-27) -- real body, see header/.cpp for the full
+	 * from-scratch re-trace (promoted from Tier B; two real jump tables fully
+	 * decoded, ~90% mechanical EditApi/SetWithoutUpdatingSTG dispatch, with
+	 * exactly ONE genuine deep leaf -- a CStorage::GetInstance()-based "MOSS
+	 * algorithm" voice-model-database dispatch -- left as a precisely-scoped
+	 * Tier-B stub, VoiceModelMossAlgorithmDispatch() in the .cpp).
+	 */
 	void VoiceModelMsgHandler(STGMessage &msg);
 
 	/* Tier A, batch 2 (2026-07-25) -- real bodies, see header comment. */
@@ -477,6 +490,28 @@ private:
 	static unsigned char EditApiGetScopeId(const char *name);
 	static void EditApiSendParamMsg(unsigned char scope, unsigned char code, unsigned char value,
 	                                 void *payload, int len, int flag);
+
+	/* VoiceModelMsgHandler's own two dispatch entry points (Tier A batch 8,
+	 * 2026-07-27) -- private static (need EditApiGetScopeId's access, touch no
+	 * instance state) so the ~20 pure-math per-case helpers in the .cpp can stay
+	 * plain free functions, same split this file already uses for
+	 * EditApiGetScopeId/EditApiSendParamMsg vs. CombiMsgHandlerGuardPass(). See
+	 * stg_unsol_msg_handler.cpp's own header comment for the real control flow
+	 * these two implement.
+	 */
+	static void VoiceModelMainDispatch(unsigned char *p);
+	static void VoiceModelWildcardDispatch(unsigned char *p);
+
+	/* VoiceModelMsgHandler's subindex==13 case body (0x08917592) -- the one JT1
+	 * case confirmed (by direct disassembly) to call EditApiGetScopeId()
+	 * UNCONDITIONALLY at its own top, before any bound/guard check, unlike every
+	 * other case (which check their own bound first and only fetch scope if it
+	 * passes -- modeled as free-function Compute*() helpers in the .cpp instead).
+	 * Needs class access for that unconditional fetch, hence its own private
+	 * static member rather than a free function. See stg_unsol_msg_handler.cpp's
+	 * own header comment.
+	 */
+	static void VoiceModelS13(unsigned char *p);
 };
 
 #endif /* STG_UNSOL_MSG_HANDLER_H */

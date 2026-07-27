@@ -33,6 +33,8 @@
  */
 extern void *EditApi;
 extern unsigned char DAT_0af0df1e;
+extern unsigned char DAT_0af0e465;
+extern int DAT_0acadb30;
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -1801,6 +1803,268 @@ int main()
 			check("CombiMsgHandler case6 idx=1: payload == msg[0x18] verbatim (not msg[0x1c])", cap.payload == 0x55667788);
 		}
 
+		EditApi = realEditApi;
+	}
+
+	/* [13] VoiceModelMsgHandler (Tier A batch 8, 2026-07-27, real EditApi dispatch) --
+	 * unlike PatchMsgHandler/CombiMsgHandler's own EditApi+0x30 "SetParam" dispatch,
+	 * VoiceModelMsgHandler's entire real per-case dispatch goes through
+	 * SetWithoutUpdatingSTG() (a file-local static, same unobservable-from-here status
+	 * GlobalMsgHandler's own test comment already documents for its two call sites) --
+	 * so this coverage confirms the one thing that IS observable from here (GetScopeId's
+	 * scope-name argument, i.e. which real EditApi scope a given branch resolves to)
+	 * plus every guard/bound-check rejection path (verified via "GetScopeId not called
+	 * at all"), plus VoiceModelS1or2's own real side effect (zeroing msg+0x14), plus
+	 * "does not crash" for every dispatch path exercised. The real algType byte array
+	 * (DAT_0af0e049_AlgTypeTable) is a file-local `static` placeholder with no test
+	 * seam -- it is always 0 in this build, so the "(DAT_0af0df1e&7)==3, algType in
+	 * [2,9]" branches (the JT2 mechanical cases + the MOSS stub) are not reachable from
+	 * this test file; only the algType-invalid fallback sub-branch of that mode is
+	 * covered below, same "real but currently untestable given this pass's own data"
+	 * status this file already documents for several other dead/unseamed branches.
+	 */
+	printf("[13] VoiceModelMsgHandler (Tier A batch 8, 2026-07-27, real EditApi dispatch)\n");
+	{
+		struct Capture {
+			bool scopeCalled;
+			const char *scopeName;
+		};
+		static Capture cap;
+
+		struct Fake13 {
+			static unsigned char GetScopeId(void *, const char *name)
+			{
+				cap.scopeCalled = true;
+				cap.scopeName = name;
+				return 0x40;
+			}
+		};
+
+		struct Trap13 { static void Nop() {} };
+		void *fakeVtbl[16];
+		for (int i = 0; i < 16; ++i)
+			fakeVtbl[i] = (void *)Trap13::Nop;
+		fakeVtbl[0x28 / 4] = (void *)Fake13::GetScopeId;
+
+		void *fakeObj = fakeVtbl;
+		void *realEditApi = EditApi;
+		EditApi = &fakeObj;
+
+		unsigned char savedMode = DAT_0af0df1e;
+		unsigned char savedGByte = DAT_0af0e465;
+		int savedAcadb30 = DAT_0acadb30;
+		unsigned char buf[64];
+
+		/* Guard rejection: target matches none of {id-match, 0xfffe, 0xffff} ->
+		 * no dispatch at all, GetScopeId never called.
+		 */
+		{
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0xc) = 0xdeadbeef;
+			*(unsigned int *)(buf + 0x10) = 0x1234; /* neither id-match nor 0xfffe/0xffff */
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler: guard rejects non-wildcard mismatched target", !cap.scopeCalled);
+		}
+
+		/* WILDCARD (target==0xfffe), DAT_0acadb30==0, msg+0x8==0, S(msg+0x16)==0,
+		 * F(msg+0x1a)==2 -> table 0x8f1bd4c[2]={0x2f,0x03}, scope "ESSampling".
+		 */
+		{
+			DAT_0acadb30 = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(uint16_t *)(buf + 0x16) = 0;
+			*(uint16_t *)(buf + 0x1a) = 2;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler WILDCARD S==0: dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler WILDCARD S==0: scope name == \"ESSampling\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESSampling") == 0);
+		}
+
+		/* WILDCARD S==3, F==1 -> table 0x8f1bd58[1]={0xff,0xff} (real sentinel
+		 * entry, still dispatches -- no sentinel check exists on this table).
+		 */
+		{
+			DAT_0acadb30 = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(uint16_t *)(buf + 0x16) = 3;
+			*(uint16_t *)(buf + 0x1a) = 1;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler WILDCARD S==3: dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler WILDCARD S==3: scope name == \"ESSampling\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESSampling") == 0);
+		}
+
+		/* WILDCARD, S neither 0 nor 3 -> bail, no dispatch. */
+		{
+			DAT_0acadb30 = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(uint16_t *)(buf + 0x16) = 7;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler WILDCARD invalid S: no dispatch", !cap.scopeCalled);
+		}
+
+		/* WILDCARD, DAT_0acadb30 != 0 -> real: re-enters MAIN instead of bailing.
+		 * Set DAT_0af0df1e so MAIN's own "!=3" branch takes idx0 (subindex
+		 * 0xffff wildcard), F==0 -> table 0x8f1bd6a[0]={0x33,0x4d}, scope "ESProg".
+		 */
+		{
+			DAT_0acadb30 = 1;
+			DAT_0af0df1e = 0; /* (0 & 7) != 3 -> "!=3" branch */
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xfffe;
+			*(uint16_t *)(buf + 0x16) = 0xffff;
+			*(uint16_t *)(buf + 0x1a) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler WILDCARD with DAT_0acadb30!=0: re-enters MAIN, dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler WILDCARD with DAT_0acadb30!=0: scope name == \"ESProg\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			DAT_0acadb30 = 0;
+		}
+
+		/* MAIN, "!=3" branch (17-entry JT1), target==0xffff (wildcard, bypasses
+		 * the CStorage id-match entirely -- same trick this file's own
+		 * PatchMsgHandler coverage above uses). idx0 (subindex==0xffff), F==1 ->
+		 * table 0x8f1bd6a[1]={0x33,0x51}, scope "ESProg".
+		 */
+		{
+			DAT_0af0df1e = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x16) = 0xffff;
+			*(uint16_t *)(buf + 0x1a) = 1;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN idx0: dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler MAIN idx0: scope name == \"ESProg\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+		}
+
+		/* MAIN idx1 (S==0), F==6 (out of the real table's own <=5 bound) -> bail,
+		 * no dispatch.
+		 */
+		{
+			DAT_0af0df1e = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x16) = 0;
+			*(uint16_t *)(buf + 0x1a) = 6;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN idx1 F-out-of-range: no dispatch", !cap.scopeCalled);
+		}
+
+		/* MAIN idx2 (S==1, the bespoke case): real side effect zeroes msg+0x14,
+		 * dispatches unconditionally (no bound check on F at all), scope "ESProg".
+		 */
+		{
+			DAT_0af0df1e = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x14) = 0x1234; /* must be observably zeroed afterward */
+			*(uint16_t *)(buf + 0x16) = 1;
+			buf[0x1a] = 9;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN idx2 (S==1): dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler MAIN idx2 (S==1): scope name == \"ESProg\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+			check("VoiceModelMsgHandler MAIN idx2 (S==1): real side effect zeroed msg+0x14",
+			      *(uint16_t *)(buf + 0x14) == 0);
+		}
+
+		/* MAIN, subindex+1 wraps out of the real 17-entry bound (rawS==16 ->
+		 * idx==17) -> bail, no dispatch.
+		 */
+		{
+			DAT_0af0df1e = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x16) = 16;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN idx-out-of-range (S==16): no dispatch", !cap.scopeCalled);
+		}
+
+		/* MAIN, "==3" branch, algType-invalid fallback sub-path: msg+0x14 (V)
+		 * must be 0 (algType table lookup key, always 0 in this placeholder
+		 * build -> algType always 0, i.e. always "invalid"), DAT_0af0e465 in
+		 * [1,9], subindex(msg+0x16)==0 -> converges on the same VoiceModelS0()
+		 * body as MAIN idx1 above, scope "ESProg".
+		 */
+		{
+			DAT_0af0df1e = 3; /* (3 & 7) == 3 */
+			DAT_0af0e465 = 5; /* in [1,9] */
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x14) = 0;
+			*(uint16_t *)(buf + 0x16) = 0;
+			*(uint16_t *)(buf + 0x1a) = 3;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN ==3 fallback: dispatched", cap.scopeCalled);
+			check("VoiceModelMsgHandler MAIN ==3 fallback: scope name == \"ESProg\"",
+			      cap.scopeName && strcmp(cap.scopeName, "ESProg") == 0);
+		}
+
+		/* Same as above but DAT_0af0e465 == 0 (default/unconfigured) -> bail,
+		 * no dispatch.
+		 */
+		{
+			DAT_0af0df1e = 3;
+			DAT_0af0e465 = 0;
+			memset(buf, 0, sizeof(buf));
+			*(int *)(buf + 8) = 0;
+			*(unsigned int *)(buf + 0x10) = 0xffff;
+			*(uint16_t *)(buf + 0x14) = 0;
+			*(uint16_t *)(buf + 0x16) = 0;
+
+			cap = Capture();
+			STGMessage &msg = *(STGMessage *)buf;
+			handler.VoiceModelMsgHandler(msg);
+			check("VoiceModelMsgHandler MAIN ==3 fallback with gByte==0: no dispatch", !cap.scopeCalled);
+		}
+
+		DAT_0af0df1e = savedMode;
+		DAT_0af0e465 = savedGByte;
+		DAT_0acadb30 = savedAcadb30;
 		EditApi = realEditApi;
 	}
 

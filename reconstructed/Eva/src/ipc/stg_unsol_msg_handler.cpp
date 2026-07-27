@@ -20,6 +20,7 @@
  */
 
 #include "stg_unsol_msg_handler.h"
+#include "system_api.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -731,32 +732,21 @@ void CSTGUnsolMsgHandler::CalibrationMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::FrontPanelMsgHandler(STGMessage &) {}
 void CSTGUnsolMsgHandler::KLMMsgHandler(STGMessage &) {}
 
-/* --- Tier B link-stubs: not implemented -- see this file's own header comment (the
- * "Tier B" section) for the full 2026-07-26 from-scratch re-trace findings, real jump
- * table contents/addresses, and exact evidence for each verdict. Summary:
+/* --- Tier B link-stub: not implemented -- see this file's own header comment (the
+ * "Tier B" section) for the full 2026-07-26 from-scratch re-trace findings and exact
+ * evidence. Summary:
  *   - ControlMsgHandler: RE-CONFIRMED genuinely deep (18 distinct out-of-scope call
  *     targets spanning CMMI/CControlSurface/CHelpManager/CModeManager/CDiskUtil/
  *     CSmplModeMgr/real Peg CForm dialogs/raw HAL interrupt-mask control). Real size
  *     5152 bytes (0x0891ac70..0x0891c090), corrected from the previously-documented
  *     4886B (an undercount from trusting Ghidra's own size label over the real
  *     next-symbol gap).
- *   - VoiceModelMsgHandler: RE-CHARACTERIZED as ~90% mechanical reuse of this file's own
- *     already-modeled EditApi/Api/CStorage/SetWithoutUpdatingSTG infrastructure (2 real
- *     jump tables at 0x08f1bac0/0x08f1bb04, same guard shape as PatchMsgHandler above),
- *     with exactly ONE genuine deep leaf (a `CStorage::GetInstance()`-based "MOSS
- *     algorithm" voice-model database dispatch at real call site 0x08917209, confirmed
- *     via a real nearby file-path string naming
- *     ".../Storage/MOSSAlgorithm..."). Deliberately left deferred rather than rushed in
- *     the same pass that found this -- matches this file's own CombiMsgHandler
- *     precedent for declining to force a risky reconstruction once genuine remaining
- *     complexity (2 stacked jump tables, ~16 case bodies, several with bespoke
- *     non-table-driven register math) was confirmed real rather than a decompiler
- *     artifact. Real size 2512 bytes (0x08917100..0x08917ad0), corrected from the
- *     previously-documented 2487B (same class of undercount as ControlMsgHandler's).
+ * (VoiceModelMsgHandler was also RE-CHARACTERIZED alongside ControlMsgHandler on
+ * 2026-07-26, but has since been promoted to Tier A -- see the "Tier A, batch 8" section
+ * further down this file for its real implementation.)
  */
 
 void CSTGUnsolMsgHandler::ControlMsgHandler(const STGMessage &) { /* Tier-B link-stub. .text+0x0891ac70, 5152 bytes. */ }
-void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &) { /* Tier-B link-stub. .text+0x08917100, 2512 bytes. */ }
 
 /* --- Tier A, batch 2 (2026-07-25): real bodies -----------------------------------
  *
@@ -2731,4 +2721,656 @@ void CSTGUnsolMsgHandler::CombiMsgHandler(STGMessage &msg)
 	default:
 		return;
 	}
+}
+
+/* --- Tier A, batch 8 (2026-07-27): VoiceModelMsgHandler --------------------------
+ *
+ * Promoted from Tier B (deferred 2026-07-26 as "genuinely more mechanical than
+ * previously documented, but not simple enough to reconstruct in this same pass" --
+ * see this file's own header comment for the from-scratch re-trace that established
+ * the two real jump tables/guard shape/dependency inventory). Real size 2512 bytes
+ * (0x08917100..0x08917ad0, corrected from the previously-documented 2487B).
+ *
+ * Full case-by-case tracing this session (`objdump -dr -M intel` against the real
+ * ground-truth binary, every jump target followed by hand, every table read directly
+ * out of .rodata via readelf VA->file-offset + raw byte read -- same discipline as
+ * this file's other s_akbyAP tables) confirms the header's own "~90% mechanical, one
+ * genuine deep leaf" verdict exactly. Real control flow (real addresses in parens):
+ *
+ *   - Soft assert (0x08917131): if (int16_t)(msg+0x14) > 1, fires the real Api+0x94
+ *     assert-report idiom already established elsewhere in this project (tempo.cpp/
+ *     mains.cpp/chunk_man.cpp/chunk_server.cpp/edit_server.cpp/config_manager.cpp)
+ *     with file string "MsgProcessor/STGUnsolMsgProcessor/CSTGUnsolMsgHandler.cpp",
+ *     line 0x1074 -- never fatal, always falls through and continues.
+ *   - Guard (0x08917159): real condition is
+ *       (msg+0xc == CStorage::sm_ucCurrentProg && target == DAT_0af30549)
+ *         || target == 0xffff  -> MAIN dispatch
+ *       target == 0xfffe                                -> WILDCARD dispatch
+ *       else                                              -> return (no dispatch)
+ *     (byte-identical guard SHAPE to PatchMsgHandler's own, confirmed here by direct
+ *     disassembly. DAT_0af30549 is a single byte [0,255], so it can never coincide
+ *     with the 0xfffe/0xffff sentinels -- the real disassembly's own "id-match, then
+ *     re-check target" control flow at 0x08917430/0x08917440 collapses to exactly
+ *     this without loss, confirmed by hand-tracing both branches.)
+ *   - WILDCARD (0x089173ca): real global `DAT_0acadb30` (purpose untraced, kept
+ *     opaque, same convention as DAT_0af0df1e) must be 0 to proceed (nonzero
+ *     re-enters MAIN instead, a real `jne` back into the main branch, not a bail);
+ *     msg+0x8 must be 0; subindex(msg+0x16) selects one of two bespoke, self-
+ *     contained sub-cases, each with its OWN F bound check before its OWN
+ *     GetScopeId("ESSampling") call (S==0: 0x089173e8, F<=5, table 0x08f1bd4c;
+ *     S==3: 0x08917452, F<=8, table 0x08f1bd58; both share the common tail at
+ *     0x0891748a) -- any other S bails. (Corrected from this section's own first
+ *     trace pass, which wrongly claimed S==0 falls through into idx1's 0x089174cb
+ *     body -- it does not; it is separate, self-contained code that merely uses an
+ *     analogous shape and a different table/scope.)
+ *   - MAIN (0x08917189): branches on `(DAT_0af0df1e & 7) == 3` (the same opaque mode
+ *     byte PatchMsgHandler's own guard reads):
+ *       != 3: msg+0x8 must be 0; subindex(msg+0x16)+1 (wrapping 0xffff->0) indexes
+ *         the real 17-entry jump table at 0x08f1bac0 (bound <=16).
+ *       == 3: msg+0x8 must be 0; reads a real, not-yet-modeled "algorithm
+ *         descriptor" byte from a static array based at 0x0af0e049, indexed by
+ *         msg+0x14 (raw "value" field) * 0x41c (1052) -- confirmed real via direct
+ *         disassembly, backed here by a zero-initialized bounded placeholder (see
+ *         VoiceModelAlgType() below) since the real array's actual runtime
+ *         contents/size are CStorage-internal and not recovered.
+ *           algType > 9 or == 0: falls through to a SEPARATE precondition set
+ *             (msg+0x14 must be exactly 0, a DIFFERENT opaque global byte
+ *             DAT_0af0e465 must be in [1,9], subindex must be 0) that, when
+ *             satisfied, converges on the EXACT SAME .text address as the "!=3,
+ *             subindex==0" case (0x089174cb) -- a real, confirmed-by-disassembly
+ *             convergence, not an approximation; modeled by calling the same
+ *             VoiceModelS0() helper.
+ *           algType == 1: bail, no dispatch at all.
+ *           algType in [2,9] and subindex(msg+0x16) <= 5 (unsigned): a real 6-entry
+ *             jump table at 0x08f1bb04 -- entries 0/3 are the EXACT SAME .text
+ *             addresses as the "!=3" branch's own subindex 0/3 cases
+ *             (0x089174cb/0x08917512); entries 1/2/4/5 are separately-compiled code
+ *             at different addresses (0x08917945/0x08917972) that compute the
+ *             IDENTICAL formula to the "!=3" branch's own subindex 1/2/4/5 cases,
+ *             confirmed byte-for-byte by independent register tracing of both call
+ *             sites -- modeled here by sharing one helper per formula (VoiceModelS0/
+ *             VoiceModelS1or2/VoiceModelS3/VoiceModelS4or5) called from both
+ *             branches, not duplicated.
+ *           algType in [2,9] and subindex > 5: THE ONE GENUINE DEEP LEAF (real call
+ *             0x08917209 `call CStorage::GetInstance()`, a bounds-checked array of
+ *             further-vtabled objects at [result+0x48], a real Api+0x94 assert on
+ *             bounds violation whose file argument is the real string at 0x8f25dc4,
+ *             "../../../../../OPOS/Projects/x2100/Modules/Storage/
+ *             MOSSAlgorithmDatabase/MOSSAlgorithmDatabase.h" -- confirms this is a
+ *             MOSS-algorithm voice-model-database dispatch, a whole unmodeled class
+ *             hierarchy, matching this header's original "CSTGMultisampleBankUUIDBase"
+ *             naming), further vtable calls at [obj+0x18]/[obj+0x1c], a memcpy of
+ *             message fields into a stack buffer, and a final "ESMOSS"-scope EditApi
+ *             dispatch. NOT implemented -- see VoiceModelMossAlgorithmDispatch()
+ *             below, a precisely-scoped Tier-B stub (silent no-op, matching the real
+ *             code's own silent-bail behavior on every guard failure it has). This is
+ *             the ONLY unimplemented piece of this function.
+ *
+ * All 17 JT1 case bodies (S = subindex/msg+0x16, F/C/W = msg+0x1a/0x18/0x1c
+ * respectively, V = msg+0x14) were hand-traced and are byte-exact transcriptions of
+ * real register arithmetic, not guesses -- most are a uniform "table[F] -> {code,
+ * value}, optionally offset by V/S/W" shape (kVM_A/B0to5/D/E4_5/F6_7/G/H/J/K/M),
+ * matching this file's established s_akbyAP convention. THREE are genuinely bespoke
+ * non-table register math, confirmed by hand and NOT forced into the uniform shape
+ * (per this file's own header comment warning):
+ *   - S==1/2 (0x0891775e) and its JT2-S==1/2 twin (0x08917945): zeroes msg+0x14 as a
+ *     real side effect, then value=(byte)msg+0x1a (direct, unindexed),
+ *     code=(S+0x30)&0xff (S used as a literal addend, not a table lookup at all).
+ *   - S==10 (0x08917647): a real 3-way branch on F (F==0: byte lookup by W in a
+ *     4-entry table at 0x8f1be4a; F==1: byte lookup by W in a 2-entry table at
+ *     0x8f1be46, minus 1; F>=2: W verbatim) feeding one operand, combined with a
+ *     15-entry {code,value} table at 0x8f1be4f indexed by F for the other, with TWO
+ *     independent 0xff sentinel checks (one on the F-branch result, one on the
+ *     table's own code byte).
+ *   - S==13 (0x08917592) and S==15 (0x089178de): both branch on msg+0x18 (a signed
+ *     16-bit "C" field) into 2-3 further sub-cases each (C==2 / C in {0,1} with its
+ *     own per-F table incl. a real embedded 0x3d-sentinel special case / C==0xffff
+ *     wildcard for S==13; C==0xffff / C==0 for S==15) -- see VoiceModelS13()/
+ *     VoiceModelS15() below for the exact real arithmetic.
+ * Every {code,value} table's real bytes were read directly from .rodata (readelf -l
+ * VA->file-offset, then a raw byte read) at the EXACT address each case's own
+ * disassembly references -- not transcribed from the decompile's opaque table names.
+ *
+ * Two real, confirmed-safe-to-simplify duplicate GetScopeId("ESProg") fetches (S==13's
+ * C==2 sub-case, S==15's C==0 sub-case each call GetScopeId twice in the real
+ * disassembly) are collapsed to one call here -- GetScopeId is a pure, side-effect-free
+ * lookup at every call site in this file (same status as EditApiGetScopeId's own
+ * existing callers), so this changes no observable behavior.
+ *
+ * Real, currently-dead-but-preserved unguarded-read hazard (same "avoid true C++ UB,
+ * no behavioral change for any real caller" convention as CombiMsgHandlerReadBuf()):
+ * S==10's two direct W-indexed byte tables (no bound check on W in the real ground
+ * truth) are defensively modulo-clamped against their real backing byte arrays.
+ * (S==15 turned out to have its OWN real top-of-case F<=6 bound check this section's
+ * first trace pass missed -- see the WILDCARD/MAIN correction note above -- so its
+ * own table read needs no defensive clamp at all; a modulo-clamp was applied there in
+ * this section's first draft and has been removed as unnecessary.)
+ *
+ * Real per-case GetScopeId() call-ORDER note: most JT1/JT2/WILDCARD cases check their
+ * own F bound FIRST and only call GetScopeId() if it passes (confirmed by direct
+ * disassembly of every one of them) -- so scope resolution is threaded through this
+ * reconstruction's own per-case Compute*() helpers (free functions, pure math, no
+ * class access) and only actually fetched by the two class-member dispatch methods
+ * (VoiceModelMainDispatch()/VoiceModelWildcardDispatch()) once a helper reports its
+ * own bound check passed. TWO cases are real, confirmed exceptions to this order and
+ * are NOT run through that shared bool-returning shape:
+ *   - S==1/2 (0x0891775e) has no bound check at all (always dispatches), so the
+ *     ordering question is moot -- kept as a Compute*() helper anyway for uniformity.
+ *   - S==13 (0x08917592) calls GetScopeId() UNCONDITIONALLY at the very top of the
+ *     case, before even reading msg+0x18 -- confirmed by direct disassembly (no
+ *     `cmp`/`ja` of any kind precedes the real `call [vtbl+0x28]` here, unlike every
+ *     other case). Modeled as its own private static member function,
+ *     VoiceModelS13(), which fetches scope itself and may still bail with no dispatch
+ *     afterward -- exactly reproducing this real, unconditional-fetch-then-maybe-bail
+ *     shape rather than forcing it into the shared "bound passed -> fetch -> send"
+ *     helper convention every other case genuinely follows.
+ */
+
+extern CSystemApi *Api; /* mains.cpp */
+
+namespace {
+/* Real Api+0x94 soft-assert-report idiom, same convention as tempo.cpp/mains.cpp/
+ * chunk_man.cpp/chunk_server.cpp/edit_server.cpp/config_manager.cpp.
+ */
+inline void ApiAssert(const char *file, int line)
+{
+	typedef void (*Fn)(void *, const char *, const char *, int);
+	void *vtbl = *(void **)Api;
+	Fn fn = *(Fn *)((char *)vtbl + 0x94);
+	fn(Api, "Assertion failed in module %s, line %i.\n", file, line);
+}
+} /* namespace */
+
+/* Real, opaque globals -- purposes not traced beyond their one real use each in this
+ * function, same "confirm one field, don't guess the rest" convention as
+ * DAT_0af0df1e above.
+ */
+unsigned char DAT_0af0e465 = 0; /* 0xaf0e465, real bss byte, WILDCARD/fallback gate */
+int DAT_0acadb30 = 0;           /* 0xacadb30, real bss dword, WILDCARD gate */
+
+/* Real "algorithm descriptor" byte array, base 0x0af0e049, real stride 0x41c (1052)
+ * bytes per "value" slot -- confirmed via direct disassembly (`movzx eax, BYTE PTR
+ * [edi+0xaf0e049]` with edi = msg's own raw "value" field * 0x41c). This is
+ * CStorage-internal runtime data (part of the same MOSS voice-model database the deep
+ * leaf below is unmodeled for), not a compile-time table -- backed here by a
+ * zero-initialized, size-bounded placeholder (real array's true extent unknown from
+ * this export) with a defensive modulo-clamp, same convention as
+ * CombiMsgHandlerReadBuf()'s own edit-buffer placeholder. All-zero means algType==0
+ * for every V, which routes into the (real, harmless) "fallback" path below rather
+ * than ever reaching the deep MOSS leaf -- a faithful default given this data is
+ * genuinely unrecovered, not a shortcut.
+ */
+static unsigned char DAT_0af0e049_AlgTypeTable[0x4000];
+static inline unsigned char VoiceModelAlgType(unsigned int value)
+{
+	size_t off = ((size_t)value * 0x41cu) % sizeof(DAT_0af0e049_AlgTypeTable);
+	return DAT_0af0e049_AlgTypeTable[off];
+}
+
+/* Real {code,value} byte-pair tables and small direct-index tables, every address
+ * read straight out of .rodata (readelf -l VA->file-offset, raw byte read) at the
+ * exact address each case body's own disassembly references -- see this section's
+ * own header comment for the real address of each.
+ */
+static const unsigned char kVM_Q[12]      = { 0x2f,0x01, 0x2f,0x00, 0x2f,0x03, 0x2f,0x02, 0x2f,0x04, 0x2f,0x05 }; /* 0x8f1bd4c, WILDCARD S==0 */
+static const unsigned char kVM_R[18]      = {
+	0xff,0xff, 0xff,0xff, 0xff,0xff, 0x02,0x02, 0x02,0x00, 0x02,0x01, 0x02,0x03, 0x02,0x04, 0x02,0x05,
+}; /* 0x8f1bd58, WILDCARD S==3 */
+static const unsigned char kVM_A[4]       = { 0x33,0x4d, 0x33,0x51 }; /* 0x8f1bd6a, idx0 (subindex==0xffff) */
+static const unsigned char kVM_B0to5[12]  = { 0x2c,0x01, 0x2c,0x00, 0x2c,0x03, 0x2c,0x02, 0x2c,0x04, 0x2c,0x05 }; /* 0x8f1bd6e, S==0 */
+static const unsigned char kVM_D[18]      = {
+	0x4d,0x06, 0x4d,0x02, 0x4d,0x03, 0x4d,0x01, 0x4d,0x04, 0x4d,0x05, 0x4d,0x07, 0x4d,0x08, 0x4d,0x09,
+}; /* 0x8f1bd7a, S==3 */
+static const unsigned char kVM_E4_5[58]   = {
+	0x4f,0x00, 0x4f,0x01, 0x4f,0x02, 0x4f,0x03, 0x4f,0x04, 0x4f,0x01, 0x4f,0x02, 0x4f,0x03, 0x4f,0x04, 0x4f,0x01,
+	0x4f,0x06, 0x4f,0x05, 0x4f,0x01, 0x4f,0x07, 0x4f,0x08, 0x4f,0x01, 0x4f,0x09, 0x4f,0x0a, 0x4f,0x01, 0x4f,0x0b,
+	0x4f,0x0c, 0x4f,0x0d, 0x4f,0x0e, 0x4f,0x0f, 0x4f,0x10, 0x4f,0x01, 0x4f,0x03, 0x4f,0x11, 0x4f,0x12,
+}; /* 0x8f1bda0, S==4/5 (and JT2's separately-compiled S==4/5 twin) */
+static const unsigned char kVM_F6_7[42]   = {
+	0x35,0x00, 0x35,0x05, 0x35,0x06, 0x35,0x07, 0x35,0x08, 0x35,0x03, 0x35,0x04, 0x35,0x01, 0x35,0x09, 0x35,0x02,
+	0x35,0x0b, 0x35,0x0a, 0x35,0x0c, 0x35,0x0d, 0x35,0x0e, 0x35,0x0f, 0x35,0x10, 0x35,0x11, 0x35,0x12, 0x35,0x13, 0x35,0x14,
+}; /* 0x8f1bde0, S==6/7 */
+static const unsigned char kVM_G[30]      = {
+	0x49,0x00, 0x49,0x01, 0x49,0x1d, 0x49,0x08, 0x49,0x09, 0xff,0xff, 0xff,0xff, 0x49,0x0c, 0x49,0x0d, 0x49,0x11,
+	0x49,0x12, 0x49,0x16, 0x49,0x17, 0x49,0x1b, 0x49,0x1c,
+}; /* 0x8f1be0a, S==8 (0xff,0xff real sentinel at F=5,6) */
+static const unsigned char kVM_H[30]      = {
+	0x41,0x00, 0x41,0x01, 0x41,0x1e, 0x41,0x09, 0x41,0x0a, 0xff,0xff, 0xff,0xff, 0x41,0x0d, 0x41,0x0e, 0x41,0x12,
+	0x41,0x13, 0x41,0x17, 0x41,0x18, 0x41,0x1c, 0x41,0x1d,
+}; /* 0x8f1be28, S==9 (0xff,0xff real sentinel at F=5,6) */
+static const unsigned char kVM_I_main[30] = {
+	0x2f,0x00, 0x2f,0x01, 0x2f,0x14, 0x2f,0x08, 0x2f,0x09, 0x2f,0x0c, 0x2f,0x0d, 0x2f,0x10, 0x2f,0x11, 0xff,0xff,
+	0xff,0xff, 0xff,0xff, 0xff,0xff, 0x2f,0x18, 0x2f,0x19,
+}; /* 0x8f1be4f, S==10 main table */
+static const unsigned char kVM_I_dir46[4] = { 0x01, 0x03, 0x05, 0x06 }; /* 0x8f1be46, S==10 F==1 direct table */
+static const unsigned char kVM_I_dir4a[8] = { 0x00, 0x02, 0x04, 0xff, 0x07, 0x2f, 0x00, 0x2f }; /* 0x8f1be4a, S==10 F==0 direct table */
+static const unsigned char kVM_J[40]      = {
+	0x39,0x01, 0x39,0x00, 0x39,0x02, 0x39,0x05, 0x39,0x11, 0x39,0x06, 0x39,0x07, 0x39,0x08, 0x39,0x09, 0x39,0x13,
+	0x39,0x15, 0x39,0x16, 0x39,0x0f, 0x39,0x10, 0x39,0x0b, 0x39,0x0c, 0x39,0x0d, 0x39,0x0e, 0x39,0x03, 0x39,0x04,
+}; /* 0x8f1be80, S==11 */
+static const unsigned char kVM_K[26]      = {
+	0x33,0x00, 0x33,0x02, 0x33,0x03, 0x33,0x05, 0x33,0x06, 0x33,0x04, 0x33,0x07, 0x33,0x08, 0x33,0x09, 0x33,0x50,
+	0x33,0x4f, 0x39,0x12, 0x33,0x01,
+}; /* 0x8f1bea8, S==12 (F==11 entry, {0x39,0x12}, real code-byte anomaly vs. the
+    * table's otherwise-uniform 0x33 -- transcribed as read, not "fixed", same
+    * spillover-adjacency class as this file's own CombiMsgHandler kHandleCombi*
+    * table notes) */
+static const unsigned char kVM_K_flag[13] = { 1,1,1,1,1,1,1,1,1,0,0,0,1 }; /* 0x8f1c484, S==12 flag
+    * table -- real bytes immediately inside kGlobalMsgWaveSeqFlag's own documented
+    * real base (0x8f1c481) but BEFORE that array's own transcribed range (which
+    * starts at the shifted 0x8f1c491) -- no conflict, just the previously-
+    * untranscribed portion of the same real global array, confirmed by direct read
+    * here. */
+static const unsigned char kVM_L[46]      = {
+	0x3d,0x01, 0x3d,0x00, 0x3d,0x02, 0x3d,0x06, 0x3d,0x07, 0x3d,0x08, 0x3d,0x09, 0x3d,0x0a, 0x3d,0x10, 0x3d,0x0f,
+	0x3b,0x01, 0x3d,0x17, 0x3d,0x0b, 0x3d,0x0c, 0x3d,0x0d, 0x3d,0x0e, 0x3d,0x11, 0x3d,0x14, 0x3b,0x02, 0x3d,0x18,
+	0x3d,0x03, 0x3d,0x04, 0x3d,0x05,
+}; /* 0x8f1bee0, S==13 non-negative-C table (0x3d = the real "special" sentinel code
+    * byte checked at every index except F==9/18, which are real 0x3b) */
+static const unsigned char kVM_L_wild[2]  = { 0x3b, 0x00 }; /* 0x8f1bf0e, S==13 C==0xffff table */
+static const unsigned char kVM_M[14]      = { 0x45,0x01, 0x45,0x00, 0x45,0x04, 0x45,0x05, 0x45,0x02, 0x45,0x06, 0x45,0x07 }; /* 0x8f1bf10, S==14 */
+static const unsigned char kVM_N[32]      = {
+	0x47,0x00, 0x47,0x01, 0x47,0x04, 0x47,0x02, 0x47,0x03, 0x47,0x06, 0x47,0x07, 0x00,0x00,
+	0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00,
+}; /* 0x8f1bf1e, S==15, 7 real entries (F bound <=6, confirmed by a real top-of-case
+    * bound check at 0x089178de this pass's first trace pass missed -- see this
+    * section's own header comment correction) */
+
+/* --- per-S dispatch helpers ------------------------------------------------------
+ *
+ * Free functions (not class members): each performs ONLY its own real bound check
+ * plus the case's own {code,value} math, returning false (no dispatch, matching the
+ * real ground truth exactly) if the bound check fails -- no class access needed, no
+ * scope resolution done here at all. VoiceModelMainDispatch()/
+ * VoiceModelWildcardDispatch() below (which DO have EditApiGetScopeId access) call
+ * these first and only fetch scope + dispatch via VoiceModelSend() if a helper
+ * returns true, reproducing each case's own real "bound-check-then-scope-then-
+ * dispatch" instruction order exactly (see this section's own header comment for the
+ * two real exceptions, S==1/2 and S==13, that don't follow this shape -- S==1/2 has
+ * no bound check at all so the distinction is moot; S==13 is its own private static
+ * member function, VoiceModelS13(), further down).
+ */
+static inline void VoiceModelSend(unsigned char *p, unsigned char scope, unsigned char code, unsigned char value)
+{
+	SetWithoutUpdatingSTG(scope, code, value, p + 0x20);
+}
+
+/* idx0 (dispatch index 0, real subindex sentinel 0xffff -- NOT the same as S==0). */
+static bool VoiceModelComputeIdx0(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 1) return false;
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_A[F * 2] + V);
+	value = kVM_A[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS0(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 5) return false;
+	code = kVM_B0to5[F * 2];
+	value = kVM_B0to5[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS1or2(unsigned char *p, int S, unsigned char &code, unsigned char &value)
+{
+	*(uint16_t *)(p + 0x14) = 0; /* real side effect: zeroes msg's own "value" field, unconditional */
+	value = p[0x1a]; /* real: direct byte read, no bound check, no table */
+	code = (unsigned char)(S + 0x30);
+	return true;
+}
+
+static bool VoiceModelComputeS3(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 8) return false;
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_D[F * 2] + V);
+	value = kVM_D[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS4or5(unsigned char *p, int S, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 28) return false;
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(V * 2 + kVM_E4_5[F * 2] + S - 4);
+	value = kVM_E4_5[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS6or7(unsigned char *p, int S, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 20) return false;
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(V * 2 + kVM_F6_7[F * 2] + S - 6);
+	value = kVM_F6_7[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS8(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 14) return false;
+	if (kVM_G[F * 2] == 0xff) return false; /* real sentinel, F==5/6 */
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	int adj = (F <= 1) ? (int)(W * 2) : (int)W;
+	value = (unsigned char)(adj + kVM_G[F * 2 + 1]);
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_G[F * 2] + (unsigned char)V);
+	return true;
+}
+
+static bool VoiceModelComputeS9(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 14) return false;
+	if (kVM_H[F * 2] == 0xff) return false; /* real sentinel, F==5/6 */
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	int adj = (F <= 1) ? (int)(W * 2) : (int)W;
+	value = (unsigned char)(adj + kVM_H[F * 2 + 1]);
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_H[F * 2] + (unsigned char)V);
+	return true;
+}
+
+static bool VoiceModelComputeS10(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 14) return false;
+	int W = (int)(int16_t)*(uint16_t *)(p + 0x1c);
+	int ecx;
+	if (F == 0) {
+		ecx = kVM_I_dir4a[(unsigned)W % sizeof(kVM_I_dir4a)];
+	} else if (F == 1) {
+		ecx = kVM_I_dir46[(unsigned)W % sizeof(kVM_I_dir46)] - 1;
+	} else {
+		ecx = W; /* real: verbatim, no lookup at all for F>=2 */
+	}
+	if (ecx == 0xff) return false; /* real: first sentinel check, on the F-branch result */
+	code = kVM_I_main[F * 2];
+	if (code == 0xff) return false; /* real: second, independent sentinel check, on the table's own code byte */
+	value = (unsigned char)(ecx + kVM_I_main[F * 2 + 1]);
+	return true;
+}
+
+static bool VoiceModelComputeS11(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 19) return false;
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	int adj = ((F - 10) <= 1) ? (int)(W * 2) : (int)W;
+	value = (unsigned char)(adj + kVM_J[F * 2 + 1]);
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_J[F * 2] + V);
+	return true;
+}
+
+static bool VoiceModelComputeS12(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 12) return false;
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	int adj = kVM_K_flag[F] ? (int)(W * 10) : 0;
+	value = (unsigned char)(adj + kVM_K[F * 2 + 1]);
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_K[F * 2] + V);
+	return true;
+}
+
+static bool VoiceModelComputeS14(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 6) return false;
+	unsigned int V = *(uint16_t *)(p + 0x14);
+	code = (unsigned char)(kVM_M[F * 2] + V);
+	value = kVM_M[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeS15(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	/* real top-of-case bound check, 0x089178de -- this section's first trace pass
+	 * missed it and wrongly modeled this case's own fallback table read as
+	 * unbounded; it is not (F is always <=6 by the time either sub-branch below
+	 * runs), see header comment correction.
+	 */
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 6) return false;
+
+	unsigned int C = *(uint16_t *)(p + 0x18);
+	unsigned int V = *(uint16_t *)(p + 0x14);
+
+	if (C == 0) {
+		value = p[0x1a]; /* real: direct byte read, no table */
+		code = (unsigned char)(V + 0x4b);
+		return true;
+	}
+	if (C != 0xffff) return false;
+
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	int adj;
+	unsigned int ti;
+	if (F == 2) {
+		adj = (int)W;
+		ti = 2;
+	} else if (F == 5 || F == 6) {
+		adj = (int)(W * 2);
+		ti = F;
+	} else {
+		adj = 0;
+		ti = F; /* real: F is {0,1,3,4} here, already <=6 -- always in-bounds, no clamp needed */
+	}
+	value = (unsigned char)(adj + kVM_N[ti * 2 + 1]);
+	code = (unsigned char)(V + kVM_N[ti * 2]);
+	return true;
+}
+
+static bool VoiceModelComputeWildcardS0(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 5) return false;
+	code = kVM_Q[F * 2];
+	value = kVM_Q[F * 2 + 1];
+	return true;
+}
+
+static bool VoiceModelComputeWildcardS3(unsigned char *p, unsigned char &code, unsigned char &value)
+{
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 8) return false;
+	code = kVM_R[F * 2];
+	value = kVM_R[F * 2 + 1];
+	return true;
+}
+
+/* The ONE genuine deep leaf -- see this section's own header comment for the exact
+ * real evidence (call site 0x08917209, CStorage::GetInstance(); assert file string
+ * 0x8f25dc4, ".../Storage/MOSSAlgorithmDatabase/MOSSAlgorithmDatabase.h"). NOT
+ * implemented: a real, entirely unmodeled MOSS algorithm voice-model database class
+ * hierarchy (bounds-checked array of further-vtabled objects, two more vtable calls,
+ * a memcpy, an "ESMOSS"-scope EditApi dispatch). Every real failure path in this leaf
+ * (bounds violation, null slot, either vtable call returning <=0) silently returns
+ * without dispatching anything -- modeled here as an unconditional silent no-op, the
+ * same "stub returning a fixed sentinel/no-op is the natural bail" convention this
+ * file already uses for CToneAdjustTool::ConvertParamToLinear/
+ * CPrograms::GetProgramPointer (see this file's own CombiMsgHandler section).
+ */
+static void VoiceModelMossAlgorithmDispatch(unsigned char *p, int algType, int subindex)
+{
+	(void)p; (void)algType; (void)subindex;
+	/* TODO: real MOSS algorithm database dispatch, out of scope -- see header. */
+}
+
+/* --- S==13's own case body (real address 0x08917592) -----------------------------
+ *
+ * The one real exception to the "bound check then scope" order every other case
+ * follows: GetScopeId("ESProg") is called UNCONDITIONALLY at the very top, before
+ * msg+0x18 ("C") is even read -- confirmed by direct disassembly (no `cmp`/`ja`
+ * precedes the real `call [vtbl+0x28]` here). May still end up not dispatching
+ * anything after that unconditional fetch (C outside {2} union {<=1 signed}, or F
+ * out of the non-negative table's own <=0x16 bound) -- transcribed exactly, not
+ * routed through the shared Compute*()-then-maybe-fetch shape every other case uses,
+ * since that shape would incorrectly skip the real GetScopeId() call on those bail
+ * paths.
+ */
+void CSTGUnsolMsgHandler::VoiceModelS13(unsigned char *p)
+{
+	unsigned char scope = EditApiGetScopeId("ESProg");
+
+	int16_t V = (int16_t)*(uint16_t *)(p + 0x14);
+	int16_t C = (int16_t)*(uint16_t *)(p + 0x18);
+
+	if (C == 2) {
+		unsigned char value = p[0x1a]; /* real: direct byte read, no table */
+		unsigned char code = (unsigned char)((uint16_t)V + 0x43);
+		VoiceModelSend(p, scope, code, value);
+		return;
+	}
+	if (C > 1) return; /* real: C not in {2} union {<=1 signed} -> bail */
+
+	int16_t W = (int16_t)*(uint16_t *)(p + 0x1c);
+	if (C < 0) {
+		if (C != -1) return; /* real: only the 0xffff wildcard continues */
+		unsigned char code = (unsigned char)((uint16_t)V + kVM_L_wild[0]);
+		unsigned char value = (unsigned char)((uint16_t)W + kVM_L_wild[1]);
+		VoiceModelSend(p, scope, code, value);
+		return;
+	}
+
+	/* C == 0 or C == 1 */
+	unsigned int F = *(uint16_t *)(p + 0x1a);
+	if (F > 0x16) return;
+	if (kVM_L[F * 2] == 0x3d) {
+		int esiVal = C + V * 2;
+		unsigned char code = (unsigned char)(esiVal + kVM_L[F * 2]);
+		unsigned char value = (unsigned char)((uint16_t)W + kVM_L[F * 2 + 1]);
+		VoiceModelSend(p, scope, code, value);
+	} else {
+		unsigned char code = (unsigned char)((uint16_t)V + kVM_L[F * 2]);
+		unsigned char value = (unsigned char)((uint16_t)W + kVM_L[F * 2 + 1]);
+		VoiceModelSend(p, scope, code, value);
+	}
+}
+
+/* --- the two real dispatch entry points (private static, need EditApiGetScopeId) - */
+
+void CSTGUnsolMsgHandler::VoiceModelWildcardDispatch(unsigned char *p)
+{
+	if (DAT_0acadb30 != 0) { VoiceModelMainDispatch(p); return; } /* real: re-enters MAIN, not a bail */
+	if (*(int *)(p + 8) != 0) return;
+
+	int S = (int16_t)*(uint16_t *)(p + 0x16);
+	unsigned char code = 0, value = 0;
+	bool ok;
+	if (S == 0)      ok = VoiceModelComputeWildcardS0(p, code, value);
+	else if (S == 3) ok = VoiceModelComputeWildcardS3(p, code, value);
+	else             return;
+
+	if (!ok) return;
+	unsigned char scope = EditApiGetScopeId("ESSampling");
+	VoiceModelSend(p, scope, code, value);
+}
+
+void CSTGUnsolMsgHandler::VoiceModelMainDispatch(unsigned char *p)
+{
+	if ((DAT_0af0df1e & 7) == 3) {
+		if (*(int *)(p + 8) != 0) return;
+		unsigned int V = *(uint16_t *)(p + 0x14);
+		unsigned char algType = VoiceModelAlgType(V);
+
+		if (algType > 9 || algType == 0) {
+			if (V != 0) return;
+			unsigned char gByte = DAT_0af0e465;
+			if (gByte > 9 || gByte == 0) return;
+			int S = (int16_t)*(uint16_t *)(p + 0x16);
+			if (S != 0) return;
+			unsigned char code, value;
+			if (!VoiceModelComputeS0(p, code, value)) return;
+			unsigned char scope = EditApiGetScopeId("ESProg");
+			VoiceModelSend(p, scope, code, value);
+			return;
+		}
+		if (algType == 1) return;
+
+		int S = (int16_t)*(uint16_t *)(p + 0x16);
+		if ((unsigned int)S <= 5) {
+			unsigned char code = 0, value = 0;
+			bool ok;
+			switch (S) {
+			case 0: ok = VoiceModelComputeS0(p, code, value); break;
+			case 1: case 2: ok = VoiceModelComputeS1or2(p, S, code, value); break;
+			case 3: ok = VoiceModelComputeS3(p, code, value); break;
+			case 4: case 5: ok = VoiceModelComputeS4or5(p, S, code, value); break;
+			default: ok = false; break;
+			}
+			if (ok) {
+				unsigned char scope = EditApiGetScopeId("ESProg");
+				VoiceModelSend(p, scope, code, value);
+			}
+			return;
+		}
+		VoiceModelMossAlgorithmDispatch(p, algType, S);
+		return;
+	}
+
+	if (*(int *)(p + 8) != 0) return;
+	unsigned int rawS = *(uint16_t *)(p + 0x16);
+	unsigned int idx = (unsigned short)(rawS + 1);
+	if (idx > 16) return;
+
+	if (idx == 14) { VoiceModelS13(p); return; } /* the one unconditional-scope exception */
+
+	int S = (int)rawS;
+	unsigned char code = 0, value = 0;
+	bool ok;
+	switch (idx) {
+	case 0:  ok = VoiceModelComputeIdx0(p, code, value); break;
+	case 1:  ok = VoiceModelComputeS0(p, code, value); break;
+	case 2:  case 3:  ok = VoiceModelComputeS1or2(p, S, code, value); break;
+	case 4:  ok = VoiceModelComputeS3(p, code, value); break;
+	case 5:  case 6:  ok = VoiceModelComputeS4or5(p, S, code, value); break;
+	case 7:  case 8:  ok = VoiceModelComputeS6or7(p, S, code, value); break;
+	case 9:  ok = VoiceModelComputeS8(p, code, value); break;
+	case 10: ok = VoiceModelComputeS9(p, code, value); break;
+	case 11: ok = VoiceModelComputeS10(p, code, value); break;
+	case 12: ok = VoiceModelComputeS11(p, code, value); break;
+	case 13: ok = VoiceModelComputeS12(p, code, value); break;
+	case 15: ok = VoiceModelComputeS14(p, code, value); break;
+	case 16: ok = VoiceModelComputeS15(p, code, value); break;
+	default: ok = false; break;
+	}
+	if (ok) {
+		unsigned char scope = EditApiGetScopeId("ESProg");
+		VoiceModelSend(p, scope, code, value);
+	}
+}
+
+/* CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage&), .text+0x08917100, 2512 bytes. */
+void CSTGUnsolMsgHandler::VoiceModelMsgHandler(STGMessage &msg)
+{
+	unsigned char *p = (unsigned char *)&msg;
+
+	/* real: soft assert, never fatal, always falls through */
+	if ((int16_t)*(uint16_t *)(p + 0x14) > 1)
+		ApiAssert("MsgProcessor/STGUnsolMsgProcessor/CSTGUnsolMsgHandler.cpp", 0x1074);
+
+	unsigned int target = *(unsigned int *)(p + 0x10);
+	bool idMatch = (*(unsigned int *)(p + 0xc) == (unsigned int)CStorage::sm_ucCurrentProg)
+	               && (target == (unsigned int)DAT_0af30549);
+
+	if (idMatch || target == 0xffff) {
+		VoiceModelMainDispatch(p);
+		return;
+	}
+	if (target == 0xfffe) {
+		VoiceModelWildcardDispatch(p);
+		return;
+	}
+	/* real: neither guard matched -- no dispatch */
 }

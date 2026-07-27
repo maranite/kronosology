@@ -1207,6 +1207,18 @@ RECONSTRUCTED = {
     "08071160",  # CNotifyList::ReleaseList(SNotifyEvent*)
     "08070e60",  # CNotifyList::GrowEventsList()
     "08070bb0",  # CNotifyList::PostKernelDestructor(unsigned long)
+
+    # --- Tier A, batch 8 (2026-07-27): CSTGUnsolMsgHandler::VoiceModelMsgHandler,
+    # promoted from Tier B. Both real jump tables (17 entries @0x08f1bac0, 6 entries
+    # @0x08f1bb04) fully case-traced via `objdump -dr -M intel`; ~90% mechanical
+    # EditApi/SetWithoutUpdatingSTG dispatch, with exactly ONE genuine deep leaf (a
+    # CStorage::GetInstance()-based "MOSS algorithm" voice-model-database dispatch,
+    # real call site 0x08917209) left as a precisely-scoped Tier-B stub,
+    # VoiceModelMossAlgorithmDispatch() -- not a separately manifested address, it has
+    # no real symbol of its own (inlined case logic in the real binary, not a
+    # separate function). See stg_unsol_msg_handler.h/.cpp's own header comments for
+    # the full case-by-case reconstruction.
+    "08917100",  # CSTGUnsolMsgHandler::VoiceModelMsgHandler
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
