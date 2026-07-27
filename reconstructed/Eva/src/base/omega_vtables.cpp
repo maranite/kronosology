@@ -4,6 +4,7 @@
 
 #include "omega_vtables.h"
 #include "sysapi_instance.h"
+#include "global_object_base.h"
 #include "panel.h"
 #include "editor.h"
 #include "batch_disk_man.h"
@@ -255,9 +256,35 @@ void *PTR__TNamedPtrArray_08e80ea8[3] = {
 void *PTR__TPtrArray_08e80bc8[4] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+/*
+ * FIX (2026-07-27, live vtable-dispatch sweep on kronos_vm): PTR__CSysApiInstance_
+ * 08e81008's own slots 2/3/4/5 (byte offsets 8/0xc/0x10/0x14 -- the 4 inherited
+ * CGlobalObjectBase "phase hook" slots, global_object_base.h) were still the generic
+ * EvaVTableStub, even though global_object_base.h's own header comment already
+ * documented (from an earlier ground-truth raw-byte read) that these 4 slots are
+ * confirmed identical to CGlobalObjectBase_Pre/PostKernelConstructor/Pre/
+ * PostKernelDestructor in the real binary -- the write-up was done but the array
+ * below was never actually updated to match it. Direct byte read of the ground-truth
+ * binary (Eva, VA 08e81010/08e81014/08e81018/08e8101c) confirms
+ * 0x0804cc10/0x0804cc20/0x0804cc30/0x0804cc40 -- exactly global_object_base.cpp's own
+ * 4 no-ops, reused here verbatim (not re-wrapped) since ground truth uses the literal
+ * same code address for the inherited, unoverridden slot.
+ *
+ * Confirmed live and reachable: a kronos_vm gdbstub trace of CKernel::CKernel(int)'s
+ * own sm_poGlobalObjectList bring-up loop (ckernel.cpp) caught two real hits landing
+ * on EvaVTableStub -- CallVSlot2(SysApiInstance, 8, 0) and CallVSlot2(SysApiInstance,
+ * 12, 0) -- confirming this dispatch is genuinely exercised on the real boot path, not
+ * theoretical. (Slots 0/1, the dtor pair, are NOT touched by this fix -- ground truth
+ * shows CSysApiInstance has its own distinct, still-unreconstructed destructor there,
+ * a separate documented gap, not this bug class.) Same
+ * "LESSON_vtable_dispatch_stub_gap" bug class as the +0x40/+0xa0/+0x44/+0xf8 slots
+ * above -- 9th confirmed instance this project has found.
+ */
 void *PTR__CSysApiInstance_08e81008[94] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CGlobalObjectBase_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
+	(void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)AddConstructorVSlot, (void *)ChunkLinkRegisterVSlotStub, (void *)EvaVTableStub, (void *)EvaVTableStub,

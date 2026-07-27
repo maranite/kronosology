@@ -32,12 +32,15 @@ static void CGlobalObjectBase_DeletingDtor(void *self)
  * confirmed unoverridden by every XxxApiInstance-derived class this project touches
  * (see header comment). Real signature takes an `unsigned long` param Ghidra couldn't
  * further resolve (no caller in this pass ever dispatches through these 4 slots with a
- * meaningful argument either).
+ * meaningful argument either). NOT `static` -- declared in global_object_base.h so
+ * derived-class vtable arrays (omega_vtables.cpp) can reuse these exact same function
+ * pointers, matching ground truth's own inherited-vtable-slot behavior exactly (see
+ * that file's CSysApiInstance fix, 2026-07-27).
  */
-static int CGlobalObjectBase_PreKernelConstructor(unsigned long) { return 0; }
-static int CGlobalObjectBase_PostKernelConstructor(unsigned long) { return 0; }
-static int CGlobalObjectBase_PreKernelDestructor(unsigned long) { return 0; }
-static int CGlobalObjectBase_PostKernelDestructor(unsigned long) { return 0; }
+int CGlobalObjectBase_PreKernelConstructor(unsigned long) { return 0; }
+int CGlobalObjectBase_PostKernelConstructor(unsigned long) { return 0; }
+int CGlobalObjectBase_PreKernelDestructor(unsigned long) { return 0; }
+int CGlobalObjectBase_PostKernelDestructor(unsigned long) { return 0; }
 
 } // extern "C"
 

@@ -57,6 +57,21 @@
 #ifndef GLOBAL_OBJECT_BASE_H
 #define GLOBAL_OBJECT_BASE_H
 
+/* The 4 real "phase hook" no-ops backing PTR__CGlobalObjectBase_08e80f08's slots
+ * +8/+0xc/+0x10/+0x14 (global_object_base.cpp). Exposed here (not `static`) so any
+ * XxxApiInstance-family derived class's OWN vtable array (omega_vtables.cpp) can be
+ * wired to these SAME function pointers for the 4 slots ground truth confirms are
+ * never overridden -- see this header's own file comment above (raw-byte-read
+ * spot-check against CSysApiInstance's/CEditApiInstance's/CSeqApiInstance's real
+ * installed vtables, all identical to the base's own 4 slots at these offsets).
+ */
+extern "C" {
+int CGlobalObjectBase_PreKernelConstructor(unsigned long);
+int CGlobalObjectBase_PostKernelConstructor(unsigned long);
+int CGlobalObjectBase_PreKernelDestructor(unsigned long);
+int CGlobalObjectBase_PostKernelDestructor(unsigned long);
+}
+
 class CGlobalObjectBase {
 public:
 	/* .text+0x080632e0, 23 bytes. */
