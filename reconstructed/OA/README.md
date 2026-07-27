@@ -127,9 +127,13 @@ authorization route touches the chip.
   three AT88 zones via `fFfFfFfFfFfF13`, decodes the string directly with
   `DecodeBytesFromAscii` (no tokenizing needed), then calls `ParseAuth`.
   (`src/auth/verify_auth_string.cpp`)
-- Per-patch checks (`CSTG*ModelPatch::IsUsingAnyUnauthorizedMultisamples`)
-  are not yet reconstructed - Stage 3/4 territory, called from
-  voice-model/patch code.
+- Per-patch checks (`CSTGPatch::IsUsingAnyUnauthorizedMultisamples`,
+  called from `CSTGKLMManager::AuthorizeVoiceModel` via vtable `+0x104`)
+  are wired up as a safe unconditional `return false` stub
+  (`src/stub/bar2_stubs_auth.cpp`), not yet given a real body from the
+  actual per-patch multisample-authorization walk - Stage 3/4 territory
+  (wording corrected 2026-07-27: the earlier "not yet reconstructed" phrasing
+  implied the symbol didn't exist at all, which is no longer true).
 
 ### ProcessOACmd - the /proc/.oacmd command dispatcher
 
@@ -411,14 +415,22 @@ exactly, meaning it is called at precisely 1500Hz and tracks elapsed
 microseconds exactly despite 666.75 not being a whole number.
 
 **`RunVoiceModelFeedback()`** (`.text+0x4690`, 123 bytes) and
-**`SetCurrentModeTempo(float)`** (`.text+0x4b20`, 90 bytes) - both fully
-disassembled and declared (so `CSTGEngine::PostAudioTick` compiles against
-them) but deliberately not implemented: `RunVoiceModelFeedback` walks into
-an unrecovered `CSTGSlotVoiceData`-shaped object and calls an unidentified
-virtual function; `SetCurrentModeTempo` computes `log2(tempo/120)` (the
-constants `1/120`, `+16.0`, `-16.0` are extracted from the real rodata and
-match) clamped to `[-16,16]`, but its exact FPU-conditional-move branch
-structure was not resolved with enough confidence to ship.
+**`SetCurrentModeTempo(float)`** (`.text+0x4b20`, 90 bytes) - **both now
+implemented and tested** (`src/engine/global.cpp`; stale "deliberately not
+implemented" claim corrected 2026-07-27 during a doc-staleness sweep - same
+pattern as the other findings in this section, the code already existed
+with full `verify/test_global.cpp` coverage and this prose just wasn't
+reconciled after it landed). `RunVoiceModelFeedback` walks the intrusive
+list at `+0x29c9900`, dispatches vtable slot `0x1a` through a confirmed but
+not independently identified sub-object (`+0x38`, gated by two bits at
+`+0xb73`) to decide whether to call `CSTGSlotVoiceData::
+RunVoiceModelFeedback()` on the payload. `SetCurrentModeTempo` computes
+`log2(tempo/120)` via a real x87 `fyl2x` (no libm in a kernel build; a
+confirmed real quirk is preserved: `tempo<1.0` substitutes the fixed ratio
+as if `tempo` were exactly `1.0` rather than computing `tempo/120`),
+clamped to `[-16,16]` - the clamp's lower bound is confirmed real but
+unreachable in practice, since both of `ratio`'s possible sources keep
+`log2(ratio) >= ~-6.9`.
 
 **Message handlers.** `CSTGGlobal`'s ~195-method surface includes 110 real
 `UpdateXXX(CSTGMessageContext&, STGConvertedParam&)` handlers, one per
@@ -489,7 +501,11 @@ Notable finds:
 - `CSTGDiskCostManager`'s constructor is a single `sInstance = this` and
   nothing else, despite a confirmed 72-byte real object - every other
   field is either zero-initialized by its `CSTGBankMemory` allocation
-  already, or set later by its own (not yet reconstructed) `Initialize()`.
+  already, or set later by its own `Initialize()` (`.text+0x62970`, 256
+  bytes - **implemented**, `src/engine/engine_startup_bits2.cpp`; stale
+  "not yet reconstructed" claim corrected 2026-07-27 during a doc-staleness
+  sweep, same pattern as the `CSTGGlobal` finding above - the code already
+  existed, this prose just wasn't reconciled after it landed).
 - `CSTGFileOpener`'s 953-byte constructor is almost entirely one repeated
   16-byte zeroing pattern (32 times), reconstructed as a C++ `for` loop.
   Confirmed 544-byte total size: `12 (header) + 4 (gap) + 32x16 (slots) +
