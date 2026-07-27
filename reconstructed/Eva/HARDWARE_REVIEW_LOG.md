@@ -914,3 +914,68 @@ should know they exist and are untested/unmodeled, not silently absent.
   `global_object_base.h`) is deliberately not modeled here — nothing on this
   project's traced boot path ever dispatches virtually on this object or destroys
   it, only `RegisterLoader()`'s own plain (non-virtual) call path matters.
+- **`TVector<T,N>` re-check (2026-07-27): confirmed NOTHING else in this registry is
+  unblocked by it.** Following up the same-day `TVector<T,N>` reconstruction
+  (`tvector.h`, commit `d5e2e56`) that closed `CPool`/`CSlotPool`, this pass
+  specifically re-read every deferred entry above and grepped this project's own
+  `include/`/`src/` for "unmodeled TVector" / "needs TVector" / "blocked...vector"
+  phrasing to check for other classes citing the same blocker. Result: a clean
+  negative. `CJobStack`'s 8 job-queue methods and `CBatchDiskMainTask`'s 5 heaviest
+  methods both mention `TVector<...>` in their own real disassembly, but their
+  actual documented blocker is the much larger `CZ`/`CResMan` "god object"
+  business-logic surface those methods are made of — `TVector<T,N>` itself was
+  never their limiting factor, just one ingredient among several genuinely deep
+  ones (confirmed by re-reading `job_stack.h`'s and `batch_disk_main_task.h`'s own
+  header comments, not re-guessed). Every other `TVector<T,1>` instantiation
+  named elsewhere in this project (`limiter_man.h`, `task.h`, `poller.h`,
+  `ckernel.h`) was already real before today. No action taken — this confirms the
+  earlier "genuinely deep, not just TVector-shaped" verdicts rather than reversing
+  any of them.
+- **USTGAPIXxx thin-IPC-facade family — non-CValue slice RECONSTRUCTED 2026-07-27**
+  (`ustg_api_wrappers.h`/`.cpp`, 21 methods across 10 classes: `USTGAPICombi` (8),
+  `USTGAPIEffect`/`USTGAPIEffectSlot`/`USTGAPIEffectMgr`/`USTGAPIGlobal`/
+  `USTGAPIHDRTrack` (1 each), `USTGAPIProgramSlot` (2), `USTGAPISetList` (1),
+  `USTGAPIDrumkitData` (2 of 3), `USTGAPIPatch` (1), `USTGAPIWaveSequenceData` (2
+  of 3)). Found via a fresh `nm -C` whole-binary class-inventory sweep (same
+  technique that found `CResFamily`/`CPool`/`CSlotPool`) cross-referenced against
+  `ustg_user_api.h`'s own header comment, which already named this ~150-method
+  family as the largest remaining unclaimed USTGUserAPI surface. Every method
+  builds a small fixed-size STGMessage-shaped struct on the stack (transcribed
+  field-by-field from real disassembly, not assumed by argument-count analogy --
+  several methods place C++ parameters into the wire struct in a DIFFERENT order
+  than the parameter list, e.g. `UpdateProgramSlotParameter`'s real payload order
+  is a2,a3,a4,a5,a6,a8,a1,a7) and forwards it via the already-real
+  `USTGUserAPI::SendSTGMessageWithSource()`; the 3 "SharedMemXxxDump"-named
+  methods additionally poll `USTGUserAPI::ReadMessage()` up to 8x for a
+  subcode-echo ack, using a shared new `WaitForDumpSubcodeEcho()` helper (ground
+  truth inlines this loop separately 3x with byte-identical control flow -- real
+  behavior unchanged by factoring it). Verified with 25 new byte-exact wire-format
+  KAT checks (`verify/test_ustg_api_wrappers.cpp`) that read back the literal
+  bytes written to a test-hooked pipe and compare field-by-field against the
+  decoded shape, plus the full existing host suite (0 failures) and a real Lenny
+  cross-build+link ("LINK OK").
+  **Deliberately deferred, same batch**: 4 real sibling methods that take a
+  `CValue const&` argument (`USTGAPIDrumkitData::UpdateVSplitParam`,
+  `USTGAPIVoiceModel::UpdateParam`/`UpdateLinkedParam`,
+  `USTGAPIWaveSequenceData::UpdateStepParam`) -- their own real disassembly
+  memcpy()s a SELF-DESCRIBING, VARIABLE-LENGTH byte range starting at the CValue
+  object itself (`size = *(byte*)((char*)cvalue+1) + 4`, i.e. CValue's own
+  byte-at-offset+1 is a length prefix for its own variable-length payload). The
+  serialization RULE is fully decoded (see `ustg_api_wrappers.h`'s header
+  comment); what's missing is CValue's own field-level layout/semantics, not
+  modeled anywhere in this project (same boundary as `CMessage`/`STGMessage`
+  themselves) -- a precise, tractable-with-more-effort lead for a future pass.
+  `USTGAPIPatch`/`USTGAPIVoiceModel`'s own static data members
+  (`m_DefaultProgramId`/`m_DefaultBankId`) also not reconstructed (no traced
+  caller touches either). Also out of scope this batch, each confirmed a
+  materially different shape from a direct disassembly spot-check rather than
+  assumed by family membership: `USTGAPIKLM` (15 methods, `CSTGHandle::Access()`-
+  based shared-memory table reads, not message sends), `USTGAPICDAudio` (12),
+  `USTGAPIMIDI` (23, real device-queue I/O against 4 static per-port
+  `CSTGHandle`s + `CSTGMidiQueue`), and by far the largest,
+  `USTGAPIPCMBanks`/`USTGAPISampling` (51/46 methods -- not spot-checked,
+  presumed genuinely deep sample-loading logic given their size, a natural
+  target for a dedicated future pass). Not tested on real hardware -- none of
+  these methods have a reconstructed caller anywhere in this project yet (same
+  "structural completeness, not reachability" status as the rest of the
+  USTGUserAPI Stage 2 substrate they depend on).

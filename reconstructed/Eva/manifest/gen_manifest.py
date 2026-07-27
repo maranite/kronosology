@@ -1424,6 +1424,39 @@ RECONSTRUCTED = {
     "0816b860",  # global.constructors.keyed.to.CSlotStateFree::s_oInstance (merged
                   # _GLOBAL__I_ -- only the CSlotStateFree slice is modeled, see
                   # slot_pool.h)
+
+    # --- USTGAPIXxx thin-IPC-facade family, non-CValue slice (2026-07-27) ---
+    # Fresh nm -C class-inventory sweep (same methodology that found CResFamily/
+    # CPool/CSlotPool) confirmed ustg_user_api.h's own header comment: ~150
+    # per-subsystem USTGAPIXxx::UpdateYyy() wrapper classes were still genuinely
+    # unclaimed. Reconstructed every method in this family that does NOT take a
+    # `CValue const&` argument (4 real methods do -- CValue's own layout is not
+    # modeled anywhere in this project, deliberately deferred, see
+    # ustg_api_wrappers.h's own header comment for the precise finding).
+    # Verified: host `make verify` green (new test_ustg_api_wrappers.cpp, 25
+    # byte-exact wire-format checks, 0 failed) + full existing suite unaffected +
+    # real Lenny cross-build+link ("LINK OK").
+    "08e1b6f0",  # USTGAPICombi::SharedMemCombiDump(unsigned, unsigned, eSTGMsgPerfType)
+    "08e1b810",  # USTGAPICombi::UpdateCombiParameter(...)
+    "08e1b880",  # USTGAPICombi::UpdateVectorMotionParameter(...)
+    "08e1b8f0",  # USTGAPICombi::UpdateControllerInfoParameter(...)
+    "08e1b960",  # USTGAPICombi::UpdateToneAdjustParameter(...)
+    "08e1b9e0",  # USTGAPICombi::UpdateAudioInputParameter(...)
+    "08e1ba50",  # USTGAPICombi::UpdateEffectBalanceParameter(...)
+    "08e1bac0",  # USTGAPICombi::UpdateSequenceMetronomeParameter(unsigned, int, int)
+    "08e1d2d0",  # USTGAPIEffect::UpdateParam(...)
+    "08e1d350",  # USTGAPIEffectMgr::UpdateEffectLFOParameter(...)
+    "08e1d3c0",  # USTGAPIEffectSlot::UpdateParam(...)
+    "08e1d590",  # USTGAPIGlobal::UpdateGlobalParameter(unsigned, unsigned, int)
+    "08e1d5e0",  # USTGAPIHDRTrack::UpdateHDRTrackParameter(unsigned, unsigned, unsigned, int)
+    "08e1d0e0",  # USTGAPIDrumkitData::SetCurrentKitId(unsigned)
+    "08e1d1d0",  # USTGAPIDrumkitData::SharedMemDrumKitDump(int)
+    "08e1ec60",  # USTGAPIPatch::UpdateOscSelectByType(...)
+    "08e22fd0",  # USTGAPIProgramSlot::UpdateProgramSlotParameter(...)
+    "08e23050",  # USTGAPIProgramSlot::UpdateProgramSlotEnabled(...)
+    "08e24ad0",  # USTGAPISetList::UpdateSlotParam(int, int, int, int)
+    "08e24d60",  # USTGAPIWaveSequenceData::SetCurrentSequenceId(unsigned)
+    "08e24e40",  # USTGAPIWaveSequenceData::SharedMemWaveSequenceDump(int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
