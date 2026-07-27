@@ -2621,14 +2621,31 @@ struct CSTGCommonStepSeq {
 	static STGStepSeqSubRateParams *sSubRateParams;
 };
 
+/* Defined in oa_lfo.h (CSTGLFO's own header) -- forward-declared here
+ * only so CSTGLFOBase's 3 small real methods below can take/return a
+ * pointer to it without a circular include. */
+struct STGLFOSubRateParamsSlice;
+
 /*
  * Confirmed real mangled member functions (via relocation from
  * CSTGCommonLFO/CSTGCommonStepSeq::Initialize() -- `call
  * _ZN11CSTGLFOBase14InitializeQuadEP19STGLFOSubRateParams` etc, NOT
  * plain C-linkage wrappers, matching the CSTGComPort lesson from sec
  * 10.53: a plain C symbol here would never link against the real
- * mangled one). Bodies not reconstructed in this pass. */
-struct CSTGLFOBase { static void InitializeQuad(STGLFOSubRateParams *quad); };
+ * mangled one). Bodies not reconstructed in this pass.
+ *
+ * UpdateStartPhase/CalculateFreq/GetRandomFlagsForWaveform added
+ * batch (CSTGLFO cluster, see oa_lfo.h): 3 further confirmed-real,
+ * small, self-contained CSTGLFOBase methods CSTGLFO's own in-scope
+ * methods call into. Bodies in src/engine/lfo_component.cpp. The
+ * class's 3 LARGE methods (SetupSubrateLFO/UpdateRandomValue/Restart)
+ * stay undeclared -- see oa_lfo.h's file header "not modeled" list. */
+struct CSTGLFOBase {
+	static void InitializeQuad(STGLFOSubRateParams *quad);
+	static void UpdateStartPhase(STGLFOSubRateParamsSlice *slice, STGConvertedParam &newVal);
+	static float CalculateFreq(const STGLFOSubRateParamsSlice *slice, unsigned char note);
+	static int GetRandomFlagsForWaveform(int waveform);
+};
 struct CSTGStepSeqBase { static void InitializeQuad(STGStepSeqSubRateParams *quad); };
 
 /*
