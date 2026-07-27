@@ -9,6 +9,67 @@ Format: `## <fn/topic>` + what's uncertain + what real-HW test would confirm.
 
 ---
 
+## Fresh re-audit of prior "dead"/"no-op"/"unreachable" classifications — negative result, one documentation refinement (2026-07-27)
+
+Following the same day's `CSTGDrumPadClient` find (a real vtable-install
+bug hiding behind an earlier sweep's "no-op"/"opaque placeholder"
+classification, `e00cd3e`), did a fresh pure-static-analysis re-audit of a
+sample of this project's other "dead"/"no-op"/"unreachable" classifications,
+using the same discipline (`objdump -dr`/`readelf -r` against ground truth
+`955636c2...` OA.ko, not re-trusting a prior sweep's conclusion). Result:
+3 spot-checks reconfirmed correct, 1 flagged-out-of-scope item got a real
+new fact but no change to its deferred status, no new bug found:
+
+1. **`CSTGControllerRTData::SetAudioInSolo()`'s pure-virtual claim**
+   (batch 57 entry above) -- independently re-derived `_ZTV15CSTGPerformance`
+   vtable slot 27's byte offset (`8 + 27*4 = 0x74`) from the mangled vtable
+   layout and confirmed via `readelf -r` that offset resolves to
+   `__cxa_pure_virtual` in ground truth. Confirmed correct.
+2. **`CSTGMidiOutPortSerial`'s "2 trailing vtable slots are provably dead"
+   claim** (`CanTransmitHardware()`/`TransmitHardwareByte()`, MIDI-OUT UART
+   cluster entry above) -- `readelf -r` on `.rel.rodata._ZTV21CSTGMidiOutPortSerial`
+   confirms the trailing 2 of 11 slots (offsets `0x2c`/`0x30`) are indeed
+   `__cxa_pure_virtual`, matching the claim exactly. Confirmed correct.
+3. **`CSTGCalibrationMsgHandler::sInstance`'s ctor "touches a different,
+   unrelated .bss byte that's already 0" claim** (`LESSON_ctors_vs_init_array.md`)
+   -- worth extra scrutiny since a REAL bug was found in this same class
+   today (`HandleKeybedCalibrationResult`, entry above). Disassembled
+   `_GLOBAL__I__ZN25CSTGCalibrationMsgHandler9sInstanceE` (`.text+0xdf120`,
+   8 bytes) directly: `movb $0x0,0x9e710` (`R_386_32` to `.bss`) --
+   `sInstance` itself is a separate 4-byte object at `.bss+0x9e660` (176
+   bytes away), untouched by this ctor. Confirmed correct: a genuine
+   compiler-arbitrary `_GLOBAL__I_` naming coincidence, not related to
+   today's real bug.
+4. **`CSTGUSBMidiAccessoryMidiInPort`'s "no global object exists yet,
+   flagged out of scope" classification** -- see
+   `LESSON_ctors_vs_init_array.md`'s own 2026-07-27 re-check note for the
+   full trace. Found one genuinely new fact (a previously undocumented
+   sibling class, `CMidiInClient`, real 20-byte `Receive()` forwarder, and
+   that the ctor at `.text+0xfa840` constructs BOTH objects together) but
+   a whole-binary xref sweep confirms neither object nor `Activate()`/
+   `Deactivate()` has any caller anywhere in OA.ko outside their own
+   mutual references -- unlike `CSTGDrumPadInterface_Initialize()`, nothing
+   in `init_module()` or any other unconditional path reaches this pair.
+   Correctly deferred, not a hidden reachability gap.
+
+Also spot-checked the 18-entry `CSTGCalibrationMsgHandler::sMsgHandler[]`
+and the 54-entry `CSTGControlMsgHandler::sMsgHandler[]` dispatch tables
+(the "function referenced by a real dispatcher but left as a plain stub"
+pattern) -- all 18 calibration start/end/cancel handlers and all
+non-`HandleUnsupportedMessage` slots of the control table resolve to real,
+previously-reconstructed method bodies in current source, no stub-in-a-live-
+table gaps found.
+
+**Conclusion**: negative result for new bugs. This project's structural/
+hardware-integration scope is genuinely close to exhausted along this
+specific axis (mis-classified dead code) -- `CSTGDrumPadClient` was real,
+but the sample re-audited here holds up under the same fresh-eyes
+`objdump -dr`/`readelf -r` scrutiny that found it. `LESSON_ctors_vs_init_array.md`
+updated to reflect both this negative result and the now-stale
+`CSTGDrumPadClient`/`CMidiInClient` notes it previously carried.
+
+---
+
 ## CSTGCalibrationMsgHandler::HandleKeybedCalibrationResult — real bug fixed 2026-07-27 (state 0x10 reply polarity)
 
 Found during a targeted correctness re-audit (not live-boot serendipity),
