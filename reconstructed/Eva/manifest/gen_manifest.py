@@ -1242,6 +1242,30 @@ RECONSTRUCTED = {
     "0814da30",  # CJobStack::CJobStack()
     "0814d6c0",  # CJobStack::~CJobStack() [D1]
     "0814d870",  # CJobStack::~CJobStack() [D0, deleting]
+
+    # --- CEditClient, construction/destruction-only re-check (Eva "size is not
+    # depth", 2026-07-27, 3rd re-open of this exact class): re-traced fresh from
+    # `objdump -dr -M intel` rather than restating the prior "needs a genuine
+    # open-chaining hash-table + free-list-allocator template" verdict. That
+    # verdict was right that the ctor installs 2 real `PointerHash<K,V>` template
+    # instantiations (RTTI-confirmed: "PointerHash<CEditControl*, CEditControl>"
+    # and "PointerHash<long, CEditControl>", Eva VA 0x8e81558/0x8e81568) but wrong
+    # that this blocks the ctor/dtor -- a whole-binary xref sweep shows these are
+    # PointerHash's ONLY 2 instantiations anywhere, both consumed only by this
+    # ctor, and construction never calls into the template's own Add/Find/Node/
+    # Iterator machinery (just 2x malloc+vtable-install+memset). CEditClient's 4
+    # other real named methods (BlockRegister/Register/Unregister/NotifyControls)
+    # and PointerHash<K,V>'s own methods stay unreconstructed/out of scope -- NOT
+    # added here. Also promotes the 2 CEditApiInstance::RegisterClient()/
+    # UnregisterClient() trampolines the ctor/dtor call through (confirmed via
+    # xref sweep to have no other caller anywhere) -- modeled as free functions
+    # `EditApiInstance_RegisterClient()`/`UnregisterClient()`, edit_man.cpp,
+    # matching that file's existing `EditApiInstance_RegisterServer()` etc.
+    # convention. See include/edit_man.h.
+    "0806e470",  # CEditClient::CEditClient()
+    "0806e3f0",  # CEditClient::~CEditClient() [D1]
+    "080d1ea0",  # CEditApiInstance::RegisterClient(CEditClient const*)
+    "080d1e70",  # CEditApiInstance::UnregisterClient(CEditClient const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

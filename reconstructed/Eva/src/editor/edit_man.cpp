@@ -300,21 +300,97 @@ void *PTR__TPtrArray_08e85f40[3] = {
  */
 int EvaDataPlaceholder_08e85f04;
 
-/* CEditClient::CEditClient()/~CEditClient() -- Tier-B link-stubs, see edit_man.h's
- * own header comment. Real ctor (.text+0x0806e470) installs CEditClient's own
- * vtable and (per every other real CObjectBase-shaped ctor in this project)
- * presumably zeroes its own remaining fields; real dtor (.text+0x0806e3f0) calls
- * `CEditApiInstance::UnregisterClient(&EditApiInstance, this)` -- CEditApiInstance
- * itself is not reconstructed here (separate class, edit_man.h's own deferred-scope
- * note), so this is left as a real-signature no-op rather than a guessed partial
- * implementation.
+/* CEditClient's own real vtable + the two PointerHash<...> header vtables it
+ * installs -- see edit_man.h's own header comment for the full RE trace.
+ */
+void *PTR__CEditClient_08e814e0[3] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+void *PTR__PointerHash_CEditControlPtr_08e81560[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+void *PTR__PointerHash_long_08e81570[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+
+namespace {
+
+/* CEditApiInstance::RegisterClient(CEditClient const*)/
+ * UnregisterClient(CEditClient const*) -- real trampolines, .text+0x080d1ea0
+ * (35B) / +0x080d1e70 (35B). Both read `EditApiInstance+4` (the real
+ * `CEditMan*` `CEditMan::Setup()` stores there, above) and, if non-null,
+ * tail-call directly into the already-real `CEditMan::RegisterClient()`/
+ * `UnregisterClient()` (edit_man.h's own inline forwarders) with the same
+ * `CEditClient*` argument; otherwise a no-op (`RegisterClient` returns 0).
+ * Modeled as free functions matching this file's sibling
+ * `edit_server.cpp`'s own `EditApiInstance_RegisterServer()`/
+ * `UnregisterServer()`/`GetAssignedScope()` convention, since
+ * `CEditApiInstance` itself stays an opaque byte buffer everywhere in this
+ * project (config_manager.cpp's own header comment). Confirmed via a full
+ * xref sweep of the 37k-function binary: these two real functions are
+ * called ONLY from `CEditClient::CEditClient()`/`~CEditClient()` below --
+ * nowhere else in ground truth.
+ */
+int EditApiInstance_RegisterClient(CEditClient *client)
+{
+	CEditMan *editMan = *reinterpret_cast<CEditMan **>(EditApiInstance + 4);
+	if (editMan == 0)
+		return 0;
+	return editMan->RegisterClient(client);
+}
+
+void EditApiInstance_UnregisterClient(CEditClient *client)
+{
+	CEditMan *editMan = *reinterpret_cast<CEditMan **>(EditApiInstance + 4);
+	if (editMan == 0)
+		return;
+	editMan->UnregisterClient(client);
+}
+
+} // namespace
+
+/* CEditClient::CEditClient() -- real body, .text+0x0806e470 (1812 bytes).
+ * See edit_man.h's own header comment for the full RE trace of why this is
+ * tractable despite PointerHash<K,V> being a genuine template class.
  */
 CEditClient::CEditClient()
 {
-	mVtbl = 0;
-	memset(mUnknown04, 0, sizeof(mUnknown04));
+	mVtbl = PTR__CEditClient_08e814e0;
+
+	/* mControlHash -- PointerHash<CEditControl*, CEditControl> header.
+	 * HAL_DisableInterrupts()/HAL_EnableInterrupts() brackets around both
+	 * mallocs dropped, same established reason as every other malloc in
+	 * this project.
+	 */
+	unsigned char *hash1 = static_cast<unsigned char *>(malloc(0x10));
+	*reinterpret_cast<void **>(hash1) = PTR__PointerHash_CEditControlPtr_08e81560;
+	hash1[4] = 0;
+	*reinterpret_cast<unsigned int *>(hash1 + 0xc) = 0;
+	void *pool1 = malloc(0xada4);
+	memset(pool1, 0, 0xada4); /* real: GCC auto-vectorized movdqa zero loop */
+	*reinterpret_cast<void **>(hash1 + 8) = pool1;
+	mControlHash = hash1;
+
+	/* mIndexHash -- PointerHash<long, CEditControl>, identical shape. */
+	unsigned char *hash2 = static_cast<unsigned char *>(malloc(0x10));
+	*reinterpret_cast<void **>(hash2) = PTR__PointerHash_long_08e81570;
+	hash2[4] = 0;
+	*reinterpret_cast<unsigned int *>(hash2 + 0xc) = 0;
+	void *pool2 = malloc(0xada4);
+	memset(pool2, 0, 0xada4);
+	*reinterpret_cast<void **>(hash2 + 8) = pool2;
+	mIndexHash = hash2;
+
+	EditApiInstance_RegisterClient(this);
 }
 
+/* ~CEditClient() -- real D1 (base-object) body, .text+0x0806e3f0 (35 bytes).
+ * See edit_man.h's own header comment for why only D1 (not D0) is modeled.
+ */
 CEditClient::~CEditClient()
 {
+	mVtbl = PTR__CEditClient_08e814e0;
+	EditApiInstance_UnregisterClient(this);
 }

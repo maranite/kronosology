@@ -65,36 +65,104 @@
 
 class CEditServer;
 
-/* Opaque real interface -- only known real member is vtable slot +8
- * (`Notify(group, index, subIndex)`, called by `CMainTask::Notify()` below).
- * Not independently reconstructed, same "opaque interface pointer" treatment as
- * `CIfcUnknown` (task.h).
+/* CEditClient -- RE-TRACED FOR REAL, 2026-07-27 (Eva "size is not depth"
+ * re-check, 3rd consecutive session to re-open this exact class after an
+ * earlier "needs a genuine open-chaining hash-table + free-list-allocator
+ * template, out of scope" verdict).
  *
- * UPDATE (Stage 6 CEditor batch, 2026-07-25): real total size is now confirmed
- * as 0xc (12) bytes, not just the 4-byte vtable pointer -- CEditor's own ctor
- * (editor.h) embeds a CEditClient sub-object at +0x2c immediately followed by a
- * CEditServer sub-object at +0x38 (edit_server.h, itself confirmed exactly
- * 0x40038 bytes), so 0x38-0x2c == 0xc exactly. The real ctor/dtor
- * (CEditClient::CEditClient()/~CEditClient(), .text+0x0806e470/0x0806e3f0) and
- * the 4 real named methods this class ALSO has in ground truth
- * (BlockRegister/Register/Unregister/NotifyControls/OnNotify, all operating on
- * a TPtrArray<CEditControl>-shaped member somewhere in the remaining 8 bytes)
- * are still genuinely out of scope -- a separate, non-trivial class in its own
- * right (confirmed via `nm -C`: 9 real methods total, own `TPtrArray<CEditClient>`
- * container elsewhere too), deferred to its own future pass, same as
- * `CEditor::CMainTask`'s own deferred Peg-construction tail (editor.h). Ctor/dtor
- * here are Tier-B link-stubs (real signature, empty body, see edit_man.cpp) --
- * exactly enough for CEditor's own composed sub-object to construct/destruct
- * without guessing the remaining 8 bytes' real layout.
+ * That verdict was RIGHT about the template being real, but WRONG about it
+ * blocking ctor/dtor: direct `objdump -dr -M intel` of
+ * `CEditClient::CEditClient()` (.text+0x0806e470, 1812 bytes) and both
+ * `~CEditClient()` variants (D1 .text+0x0806e3f0/35B, D0 .text+0x0806e420/
+ * 55B) shows the construction/destruction path never calls into the hash
+ * table's own Add/Find/Remove/Node/Iterator machinery at all -- it only
+ * allocates and zero-initializes two small header objects. Confirmed via
+ * RTTI: the two vtables the ctor installs (Eva VA 0x8e81560/0x8e81570) have
+ * `typeinfo` strings "PointerHash<CEditControl*, CEditControl>" and
+ * "PointerHash<long, CEditControl>" (.rodata VA 0x8e815c0/0x8e81600) --
+ * `PointerHash<K,V>` is a REAL template class, but a whole-binary xref sweep
+ * shows these are its ONLY TWO instantiations anywhere in the 37k-function
+ * binary, and both vtable-install addresses are referenced from nowhere but
+ * this ctor. So it is not a widely shared piece of infrastructure the way
+ * `CZ` is -- it just happens to look generic from the demangled name.
+ *
+ * REAL ctor sequence (HAL_DisableInterrupts()/HAL_EnableInterrupts()
+ * brackets around each malloc dropped, same established reason as every
+ * other malloc in this project, e.g. `job_stack.h`):
+ *   1. this->mVtbl = PTR__CEditClient_08e814e0 (this class's OWN real
+ *      3-slot vtable: ~CEditClient D1, ~CEditClient D0, OnNotify --
+ *      confirmed by a direct .rodata read, vfunc[2] == 0x0806f6e0, matching
+ *      `CMainTask::Notify()`'s own `vtbl[2]` dispatch in edit_man.cpp).
+ *   2. mControlHash = malloc(0x10); install its own vtable
+ *      (PTR__PointerHash_CEditControlPtr_08e81560); zero its +0x4 flag byte
+ *      and +0xc dword; malloc(0xada4) [=44452 bytes] for its node-pool
+ *      buffer, store at +0x8, memset it to 0 (ground truth's own body is a
+ *      GCC auto-vectorized `movdqa` zero loop over exactly 11113 dwords --
+ *      0xada4/4 -- a decompiler-shape artifact, not real hash-bucket
+ *      initialization logic; same "dead auto-vectorized loop" pattern as
+ *      `ghidra_oa_export_artifacts.md`).
+ *   3. mIndexHash: identical shape, second PointerHash instantiation
+ *      (PTR__PointerHash_long_08e81570).
+ *   4. EditApiInstance_RegisterClient(this) -- confirmed by a full xref
+ *      sweep to be the ONLY caller anywhere of the real
+ *      CEditApiInstance::RegisterClient() trampoline (.text+0x080d1ea0),
+ *      which itself just forwards to the already-real
+ *      `CEditMan::RegisterClient()` (edit_man.h) when `EditApiInstance+4`
+ *      (a `CEditMan*`, set by `CEditMan::Setup()` above) is non-null.
+ *
+ * REAL dtor: only the D1 (base-object) variant is modeled here, because the
+ * ONLY known real construction site in this project's own call graph is
+ * `CEditor`'s embedded `mEditClient` sub-object (editor.h) -- a plain
+ * non-virtual member, torn down by the compiler with a direct D1-shaped
+ * call, exactly matching `CEditor::~CEditor()`'s own header comment
+ * ("mEditClient... destructed automatically by the compiler... same as
+ * ground truth's own explicit ~CEditClient() tail calls"). D1 restores
+ * `mVtbl` then calls `EditApiInstance_UnregisterClient(this)` -- confirmed
+ * by direct disasm to NOT destruct or free `mControlHash`/`mIndexHash` (a
+ * real leak in ground truth, transcribed faithfully, not a modeling gap).
+ * The D0 (deleting) variant additionally does `free(this)` -- not modeled,
+ * since nothing in this reconstruction's own traced call graph reaches it
+ * (the only other real caller, `TPtrArray<CEditClient>::DeletePointer`,
+ * .text+0x08186990, is a genuinely separate, unmodeled container).
+ *
+ * `PointerHash<K,V>`'s own Add/Find/Remove/Node/Iterator methods, and
+ * CEditClient's OWN 4 other real named methods (BlockRegister/Register/
+ * Unregister/NotifyControls, all real, all still genuinely unreconstructed)
+ * are OUT OF SCOPE for this pass -- exactly the same "reconstruct the
+ * narrow slice the traced call graph actually needs, leave the rest
+ * deferred" precedent as `CJobStack` (job_stack.h).
  */
 class CEditClient {
 public:
 	CEditClient();
 	~CEditClient();
 
-	void *mVtbl;
-	unsigned char mUnknown04[8]; /* real fields, not yet reconstructed -- see above */
+	void *mVtbl;         /* +0x00, PTR__CEditClient_08e814e0 */
+	void *mControlHash;   /* +0x04, PointerHash<CEditControl*, CEditControl>* -- opaque 0x10-byte header, see above */
+	void *mIndexHash;     /* +0x08, PointerHash<long, CEditControl>* -- opaque 0x10-byte header, see above */
 };
+
+/* CEditClient's own real vtable (3 slots: ~CEditClient D1, ~CEditClient D0,
+ * OnNotify). Slots 0/1 stay EvaVTableStub -- CEditClient is modeled
+ * non-virtually here (this project's established "manually vtable-swapped,
+ * non-polymorphic-in-C++-terms" idiom, job_stack.h), so nothing dispatches
+ * through them; ~CEditClient() below implements D1's real behavior directly
+ * as an ordinary member function instead. Slot 2 (OnNotify, real
+ * .text+0x0806f6e0) also stays EvaVTableStub -- real and load-bearing for
+ * `CMainTask::Notify()`'s own `vtbl[2]` dispatch, but not independently
+ * reconstructed by this pass (out of scope, see above).
+ */
+extern "C" void *PTR__CEditClient_08e814e0[3];
+
+/* PointerHash<CEditControl*, CEditControl>'s own real vtable (2 slots: D1,
+ * D0 -- confirmed by direct .rodata read, no other real virtual methods).
+ * Both slots stay EvaVTableStub -- nothing in this reconstruction's own
+ * call graph ever dispatches through a PointerHash instance's own vtable.
+ */
+extern "C" void *PTR__PointerHash_CEditControlPtr_08e81560[2];
+
+/* PointerHash<long, CEditControl>'s own real vtable, same shape as above. */
+extern "C" void *PTR__PointerHash_long_08e81570[2];
 
 class CEditMan : public CModule {
 public:
