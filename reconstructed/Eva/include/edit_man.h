@@ -148,9 +148,18 @@ public:
  * non-polymorphic-in-C++-terms" idiom, job_stack.h), so nothing dispatches
  * through them; ~CEditClient() below implements D1's real behavior directly
  * as an ordinary member function instead. Slot 2 (OnNotify, real
- * .text+0x0806f6e0) also stays EvaVTableStub -- real and load-bearing for
- * `CMainTask::Notify()`'s own `vtbl[2]` dispatch, but not independently
- * reconstructed by this pass (out of scope, see above).
+ * .text+0x0806f6e0) also stays EvaVTableStub -- its dispatcher,
+ * `CMainTask::Notify()`, DOES genuinely perform a `vtbl[2]` indirect call
+ * internally (confirmed, and correctly transcribed in edit_man.cpp), but
+ * `Notify()` itself is DEAD CODE in ground truth: an exhaustive check (no
+ * `call 0x080d3820` anywhere in .text; the raw address stored nowhere in
+ * .rodata/.data/.got, i.e. not in any vtable either; no
+ * `CEditMan::Notify()`/`CEditApiInstance::Notify()` public forwarder exists
+ * at all) found zero callers anywhere in the binary -- 2026-07-27
+ * re-verification, see eva_ceditclient_onnotify_dead_dispatcher_negative_
+ * 2026-07-27.md (agent memory). This slot is genuinely unreachable, not a
+ * missed reconstruction; do not treat it as an instance of
+ * LESSON_vtable_dispatch_stub_gap.
  */
 extern "C" void *PTR__CEditClient_08e814e0[3];
 
