@@ -1384,6 +1384,46 @@ RECONSTRUCTED = {
     "080633a0",  # CResFamily::PostKernelConstructor(unsigned long)
     "08063300",  # CResFamily::PostKernelDestructor(unsigned long)
     "08069b90",  # global.constructors.keyed.to.g_atResFamilies (32-instance array)
+
+    # --- Eva CPool/CSlotPool follow-up, 2026-07-27: TVector<T,N> template traced for
+    # real (tvector.h) against TVector<CPool::SPool,1>'s own ~TVector()/MakeCapacity(),
+    # cross-checked for general shape against TVector<CZ,1>/TVector<CLogicUnit,1>/
+    # TVector<CLimiterBase*,1>'s own MakeCapacity. Unlocked both CPool (pool.h/.cpp) and
+    # CSlotPool (slot_pool.h/.cpp) construction/destruction + real phase-hook overrides
+    # -- same "size is not depth" narrow-scope precedent as CResFamily above. CSlotPool
+    # additionally needed CSlotStateFree (a State-pattern singleton, slot_pool.h/.cpp) --
+    # small and real (1 field, no ground-truth ctor symbol -- GCC inlined it into a
+    # merged _GLOBAL__I_ static initializer, same shape as CKernelDeathNotifier's own
+    # g_oKernelDeathNotifier). Both owning objects (CSysExSnifferBase::CSampleItem::
+    # sm_oPool @ ds:0x930a360, CSeqScheduler::sm_oSlotPool) and CSlotPool's own per-slot
+    # record type's owning class (CSeqSlot, CSeqScheduler-adjacent) stay deep, entirely
+    # unmodeled subsystems -- not added here. Verified: host `make verify` green (2 new
+    # binaries, test_pool.cpp/test_slot_pool.cpp, 0 checks failed each) + a real period-
+    # correct Debian Lenny (glibc 2.7/GCC 4.3.2) chroot cross-build+link ("LINK OK").
+    "081859c0",  # TVector<CPool::SPool,1>::MakeCapacity(unsigned int)
+    "08182c10",  # TVector<CPool::SPool,1>::~TVector() [D1/D2]
+    "08182c60",  # TVector<CPool::SPool,1>::~TVector() [D0, deleting]
+    "080b92a0",  # CPool::CPool(unsigned int, int)
+    "08182c30",  # CPool::~CPool() [D1]
+    "08182d90",  # CPool::~CPool() [D0, deleting]
+    "080b94c0",  # CPool::Alloc()
+    "080b9190",  # CPool::Free(void*)
+    "080b9210",  # CPool::Expand(CPool::SPool&, unsigned int)
+    "080b9140",  # CPool::PostKernelDestructor(unsigned long)
+    "081692b0",  # CSlotPool::CSlotPool(unsigned int)
+    "081690e0",  # CSlotPool::~CSlotPool() [D1/D2]
+    "08169150",  # CSlotPool::~CSlotPool() [D0, deleting]
+    "08168cb0",  # CSlotPool::PreKernelConstructor(unsigned long)
+    "08168c80",  # CSlotPool::PostKernelDestructor(unsigned long)
+    "08169260",  # CSeqSlot::CSeqSlot() (element ctor -- matches CSlotPool::SSlot's own
+                  # field-init pattern byte-for-byte; CSeqSlot itself not otherwise
+                  # reconstructed, see slot_pool.h)
+    "08195af0",  # CSlotStateFree::~CSlotStateFree() [D1/D2]
+    "08195c20",  # CSlotStateFree::~CSlotStateFree() [D0, deleting]
+    "081959e0",  # CSlotStateFree::GetStateName_debug() const
+    "0816b860",  # global.constructors.keyed.to.CSlotStateFree::s_oInstance (merged
+                  # _GLOBAL__I_ -- only the CSlotStateFree slice is modeled, see
+                  # slot_pool.h)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
