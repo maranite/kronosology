@@ -74,6 +74,7 @@
 #include "panel.h"
 #include "batch_disk_man.h"
 #include "alpha_keyb_ctrl.h"
+#include "job_stack.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -774,22 +775,30 @@ void *SysExApi = 0;
  *     0x08165490/PostKernelDestructor@0x08164d80) -- reconstructed below.
  *     CRMApiInstance::PreKernelConstructor's real body lazily heap-constructs a
  *     `CJobStack` (malloc(0x18) + placement CJobStack::CJobStack(), which itself
- *     malloc(0x54)s+placement-constructs a CRMJob) into RMApiInstance+0x24 --
- *     `CJobStack` is the same CResMan/CJobStack "god object" family already
- *     confirmed genuinely out of scope elsewhere in this project (batch_disk_main_task.h,
- *     rm_api_callback.h -- it owns its own 7-slot primary vtable shared with
- *     CRMApiCallBack, PLUS a 2-real-slot secondary vtable, none of which this
- *     project models), so PreKernelConstructor is deliberately left as
- *     `EvaVTableStub` rather than forcing a fake CJobStack -- precisely scoped, not
- *     silently dropped: see the real function's own comment below. This is safe
- *     (not a hidden inconsistency): RMApiInstance+0x24 is explicitly zeroed by
- *     ConstructRMApiInstance() and nothing else ever sets it, so
- *     PostKernelDestructor's own real conditional dispatch through it (a generic
- *     opaque-vtable-slot+4 call, same idiom as sysapi_instance.cpp's CallUninit)
- *     correctly never fires -- reconstructed faithfully below, fully tractable
- *     without needing CJobStack's type. RMApiInstance+0x8 (the CRMJob* already
- *     placement-constructed by ConstructRMApiInstance() itself) is real and DOES
- *     get destructed+freed for real once PostKernelDestructor is wired.
+ *     malloc(0x54)s+placement-constructs a CRMJob) into RMApiInstance+0x24.
+ *
+ *     UPDATE (Eva "size is not depth" re-check, 2026-07-27): re-traced `CJobStack`
+ *     specifically scoped to what this call site needs, rather than restating the
+ *     prior "genuinely deep" verdict. `CJobStack`'s 8 AddLoadRes/AddLoadFile/
+ *     AddSave/AddDelete/AddSetRes/ExecutePendingCmds job-queue methods (real,
+ *     ~0x2d00 bytes total, TVector<...>/TPtrArray<SLoadBankOffset>-driven) ARE
+ *     genuinely out of scope, same verdict as before -- but the CONSTRUCTION/
+ *     DESTRUCTION path alone (.text+0x0814da30 ctor / 0x0814d6c0,0x0814d870 dtor)
+ *     never touches that machinery at all: it is a small, self-contained
+ *     "base-construct-then-vtable-swap plus one heap CRMJob plus one always-empty
+ *     job-queue TVector" sequence, the same class of narrow-slice-tractable case
+ *     already found for CRTRouterApiInstance's own phase hooks above. Reconstructed
+ *     for real in job_stack.h/job_stack.cpp (construction/destruction-only; the
+ *     class stays otherwise unmodeled, precisely scoped). PreKernelConstructor is
+ *     now wired to a real function below. RMApiInstance+0x24 is explicitly zeroed
+ *     by ConstructRMApiInstance() and nothing else sets it before PreKernelConstructor
+ *     runs, so PostKernelDestructor's own real conditional dispatch through it (a
+ *     generic opaque-vtable-slot+4 call, same idiom as sysapi_instance.cpp's
+ *     CallUninit) now genuinely fires for the first time, into CJobStack's own real
+ *     D0 destructor (job_stack.cpp) -- correct by construction, not accidental.
+ *     RMApiInstance+0x8 (the CRMJob* already placement-constructed by
+ *     ConstructRMApiInstance() itself) is real and DOES get destructed+freed for
+ *     real once PostKernelDestructor is wired.
  */
 extern "C" void *PTR__CEditApiInstance_08e85da8[20] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
@@ -869,23 +878,34 @@ extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
  * yields the correct (array-base) address unchanged.
  */
 extern "C" void *PTR__CRMApi_08e88de8 = 0;
-/* CRMApiInstance::PostKernelDestructor@0x08164d80 (93 bytes) -- reconstructed for
- * real (see WORKAROUND #4 above): destructs+frees the real CRMJob at self+0x8
- * (ConstructRMApiInstance()'s own placement-constructed job), then a generic opaque
- * vtable dispatch (slot+4, the D1 complete-object-destructor shape) through
- * self+0x24 if non-null -- safe without needing CJobStack's type since self+0x24
- * always stays null in this reconstruction (see WORKAROUND #4). PreKernelConstructor
- * (slot 2, +0x8) is the one confirmed-genuinely-deep gap in this whole sweep --
- * left as `EvaVTableStub`, not forced -- its real body lazily heap-constructs a
- * `CJobStack` object, an entire unmodeled class of the same CResMan/CJobStack
- * "god object" family this project has repeatedly, deliberately left out of scope
- * (batch_disk_main_task.h, rm_api_callback.h) -- own primary vtable (7 slots, 2
- * real D1/D0 dtors + 5 slots inherited unchanged from CRMApiCallBack) plus a
- * secondary (multiple-inheritance) vtable with 2 more real, unreconstructed
- * functions. Precisely scoped, not silently dropped.
+/* CRMApiInstance::PreKernelConstructor@0x08165490 (24 bytes) / PostKernelDestructor@
+ * 0x08164d80 (93 bytes) -- both reconstructed for real (see WORKAROUND #4's
+ * 2026-07-27 UPDATE above). PreKernelConstructor: malloc(0x18) + placement
+ * CJobStack::CJobStack() (job_stack.h/job_stack.cpp -- construction/destruction-only
+ * reconstruction; the class's own job-queue business logic stays out of scope, see
+ * that header's own comment) into self+0x24. PostKernelDestructor: destructs+frees
+ * the real CRMJob at self+0x8 (ConstructRMApiInstance()'s own placement-constructed
+ * job), then a generic opaque vtable dispatch (slot+4, the D0 deleting-destructor
+ * shape) through self+0x24 -- now genuinely fires (self+0x24 is non-null once
+ * PreKernelConstructor runs), landing in CJobStack's own real
+ * CJobStack_DeletingDtor. Both together close what was the one remaining
+ * confirmed-genuinely-deep gap in the whole WORKAROUND #4 sweep -- narrower
+ * re-scoping (construction/destruction only, not the whole class) made it
+ * tractable after all.
  */
 extern "C" {
 typedef void (*OpaqueDtorFn)(void *);
+
+int CRMApiInstance_PreKernelConstructor(unsigned long self_)
+{
+	unsigned char *self = (unsigned char *)self_;
+
+	void *jobStack = malloc(0x18);
+	CJobStack_Construct(jobStack); /* real CJobStack::CJobStack(), job_stack.h */
+	*(void **)(self + 0x24) = jobStack;
+
+	return 0;
+}
 
 int CRMApiInstance_PostKernelDestructor(unsigned long self_)
 {
@@ -910,7 +930,7 @@ int CRMApiInstance_PostKernelDestructor(unsigned long self_)
 }
 } // extern "C"
 extern "C" void *PTR__CRMApiInstance_08e88c48[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CRMApiInstance_PreKernelConstructor,
 	(void *)CGlobalObjectBase_PostKernelConstructor, (void *)CGlobalObjectBase_PreKernelDestructor, (void *)CRMApiInstance_PostKernelDestructor,
 };
 extern "C" void *DAT_08e88d80 = 0; /* real 2nd vtable-like slot RMApiInstance+4 installs */

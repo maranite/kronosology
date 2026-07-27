@@ -1219,6 +1219,27 @@ RECONSTRUCTED = {
     # separate function). See stg_unsol_msg_handler.h/.cpp's own header comments for
     # the full case-by-case reconstruction.
     "08917100",  # CSTGUnsolMsgHandler::VoiceModelMsgHandler
+
+    # --- WORKAROUND #4 (mains.cpp), vtable-dispatch-stub-gap sweep, 2026-07-27:
+    # CRTRouterApiInstance/CRMApiInstance phase-hook overrides -- reconstructed at
+    # the time but never added to this manifest. Backfilled here.
+    "08085790",  # CRTRouterApiInstance::PreKernelConstructor(unsigned long)
+    "08086330",  # CRTRouterApiInstance::PostKernelDestructor(unsigned long)
+    "08164d80",  # CRMApiInstance::PostKernelDestructor(unsigned long)
+
+    # --- CJobStack, construction/destruction-only re-check (Eva "size is not
+    # depth", 2026-07-27): re-traced RMApiInstance's own remaining
+    # PreKernelConstructor gap (08165490) specifically scoped to what it needs,
+    # rather than restating the prior "genuinely deep" verdict. The class's own
+    # 8 AddLoadRes/AddLoadFile/AddSave/AddDelete/AddSetRes/ExecutePendingCmds
+    # job-queue methods stay unreconstructed/out of scope (genuinely deep,
+    # unreachable business logic) -- NOT added here. Only the construction/
+    # destruction path itself, which is small and self-contained, is manifested
+    # as reconstructed. See include/job_stack.h.
+    "08165490",  # CRMApiInstance::PreKernelConstructor(unsigned long)
+    "0814da30",  # CJobStack::CJobStack()
+    "0814d6c0",  # CJobStack::~CJobStack() [D1]
+    "0814d870",  # CJobStack::~CJobStack() [D0, deleting]
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
