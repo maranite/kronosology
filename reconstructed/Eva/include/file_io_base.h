@@ -76,6 +76,20 @@ enum EMountIoType { kMountIoType_Placeholder = 0 };
 enum EFatType { kFatType_Placeholder = 0 };
 enum EAudioStatusMMC { kAudioStatusMMC_Placeholder = 0 };
 
+/* EFileIOType -- not used by any CFileIoBase method itself, but shared across the
+ * whole DiskUtil/CustomFs family (CMediaInfo::init()'s `type` parameter,
+ * CFilesys::get_fileioptr()'s selector argument -- see file_io_unknown.h). Declared
+ * here as the natural common home for this subsystem's opaque enums. Two real
+ * numeric values ARE confirmed (not just the enum's existence): CFileIoUnknown::
+ * get_iotype() returns 1 and CFileIoCdda::get_iotype() returns 2, and
+ * CFileIoUnknown::getmediainfo() passes its own get_iotype() value (1) straight
+ * into CMediaInfo::init()'s `type` parameter -- so kFileIOType_Unknown==1 is
+ * confirmed by direct cross-reference, not guessed. The two literals
+ * CFileIoUnknown::format() passes to get_fileioptr() (3 and 6) are also real
+ * immediates (see file_io_unknown.h) but their symbolic names are not recovered.
+ */
+enum EFileIOType { kFileIOType_Placeholder = 0, kFileIOType_Unknown = 1 };
+
 /* Opaque forward declarations -- never dereferenced by CFileIoBase itself. */
 class CMediaInfo;
 class CFileDirEntry;

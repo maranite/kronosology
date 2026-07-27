@@ -1581,6 +1581,27 @@ RECONSTRUCTED = {
     "08318e90",  # CFileIoBase::CFileIoBase()
     "08995480",  # CFileIoBase::~CFileIoBase() (D1, complete object)
     "089954e0",  # CFileIoBase::~CFileIoBase() (D0, deleting)
+
+    # --- CFileIoUnknown, full class, 6/6 overridden methods + dtor pair
+    # (2026-07-27 storage-cluster follow-up). First of the 4 concrete
+    # CFileIoBase subclasses file_io_base.h's own "OUT OF SCOPE" list deferred
+    # (CFileIoUnknown/CFileIoCdda/CFileIoKge/CFileIoUdf) -- picked as the
+    # smallest/most self-contained (6 overrides vs CFileIoCdda's 41). 3 trivial
+    # sentinel overrides (get_iotype/fmount/funmount) + 3 genuine forwarding
+    # bodies reaching into out-of-scope CDDriverIO/CFilesys/CMediaInfo, modeled
+    # as inert EvaVTableStub-style stand-ins (same convention as
+    # panel_ifc_task.cpp) so `make verify` stays fully linkable. No separate
+    # ctor symbol exists in the real binary (trivial-derived-ctor folding);
+    # dtor pair (D1/D0) matches CFileIoBase's own compiler-bookkeeping shape.
+    # See include/file_io_unknown.h for the full per-method writeup.
+    "08318d30",  # CFileIoUnknown::get_iotype()
+    "08318d40",  # CFileIoUnknown::fmount(EDevice_Id)
+    "08318d50",  # CFileIoUnknown::funmount(EDevice_Id)
+    "08318d60",  # CFileIoUnknown::getmediainfo(EDevice_Id, CMediaInfo*)
+    "08318dc0",  # CFileIoUnknown::format(EDevice_Id, int, EFatType)
+    "08318e20",  # CFileIoUnknown::format(EDevice_Id, int)
+    "08995490",  # CFileIoUnknown::~CFileIoUnknown() (D1, complete object)
+    "089954a0",  # CFileIoUnknown::~CFileIoUnknown() (D0, deleting)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
