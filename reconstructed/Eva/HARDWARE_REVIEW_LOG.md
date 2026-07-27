@@ -979,3 +979,82 @@ should know they exist and are untested/unmodeled, not silently absent.
   these methods have a reconstructed caller anywhere in this project yet (same
   "structural completeness, not reachability" status as the rest of the
   USTGUserAPI Stage 2 substrate they depend on).
+- **USTGAPIKLM (14/15) + USTGAPICDAudio (12/12) + 4 USTGAPISampling primitives
+  RECONSTRUCTED 2026-07-27** (`ustg_api_klm.h`/`.cpp`, `ustg_api_cdaudio.h`/`.cpp`,
+  `ustg_api_sampling.h`/`.cpp`, `cvalue.h`-in-`eva_types.h`/`cvalue.cpp`).
+  Follow-up to the entry above: traced all 5 "confirmed different-shaped" sibling
+  classes via direct `objdump -dr -M intel` reads to actually characterize why,
+  not just note that they differ.
+  **USTGAPIKLM** turned out genuinely tractable: 13 of 15 methods are thin
+  wrappers around one real worker, `GetProductInfo()` (.text+0x08e1d690), which
+  attaches the real installed-EXs-product shared-memory table via
+  `CSTGHandle{mode=1}.Access()` (already-real, `stg_handle.cpp`) and reads a
+  164-byte-per-product record array. Confirms the "call `Access()` again on the
+  pointer it just returned" quirk `USTGUserAPI::Connect()` already exercises for
+  `mFrontPanelStatusAddress` is a general `CSTGHandle` idiom (`Access()` treats
+  whatever int sits at `this` as a cache-table index, stg_handle.cpp), not a
+  one-off -- `GetProductInfo()`/`GetProductItemInfo()` both do it too, the latter
+  a 3rd time for a product's own per-item sub-table. Real, non-obvious quirk
+  caught mid-transcription: `GetProductShortName()` and
+  `GetProductOptionFileName()` read the OPPOSITE-sized record fields from what
+  their names alone would suggest (ShortName -> the 16-byte field, OptionFileName
+  -> the 5-byte field, e.g. "S010" -- CLAUDE.md's own S-file naming convention).
+  Decoded and used both of CValue's serialization rules for the first time in
+  this project (previously only the variable-length-blob rule was known, from
+  the deferred batch above) -- `GetProductInfo()`'s own real disassembly writes
+  a FIXED "scalar dword" CValue encoding (tag=1,len=4,pad2,dword) for a
+  product's identifier, confirming the byte-1-length-prefix convention is
+  CValue's general wire shape, not specific to the variable-length case. Also
+  reconstructed the 2 real `/proc/.oacmd` command-channel free functions
+  `RescanInstalledProducts()`/`SetAuthString()` tail-call
+  (`SendCommandRescanInstalledProducts` "SO:*", `SendCommandAuthorizeOption`
+  "AU:%s") -- confirms/extends CLAUDE.md's already-documented "AU:" trigger with
+  its general request/response envelope (write command, read back a 4-byte int
+  status, 0=success) for the first time from the real CLIENT-side sender rather
+  than just OA.ko's consumer. **Deliberately deferred**: `InstallOptionFile()`
+  calls `CSTGInstalledEXProducts::InstallProductFile()`, a genuinely deep real
+  S-file/option-file binary parser+installer (5 more real methods across 3
+  classes plus 2 callbacks, .text+0x08e32450-0x08e33900) -- a project of its own,
+  matching this batch's overall verdict for the family.
+  **USTGAPICDAudio** (all 12 methods) doesn't build STGMessages inline at all --
+  every method routes through 4 real `USTGAPISampling` primitive methods
+  (`SharedScratch`/`SendSimpleMessage`/`ReceiveSimpleMessage`/`ReceiveMessage`),
+  themselves genuinely tractable and reconstructed here for the first time.
+  These primitives share the SAME 24-byte STGMessage substrate
+  (`USTGUserAPI::SendSTGMessageWithSource`/`ReadMessage`) the batch above's whole
+  family uses, but with an INVERTED field-role split: there, `type` identifies
+  the subsystem and `subcode` the per-command opcode; here `type=1` is constant
+  ("simple 3-int command" shape) and `subcode=0xc` is the constant Sampling/
+  CDAudio subsystem id, with the real per-command opcode living in a PAYLOAD
+  dword instead (position varies per primitive, documented precisely per-function
+  in `ustg_api_sampling.h` rather than asserting one unified scheme).
+  `SharedScratch()` turned out to reuse `USTGUserAPI::mFrontPanelStatusAddress`
+  (already real) at a fixed +0xd34 offset as a general scratch buffer, not a new
+  shared-memory attach. A quick 4-method spot-check of `USTGAPISampling`'s own
+  ~46 "UpdateXxx" methods (`UpdateLevelSlider`/`UpdateTrigger`/`UpdateThreshold`/
+  `UpdatePretrigger`) confirms they build their OWN STGMessages directly the same
+  way the batch above's family does, NOT through these 4 shared primitives --
+  so `USTGAPIPCMBanks`/`USTGAPISampling`'s "genuinely deep" verdict stands for
+  the bulk of both classes; only the 4 shared primitives CDAudio needed are done
+  here, a real, scoped, verified lead for a future pass rather than a guess.
+  `USTGAPIMIDI` re-checked and confirmed materially deeper than either of the
+  above: real device-queue I/O against `sQueueReaders`/`sQueueWriters` static
+  arrays and a `CSTGMidiQueue` class (real tail-call target
+  `CSTGMidiQueue::GetNumWritableBytes()` at .text+0x08e47e70), guarded by real
+  `__assert_fail()` calls (confirmed real source path
+  "../StgAPI/UserAPI/USTGAPIMIDI.cpp" and assert text "sMidiShare"/
+  "IsValidPortId(port)" from .rodata) -- left deferred with this more precise
+  characterization for a future pass rather than the prior batch's shallower
+  "different-shaped" note.
+  Verified with 26 new byte-exact/behavioral KAT checks
+  (`verify/test_ustg_api_cdaudio.cpp`, covering both CValue rules + all 4
+  Sampling primitives + a representative CDAudio slice incl. `PlayStandby`'s
+  2-separate-wire-sends-per-call shape) plus the full existing 47-binary host
+  suite (0 failures) and a real Lenny cross-build+link ("LINK OK"). USTGAPIKLM's
+  own `CSTGHandle::Access()`/`/proc/.oacmd`-dependent methods compile clean
+  (`make objs`) but are not host-KAT-tested at the byte level -- same
+  already-accepted "real shared-memory/file I/O boundary, not mockable
+  host-side" limitation `CSTGHandle::Access()` itself already carries. Not
+  tested on real hardware -- no reconstructed caller anywhere in this project
+  yet (same status as the rest of the Stage 2 substrate). Eva manifest
+  646 -> 678/37,795.

@@ -1457,6 +1457,64 @@ RECONSTRUCTED = {
     "08e24ad0",  # USTGAPISetList::UpdateSlotParam(int, int, int, int)
     "08e24d60",  # USTGAPIWaveSequenceData::SetCurrentSequenceId(unsigned)
     "08e24e40",  # USTGAPIWaveSequenceData::SharedMemWaveSequenceDump(int)
+
+    # --- USTGAPIKLM / USTGAPICDAudio / USTGAPISampling primitives (2026-07-27) ---
+    # Follow-up to the batch above: traced the 5 sibling classes that batch's own
+    # header comment flagged "confirmed different-shaped" (USTGAPIKLM, CDAudio,
+    # MIDI, PCMBanks, Sampling) via direct objdump -dr -M intel reads, not guesses.
+    # USTGAPIKLM (14/15 methods -- the real installed-EXs-product/license table,
+    # CSTGHandle::Access()-based, not message-send-based; InstallOptionFile
+    # deliberately deferred, see ustg_api_klm.h) and USTGAPICDAudio (12/12 methods)
+    # both turned out genuinely tractable. USTGAPICDAudio unlocked 4 real
+    # USTGAPISampling primitive methods it depends on (SharedScratch/
+    # SendSimpleMessage/ReceiveSimpleMessage/ReceiveMessage) -- confirmed these are
+    # a shared "simple 3-int command" layer at least 3 subsystems build on, NOT
+    # the same field layout as the USTGAPIXxx family above (see ustg_api_sampling.h's
+    # header comment for the precise field-role difference). USTGAPIMIDI (device-
+    # queue I/O against CSTGMidiQueue, real __assert_fail-guarded bounds checks) and
+    # the bulk of USTGAPIPCMBanks/USTGAPISampling (46/51 methods each, own
+    # STGMessages built directly, not through these 4 primitives) re-confirmed
+    # genuinely deeper -- left deferred, precise leads recorded in
+    # ustg_api_sampling.h's own header comment for a future pass.
+    # Verified: host `make verify` green (new test_ustg_api_cdaudio.cpp, 26
+    # byte-exact/behavioral checks incl. the 2 CValue serialization rules, 0
+    # failed) + full existing 47-binary suite unaffected. USTGAPIKLM's own
+    # CSTGHandle::Access()/`/proc/.oacmd`-dependent methods compile clean
+    # (`make objs`) but are not host-KAT-tested at the byte level -- same
+    # already-accepted "real shared-memory/file I/O boundary, not mockable
+    # host-side" limitation as CSTGHandle::Access() itself (stg_handle.cpp).
+    "08e1d640",  # USTGAPIKLM::RescanInstalledProducts()
+    "08e1d650",  # USTGAPIKLM::GetNumberOfProductsInstalled(unsigned&)
+    "08e1d690",  # USTGAPIKLM::GetProductInfo(unsigned, CValue&, bool&, unsigned&, char*, char*, char*)
+    "08e1d7e0",  # USTGAPIKLM::IsProductAuthorized(unsigned)
+    "08e1d840",  # USTGAPIKLM::GetProductIdentifier(unsigned, CValue&)
+    "08e1d890",  # USTGAPIKLM::GetProductOptionFileName(unsigned, char*)
+    "08e1d8e0",  # USTGAPIKLM::GetProductLongName(unsigned, char*)
+    "08e1d930",  # USTGAPIKLM::GetProductFullName(unsigned, char*)
+    "08e1d9d0",  # USTGAPIKLM::GetProductShortName(unsigned, char*)
+    "08e1da20",  # USTGAPIKLM::GetNumberOfItemsInProduct(unsigned, unsigned&)
+    "08e1da70",  # USTGAPIKLM::GetProductItemInfo(unsigned, unsigned, eSTGOptionType&, CValue&, char*)
+    "08e1db50",  # USTGAPIKLM::GetProductItemType(unsigned, unsigned, eSTGOptionType&)
+    "08e1db90",  # USTGAPIKLM::GetProductItemName(unsigned, unsigned, char*)
+    "08e1dbd0",  # USTGAPIKLM::SetAuthString(unsigned, char*)
+    "08e48da0",  # SendCommandRescanInstalledProducts() -- "SO:*" to /proc/.oacmd
+    "08e48bc0",  # SendCommandAuthorizeOption(char const*) -- "AU:%s" to /proc/.oacmd
+    "08e1b3f0",  # USTGAPICDAudio::PlayStandby(char const*, unsigned long, unsigned, unsigned long, unsigned)
+    "08e1b480",  # USTGAPICDAudio::PlayStart()
+    "08e1b4b0",  # USTGAPICDAudio::PlayStop()
+    "08e1b4e0",  # USTGAPICDAudio::GetCurrentPosition(unsigned long&, EAudioStatus&)
+    "08e1b570",  # USTGAPICDAudio::SetLevel(unsigned char)
+    "08e1b5a0",  # USTGAPICDAudio::SetChanLevel(unsigned char, unsigned char)
+    "08e1b5d0",  # USTGAPICDAudio::SetChanPan(unsigned char, unsigned char)
+    "08e1b600",  # USTGAPICDAudio::SetChanBusSelect(unsigned char, eSTGAPIBusIDOut)
+    "08e1b630",  # USTGAPICDAudio::SetChanSend1Level(unsigned char, unsigned char)
+    "08e1b660",  # USTGAPICDAudio::SetChanSend2Level(unsigned char, unsigned char)
+    "08e1b690",  # USTGAPICDAudio::SetChanFXControlBus(unsigned char, eSTGAPIFXCtrlBus)
+    "08e1b6c0",  # USTGAPICDAudio::SetChanHDRBus(unsigned char, eSTGAPIHDRBus)
+    "08e230d0",  # USTGAPISampling::SharedScratch()
+    "08e24870",  # USTGAPISampling::ReceiveMessage(char*, int, int, int)
+    "08e24970",  # USTGAPISampling::ReceiveSimpleMessage(int, unsigned long&)
+    "08e24a80",  # USTGAPISampling::SendSimpleMessage(int, int, int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
