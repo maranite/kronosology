@@ -630,12 +630,56 @@ should know they exist and are untested/unmodeled, not silently absent.
   a known, documented gap (not a bug), but one that could look like a
   missing-notification symptom during real-hardware bring-up if this log
   entry isn't consulted first.
-- **`CDumpManStateMachine` family** — confirmed genuinely deep, deferred;
-  real SysEx/dump-protocol state-machine behavior is untested.
-- **`COutLinkIfcBase`/`CMarshaller<T>` framework** — confirmed genuinely
-  deep shared interface-link infrastructure (also blocks `ILimiterNotify`/
-  `IAlphaKeybEvent`/`IAlphaKeybCtrl`, not just `CAlphaKeybCtrlTask`); not
-  tested on real hardware because no concrete instantiation exists yet.
+- **`CDumpManStateMachine` family** — STALE as of 2026-07-27, re-verified and
+  corrected: this bullet previously read as if nothing had been reconstructed,
+  but the Stage 6 DumpManager cluster batch (2026-07-25) and its 2026-07-26
+  re-check already promoted `CCircByteBuffer`/`CDumpBuffer`/`CDumpManMod`/
+  `CDumpTask`/`CBufferingTask`'s ctor+dtor pair and `CDumpManStateMachine`'s
+  own ctor/dtor/`Init()`/`CDumpMachine`'s full 6-method I/O-adapter surface
+  (`SetTimeout`/`SendSexMessage`/`PutMessage`/`ReadPacket`/`WritePacket`/
+  `IsDumpEnded`) to real bodies — see dump_man_state_machine.h/dump_buffer.h/
+  buffering_task.h for the full per-method breakdown. A fresh 2026-07-27
+  `objdump -dr -M intel` re-trace of the REMAINING Tier-B leaves
+  (`CBufferingTask::Exec(CMessage&)`/`Put(uchar const*, uchar)`,
+  `.text+0x080cd930`/`0x080cde50`) confirmed they are still genuinely deep:
+  `Put()`'s own real disassembly dispatches into `CChunkClient::Abort()`/
+  `LoadDump()`/`LoadFile()`/`SaveDump()`/`StoppedByUser()` and
+  `CDumpHeaderDescr`/`CDumpReqDescr`'s own `DeSerialize()`/ctor/dtor pairs —
+  an entirely separate, un-reconstructed chunk-transfer-serialization
+  subsystem, not a shallow forward. `CDumpManStateMachine::OnTimeout()`
+  (`.text+0x080d0150`) was also re-traced: it dispatches through a 9-entry
+  jump table keyed on internal protocol state (its own `+0x8` field) into the
+  genuinely out-of-scope ~30-method state-handler family — confirms, does not
+  reverse, the existing verdict for that specific piece. Net: real SysEx/
+  dump-file-transfer serialization (the `CChunkClient`/`CDumpHeaderDescr`/
+  `CDumpReqDescr` side) and the state-handler protocol logic itself remain
+  untested; the I/O-adapter shell around them is real and exercised.
+- **`COutLinkIfcBase`/`CMarshaller<T>` framework** — STALE as of 2026-07-27,
+  corrected: this bullet's "no concrete instantiation exists yet" claim was
+  already half-wrong even before today (`CAlphaKeybCtrlTask`'s own `mCodeIfc`,
+  alpha_keyb_ctrl_task.h, constructed on this project's own wired boot path
+  since the 2026-07-26 CAlphaKeybCtrl/CAlphaKeybCtrlTask batch). A fresh
+  `objdump -dr -M intel` re-trace (2026-07-27) found a SECOND, independent
+  real instantiation site: `CLimiterBase::Init(CTask&, unsigned int)`
+  (`.text+0x0807ac70`) builds a `COutLinkIfc<ILimiterNotify>`/
+  `CMarshaller<ILimiterNotify>` sub-object via the exact same "malloc + base-
+  construct + raw vtable pokes" idiom, confirmed via a direct `.rodata` byte
+  read of `PTR__CLimiterBase_08e81c90`/`PTR__CWrProtCircularQueue_08e81ca8`
+  (only 4 and 2 real virtual slots respectively). `CLimiterBase`'s own ctor/
+  dtor and its embedded `CWrProtCircularQueue` message-ring-buffer (ctor/
+  dtor/`Init(int)`/`IsEmpty()`/`CountIntegers()`) are now reconstructed for
+  real (`limiter_base.h`/`.cpp`, commit pending) — `CLimiterBase` itself has
+  ZERO callers anywhere in the whole 22MB ground-truth binary (dead code in
+  ground truth itself, not just this reconstruction — confirmed by grepping
+  every `call` target in a full `objdump -dr` sweep), so this is structural
+  completeness, not a reachability change. The `COutLinkIfcBase`/
+  `CMarshaller<T>` framework itself (and `Init()`'s own base-construction
+  call, which needs it) stays genuinely out of scope, shared by
+  `IAlphaKeybEvent`/`IAlphaKeybCtrl` too — not tested on real hardware
+  because, while 2 concrete instantiation SITES now exist in this
+  reconstruction, neither one's own framework-level machinery
+  (`GetDirectIfcPtr()`'s callee-side behavior aside, already real) is
+  modeled.
 - **10 `CXxxTask` ES-family UI god-objects** (`CESCommonTask` through
   `CESSongTask`, 52–1092 real methods each) — confirmed deliberately out of
   scope, not constructed anywhere on the currently-wired boot path; the

@@ -860,6 +860,40 @@ extern void *PTR__CBatchDiskMainTask_08eabefc[7];
  * dispatched through (the vector is always empty in this reconstruction).
  */
 extern void *PTR__TVectorInt_08e86f78[2];
+
+/*
+ * CLimiterBase's own real vtables (limiter_base.h, Eva "size is not depth"
+ * re-check batch, 2026-07-27) -- confirmed byte-exact via a direct `.rodata`
+ * dword read at 0x08e81c90..0x08e81ca8 ("vtable for CLimiterBase::
+ * CWrProtCircularQueue" begins immediately after CLimiterBase's own last real
+ * slot, at 0x8e81ca0, so CLimiterBase's own vtable is exactly 4 slots -- dtor
+ * D1/D0 + SendNoAnswer + SendWithAnswer -- not the ~16 nm -C lists across the
+ * whole class, most of which are non-virtual). Both install-only/EvaVTableStub-
+ * backed: nothing in this reconstruction's own call graph dispatches through
+ * either vtable (CLimiterBase has zero callers anywhere in ground truth itself,
+ * see limiter_base.h's own REACHABILITY note) -- unlike CAlphaKeybCtrlTask's own
+ * per-instance vtable above, no real self-dispatch forwarder is needed.
+ */
+extern void *PTR__CLimiterBase_08e81c90[4];
+extern void *PTR__CWrProtCircularQueue_08e81ca8[2];
+
+/* The "ILimiterNotify" interface-link sub-object CLimiterBase::Init() would build
+ * at mIfcLink (limiter_base.h) -- 3 placeholder vtables, same shape and status as
+ * PTR__COutLinkIfc_AlphaKeybCode_08eabd48/PTR__CMarshaller_AlphaKeybCode_08e89f18
+ * above, just for the ILimiterNotify specialization instead. Declared here (even
+ * though Init() itself stays Tier B -- limiter_base.h's own header comment) so a
+ * future COutLinkIfcBase reconstruction has real, byte-confirmed addresses ready
+ * to wire up: primary vtable @0x8e81d28 (10 slots, matching COutLinkIfcBase's own
+ * primary vtable slot count established by AlphaKeybCode's array), secondary/
+ * thunk vtable @0x8e81d50 (same 10-slot convention), CMarshaller<ILimiterNotify>
+ * sub-object vtable @0x8e81f00 (4 slots: dtor pair, an unidentified slot 2, and
+ * `CMarshaller<ILimiterNotify>::WakeUp(unsigned int)` at slot 3 -- confirmed via
+ * `nm -C` to be this specialization's real 4th vtable entry, matching
+ * ProcessCode's own slot-3 position in the AlphaKeybCode specialization).
+ */
+extern void *PTR__COutLinkIfc_ILimiterNotify_08e81d28[10];
+extern void *PTR__COutLinkIfc_ILimiterNotify_08e81d50[10];
+extern void *PTR__CMarshaller_ILimiterNotify_08e81f00[4];
 }
 
 #endif /* OMEGA_VTABLES_H */

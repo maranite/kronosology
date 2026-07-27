@@ -780,4 +780,30 @@ void *PTR__CBatchDiskMainTask_08eabefc[7] = {
 void *PTR__TVectorInt_08e86f78[2] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+
+/* CLimiterBase's own real vtables + the ILimiterNotify interface-link's 3
+ * placeholder vtables -- see omega_vtables.h's own header comment. */
+void *PTR__CLimiterBase_08e81c90[4] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__CWrProtCircularQueue_08e81ca8[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
+void *PTR__COutLinkIfc_ILimiterNotify_08e81d28[10] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__COutLinkIfc_ILimiterNotify_08e81d50[10] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
+void *PTR__CMarshaller_ILimiterNotify_08e81f00[4] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub,
+};
 }

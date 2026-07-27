@@ -1286,6 +1286,33 @@ RECONSTRUCTED = {
     # per-subcode evidence. The two NEW real leaf functions this pulled in:
     "08e1cad0",  # USTGAPIControl::BeginLongErPActivity()
     "08e1cb10",  # USTGAPIControl::EndLongErPActivity()
+
+    # --- CLimiterBase / CWrProtCircularQueue (Eva "size is not depth" re-check
+    # batch, 2026-07-27, applying the same lens to HARDWARE_REVIEW_LOG.md's
+    # "COutLinkIfcBase/CMarshaller<T> framework" registry bullet, which claimed "no
+    # concrete instantiation exists yet" -- already half-wrong (CAlphaKeybCtrlTask's
+    # own mCodeIfc, alpha_keyb_ctrl_task.h) and this batch found a 2nd, independent
+    # one: CLimiterBase::Init() builds a COutLinkIfc<ILimiterNotify>/
+    # CMarshaller<ILimiterNotify> sub-object via the same idiom. CLimiterBase itself
+    # has ZERO callers anywhere in the whole 22MB ground-truth binary (confirmed by
+    # grepping every `call` target in `objdump -dr` output) -- reconstructed anyway
+    # for structural completeness, same "small + self-contained, closes a
+    # registry-flagged gap" precedent as CJobStack's ctor/dtor. Init(CTask&,
+    # unsigned int)/Write()/PopMessage() and CWrProtCircularQueue::Write()/
+    # StaticRead()/SeekNextRead() stay Tier B (genuinely intricate wraparound
+    # message-framing state machine, or genuinely blocked on the un-reconstructed
+    # COutLinkIfcBase ctor) -- see limiter_base.h for the full per-method writeup.
+    "0807a360",  # CLimiterBase::CWrProtCircularQueue::CWrProtCircularQueue(int)
+    "0807a1c0",  # CLimiterBase::CWrProtCircularQueue::~CWrProtCircularQueue (D1)
+    "0807a2f0",  # CLimiterBase::CWrProtCircularQueue::~CWrProtCircularQueue (D0)
+    "0807a3a0",  # CLimiterBase::CWrProtCircularQueue::Init(int)
+    "0807a9c0",  # CLimiterBase::CWrProtCircularQueue::IsEmpty() const
+    "0807aa30",  # CLimiterBase::CWrProtCircularQueue::CountIntegers(uint)
+    "0807aa50",  # CLimiterBase::CLimiterBase(int, ETaskLevel, TMsgFn, TMsgFn)
+    "0807a210",  # CLimiterBase::~CLimiterBase (D1)
+    "0807a270",  # CLimiterBase::~CLimiterBase (D0)
+    "0807af80",  # CLimiterBase::SendWithAnswer(uchar, void*, uint) -- real forward
+    "0807afa0",  # CLimiterBase::SendNoAnswer(uchar, void const*, uint) -- real forward
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
