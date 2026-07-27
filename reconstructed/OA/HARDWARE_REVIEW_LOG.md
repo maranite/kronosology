@@ -1767,3 +1767,80 @@ signal reflects a real, non-zero bus value -- if this reconstruction were
 ever deployed to real hardware, this would immediately reveal the "always
 0" placeholder as wrong, distinguishing it from the other deferred-vtable
 entries in this log where the real slot is confirmed unreachable/dead.
+
+## Broader vtable-write sweep, commit `8e12ab1` — 6 more instances found and fixed (2026-07-27)
+
+Follow-up task to `63f099c`/`13ef727`'s "ctor omits/mis-writes the real
+vtable pointer" bug class (4 confirmed instances at the time: the
+`CSTGAudioInputMixer` static-init fix, `CSTGMidiOutPortKorgUsb`, and the
+`CSTGMidiInPort`/`CSTGMidiOutPort` base ctors). This pass swept every
+other reconstructed class with its own real vtable — front-panel/
+calibration handler classes, `CSTGControllerInfo`/`CSTGAudioInput`, and
+every `_vtablePtr`/`virtual` declaration in the codebase — checking each
+one's real ctor disassembly (`objdump -dr -M intel` against
+`/home/share/Decomp/OA.ko_Decomp/OA.ko`) against the reconstructed C++
+ctor. Found and fixed 6 more real instances, in two distinct sub-variants.
+
+**New variant (2 instances): a real C++ `virtual` destructor combined
+with a leftover hand-rolled `_vtablePtr` field — a genuine object-layout
+bug, not just a wrong value.** `CStartupFile` (`oa_setup_global_resources.h`)
+and `CKorgPreloadFile` (`oa_global.h`) both declared `virtual ~Dtor()`
+purely to make GCC auto-emit the `_ZTVxxx` vtable data symbol as a "key
+function" side effect, while ALSO keeping this project's usual explicit
+`_vtablePtr` field (used everywhere else for classes that install but
+never C++-dispatch through their vtable). Declaring the dtor virtual made
+the class genuinely polymorphic, so GCC inserted its OWN hidden
+compiler-managed vtable pointer ahead of the hand-declared field, silently
+shifting every subsequent byte offset by one pointer-width. Confirmed via
+a throwaway `-m32` `sizeof`/`offsetof` reproduction (`sizeof(CStartupFile)`
+came back 12, not the ground-truth-confirmed 8) and then against the
+actual compiled `OA.ko`. For `CStartupFile` this inflated
+`sizeof(CCostProfile)` by 4 bytes past the FIXED-size
+`::operator new(0x12a0)` allocation `setup_global_resources.cpp`
+placement-constructs it into — **a genuine 4-byte kernel heap buffer
+overflow on every real module load.** `CKorgPreloadFile` has the same
+layout bug but is currently harmless at runtime (a plain stack local,
+accessed only via real C++ member syntax, no fixed-size external
+allocation). Fixed both by dropping `virtual` and hand-declaring the
+`_ZTVxxx` arrays as real, correctly-sized (verified via `readelf -sW`)
+byte arrays instead — restores the single-vtable-pointer-at-+0x0 layout
+ground truth actually has. Re-verified post-fix: `sizeof(CStartupFile)==8`,
+`sizeof(CCostProfile)==0x12a0`, `sizeof(CKorgPreloadFile)==8`,
+`sizeof(CKorgProgBankFile)==12`, all exactly matching ground truth, and
+the actual compiled `OA.ko`'s own ctor disassembly now matches ground
+truth's byte-for-byte.
+
+**Established variant (4 instances): the ctor's vtable-pointer write is
+simply missing or a bare literal `0`/`nullptr` instead of the real
+`&_ZTVxxx+8` value.** `CSTGAudioInput::CSTGAudioInput()`
+(`global.cpp`) never wrote `_vtablePtr` at all — left at whatever bytes
+the enclosing `CSTGProgram`/`CSTGCombi` placement-new target already
+held, where ground truth's own `.text+0xc9ea0` does
+`mov DWORD PTR [eax],0x8` + `R_386_32 _ZTV14CSTGAudioInput`.
+`CSTGCalibrationMsgHandler`/`CSTGControlMsgHandler`/
+`CSTGFrontPanelMsgHandler` (all three `*MsgHandler` dispatch-table
+installers) each wrote a bare literal `0` where ground truth's own ctors
+(`.text+0xde910`/`0xe8550`/`0xe9f80`) write real, non-null
+`&_ZTVxxx+8` values — this project's own "install vs dispatch" rule
+means nothing reads the value back through a vtable slot, NOT that the
+field itself should be left null; the header comments describing these
+as "install-only placeholder" were correct about the dispatch behavior
+but the ctor bodies had drifted to installing the wrong value. Fixed all
+four the same way as the existing convention: declared correctly-sized
+(confirmed via `readelf -sW`), zero-filled `_ZTVxxx` placeholder arrays
+and wrote the real `&_ZTVxxx+8` value in each ctor.
+
+All 6 fixes verified byte-for-byte against the actual compiled `OA.ko`'s
+own disassembly (not just ground truth) post-rebuild. Host `verify/`
+suite green (124/124, one pre-existing test updated to assert the now-
+correct non-null value instead of the old, incorrect null expectation).
+Clean `make ko-clean && make ko KDIR=/home/build/linux-kronos` rebuild.
+Live-booted on a disposable `kronosvm` instance (fresh copy of the
+known-good `full_integration_test_20260727` disk image, freshly-built
+`OA.ko` injected via `guestfish upload`, MD5-verified): reached
+`OA_DEBUG_MARKER 17`/`OA: init_module succeeded`/`[loadoa] OA.ko: LOADED
+OK`, Eva alive at 8s, zero `Oops`/`BUG:`/`panic` (one benign
+false-positive grep hit on the pre-existing "MP-BIOS bug: 8254 timer"
+printk). VM instance torn down cleanly. Full derivation in
+`kronosology/.claude/agent-memory/re-decompiler/`
+(`oa_broader_vtable_sweep_6_more_instances_2026-07-27.md`).
