@@ -24,6 +24,13 @@
  *       vtbl+8 dispatch genuinely runs CBatchDiskMan::Setup() (not EvaVTableStub).
  *   [7] CEditTask, constructed standalone: real vtable installed, DoPreload()/
  *       GetOutLinkName() don't crash and return the "Internal" outlink name.
+ *   [9] CBDApiInstance (bd_api_instance.h, 2026-07-27 batch, correcting the prior
+ *       "RegisterLoader has zero call sites" false verdict): RegisterLoader()
+ *       push_back semantics (append, growth across the 0x20-element boundary,
+ *       NULL rejected with -1 and no append), IsBusy()/IsPreloadRunning() x2
+ *       forwarding to the FIRST registered loader, and CBatchDiskManConstructor
+ *       Create()'s own real wiring (mains.cpp) growing the SAME global
+ *       BDApiInstance singleton [5] already exercises.
  */
 
 #include <cstdio>
@@ -31,8 +38,18 @@
 
 #include "batch_disk_man.h"
 #include "batch_disk_main_task.h"
+#include "bd_api_instance.h"
 #include "omega_vtables.h"
 #include "system_api.h"
+
+struct BDApiInstanceTestHooks {
+	static int Count(const CBDApiInstance &b)
+	{
+		return (int)(b.mEnd - b.mBegin);
+	}
+	static CBatchDiskMan *First(const CBDApiInstance &b) { return b.mBegin[0]; }
+	static CBatchDiskMan *Last(const CBDApiInstance &b) { return b.mEnd[-1]; }
+};
 
 struct BatchDiskMainTaskTestHooks {
 	static int State(const CBatchDiskMainTask &t) { return t.mState; }
@@ -220,6 +237,67 @@ int main()
 		      "own real malloc size)", sizeof(CBatchDiskMainTask) == 0x160);
 		check("ctor/dtor did not crash (CTask+CEditable+CRMApiCallBack bases, heap "
 		      "CRMJob, embedded CDirEntry/CZ, heap COutLinkMulti all constructed)", true);
+	}
+
+	printf("[9] CBDApiInstance -- RegisterLoader()/IsBusy()/IsPreloadRunning() (bd_api_instance.h)\n");
+	{
+		/* A fresh, LOCAL CBDApiInstance -- deliberately NOT the global BDApiInstance
+		 * singleton (which [5]/[10] already populate via the real factory wiring, in
+		 * an order this file doesn't want this check to depend on). Same real class,
+		 * just an independent instance for isolated testing.
+		 */
+		CBDApiInstance local;
+
+		check("RegisterLoader(NULL) returns -1", local.RegisterLoader(0) == -1);
+
+		CBatchDiskMan first("BDApi-First", 0);
+		first.Setup(); /* IsBusy()/IsPreloadRunning() forward through mMainTask --
+		                 * must be non-NULL, same precondition CBatchDiskMan's own
+		                 * ground truth requires. */
+		int rc1 = local.RegisterLoader(&first);
+		check("RegisterLoader() returns the new count (1st real append)", rc1 == 1);
+		check("RegisterLoader(NULL) above did not append", rc1 == 1);
+
+		check("IsBusy() forwards to the first (only) registered loader",
+		      local.IsBusy() == first.IsBusy());
+		check("IsPreloadRunning() forwards to the first (only) registered loader",
+		      local.IsPreloadRunning() == first.IsPreloadRunning());
+		check("IsPreloadRunning(group,name) forwards to the first (only) registered "
+		      "loader", local.IsPreloadRunning(3, "grp") ==
+		                    first.IsPreloadRunning(3, "grp"));
+
+		/* Grow past the real 0x20-element initial capacity (bd_api_instance.h's own
+		 * MakeCapacity() growth-policy writeup) to exercise the real doubling path,
+		 * not just the fast "room available" append. Reusing &first 40 more times is
+		 * fine -- this exercises RegisterLoader()'s/MakeCapacity()'s own pointer-
+		 * vector growth mechanics, not per-element uniqueness.
+		 */
+		for (int i = 0; i < 40; i++)
+			local.RegisterLoader(&first);
+		check("40 more RegisterLoader() calls grew the count by exactly 40 "
+		      "(real MakeCapacity() growth, crossing the 0x20-element boundary)",
+		      BDApiInstanceTestHooks::Count(local) == 41);
+		check("index 0 is UNCHANGED after growth (MakeCapacity() copied existing "
+		      "elements into the new block, first-ever registration untouched)",
+		      BDApiInstanceTestHooks::First(local) == &first);
+		check("index 40 (the last append) also == &first",
+		      BDApiInstanceTestHooks::Last(local) == &first);
+	}
+
+	printf("[10] CBatchDiskManConstructor::Create() wiring RegisterLoader() for "
+	       "real (mains.cpp, corrects the prior omission)\n");
+	{
+		int countBefore = BDApiInstanceTestHooks::Count(BDApiInstance);
+
+		typedef void *(*CreateFn)(void *, void *, void *, int);
+		CreateFn create = (CreateFn)PTR__CBatchDiskManConstructor_08eabe08[2];
+		void *obj = create(0, (void *)"BDApi-ViaFactory", 0, 0);
+		check("Create() returns non-null", obj != 0);
+		check("Create() also registered the new CBatchDiskMan with BDApiInstance "
+		      "(count grew by 1 -- was silently omitted before this batch)",
+		      BDApiInstanceTestHooks::Count(BDApiInstance) == countBefore + 1);
+		check("the newly-appended loader IS the exact object Create() just returned",
+		      (void *)BDApiInstanceTestHooks::Last(BDApiInstance) == obj);
 	}
 
 	printf("=========================\n");

@@ -59,9 +59,13 @@
  *                       mShortName`, dispatched via `this->mVtbl + 0x8` (not a
  *                       direct call, matching ground truth's own indirect-call
  *                       shape), returns that CZ's `RawPtrField()` cast to
- *                       `const char*`. Always NULL in this reconstruction today
- *                       (both candidate CZ's `RawPtrField()`s are always 0,
- *                       nothing populates them -- see cz_util.h).
+ *                       `const char*`. UPDATE (2026-07-27, cz_util.h's own CZ
+ *                       ctor/dtor fix): now a valid, non-NULL pointer to a
+ *                       heap-allocated empty string ("") on a freshly-constructed,
+ *                       never-populated CDirEntry -- matching ground truth's real
+ *                       behavior. Previously always NULL, a real, previously-
+ *                       undetected divergence caused by CZ's own ctor not yet
+ *                       allocating anything -- see cz_util.h.
  *   `GetExt()`         .text+0x080723e0, identical shape to GetName() but on
  *                       `mLongExt`/`mShortExt`.
  * None of the above required decoding `CZ::Insert`/`RFind`/`Remove`/the string

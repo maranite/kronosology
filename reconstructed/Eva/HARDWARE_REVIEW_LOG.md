@@ -547,15 +547,38 @@ should know they exist and are untested/unmodeled, not silently absent.
   call graph ever needs it" is now imprecise (the call graph DOES reach a
   Peg-named call site, just not real Peg internals). See `README.md` Stage 5's
   "Survey B" section for the original sweep this refines.
-- **`CZ` string container** (247 methods) — confirmed out of scope
-  project-wide, kept opaque everywhere it's a dependency (`CBatchDiskMainTask`,
-  `CConfigManager::CreateResourceFamilies()`); not tested on real hardware
-  because this reconstruction never implements its real string/set
-  semantics, only its `sizeof`.
-- **`CStorage`/`CControlSurface`/`CMMI`/`CModeManager`** — confirmed
-  genuinely deep UI/control-surface state backing `CSTGUnsolMsgHandler`'s
-  remaining Tier-B leaves below (`ControlMsgHandler`'s 38 still-unpromoted
-  outer subcodes, `VoiceModelMsgHandler`'s one MOSS-algorithm leaf); not tested on real
+- **`CZ` string container** (247 raw symbol count / 59 distinctly-named methods,
+  RE-TRACED 2026-07-27) — the CONTAINER (`Insert`/`RFind`/`Remove`/`Sprintf`/
+  the real 5 string-building constructors, ~55 remaining methods) stays
+  confirmed out of scope project-wide, kept opaque everywhere it's a
+  dependency (`CBatchDiskMainTask`, `CConfigManager::CreateResourceFamilies()`).
+  BUT the opaque-capacity instance ctor/dtor (`CZ(unsigned)`/`~CZ()`, used by
+  every class that embeds a `CZ` MEMBER — `CRMJob`, `CDirEntry`, `CBatchDiskMainTask`
+  — cz_util.h) turned out to be a genuinely tractable sub-piece, same "size is
+  not depth" lens as `CJobStack`/`CLimiterBase`/`CKGMsgProcessor`: NOW REAL
+  (was an all-zero stub), fixing a real, previously-undetected divergence —
+  `CDirEntry::GetName()`/`GetExt()` used to always return NULL on a freshly-
+  constructed entry; ground truth's real ctor allocates a valid empty-string
+  buffer, so they now correctly return a non-NULL pointer to `""`. See
+  cz_util.h's own header comment for the full ctor/dtor field-layout writeup
+  and dir_entry.h/`verify/test_dir_entry.cpp` for the downstream fix. Real
+  string/set container semantics (the 247-symbol/59-method surface minus this
+  ctor/dtor pair) are still not tested on real hardware.
+- **`CStorage`/`CControlSurface`/`CMMI`/`CModeManager`** — RE-TRACED 2026-07-27,
+  CStorage specifically: confirmed genuinely deep with precise fresh evidence,
+  not just re-affirmed. Unlike `CJobStack` (whose tiny ctor never touched its
+  class's own big method surface), `CStorage::CStorage()` itself is 4421 bytes
+  (`.text+0x08a5deb0`) — no small, separable ctor/dtor sub-piece exists (no
+  `~CStorage()` was even found in the export; this is a permanent singleton).
+  Its own central method, `CStorage::Initialize(CStaticLabel*, PegRect&)`
+  (`.text+0x08a57e60`), is 23125 bytes and takes REAL Peg-toolkit widget types
+  as parameters — i.e. `CStorage` is directly, unavoidably coupled to the
+  still-100%-unmodeled real Peg GUI toolkit (`CStaticLabel`/`PegRect`), not
+  just adjacent to it. 21 distinctly-named methods total (42 raw symbols).
+  Confirmed genuinely deep UI/control-surface state backing
+  `CSTGUnsolMsgHandler`'s remaining Tier-B leaves below (`ControlMsgHandler`'s
+  38 still-unpromoted outer subcodes, `VoiceModelMsgHandler`'s one
+  MOSS-algorithm leaf); not tested on real
   hardware because none of these classes are modeled beyond stub
   declarations.
 - **`CSTGUnsolMsgHandler::ControlMsgHandler`** — PARTIALLY PROMOTED 2026-07-27
@@ -698,11 +721,37 @@ should know they exist and are untested/unmodeled, not silently absent.
   reconstruction, neither one's own framework-level machinery
   (`GetDirectIfcPtr()`'s callee-side behavior aside, already real) is
   modeled.
-- **10 `CXxxTask` ES-family UI god-objects** (`CESCommonTask` through
-  `CESSongTask`, 52–1092 real methods each) — confirmed deliberately out of
-  scope, not constructed anywhere on the currently-wired boot path; the
-  actual per-editor-page UI/model logic behind every edit screen is
-  entirely unmodeled.
+- **10 `CXxxTask` ES-family UI god-objects** (`CESCommonTask`/`CESEffectTask`/
+  `CESCombiTask`/`CESGlobalTask`/`CESMOSSTask`/`CESSamplingTask`/
+  `CESSetListTask`/`CESSongTask`/`CESDiskTask`/`CESProgTask`, 66–1106 raw
+  symbols each) — RE-TRACED 2026-07-27, `objdump -dr -M intel` on all 9
+  non-`CESCommonTask` ctors (`CESCommonTask` itself already has a real ctor,
+  es_common.h). Confirmed deliberately out of scope, with a precise,
+  size-correlates-with-depth finding this time (not just re-affirmed):
+  ctor sizes range from 293 bytes (`CESEffectTask`, smallest) to 4061 bytes
+  (`CESSongTask`, largest), and the two smallest ctors traced
+  (`CESEffectTask`/`CESMOSSTask`) are structurally SIMILAR to `CJobStack`'s own
+  tractable shape — `CTask`/`CEditable` base construction (already real) plus
+  2 `CEditable::AddDescriptorsMap()` calls (already real) — but, UNLIKE
+  `CJobStack`, each one ALSO unconditionally heap-constructs one brand-new,
+  not-yet-reconstructed per-class "manager" helper object of its own
+  (`CEffectManager::CEffectManager(int)`, .text+0x08bec0c0, 533 bytes/11
+  methods, for `CESEffectTask`; `CMOSSManager::CMOSSManager(unsigned)`,
+  .text+0x08bf3940, 533 bytes/10 methods, for `CESMOSSTask`) — i.e. even the
+  cheapest member of this family is not "free" the way `CJobStack`'s ctor was
+  (zero new dependency classes); every unlock drags in at least one full new
+  class. `CESSongTask` (the largest) confirms the opposite end is genuinely
+  deep, not just big: its ctor directly constructs a `CSongEditBuffer`, calls
+  `CMIDI::SetSongEditBuffer()` and `CSTGUnsolMsgHandler::InitializeForSong
+  (CCombi&, CCombi&)` (real cross-subsystem calls into the MIDI/voice engine),
+  and registers DOZENS of `AddDescriptorsMap()` rows (vs. 2 for the small
+  ones). Net: not constructed anywhere on the currently-wired boot path; the
+  actual per-editor-page UI/model logic behind every edit screen is entirely
+  unmodeled. `CESEffectTask`/`CESMOSSTask` specifically are a plausible target
+  for a FUTURE dedicated batch (same "CBatchDiskMan/CPanel/CEditor unlock"
+  shape, own new CEffectManager/CMOSSManager class each) — not forced here,
+  consistent with this pass's own brief not to force a reconstruction just to
+  find something.
 - **`CClientCommServer::OnReceiveMessage`** — RECONSTRUCTED 2026-07-27, closing
   `CClientCommServer` to a full 26/26. The long-standing "genuinely blocked on
   a real `CMessage` definition" verdict turned out to be based on the
@@ -803,3 +852,38 @@ should know they exist and are untested/unmodeled, not silently absent.
   file-local opaque stub rather than this header, to avoid touching that
   already-verified call site outside this batch's own scope) — reconstructed for
   structural completeness, same precedent as `CLimiterBase`/`CJobStack` above.
+- **`CBDApiInstance`** — RECONSTRUCTED FOR REAL 2026-07-27, RETRACTING a "confirmed
+  genuine dead end" verdict reached (and independently re-confirmed) TWICE before
+  (README.md's Stage 6 breadth-sweep re-check, 2026-07-25, and the
+  `CAlphaKeybIfcTask` batch's own re-check the same day). Both concluded
+  `RegisterLoader(CBatchDiskMan*)` — the one method with a plausible real caller —
+  had zero call sites anywhere in the 37,795-function export. A from-scratch
+  `objdump -dr -M intel` re-trace (dispatched specifically to re-examine this
+  project's largest deferred items with the same "size is not depth" lens that had
+  just unlocked `CLimiterBase`/`CKGMsgProcessor`) found this was a false negative:
+  the correct Itanium mangled name is `_ZN14CBDApiInstance14RegisterLoaderEP13
+  CBatchDiskMan` (14/13-character length prefixes; the prior greps apparently used
+  mistyped 13/12 prefixes and matched nothing). A correct
+  `objdump -dr | grep "call.*8243980"` finds exactly ONE real call site:
+  `CBatchDiskManConstructor::Create()` (`.text+0x08243d80`) — a function this
+  project ALREADY reconstructed (`CBatchDiskManConstructorCreate()`, mains.cpp),
+  which deliberately omitted this exact call. Worse, that caller is the SAME
+  function the "CBatchDiskMan unlock batch" (2026-07-26) already made
+  boot-path-reachable via `CConfigManager::CreateUserModules()`'s "BatchDiskManClass"
+  row — i.e. `RegisterLoader()` was reachable from the currently-wired boot path the
+  whole time, not dead code, and omitting it was a real (if inconsequential) gap in
+  an already-shipped reconstruction. All 6 of `CBDApiInstance`'s own methods turned
+  out genuinely tractable and are now real (`bd_api_instance.h`/`.cpp`):
+  `RegisterLoader()` (a `TVector<CBatchDiskMan*,1>` push_back, real
+  `MakeCapacity()` growth policy transcribed from its own disassembly — a
+  DIFFERENT curve from the project's other `TVector<T,1>` instantiation,
+  `task.cpp`'s `TVector<CTask::SRegisteredIfc,1>`, confirmed rather than assumed
+  by analogy) is now wired into `CBatchDiskManConstructorCreate()` for real.
+  `IsBusy()`/`IsPreloadRunning()` x2/the dtor have ZERO callers anywhere in ground
+  truth ITSELF (confirmed directly, same status as `CLimiterBase`) — reconstructed
+  for structural completeness only. Not tested on real hardware because
+  `CBDApiInstance`'s own base-class `CGlobalObjectBase` registration (the real
+  static-constructor mechanism every other `XxxApiInstance` sibling uses,
+  `global_object_base.h`) is deliberately not modeled here — nothing on this
+  project's traced boot path ever dispatches virtually on this object or destroys
+  it, only `RegisterLoader()`'s own plain (non-virtual) call path matters.

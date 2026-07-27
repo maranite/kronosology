@@ -131,3 +131,8 @@ bool CBatchDiskMan::IsPreloadRunning() const
 {
 	return mMainTask->IsPreloadRunning();
 }
+
+bool CBatchDiskMan::IsPreloadRunning(unsigned char group, const char *name) const
+{
+	return mMainTask->IsPreloadRunning(group, name);
+}

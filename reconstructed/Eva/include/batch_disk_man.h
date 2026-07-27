@@ -91,6 +91,13 @@
  * (ground truth is a raw tail `jmp` into `CBatchDiskMainTask`'s own same-named
  * method).
  *
+ * `CBatchDiskMan::IsPreloadRunning(unsigned char, const char*) const`
+ * (.text+0x08243800, 36 bytes) -- ADDED (CBDApiInstance batch, 2026-07-27, see
+ * bd_api_instance.h): real, same direct-forward shape as the 0-arg overload above,
+ * `return mMainTask->IsPreloadRunning(group, name);` (tail `jmp` into
+ * `CBatchDiskMainTask::IsPreloadRunning(unsigned char, const char*)`, already real,
+ * `return false;`, batch_disk_main_task.h).
+ *
  * `CBatchDiskMan::~CBatchDiskMan()` (.text+0x082433c0, 240 bytes): re-installs both
  * vtable groups, destroys+frees `mParam` if still non-null (dead code on every real
  * path since `Setup()` already nulls it -- preserved for fidelity, matches ground
@@ -119,6 +126,7 @@ public:
 
 	bool IsBusy() const;
 	bool IsPreloadRunning() const;
+	bool IsPreloadRunning(unsigned char group, const char *name) const;
 
 private:
 	CBatchDiskMainTask *mMainTask;

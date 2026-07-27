@@ -8,8 +8,12 @@
  *   [1] Default-constructed CDirEntry: IsEmpty()==1 (mUnknown5c==1 by ctor),
  *       IsDeleted()==0, IsReserved()==false, IsLabel()==false, IsDir()==false,
  *       IsParentDir()==false, IsCurrentDir()==false, HasValidLongNameExt()==
- *       false, GetName()==NULL, GetExt()==NULL (all consistent -- a freshly
- *       constructed entry has never been populated by a real directory scan).
+ *       false, GetName()/GetExt() both non-NULL and point at an empty ("")
+ *       heap-allocated string (UPDATED 2026-07-27: CZ's own ctor now really
+ *       allocates -- see cz_util.h -- so a freshly-constructed, never-populated
+ *       entry's short name/ext are real empty strings, not NULL, matching
+ *       ground truth; this check previously asserted the pre-fix bug's own
+ *       NULL result as if it were correct).
  *   [2] Friend-poked mUnknown50/mUnknown58/mUnknown60/mUnknown64 exercise
  *       every predicate's real bit-test/field shape (IsReserved's nibble==0xf
  *       sentinel, IsLabel's 0x8 bit, IsDir/IsParentDir/IsCurrentDir's shared
@@ -43,7 +47,23 @@ struct DirEntryTestHooks {
 };
 
 struct CZTestHooks {
-	static void SetRawPtr(CZ &z, uint32_t v) { memcpy(z.mOpaque + 0, &v, sizeof v); }
+	/* SetRawPtr() also marks the CZ as NOT owning the buffer (field+0xc = 1) --
+	 * required since 2026-07-27 (cz_util.h's real ~CZ() fix): every call site in
+	 * this test pokes a fabricated, non-heap address (0xdeadbe00 etc.) purely for
+	 * pointer-identity comparison, and CZ's own real dtor would otherwise
+	 * `free()` that fabricated address when the enclosing CDirEntry goes out of
+	 * scope. This also leaks the CZ's OWN real (malloc(1)) empty-string buffer
+	 * from construction -- acceptable in a short-lived host test, and avoids
+	 * silently changing what these checks exercise (they were never testing
+	 * CZ's own real allocation, only the raw pointer field CDirEntry's
+	 * accessors read back).
+	 */
+	static void SetRawPtr(CZ &z, uint32_t v)
+	{
+		memcpy(z.mOpaque + 0, &v, sizeof v);
+		uint32_t notOwned = 1;
+		memcpy(z.mOpaque + 0xc, &notOwned, sizeof notOwned);
+	}
 	static void SetRawFlag(CZ &z, uint32_t v) { memcpy(z.mOpaque + 8, &v, sizeof v); }
 };
 
@@ -71,8 +91,12 @@ int main()
 		check("IsParentDir() == false", e.IsParentDir() == false);
 		check("IsCurrentDir() == false", e.IsCurrentDir() == false);
 		check("HasValidLongNameExt() == false", e.HasValidLongNameExt() == false);
-		check("GetName() == NULL", e.GetName() == 0);
-		check("GetExt() == NULL", e.GetExt() == 0);
+		check("GetName() != NULL (real CZ ctor allocates an empty string)",
+		      e.GetName() != 0);
+		check("GetName() points at an empty string", e.GetName()[0] == '\0');
+		check("GetExt() != NULL (real CZ ctor allocates an empty string)",
+		      e.GetExt() != 0);
+		check("GetExt() points at an empty string", e.GetExt()[0] == '\0');
 	}
 
 	printf("[2] flag-byte predicates\n");

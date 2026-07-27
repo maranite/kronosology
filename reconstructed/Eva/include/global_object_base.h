@@ -48,10 +48,18 @@
  * permanently empty, since nothing called AddGlobalObject). It's live data now.
  *
  * BDApiInstance (the 9th XxxApiInstance-style global, `global.constructors.keyed.to.
- * BDApiInstance@08243a40.c`) is deliberately NOT wired here -- nothing on this
- * project's own traced boot path (MMainBatchDiskMan, mains.cpp) ever reads BDApi or
- * BDApiInstance; it's a real sibling of this same family, just out of scope for this
- * pass (same "stay bounded" license as OmegaExitThread being left unreconstructed).
+ * BDApiInstance@08243a40.c`) is deliberately NOT wired here -- its own
+ * CGlobalObjectBase-registration static constructor specifically.
+ *
+ * UPDATE (2026-07-27, CBDApiInstance batch, bd_api_instance.h): the broader "out of
+ * scope for this pass" claim above is now STALE for BDApiInstance itself --
+ * `CBDApiInstance::RegisterLoader()` DOES have a real, boot-path-reachable caller (a
+ * prior "zero call sites" verdict was a mangled-name grep bug, see
+ * bd_api_instance.h/mains.cpp) and is now reconstructed. Only THIS file's own
+ * base-class registration mechanism (`AddGlobalObject()` et al) stays unmodeled for
+ * `BDApiInstance` specifically -- `RegisterLoader()`/`IsBusy()`/`IsPreloadRunning()`
+ * never dispatch virtually or touch the base-class vtable fields, so nothing on the
+ * traced call graph actually needs this constructor to have run.
  */
 
 #ifndef GLOBAL_OBJECT_BASE_H

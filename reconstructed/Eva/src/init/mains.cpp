@@ -73,6 +73,7 @@
 #include "editor.h"
 #include "panel.h"
 #include "batch_disk_man.h"
+#include "bd_api_instance.h"
 #include "alpha_keyb_ctrl.h"
 #include "job_stack.h"
 
@@ -167,9 +168,13 @@ extern "C" void *PTR__CLinuxDriverConstructor_08fdaab0 = 0;
  *
  * FOLLOW-UP (2026-07-26, Eva Stage 6 CBatchDiskMan unlock batch): `BatchDiskMan`'s own
  * slot is unlocked the same way, see `CBatchDiskManConstructorCreate()` below /
- * batch_disk_man.h. `CBDApiInstance::RegisterLoader()`, the real ctor's own trailing
- * side effect, is confirmed a genuine dead end (README.md) and deliberately not
- * reproduced.
+ * batch_disk_man.h.
+ *
+ * CORRECTED 2026-07-27 (CBDApiInstance batch, bd_api_instance.h): `CBDApiInstance::
+ * RegisterLoader()`, the real ctor's own trailing side effect, was NOT actually a
+ * dead end -- the prior "confirmed genuine dead end" verdict (README.md) rested on a
+ * mangled-name grep bug. It has exactly one real call site (right here) and is now
+ * reproduced -- see `CBatchDiskManConstructorCreate()` below.
  *
  * `PTR__CAlphaKeybCtrlConstructor_08eabb48`'s own Create slot is unlocked the same
  * way, see `CAlphaKeybCtrlConstructorCreate()` below / alpha_keyb_ctrl.h (Eva
@@ -220,17 +225,20 @@ void *CPanelConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int 
 /* .text+0x08243d80's own real Create() (CBatchDiskManConstructor::Create,
  * .text+0x08243d80, 132 bytes): mallocs a fresh CBatchDiskMan and
  * placement-constructs it with (param1, param2), then calls
- * `CBDApiInstance::RegisterLoader(this)` -- already independently confirmed a
- * genuine dead end (zero call sites anywhere in the export, README.md's own
- * "CBDApiInstance re-checked, confirmed a genuine dead end" section) --
- * deliberately NOT reproduced here, same "not every real ctor side effect is
- * worth chasing" license as CEditorConstructorCreate/CPanelConstructorCreate
- * above already use for their own unused ctorObj/counter args.
+ * `CBDApiInstance::RegisterLoader(this)`.
+ *
+ * CORRECTED 2026-07-27 (CBDApiInstance batch, bd_api_instance.h): the prior "already
+ * independently confirmed a genuine dead end" claim above was based on a mangled-
+ * name grep bug (wrong Itanium length prefix) -- RegisterLoader() DOES have exactly
+ * one real call site, right here, confirmed by a correct `objdump -dr | grep "call.*
+ * 8243980"`. Now reproduced for real.
  */
 void *CBatchDiskManConstructorCreate(void * /*ctorObj*/, void *name, void *param2, int /*counter*/)
 {
 	void *raw = malloc(sizeof(CBatchDiskMan));
-	return new (raw) CBatchDiskMan((const char *)name, (const char *)param2);
+	CBatchDiskMan *diskMan = new (raw) CBatchDiskMan((const char *)name, (const char *)param2);
+	BDApiInstance.RegisterLoader(diskMan);
+	return diskMan;
 }
 
 /* .text+0x0823e6c0's own real Create() (CAlphaKeybCtrlConstructor::Create,

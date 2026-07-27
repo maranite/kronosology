@@ -1337,6 +1337,19 @@ RECONSTRUCTED = {
     "08913620",  # CKGMsgProcessor::CKGMsgProcessor()
     "08913860",  # CKGMsgProcessor::~CKGMsgProcessor() (D1/D2, identical)
     "089138f0",  # CKGMsgProcessor::GetInstance()
+
+    # --- Eva deferred-registry re-trace, 2026-07-27: CZ(unsigned)/~CZ() real bodies
+    # (cz_util.h) + the CBDApiInstance batch (bd_api_instance.h), correcting the
+    # prior "RegisterLoader is a genuine dead end" false verdict (a mangled-name
+    # grep bug, not a real absence of callers -- see bd_api_instance.h/mains.cpp).
+    "080ba5f0",  # CZ::CZ(unsigned int) -- real body, was an all-zero stub
+    "08185c00",  # CZ::~CZ() (canonical out-of-line copy) -- real body, was a no-op
+    "08243800",  # CBatchDiskMan::IsPreloadRunning(unsigned char, char const*) const
+    "08243980",  # CBDApiInstance::RegisterLoader(CBatchDiskMan*)
+    "08243920",  # CBDApiInstance::IsBusy() const
+    "082438c0",  # CBDApiInstance::IsPreloadRunning() const
+    "08243830",  # CBDApiInstance::IsPreloadRunning(unsigned char, char const*) const
+    "082456d0",  # TVector<CBatchDiskMan*,1>::MakeCapacity(unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
@@ -1355,6 +1368,21 @@ RECONSTRUCTED = {
 # (mains.cpp), the same unlock CPanel/CEditor already got, so `CBatchDiskMan` IS now
 # constructed for real via `CConfigManager::CreateUserModules()`'s own "BatchDiskManClass"
 # row (config_info.cpp row 0). Kept here for its own historical context, not deleted.
+#
+# UPDATE (2026-07-27, CBDApiInstance batch, bd_api_instance.h): the ENTIRE "zero call
+# sites found... confirmed, thorough negative result" claim above is now RETRACTED,
+# not just stale -- it was a false negative caused by a mangled-name grep bug (wrong
+# Itanium length-prefix digits: "CBDApiInstance"/"CBatchDiskMan" are 14/13 characters,
+# not 13/12). A correct `objdump -dr | grep "call.*8243980"` finds exactly ONE real
+# call site, inside `CBatchDiskManConstructor::Create()` (08243d80) -- the SAME
+# function the UPDATE directly above already established is now boot-path-reachable.
+# All 6 of `CBDApiInstance`'s own methods (bd_api_instance.h) are now genuinely
+# tractable and reconstructed for real: `RegisterLoader()` is boot-path-reachable and
+# now wired into `CBatchDiskManConstructorCreate()`; `IsBusy()`/`IsPreloadRunning()`
+# x2/the dtor have zero callers anywhere in ground truth itself (confirmed directly,
+# same status as `CLimiterBase`) and are reconstructed for structural completeness
+# only. See RECONSTRUCTED above for the 4 new addresses (dtor x2 NOT included --
+# nothing dispatches virtually on this object, see bd_api_instance.h).
 
 # CTask::RegisterIfc (0807ec90, 472 bytes) is NOW in RECONSTRUCTED (2026-07-26, see
 # above) -- this note is stale/superseded, kept only for its own historical context.

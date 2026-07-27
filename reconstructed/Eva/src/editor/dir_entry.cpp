@@ -18,8 +18,10 @@ CDirEntry::CDirEntry()
 CDirEntry::~CDirEntry()
 {
 	/* Real dtor: 4x conditional operator delete[] on the CZ members' own
-	 * internal heap buffers -- CZ's own opaque dtor is a real no-op (see
-	 * cz_util.h), so there is nothing further to release here.
+	 * internal heap buffers -- CZ's own dtor (cz_util.h) now does exactly this
+	 * for real (implicitly, via the 4 embedded CZ members' own destructors
+	 * running as part of this dtor's base/member cleanup cascade), so there is
+	 * nothing further to do here explicitly.
 	 */
 }
 
