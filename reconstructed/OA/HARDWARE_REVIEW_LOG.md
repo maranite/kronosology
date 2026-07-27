@@ -9,6 +9,41 @@ Format: `## <fn/topic>` + what's uncertain + what real-HW test would confirm.
 
 ---
 
+## CSTGDrumPadClient's own vtable — 6th confirmed `.ctors`-vs-`.init_array` instance, real bug fixed (2026-07-27)
+
+The `CSTGDrumPadClient` reconstruction added earlier the same day (`e00cd3e`,
+see the entry below) populated its own 3-method vtable
+(`g_drumPadClientVtable`, `src/init/drumpad_init.cpp`) via
+`AsRawFn(&CSTGDrumPadClient::Method)` — a member-function-pointer-to-`void*`
+conversion inside a static aggregate initializer. That conversion is not a
+C++ constant expression, so GCC silently emitted the vtable's population as
+a dynamic initializer (`.init_array`) rather than a plain link-time-constant
+array — the exact same anti-pattern already fixed 5 times earlier the same
+day (`804b909`, `5a1b107`, `9c587a2` ×2), and Linux's kernel module loader
+never runs `.init_array` for a loaded module. Left as-is, this would have
+installed a vtable of all-zero pointers, and any real dispatch through
+`CanReceiveTriggerEvent`/`ReceiveTriggerEvent`/`ReceiveNotification` would
+jump through address 0 — i.e. the very fix that made `CSTGDrumPadClient`
+real also reintroduced the bug class it was supposed to avoid, caught the
+same day by a follow-up survey rather than live-boot testing.
+
+Found via direct `readelf -S`/`-r`/`nm` inspection (not code review): the
+vtable lived in all-zero `.bss` before the fix, moved to properly-relocated
+`.data` after. Fixed with the same free-function-trampoline pattern used in
+`804b909` (compile-time-constant addresses, no dynamic initializer). Audited
+every other `AsRawFn(&Class::Method)` call site in the project
+(`control_msg_handler.cpp`, `front_panel_msg_handler.cpp`) — both use the
+same risky pattern but only inside constructor-body statements for classes
+never instantiated anywhere in the current source, so they're dead code, not
+live bugs (flagged here so a future reconstruction of either class re-checks
+this before instantiating them for real). Fixed as commit `87e446d`; host
+`verify/` suite green, real Kbuild rebuild clean. Real-hardware relevance:
+none — this bug only existed in the reconstruction's own transcription of
+the vtable population, not in ground truth, and is fully fixed with no VM
+dependency (invisible to host-only testing by nature, since host ELF
+binaries run `.init_array` normally — this specific bug class can only be
+caught by inspecting the built kernel-module `.ko` directly).
+
 ## Fresh re-audit of prior "dead"/"no-op"/"unreachable" classifications — negative result, one documentation refinement (2026-07-27)
 
 Following the same day's `CSTGDrumPadClient` find (a real vtable-install
