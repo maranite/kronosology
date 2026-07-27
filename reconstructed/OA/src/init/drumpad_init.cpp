@@ -43,6 +43,28 @@
  * oa_control_msg_handler.h's `CSTGDrumPadClient` class comment for the
  * full trace (including the SECOND relocation-hidden-as-literal-8 bug
  * this uncovered).
+ *
+ * CORRECTION #2 (2026-07-27, broad re-audit for the day's 3 recurring
+ * bug classes): `g_drumPadClientVtable`'s original initializer used
+ * `AsRawFn(&CSTGDrumPadClient::Method)` directly inside the static
+ * aggregate initializer -- the EXACT SAME anti-pattern already found
+ * and fixed in `audio_input_mixer.cpp` (804b909): a member-function-
+ * pointer-to-`void*` type pun via `__builtin_memcpy` is not a C++
+ * constant expression, so GCC silently emitted the whole vtable's
+ * population as a dynamic initializer (`_GLOBAL__sub_I_*` in
+ * `.text.startup`, registered via `.init_array`) instead of link-time
+ * relocations in `.data`. Confirmed by compiling this file standalone
+ * with the real kernel-module flags and checking `readelf -S`/`-r`:
+ * `g_drumPadClientVtable` lived entirely in `.bss` (all-zero) with its
+ * real content only ever written by that `.init_array` entry -- which
+ * Linux's module loader never runs (same as every other confirmed
+ * instance of this bug class today). Left unfixed, `ConstructDrumPadClient()`
+ * below would install a vtable pointer into an all-NULL vtable, and any
+ * call through `CanReceiveTriggerEvent`/`ReceiveTriggerEvent`/
+ * `ReceiveNotification` would jump through a NULL function pointer.
+ * Fixed the same way as `audio_input_mixer.cpp`: plain free-function
+ * trampolines instead of member-function-pointer type puns, since a
+ * free function's address IS a genuine compile-time constant.
  */
 
 #include "oa_init.h"
@@ -54,17 +76,11 @@ namespace {
 
 /* Real vtable shape, confirmed via `.rel.rodata._ZTV17CSTGDrumPadClient`:
  * offsetToTop/rtti are literal 0 (no RTTI, no virtual destructor), then
- * the 3 real methods in declaration order. Same `AsRawFn` non-virtual-
- * member-function-pointer type pun already used in control_msg_handler.cpp/
- * audio_input_mixer.cpp. */
-template <typename T>
-void *AsRawFn(T memberFnPtr)
-{
-	void *raw;
-	__builtin_memcpy(&raw, &memberFnPtr, sizeof(raw));
-	return raw;
-}
-
+ * the 3 real methods in declaration order. Populated via plain free-
+ * function trampolines (genuine compile-time constants), NOT via
+ * `AsRawFn`-style member-function-pointer type puns inside the static
+ * initializer -- see this file's own header comment (CORRECTION #2)
+ * for the `.init_array`-never-runs bug that pattern caused here. */
 struct DrumPadClientVtable {
 	void *offsetToTop;
 	void *rtti;
@@ -73,13 +89,28 @@ struct DrumPadClientVtable {
 	void *receiveNotification;
 };
 
+} /* anonymous namespace */
+
+static int CSTGDrumPadClientCanReceiveTriggerEventTrampoline(void *self)
+{
+	return ((CSTGDrumPadClient *)self)->CanReceiveTriggerEvent();
+}
+static void CSTGDrumPadClientReceiveTriggerEventTrampoline(void *self, unsigned short event)
+{
+	((CSTGDrumPadClient *)self)->ReceiveTriggerEvent(event);
+}
+static void CSTGDrumPadClientReceiveNotificationTrampoline(void *self, CUSBMidiAccessory_DrumPadClient::eNotificiation n)
+{
+	((CSTGDrumPadClient *)self)->ReceiveNotification(n);
+}
+
+namespace {
 DrumPadClientVtable g_drumPadClientVtable = {
 	0, 0,
-	AsRawFn(&CSTGDrumPadClient::CanReceiveTriggerEvent),
-	AsRawFn(&CSTGDrumPadClient::ReceiveTriggerEvent),
-	AsRawFn(&CSTGDrumPadClient::ReceiveNotification),
+	(void *)&CSTGDrumPadClientCanReceiveTriggerEventTrampoline,
+	(void *)&CSTGDrumPadClientReceiveTriggerEventTrampoline,
+	(void *)&CSTGDrumPadClientReceiveNotificationTrampoline,
 };
-
 } /* anonymous namespace */
 
 /*
