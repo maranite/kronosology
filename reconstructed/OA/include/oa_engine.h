@@ -2786,6 +2786,24 @@ extern "C" unsigned char _ZTV9CSTGVoice[20];
 class CSTGVoice {
 public:
 	CSTGVoice(unsigned short note);
+
+	/*
+	 * GetAMSSourceAddress(eAMSSource) -- confirmed real (relocation
+	 * from CSTGADSRBase::InitAMSSourceAddresses/UpdateAttackTimeAMSSource
+	 * and its 7 siblings, src/engine/adsr_base.cpp): resolves a
+	 * front-panel-selected AMS mod-source ID (raw signed byte, sign-
+	 * extended to the regparm arg1 slot -- not a small fixed set,
+	 * plain `int` used here since the real enum's value palette isn't
+	 * independently confirmed) to a live pointer into this voice's own
+	 * per-tick modulation-source value table. Own body not
+	 * reconstructed here (deliberately deferred, same "confirmed real
+	 * call, callee out of scope" treatment as CSTGVoiceAllocator::
+	 * StealVoice above) -- every known caller only stores the returned
+	 * pointer for later dereference, never calls this function itself
+	 * in host verify tests, so no stub/link dependency is introduced.
+	 */
+	void *GetAMSSourceAddress(int amsSource);
+
 	unsigned char _unrecovered[0xf0];
 };
 

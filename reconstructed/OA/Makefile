@@ -178,7 +178,8 @@ OA-objs := src/auth/klm_manager.o \
            src/init/omap_nks_msg_handler.o \
            src/engine/seq_led.o \
            src/engine/param_convertor.o \
-           src/engine/am_exp2_ess.o
+           src/engine/am_exp2_ess.o \
+           src/engine/adsr_base.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -488,7 +489,8 @@ SRC := src/auth/klm_manager.cpp \
        src/init/omap_nks_msg_handler.cpp \
        src/engine/seq_led.cpp \
        src/engine/param_convertor.cpp \
-       src/engine/am_exp2_ess.cpp
+       src/engine/am_exp2_ess.cpp \
+       src/engine/adsr_base.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -590,7 +592,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_front_panel_msg_handler \
          verify/test_omap_nks_msg_handler \
          verify/test_seq_led \
-         verify/test_param_convertor
+         verify/test_param_convertor \
+         verify/test_adsr_base
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -749,6 +752,9 @@ verify/test_front_panel_msg_handler: verify/test_front_panel_msg_handler.cpp src
 
 verify/test_param_convertor: verify/test_param_convertor.cpp src/engine/param_convertor.cpp src/engine/am_exp2_ess.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_param_convertor.cpp src/engine/param_convertor.cpp src/engine/am_exp2_ess.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
+
+verify/test_adsr_base: verify/test_adsr_base.cpp src/engine/adsr_base.cpp include/oa_adsr_base.h include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_adsr_base.cpp src/engine/adsr_base.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@

@@ -2952,6 +2952,21 @@ struct CSTGControllerValue {
  */
 class CSTGParamsOwner {
 public:
+	/*
+	 * sValueGetterTemp (`.bss`, confirmed real via relocation from
+	 * CSTGADSRBase::GetSustainLevel and its 19 sibling Get* accessors,
+	 * src/engine/adsr_base.cpp) -- a single shared static
+	 * STGConvertedParam scratch instance. Every one of those trivial
+	 * `float`/`int8_t` field getters writes its raw field into BOTH
+	 * `.value` (+0x00) and `.displayValue` (+0x18) here (int8 fields
+	 * write only `.value`) then returns a reference to this same
+	 * object, rather than returning by value -- confirmed via 3
+	 * identical `R_386_32` relocations to this one symbol per getter.
+	 * Not thread/reentrancy-safe by construction (shared mutable
+	 * global); faithfully reproduced as-is, not "fixed".
+	 */
+	static STGConvertedParam sValueGetterTemp;
+
 	void ValidateParamChange(CSTGMessageContext &ctx, unsigned long paramId, const CValue &value);
 
 	/*
