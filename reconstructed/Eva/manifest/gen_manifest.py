@@ -1515,6 +1515,72 @@ RECONSTRUCTED = {
     "08e24870",  # USTGAPISampling::ReceiveMessage(char*, int, int, int)
     "08e24970",  # USTGAPISampling::ReceiveSimpleMessage(int, unsigned long&)
     "08e24a80",  # USTGAPISampling::SendSimpleMessage(int, int, int)
+
+    # --- CFileIoBase, full class, 52/52 methods (2026-07-27 storage-cluster batch) ---
+    # Fresh nm -C class-inventory sweep found a dense, previously-100%-untouched
+    # DiskUtil/CustomFs storage cluster (CFileIoBase/CDDriverIO/CScsiDriverBase/
+    # CFilesys/CDiskUtil). CFileIoBase is the pure abstract interface layer -- every
+    # method a fixed-sentinel stub, 30 calling the real Api+0x94 assert-report slot
+    # first, 19 (incl. get_iotype()) returning immediately. Mangled symbol names of
+    # the compiled TU verified byte-for-byte identical (nm -C diff, 50/50 unique
+    # names match) against the real binary's own CFileIoBase:: symbols -- confirms
+    # every parameter type/overload was transcribed correctly, not just plausible.
+    # Concrete per-media overrides (CFileIoUnknown/CFileIoCdda/CFileIoKge/
+    # CFileIoUdf) and the rest of the cluster (CDDriverIO/CScsiDriverBase/CFilesys/
+    # CDiskUtil) are deliberately out of scope for this pass -- see
+    # include/file_io_base.h's own header comment.
+    "08318480",  # CFileIoBase::get_iotype()
+    "08318490",  # CFileIoBase::fmount(EDevice_Id)
+    "083184d0",  # CFileIoBase::fmount(EDevice_Id, EMountIoType, int*)
+    "08318510",  # CFileIoBase::funmount(EDevice_Id)
+    "08318550",  # CFileIoBase::fopen(char const*, char const*)
+    "08318590",  # CFileIoBase::fclose(int)
+    "083185d0",  # CFileIoBase::fread(void*, unsigned int, unsigned int, int)
+    "08318610",  # CFileIoBase::fwrite(void const*, unsigned int, unsigned int, int)
+    "08318650",  # CFileIoBase::fseek(int, long, int)
+    "08318690",  # CFileIoBase::ftell(int)
+    "083186d0",  # CFileIoBase::fflush(int)
+    "08318710",  # CFileIoBase::resize(int, unsigned int)
+    "08318750",  # CFileIoBase::format(EDevice_Id, int)
+    "08318790",  # CFileIoBase::format(EDevice_Id, int, EFatType)
+    "083187a0",  # CFileIoBase::freebytes(EDevice_Id)
+    "083187b0",  # CFileIoBase::totalfreeclus(EDevice_Id)
+    "083187f0",  # CFileIoBase::chdir(char const*)
+    "08318800",  # CFileIoBase::getwd(EDevice_Id, char*)
+    "08318810",  # CFileIoBase::dir(char const*, int, unsigned long&, CFileDirEntry*)
+    "08318820",  # CFileIoBase::rename(char const*, char const*)
+    "08318860",  # CFileIoBase::remove(char const*)
+    "083188a0",  # CFileIoBase::mkdir(char const*)
+    "083188e0",  # CFileIoBase::rmdir(char const*)
+    "08318920",  # CFileIoBase::getmediainfo(EDevice_Id, CMediaInfo*)
+    "08318930",  # CFileIoBase::play(EDevice_Id, unsigned char, unsigned char, unsigned long, unsigned long)
+    "08318940",  # CFileIoBase::stop(EDevice_Id)
+    "08318950",  # CFileIoBase::pause(EDevice_Id)
+    "08318960",  # CFileIoBase::resume(EDevice_Id)
+    "08318970",  # CFileIoBase::ffscan(EDevice_Id, unsigned char, unsigned char, unsigned long, unsigned long)
+    "08318980",  # CFileIoBase::rewscan(EDevice_Id, unsigned char, unsigned char, unsigned long, unsigned long)
+    "08318990",  # CFileIoBase::stopscan(EDevice_Id)
+    "083189a0",  # CFileIoBase::getcurpos(EDevice_Id, EAudioStatusMMC*, unsigned char*, unsigned char*, int, int)
+    "083189b0",  # CFileIoBase::getmaxtrk(EDevice_Id, unsigned char*)
+    "083189c0",  # CFileIoBase::getmaxidx(EDevice_Id, unsigned char, unsigned char*)
+    "083189d0",  # CFileIoBase::gettrklen(EDevice_Id, unsigned char, unsigned long*)
+    "083189e0",  # CFileIoBase::getidxlen(EDevice_Id, unsigned char, unsigned char, unsigned char, unsigned long*)
+    "083189f0",  # CFileIoBase::finalize(EDevice_Id)
+    "08318a30",  # CFileIoBase::settestmode(EDevice_Id, int)
+    "08318a70",  # CFileIoBase::fdummywrite(unsigned int, unsigned int, int)
+    "08318ab0",  # CFileIoBase::getfilelbaarray(EDevice_Id, int, CFileLbaArray*)
+    "08318af0",  # CFileIoBase::opennextpath(EDevice_Id)
+    "08318b30",  # CFileIoBase::closepath(EDevice_Id, int)
+    "08318b70",  # CFileIoBase::sortdir(EDevice_Id)
+    "08318bb0",  # CFileIoBase::isodir(EDevice_Id, udf_iso_rec*, udf_iso_rec*)
+    "08318bf0",  # CFileIoBase::getemphasized(int, int*)
+    "08318c30",  # CFileIoBase::getmaxclusterno(EDevice_Id)
+    "08318c70",  # CFileIoBase::scandisk(EDevice_Id, unsigned long, unsigned long, unsigned long*, unsigned long*)
+    "08318cb0",  # CFileIoBase::optimizemedium(EDevice_Id, unsigned long, unsigned long*, int)
+    "08318cf0",  # CFileIoBase::chmod(char const*, unsigned char)
+    "08318e90",  # CFileIoBase::CFileIoBase()
+    "08995480",  # CFileIoBase::~CFileIoBase() (D1, complete object)
+    "089954e0",  # CFileIoBase::~CFileIoBase() (D0, deleting)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
