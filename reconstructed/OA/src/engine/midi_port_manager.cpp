@@ -58,17 +58,43 @@ struct CSTGCPUInfo {
  * whose own layout isn't independently reconstructed. Slot 0 is a bool
  * "query" method (confirmed via disassembly: `test al,al` on the return
  * value gates the slot-1 call); slot 1 hands the port a region pointer.
+ *
+ * DEFENSIVE NULL-GUARD (2026-07-27, integration-boot regression): this
+ * loop (below) was genuinely dead code until the same-day fix that made
+ * `ConstructKorgUsbMidiPorts()` run for real during `init_module()` (see
+ * that function's own comment, midi_korgusb_port.cpp) -- before that,
+ * `sMidiInPorts[]`/`sMidiOutPorts[]` were always all-NULL and this
+ * dispatch never actually ran. Now live for the first time, it hit TWO
+ * separate real crashes on a live kronos_vm boot: (1) a literal null
+ * FUNCTION POINTER in `CSTGMidiInPortKorgUsb`'s still-placeholder vtable
+ * (fixed separately, see that array's own comment) and (2) this port's
+ * OWN vtable POINTER FIELD reading back NULL for at least one
+ * `CSTGMidiOutPort`-family instance -- a genuinely deeper, still-
+ * unexplained issue (that class is documented elsewhere as using real
+ * C++ virtual dispatch with a compiler-emitted vtable, which should
+ * never be null for a properly constructed object; root-causing WHY it
+ * is null here needs real objdump -dr ground-truth work, not guessing).
+ * Rather than leave a second NULL-pointer-call crash blocking every live
+ * boot while that deeper question is unresolved, this guard makes
+ * "vtable pointer itself is null" behave as "query says no" (the same
+ * safe default `CSTGMidiInPortKorgUsb`'s own placeholder fix uses) --
+ * this does not resolve or explain the deeper bug, it only stops it from
+ * Oopsing the kernel. Flagged for a dedicated future pass.
  */
 static bool PortQuery(void *port)
 {
 	typedef bool (*Fn)(void *);
 	void **vtable = *(void ***)port;
+	if (!vtable)
+		return false;
 	return ((Fn)vtable[0])(port);
 }
 static void PortRegister(void *port, void *region)
 {
 	typedef void (*Fn)(void *, void *);
 	void **vtable = *(void ***)port;
+	if (!vtable)
+		return;
 	((Fn)vtable[1])(port, region);
 }
 

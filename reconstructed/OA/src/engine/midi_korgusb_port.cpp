@@ -95,8 +95,57 @@ extern "C" void rt_pend_linux_srq(unsigned int);
  * field, so nothing dispatches through it -- see that class's own
  * comment (oa_engine.h). Declared purely so the ctor below has SOME
  * real address to write at InPort+0x00, matching the real binary's own
- * observable write. */
-static const unsigned int _ZTV21CSTGMidiInPortKorgUsb[3] = { 0, 0, 0 };
+ * observable write.
+ *
+ * SAFETY FIX (2026-07-27, integration-boot regression): this array used
+ * to be a literal all-zero placeholder `{0, 0, 0}`. That was safe ONLY
+ * as long as `CSTGMidiPortManager::Initialize()`'s port-registration
+ * loop (midi_port_manager.cpp) stayed genuinely dead code -- true when
+ * this file's ctor ran as an automatic C++ static initializer that the
+ * kernel module loader never actually executes (`.init_array` is never
+ * run by `do_mod_ctors()`). Once that ordering bug was fixed (see
+ * `ConstructKorgUsbMidiPorts()`'s new explicit call as literally the
+ * first statement of `init_module()`), `RegisterMidiInPort()` genuinely
+ * runs during boot and populates `CSTGMidiPortManager::sMidiInPorts[]`
+ * with this pair's two real port objects -- making the previously-dead
+ * loop live for the first time. That loop calls `PortQuery(inPort)`
+ * (midi_port_manager.cpp), which dereferences `*(void***)inPort` (this
+ * placeholder) and calls slot 0 as a function pointer -- with the old
+ * all-zero content, that is a call through a NULL pointer, confirmed via
+ * a live kronos_vm boot Oops (`EIP is at 0x0`, called from
+ * `CSTGMidiPortManager::Initialize()` via `CSTGEngine::Initialize()` via
+ * `setup_global_resources()`).
+ *
+ * This project's own documentation is NOT yet settled on what the real
+ * ground-truth semantics of `PortQuery()`'s slot 0 dispatch actually are
+ * for this class specifically: midi_port_manager.cpp's own header
+ * comment (and oa_engine_init.h's `CSTGMidiOutPort` field-layout note)
+ * describe it as "slot 0 bool query, slot 1 hands the port a
+ * CSTGMidiQueue region" -- but oa_engine_init.h's own later, more
+ * detailed `CSTGMidiOutPort` vtable derivation independently states the
+ * REAL vtable order is `[dtor, Activate, Deactivate, BumpTimers, ...]`,
+ * i.e. slot 0 would be the (still-pure) destructor, not a bool query.
+ * These two comments contradict each other and were not reconciled
+ * before this fix -- resolving that ambiguity needs real objdump -dr
+ * disassembly at PortQuery()/PortRegister()'s own call site in
+ * OA_real.ko, out of scope for this integration-boot pass. Rather than
+ * guess at real semantics under that ambiguity, this is a deliberate,
+ * clearly-labeled SAFE STUB: slot 0 unconditionally returns false, so
+ * `PortQuery()` is satisfied (no NULL call) and the calling loop's own
+ * `&&`-short-circuit means `PortRegister()` (slot 1) is never reached
+ * through this object -- i.e. this pair's in-ports are treated as "not
+ * ready to register" rather than dispatching into not-yet-reconstructed
+ * territory. Matches this project's own established convention for
+ * exactly this situation (e.g. bar2_stubs.cpp's whole approach). Flagged
+ * for a dedicated future pass to determine the TRUE slot semantics and
+ * replace this stub with the real dispatch once resolved. */
+static bool KorgUsbInPortPortQueryStub(void *)
+{
+	return false;
+}
+static const unsigned int _ZTV21CSTGMidiInPortKorgUsb[3] = {
+	0, 0, (unsigned int)(unsigned long)&KorgUsbInPortPortQueryStub
+};
 
 /* ---------------------------------------------------------------------
  * Companion-module (KorgUsbAudioDriver.ko-family) externs. All confirmed
