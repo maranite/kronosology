@@ -117,3 +117,15 @@ int USBMidiAccessory_SetDrumPadClient(void *queue)
 	g_drumPadClientQueue = queue;
 	return 0;
 }
+
+/* Sibling of SetDrumPadClient above -- see korgusbaudio_stub.h's own
+ * header comment for the same "wrong real-hardware home, pragmatic VM
+ * stand-in" discrepancy note. Trivial: just remembers the pointer, VOID
+ * return (real ABI, confirmed different from SetDrumPadClient's int
+ * return) -- no real USB-MIDI-accessory hardware to register with in a
+ * VM. */
+static void *g_midiInClient;
+void USBMidiAccessory_SetMidiInClient(void *client)
+{
+	g_midiInClient = client;
+}

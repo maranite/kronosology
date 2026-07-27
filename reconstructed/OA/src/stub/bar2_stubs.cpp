@@ -34,6 +34,8 @@
 #include "oa_audio_start.h"
 #include "oa_comport.h"
 #include "oa_crypto.h"
+#include "oa_control_msg_handler.h"
+#include "oa_keybed_init.h"
 
 /* NOTE: CSTGMultisampleBank/CUUID/CSTGKLEG/CSTGPatch/
  * CSTGInstalledEXProducts stubs live in bar2_stubs_auth.cpp instead,
@@ -948,3 +950,125 @@ void CSTGMidiInPort::ReceiveSysExData(unsigned char) { }
 void CSTGExtMIDIClockSync::ProcessClock() { }
 void CSTGExtMIDIClockSync::MeasureJitter() { }
 void CSTGExtMIDIClockSync::EstimateTempoAndPredictNextClock() { }
+
+/* ---------------------------------------------------------------------
+ * 2026-07-27: real insmod-ability regression fix. A dynamic-sweep
+ * live-boot test (see re-decompiler agent memory,
+ * oa_audioinputmixer_vtable_literal8_bug_2026-07-27.md) found that
+ * current HEAD's OA.ko literally CANNOT `insmod` on its own: the
+ * `CSTGControllerInfo::ButtonPressHandler`/`AnalogControllerHandler`
+ * cluster (batches 65/66/68 + follow-ups) reference ~35 already-
+ * documented "confirmed real, deliberately deferred" externs (own
+ * header comments in oa_global.h/oa_engine.h/oa_engine_init.h/
+ * oa_keybed_init.h/oa_control_msg_handler.h/oa_calibration.h all
+ * already say so) that were never actually given the matching no-op
+ * stub body this file's own convention requires -- a pure oversight
+ * (each batch that added a new deferred extern to a header forgot the
+ * matching bar2_stubs.cpp entry), not a design change and not a
+ * regression from a previously-real implementation (`git log -S` on
+ * every one of these confirms no prior definition ever existed
+ * anywhere in this project's history). Every body below is EMPTY/safe-
+ * default exactly like every other stub in this file -- see each
+ * symbol's own declaration-site header comment (cited above) for why
+ * that specific default was chosen; nothing here is a new derivation.
+ * ------------------------------------------------------------------- */
+
+/* PushMessage(void*) -- oa_calibration.h/oa_control_msg_handler.h's own
+ * "confirmed real, deliberately deferred" extern (same convention as
+ * CSTGMidiInPortUSB below). Safe as a no-op: callers build a reply
+ * packet on the stack and fire-and-forget into this; dropping it means
+ * the UI simply never receives that one solicited reply, no crash. */
+void PushMessage(void *) { }
+
+/* ApplyKeybedCalibration(int,short) -- oa_keybed_init.h's own comment:
+ * ground truth returns a calibrated value OR the confirmed real 0xffff
+ * "no calibration data" sentinel. Always returning that sentinel here
+ * is the faithful safe default (matches a real keybed board that has
+ * never had SetupKeybedCalibration/CleanupKeybedCalibration wired up),
+ * not an invented behavior -- callers already handle this sentinel by
+ * leaving the value uncalibrated. */
+short ApplyKeybedCalibration(int, short) { return (short)0xffff; }
+
+/* SetupNKS4Calibration(void*,int) -- oa_setup_global_resources.h's own
+ * deferred extern, called from the calibration-panel setup path
+ * (setup_global_resources.cpp). No-op: calibration setup simply doesn't
+ * run, matching this file's own established convention. */
+void SetupNKS4Calibration(void *, int) { }
+
+/* CSTGControllerInfo -- ButtonPressHandler/AnalogControllerHandler's own
+ * deliberately-deferred callees (oa_global.h, see each declaration's own
+ * comment for the confirmed real address/size and dispatch context).
+ * All void except the three "gate ahead of dispatch" methods, which
+ * return bool: false ("UI edit mode did NOT intercept this event") is
+ * the safe default -- it makes the caller fall through to the already-
+ * real per-button/per-device dispatch tables instead of short-
+ * circuiting them, per each method's own documented return-value
+ * semantics. */
+void CSTGControllerInfo::SetMixerKnobMode(int) { }
+void CSTGControllerInfo::SetSoloSelected(bool) { }
+void CSTGControllerInfo::ResetAllKnobCCs() { }
+void CSTGControllerInfo::ResetAllExtModeControllers() { }
+bool CSTGControllerInfo::HandleEditInContextButton(unsigned int, bool) { return false; }
+void CSTGControllerInfo::ProcessMixerSwitchPress(unsigned int, bool) { }
+void CSTGControllerInfo::ChangeControlSurfaceMode(int) { }
+void CSTGControllerInfo::ProcessPerfSwitchPress(int, bool) { }
+void CSTGControllerInfo::ResetSolo() { }
+bool CSTGControllerInfo::HandleEditInContextKnob(unsigned int, unsigned short, unsigned short) { return false; }
+bool CSTGControllerInfo::HandleEditInContextSlider(unsigned int, unsigned short, unsigned short) { return false; }
+void CSTGControllerInfo::SendExtModeSliderEvent(int, unsigned int, bool) { }
+void CSTGControllerInfo::SendExtModeKnobEvent(int, unsigned int, bool) { }
+void CSTGControllerInfo::SetRTKModeKnob(unsigned short, unsigned short, bool, int, bool) { }
+void CSTGControllerInfo::ResetRTKModeKnob(unsigned short) { }
+void CSTGControllerInfo::ProcessJoystickY(unsigned short) { }
+void CSTGControllerInfo::AnalogTempoHandler(unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogKnobSetListEQHandler(unsigned int, unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogSliderSetListEQHandler(unsigned int, unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogKnobTAHandler(unsigned int, unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogSliderTAHandler(unsigned int, unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogKnobAInHandler(unsigned int, unsigned short, unsigned short) { }
+void CSTGControllerInfo::AnalogSliderAInHandler(unsigned int, unsigned short, unsigned short) { }
+
+/* CSTGControllerRTData -- AnalogControllerHandler's own deferred nested-
+ * class methods and siblings (oa_global.h, see each declaration's own
+ * comment). CJumpCatch::CheckPosition/CPedalFilter::Filter/
+ * CPitchBendFilter::Filter all return bool "did this filter accept/
+ * catch the value" -- false is the safe default (caller treats it as
+ * "not yet", never dereferences on the true-only side effects). */
+void CSTGControllerRTData::CJumpCatch::UpdateStatus() { }
+bool CSTGControllerRTData::CJumpCatch::CheckPosition(int, bool) { return false; }
+bool CSTGControllerRTData::CPedalFilter::Filter(unsigned char) { return false; }
+bool CSTGControllerRTData::CPitchBendFilter::Filter(unsigned short) { return false; }
+void CSTGControllerRTData::SendCCToKG(unsigned char, unsigned char) { }
+void CSTGControllerRTData::SendCCToKG(unsigned char, unsigned char, unsigned char) { }
+void CSTGControllerRTData::HandleFootPedalChange(unsigned char) { }
+void CSTGControllerRTData::HandleFootSwitchChange(bool) { }
+void CSTGControllerRTData::SendUnsolControl2MessageToUI(int, int, int, int) { }
+
+/* CSTGMidiOutPortSerial::CanTransmitHardware()/TransmitHardwareByte() --
+ * oa_engine_init.h's own comment: BOTH still `__cxa_pure_virtual` in
+ * ground truth's own vtable (no further-derived hardware-backend class
+ * exists anywhere in OA.ko -- reaching this path is a genuine kernel
+ * BUG() dead end on REAL hardware too, not a gap in this
+ * reconstruction). Unlike a real pure-virtual thunk (which the C++ ABI
+ * always resolves to *some* symbol, so real hardware insmods fine and
+ * only BUG()s if this dead path is ever actually reached), these are
+ * plain non-virtual methods here (see that header comment for why:
+ * modeling them as real C++ virtual would insert a compiler vtable
+ * pointer that corrupts this class's confirmed real field layout) --
+ * so a genuinely missing definition would block insmod outright, a
+ * strictly WORSE failure mode than ground truth's own "loads fine,
+ * BUG()s only if reached". CanTransmitHardware() always returning false
+ * is the closer-to-ground-truth choice: it makes this genuinely-dead
+ * path stay dead (TransmitHardwareByte is never actually reached
+ * through the real CanSendRealTime/CanSendRegular gates above it),
+ * rather than inventing new "successful transmit" behavior. */
+bool CSTGMidiOutPortSerial::CanTransmitHardware() const { return false; }
+void CSTGMidiOutPortSerial::TransmitHardwareByte(unsigned char) { }
+
+/* CSTGMidiInPortUSB::ReceivePacket(USBMidiPacket) -- oa_engine.h's own
+ * comment: confirmed real and called (CKorgUsbAudioDriverMidiPorts::
+ * CMidiPortPair::InputCallback()), but this class's own body/fields are
+ * a disproportionate separate cluster deliberately not reconstructed.
+ * No-op: an incoming USB-MIDI-class packet is silently dropped rather
+ * than dispatched, matching this file's own established convention. */
+void CSTGMidiInPortUSB::ReceivePacket(USBMidiPacket) { }

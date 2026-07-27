@@ -80,6 +80,13 @@ int main(void)
 	check_eq("USBMidiAccessory_SetDrumPadClient(NULL) == 0",
 		 USBMidiAccessory_SetDrumPadClient(0), 0);
 
+	printf("[7] USBMidiAccessory_SetMidiInClient: sibling of [6], same trivial VM\n"
+	       "    stand-in (real ABI: void return, unlike SetDrumPadClient's int) --\n"
+	       "    must not crash for a real pointer or NULL (unregister)\n");
+	int dummyMidiInClient;
+	USBMidiAccessory_SetMidiInClient(&dummyMidiInClient); /* void return -- must not crash */
+	USBMidiAccessory_SetMidiInClient(0); /* void return -- must not crash */
+
 	printf("============================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * module_main.c  -  OmapNKS4VirtualDriver.ko: a stand-in for
- * OmapNKS4Module.ko's own 9 exported symbols, for VM/foreign-hardware
+ * OmapNKS4Module.ko's own 13 exported symbols, for VM/foreign-hardware
  * boot testing only.
  *
  * WHY THIS EXISTS (Bar 2, 2026-07-02): OA.ko's own
@@ -113,6 +113,43 @@ void COmapNKS4_IncProgressBar(void) { }
  * intent as IncProgressBar's own no-op body. */
 unsigned char COmapNKS4_GetProgressBarPercent(void) { return 0x30; }
 
+/*
+ * ADDED (2026-07-27): closes the exact same class of gap as
+ * COmapNKS4_IncProgressBar/COmapNKS4_GetProgressBarPercent above --
+ * found during an OA.ko dynamic-sweep insmod test that finally exercised
+ * the ButtonPressHandler/AnalogControllerHandler cluster and
+ * CSTGOmapNKSMsgHandler::ProcessNextNKSEvent() (oa_control_msg_handler.h/
+ * oa_omap_nks_msg_handler.h/oa_setup_global_resources.h), all of which
+ * call these 4 real companion-module symbols that were simply never
+ * added to this file when those OA.ko source files were reconstructed --
+ * a pure oversight, not a new design decision (same "this stub's own
+ * list has fallen behind OA.ko's growing set of real companion-module
+ * calls" situation as every prior addition to this file). Real
+ * signatures confirmed via OA.ko's own header comments cited above:
+ *   - OmapNKS4InputFifo_ReadCommand(void*): fills a 4-byte event packet,
+ *     returns nonzero iff an event was available. Always returning 0
+ *     ("no event pending") is the safe default -- there is no real NKS4
+ *     input FIFO to poll in a VM, and the real caller's own dispatch
+ *     loop does nothing when this reports false, matching every other
+ *     "no hardware to report" stub in this file.
+ *   - COmapNKS4Driver_GetSPDIFClockError(void): toggles a status bit on
+ *     every call; always returning 0 ("no clock error") avoids a false
+ *     alarm with no real SPDIF hardware present.
+ *   - COmapNKS4Driver_GetTestMode(void): the GETTER half of the already-
+ *     stubbed COmapNKS4Driver_SetTestMode above (distinct real exported
+ *     symbol, confirmed via oa_setup_global_resources.h) -- always
+ *     returning 0 ("not in test mode") matches SetTestMode's own no-op
+ *     body (test mode is never actually entered in this stub).
+ *   - COmapNKS4Driver_StartScanning(void): a drum-pad hardware scan
+ *     trigger (oa_control_msg_handler.h) -- trivial no-op, matching
+ *     SetupNKS4Calibration's own precedent (no real drum-pad hardware to
+ *     scan in a VM).
+ */
+int OmapNKS4InputFifo_ReadCommand(void *buf) { (void)buf; return 0; }
+int COmapNKS4Driver_GetSPDIFClockError(void) { return 0; }
+int COmapNKS4Driver_GetTestMode(void) { return 0; }
+void COmapNKS4Driver_StartScanning(void) { }
+
 static int __init OmapNKS4VirtualDriverInit(void)
 {
 	printk(KERN_INFO "OmapNKS4VirtualDriver: loading (stand-in for "
@@ -137,7 +174,11 @@ EXPORT_SYMBOL(OmapNKS4OutputFifo_WriteCommand);
 EXPORT_SYMBOL(SetupNKS4Calibration);
 EXPORT_SYMBOL(COmapNKS4_IncProgressBar);
 EXPORT_SYMBOL(COmapNKS4_GetProgressBarPercent);
+EXPORT_SYMBOL(OmapNKS4InputFifo_ReadCommand);
+EXPORT_SYMBOL(COmapNKS4Driver_GetSPDIFClockError);
+EXPORT_SYMBOL(COmapNKS4Driver_GetTestMode);
+EXPORT_SYMBOL(COmapNKS4Driver_StartScanning);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 9 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
+MODULE_DESCRIPTION("Stand-in for OmapNKS4Module.ko's 13 OA.ko-referenced exports (VM/foreign-hardware boot testing only)");
 MODULE_AUTHOR("Korg (reconstructed)");

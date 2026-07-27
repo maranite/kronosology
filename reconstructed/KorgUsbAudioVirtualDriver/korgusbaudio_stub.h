@@ -140,6 +140,32 @@ int  KorgUsbRealtimeMidiOutputCanSend(int port);
  */
 int  USBMidiAccessory_SetDrumPadClient(void *queue);
 
+/*
+ * ADDED (2026-07-27): closes the exact same class of gap as
+ * `USBMidiAccessory_SetDrumPadClient` above, for its sibling. Found
+ * during an OA.ko dynamic-sweep insmod test: `midi_usb_accessory_port.cpp`
+ * (reconstructed/OA, `CSTGUSBMidiAccessoryMidiInPort::Activate()`/
+ * `Deactivate()`) calls this real companion-module symbol, but unlike
+ * `SetDrumPadClient` it was never given the matching pragmatic VM
+ * stand-in here when that file was added -- a pure oversight, not a new
+ * design decision. SAME "IMPORTANT DISCREPANCY" caveat as
+ * `SetDrumPadClient` applies verbatim: this project's own
+ * `readelf -sW` survey of the REAL KorgUsbAudioDriver.ko confirmed
+ * `USBMidiAccessory_Set{DrumPad,MidiIn}Client` are BOTH absent from that
+ * binary's real exports -- on real hardware both are resolved by the
+ * separate, never-reconstructed `USBMidiAccessory.ko`. Added here purely
+ * as a pragmatic VM-boot-test convenience (this .ko is already in every
+ * test's load order); a future real `USBMidiAccessory.ko` stand-in should
+ * move both declarations/definitions/exports there instead.
+ *
+ * Real signature confirmed via OA.ko's own midi_usb_accessory_port.cpp
+ * disassembly comment: single `void *` arg (a `CMidiInClient*` to
+ * register, or NULL to unregister), VOID return (unlike SetDrumPadClient,
+ * which returns int) -- confirmed by the real call sites never using a
+ * result.
+ */
+void USBMidiAccessory_SetMidiInClient(void *client);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
