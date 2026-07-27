@@ -1122,27 +1122,42 @@ live physical interaction — a normal scoped task, not an open mystery.
   virtualization scope (audio fidelity itself is out of scope; getting the
   module to load and its control-plane logic to run correctly is in
   scope).
-- **A live `insmod` of the current build does NOT yet reach a clean,
-  oops-free `init_module()` return (open as of 2026-07-27).** Two related
-  but distinct bugs were found the same day: (1) ~44 externs added by the
-  2026-07-25 button/analog/MIDI reconstruction batches were never given
-  matching stub bodies across `src/stub/bar2_stubs.cpp` and two sibling
-  virtual-driver `module_main.c` files, which blocked `insmod` outright —
-  **fixed and verified, commit `68853c2`** (insmod now resolves every
-  symbol and real `init_module` code runs to `OA_DEBUG_MARKER 8`); (2) a
-  genuine kernel NULL-pointer-deref Oops in
-  `CSTGAudioInputMixerBase::SetSendBuses()` — partially root-caused and
-  fixed (commit `2c539fb`, a lost `R_386_32` relocation that stored a
-  literal `8` into a vtable-pointer field instead of the real
-  `&vtable+8`), but a SEPARATE, deeper bug in the same function (the
-  vtable pointer reverting to `NULL` again moments later) remains
-  **open, unresolved, not yet root-caused**. Any earlier claim in this
-  project's history that "`OA.ko` loads with zero kernel oops" reflects a
-  staler build than current `HEAD`, not a currently-verifiable fact — see
-  `kronosology/.claude/agent-memory/re-decompiler/oa_insmod_regression_bar2_stub_drift_2026-07-27.md`
-  and `oa_audioinputmixer_vtable_literal8_bug_2026-07-27.md`, and
-  `PROJECT_BRAIN/status.md`'s latest kronosology-section entries, for the
-  authoritative current state.
+- **A live `insmod` of the current build now reaches a clean, oops-free
+  `init_module()` return (`OA: init_module succeeded`, `OA_DEBUG_MARKER 17`
+  reached, live-verified 2026-07-27), closing out the multi-bug chain
+  below.** Four related but distinct bugs were found and fixed the same
+  day: (1) ~44 externs added by the 2026-07-25 button/analog/MIDI
+  reconstruction batches were never given matching stub bodies across
+  `src/stub/bar2_stubs.cpp` and two sibling virtual-driver `module_main.c`
+  files, which blocked `insmod` outright — **fixed, commit `68853c2`**
+  (insmod now resolves every symbol, real `init_module` code runs to
+  `OA_DEBUG_MARKER 8`); (2) a genuine kernel NULL-pointer-deref Oops in
+  `CSTGAudioInputMixerBase::SetSendBuses()` from a lost `R_386_32`
+  relocation that stored a literal `8` into a vtable-pointer field instead
+  of the real `&vtable+8` — **fixed, commit `2c539fb`**; (3) a VM/QEMU-only
+  environment issue (NOT a source bug): `CSTGBankMemory`'s AlignedHeap
+  arena landed exactly on QEMU i440FX's unbacked PCI/chipset memory hole,
+  making writes silently vanish — **worked around via a `kronos_vm` boot
+  config change** (`mem=2048M` instead of `mem=3072M` on the kernel
+  cmdline, no OA.ko source touched; see
+  `oa_setsendbuses_vm_hole_fixed_mem2048_2026-07-27.md`); (4) with (3)
+  unblocked, a fourth, previously-hidden bug was exposed and fixed the
+  same day: `CSTGAudioInputMixer`'s own vtable (`g_audioInputMixerVtable`
+  in `audio_input_mixer.cpp`) populated its `ShouldMute`/`GetOutputBus`
+  slots via a member-function-pointer-to-`void*` conversion inside a
+  **static aggregate initializer** — not a C++ constant expression, so GCC
+  emitted it as a `_GLOBAL__sub_I_*` dynamic initializer in `.init_array`,
+  which Linux's kernel module loader never runs (only ground truth's own
+  confirmed-no-op `init_cpp_support()` was ever a candidate to do so, and
+  it doesn't). Fixed by replacing the two slots with plain free-function
+  trampolines, whose addresses **are** genuine compile-time constants —
+  see `audio_input_mixer.cpp`'s own updated header comment and
+  `oa_audioinputmixer_ctor_never_runs_fixed_2026-07-27.md`. A closely
+  related, NOT yet confirmed-broken instance of the same static-init
+  mechanism (`CKorgUsbAudioDriverMidiPorts::sInstance`) is flagged but
+  deliberately untouched — not proven reachable in the boot window tested
+  so far. See `PROJECT_BRAIN/status.md`'s latest kronosology-section
+  entries for the full authoritative history of all four fixes.
 
 ## Building and testing
 

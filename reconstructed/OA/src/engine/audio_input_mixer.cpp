@@ -265,20 +265,53 @@ void CSTGAudioInputMixerBase::SetSendBuses()
  * slot3 = `GetOutputBus(int)` -- the exact slot `SetSendBuses()`'s
  * `(*(void***)this)[3]` dispatches, confirmed by the live NULL-deref Oops
  * this fix resolves (see oa_global.h's own comment on both methods).
+ *
+ * FIXED (2026-07-27, later same day, live dynamic re-verification): the
+ * FIRST version of this fix populated shouldMute/getOutputBus via
+ * `AudioInputMixerAsRawFn(&CSTGAudioInputMixer::ShouldMute/GetOutputBus)`
+ * -- a member-function-pointer-to-void* memcpy -- directly inside this
+ * struct's own static aggregate initializer. That compiles, but is NOT a
+ * C++ constant expression (the memcpy is a real function call as far as
+ * the front-end's constant-initialization analysis is concerned), so GCC
+ * emitted it as DYNAMIC initialization: a real `_GLOBAL__sub_I_*` function
+ * in `.text.startup`, referenced from this TU's 3-entry `.init_array`
+ * (confirmed via `objdump -dr -j .text.startup`: it does exactly
+ * `movl $ShouldMute,g_audioInputMixerVtable.shouldMute` /
+ * `movl $GetOutputBus,g_audioInputMixerVtable.getOutputBus` then `ret`).
+ * Linux's kernel module loader (`load_module()`) does NOT run a module's
+ * `.init_array`/`.ctors` the way userspace crt0 does -- only the function
+ * `init_module()` itself registers gets called. This project's own
+ * `oa_init.h` already documents the intended real mechanism
+ * (`init_cpp_support()`, init_module()'s step 1) but ground truth's own
+ * `init_cpp_support` is a confirmed 1-byte `ret` (see
+ * startup_helpers.cpp) -- there is no ctor-array runner anywhere in this
+ * reconstruction's actual call graph. Net effect, confirmed via a live
+ * kronos_vm boot AFTER the VM-memory-map fix ([[oa_setsendbuses_vm_hole_fixed_mem2048_2026-07-27]]
+ * unblocked the original Oops): `shouldMute`/`getOutputBus` read back as
+ * NULL at runtime even though the vtable pointer itself is correctly
+ * non-null and persists -- `SetSendBuses()`'s `call *0xc(%eax)` jumps to
+ * 0 (`EIP is at 0x0`, EDX=0x32 matching the first `GetOutputBus` call
+ * argument). Root cause is the SAME "populating ctor never actually
+ * called" bug class already found in this project's 3 named C dispatch
+ * tables (`sMsgHandler` arrays, control_msg_handler.cpp and siblings) --
+ * this is just the first instance where the un-run populator is a
+ * COMPILER-GENERATED static initializer instead of an explicit,
+ * hand-written (but likewise never-called) populate function.
+ *
+ * Fix: don't rely on ANY static-initialization-time computation for these
+ * two slots. `CSTGAudioInputMixerDtorPlaceholder` below already shows the
+ * working pattern (a plain free function, its address taken directly --
+ * genuinely usable in a constant aggregate initializer, no ctor needed).
+ * Apply the same shape to shouldMute/getOutputBus via two trivial
+ * `static` trampolines that cast `this` back and forward to the real
+ * member function -- the raw ABI is unchanged (callers already treat
+ * this slot as a plain `int/void* (*)(void*, int)` C function pointer,
+ * see SetFXCtrlBus/SetHDRBus/SetSendBuses above), only the mechanism that
+ * gets the address INTO this table changes. `AudioInputMixerAsRawFn`
+ * itself is removed as unused -- it's the thing that caused the bug,
+ * kept out rather than left as a footgun for a future vtable slot.
  */
 namespace {
-/* Same non-virtual member-function-pointer -> raw void* type pun as
- * control_msg_handler.cpp's own `AsRawFn` (see that file's header comment
- * for the full Itanium-ABI justification) -- duplicated locally rather
- * than shared since these are separate translation units. */
-template <typename T>
-void *AudioInputMixerAsRawFn(T memberFnPtr)
-{
-	void *raw;
-	__builtin_memcpy(&raw, &memberFnPtr, sizeof(raw));
-	return raw;
-}
-
 struct AudioInputMixerVtable {
 	void *offsetToTop;
 	void *rtti;
@@ -288,12 +321,27 @@ struct AudioInputMixerVtable {
 	void *getOutputBus;
 };
 bool CSTGAudioInputMixerDtorPlaceholder(void *) { return false; }
+
+/* Plain free-function trampolines -- their addresses are genuine C++
+ * constant expressions (ordinary function pointers), unlike a member-
+ * function-pointer-to-void* conversion. See the class-level comment
+ * above for why this replaces the original AsRawFn-in-static-initializer
+ * approach. */
+bool CSTGAudioInputMixerShouldMuteTrampoline(void *self, unsigned int busId)
+{
+	return ((CSTGAudioInputMixer *)self)->ShouldMute(busId);
+}
+void *CSTGAudioInputMixerGetOutputBusTrampoline(void *self, int busId)
+{
+	return ((CSTGAudioInputMixer *)self)->GetOutputBus(busId);
+}
+
 AudioInputMixerVtable g_audioInputMixerVtable = {
 	0, 0,
 	(void *)&CSTGAudioInputMixerDtorPlaceholder,
 	(void *)&CSTGAudioInputMixerDtorPlaceholder,
-	AudioInputMixerAsRawFn(&CSTGAudioInputMixer::ShouldMute),
-	AudioInputMixerAsRawFn(&CSTGAudioInputMixer::GetOutputBus),
+	(void *)&CSTGAudioInputMixerShouldMuteTrampoline,
+	(void *)&CSTGAudioInputMixerGetOutputBusTrampoline,
 };
 } /* anonymous namespace */
 
