@@ -1,21 +1,23 @@
-# Eva Reconstruction — Session Summary (2026-07-25 through 2026-07-26)
+# Eva Reconstruction — Session Summary (2026-07-25 through 2026-07-27)
 
 **This document was rewritten from scratch on 2026-07-26 (HEAD `a5ff6aa`) to
 correct stale numbers/claims that had accumulated across four separate
-"Update" patches appended to the original 2026-07-25 write-up.** The original
-patches are preserved in git history if you need the exact point-in-time
-wording; this rewrite keeps the narrative of *what happened in what order*
-intact but restates every count and claim against current ground truth. The
-title keeps the original date because that's when this stream of work
-started and because `HARDWARE_REVIEW_LOG.md`/other docs already link to this
-filename — treat the date range in the heading above as the real scope.
+"Update" patches appended to the original 2026-07-25 write-up, and updated
+again (not just appended) on 2026-07-27 (HEAD `786fcd5`) to fold in that
+day's dynamic-investigation phase.** The original 2026-07-25 patches are
+preserved in git history if you need the exact point-in-time wording; each
+rewrite keeps the narrative of *what happened in what order* intact but
+restates every count and claim against current ground truth. The title keeps
+the original date because that's when this stream of work started and
+because `HARDWARE_REVIEW_LOG.md`/other docs already link to this filename —
+treat the date range in the heading above as the real scope.
 
-**Headline numbers, independently verified this rewrite** (not taken from any
-prior commit message): **530 of 37,795** functions reconstructed
-(`manifest/gen_manifest.py`, regenerated fresh — `1.402%`), across **68
+**Headline numbers, independently verified for this update** (not taken from
+any prior commit message): **559 of 37,795** functions reconstructed
+(`manifest/gen_manifest.py`, regenerated fresh — `1.479%`), across **82
 commits** touching `reconstructed/Eva/` (`git log --oneline -- reconstructed/Eva/
-| wc -l`), spanning 2026-07-23 15:xx through 2026-07-26 20:46 (commit
-`a5ff6aa`). The wider `kronosology` repo is at 276 commits total as of this
+| wc -l`), spanning 2026-07-23 16:24 UTC through 2026-07-27 00:30 UTC (commit
+`786fcd5`). The wider `kronosology` repo is at 291 commits total as of this
 writing — check `git log --oneline | wc -l` for the current figure, it moves
 daily. If you need a number not stated here, regenerate it — several of this
 document's own predecessor drafts got a manifest count wrong by trusting a
@@ -164,6 +166,88 @@ gdbstub afterward for inspection — not to combine the two mechanisms.
 
 ---
 
+## The dynamic-investigation phase (2026-07-27): live tracing found a real bug the static sweeps never could
+
+**This is the single most important methodological result to come out of this
+document's 2026-07-27 update**, worth its own section rather than a bullet
+buried in a list: the newly-proven QEMU-native-gdbstub method, pointed at a
+live `kronosvm` boot, found a genuine, previously-undetected bug within one
+session — after this project's own static call-graph/vtable sweeps had
+*repeatedly, explicitly* declared the static-analysis well exhausted for
+Eva. `PROJECT_BRAIN/status.md`'s own session-arc narrative names five
+separate independent convergences on "genuinely exhausted" over 2026-07-26
+alone (a "cross-validates the exhaustion" pass, a mop-up pass calling itself
+"a third independent time," a "4th consecutive negative broad-sweep pass,"
+and a final mop-up explicitly labeled "the 5th independent sweep in a row to
+converge on exhaustion"). None of those five static passes — each of which
+specifically re-audited per-instance vtables against the standing
+`LESSON_vtable_dispatch_stub_gap` pattern — caught this one. A sixth pass,
+this time *dynamic* rather than static, found it within a single gdbstub
+session.
+
+**The bug**: `CSysApiInstance`'s own per-instance vtable
+(`PTR__CSysApiInstance_08e81008`) had slots 2/3/4/5 — the four
+`CGlobalObjectBase`-inherited "phase hook" methods
+(Pre/PostKernelConstructor, Pre/PostKernelDestructor) — left wired to the
+generic no-op `EvaVTableStub`, even though `CKernel::CKernel(int)`'s real
+`sm_poGlobalObjectList` bring-up loop genuinely raw-dispatches through those
+exact slots on every single boot. This is the same underlying bug class as
+the `CEditor`/`CPanel` vtable-dispatch gap described above (a per-instance
+vtable slot silently no-op'ing a real caller despite the target method
+itself being correctly known) — now confirmed as the **9th** instance of
+this pattern across the two-day span, and the first found purely through
+live tracing rather than a static audit. See
+`.claude/agent-memory/re-decompiler/LESSON_vtable_dispatch_stub_gap.md` for
+the full standing lesson and all 9 instances.
+
+**A genuinely new wrinkle this instance surfaced**: `global_object_base.h`'s
+own header comment already *documented*, from an earlier ground-truth
+raw-byte read, that these exact 4 slots were confirmed to be
+`CGlobalObjectBase`'s own no-ops — and even asserted "It's live data now,"
+implying the wiring was believed complete. It was not: the vtable array
+itself was never actually updated to match its own header's documented
+finding. A correct, ground-truth-verified analysis written into a comment is
+not a substitute for checking the actual array contents — worth flagging
+for any future sweep, static or dynamic.
+
+**Method note, also new**: the first attempt (a hardware breakpoint on
+`EvaVTableStub`'s own entry address, then a normal gdb frame-pointer
+backtrace to identify the caller) gave unreliable caller attribution — gdb
+stops at the stub's very first instruction, before its own `push ebp; mov
+ebp, esp` executes, so at that exact PC the frame-pointer chain still
+belongs to the *caller's* caller, and different unwinder heuristics can
+misattribute the true dispatch site. The fix was breaking instead on the
+indirect `call eax` inside the generic `CallVSlot1`/`CallVSlot2` dispatch
+helpers (whose own prologue has already run by that point) and reading the
+true stack-pushed return address directly — unambiguous, and now the
+recommended approach for any future gdbstub-based vtable trace on this
+project.
+
+**Fix**: `CGlobalObjectBase_Pre/PostKernelConstructor/Destructor` were
+de-`static`'d and declared `extern "C"` so `omega_vtables.cpp` could wire
+`PTR__CSysApiInstance_08e81008` slots 2–5 directly to them (reusing the
+exact same function pointers, matching ground truth's inherited-vtable-slot
+behavior). Slots 0/1 (the dtor pair) were deliberately left as
+`EvaVTableStub` — ground truth shows `CSysApiInstance` has its own distinct,
+still-unreconstructed destructor there, a separate, already-documented gap,
+not this bug class. Rebuilt clean, full host `verify/` suite green (17/17
+test binaries, 0 failures). Committed `e0758e2`. Live re-boot verification of
+the *fixed* binary inside `kronosvm` is still outstanding — the fix was
+confirmed via rebuild + host test suite + static ground-truth cross-check,
+not yet via a fresh live trace of the corrected binary, since injecting a
+freshly-built `Eva` into the existing baked VM disk image needs
+loop-mounting infrastructure not set up this session.
+
+This dynamic-investigation phase ran alongside (not instead of) one more
+static pass: a fresh, from-scratch `objdump -dr -M intel` re-trace (not a
+reread of prior notes) of `CSTGUnsolMsgHandler`'s last two deferred
+handlers, specifically re-checking for the "size is not depth"
+misdiagnosis this session had already caught 8 other times. See "IPC /
+message substrate" below for the outcome (`VoiceModelMsgHandler` promoted to
+Tier A, `ControlMsgHandler` reconfirmed genuinely deep).
+
+---
+
 ## Scheduler / module family
 
 The spine that makes the rest of this work reachable: getting `CScheduler`'s
@@ -217,16 +301,34 @@ populated."
   faithfully-preserved ground-truth bug (see "Real bugs" below).
 - **`CSTGUnsolMsgHandler`, a 30-method unsolicited-STGMessage dispatcher** —
   found via the same broad `nm -C` class-inventory sweep technique used
-  earlier on OA.ko's `CSTGControlMsgHandler`. Worked in several batches;
-  **25 of 30 methods are now Tier A** (most recently `GlobalMsgHandler`,
-  a 2012-byte handler with two genuinely asymmetric restore-guard code paths
-  transcribed with a real `goto`, matching ground truth's own control flow
-  rather than being "cleaned up"). The remaining 5
-  (`ControlMsgHandler`/`CombiMsgHandler`/`ProgramSlotMsgHandler`/
-  `ProgramMsgHandler`/`VoiceModelMsgHandler`) all reach into genuinely deep,
-  out-of-scope `CControlSurface`/`CMMI`/`CModeManager`/`CStorage`
-  algorithm-database state — re-checked multiple times, no tractable angle
-  found, correctly deferred.
+  earlier on OA.ko's `CSTGControlMsgHandler`. Worked in several batches
+  across 2026-07-25/26/27; **29 of 30 methods are now Tier A**. The last
+  three to close were `CombiMsgHandler`/`ProgramSlotMsgHandler`/
+  `ProgramMsgHandler` (all turned out to be the same mechanical pattern
+  already used elsewhere in the file, mislabeled rather than genuinely
+  deep), and — finally — **`VoiceModelMsgHandler`** (Tier A batch 8,
+  2026-07-27, commit `786fcd5`): a full from-scratch `objdump -dr -M intel`
+  re-trace of the real 2512-byte function found it ~90% mechanical reuse of
+  already-modeled `EditApi`/`Api`/`CStorage`/`SetWithoutUpdatingSTG`
+  infrastructure, both real jump tables (17 + 6 entries) fully case-traced
+  against `.rodata`. Exactly one leaf stays unimplemented within it: a
+  `CStorage::GetInstance()`-based "MOSS algorithm" voice-model-database
+  dispatch (real call site `0x08917209`, confirmed via a `.rodata` string
+  naming `MOSSAlgorithmDatabase.h`) — an entirely unmodeled class hierarchy,
+  precisely documented rather than guessed. Reconstructing it also caught
+  and fixed a real bug: several per-case `GetScopeId()` calls had been
+  hoisted above their own case's real bound check, which would have fired
+  `GetScopeId()` even on real out-of-range bail paths — fixed by threading
+  scope resolution through bool-returning `Compute*()` helpers matching
+  real disassembly order case-by-case. **`CSTGUnsolMsgHandler` is now down
+  to exactly one genuinely-deep handler: `ControlMsgHandler`** (real size
+  corrected 4886B → 5152B, `0x0891ac70`–`0x0891c090`), reconfirmed via a
+  fresh from-scratch re-trace the same day — a full call-target survey found
+  18 distinct out-of-scope subsystems (`CMMI`, `CControlSurface`,
+  `CHelpManager`, `CModeManager`, `CDiskUtil`, `CSmplModeMgr`, 4 real Peg
+  `CForm` dialogs, raw `HAL_DisableInterrupts`/`HAL_EnableInterrupts`
+  hardware interrupt-mask control) — not a misdiagnosis, correctly stays
+  Tier-B with much more precise evidence than before.
 - **`CClientCommServer`/`CSysExMsgTaskBase`** — closed to **25 of 26** methods
   real (the sole remaining stub, `OnReceiveMessage`, is genuinely blocked on
   a real `CMessage` definition this project deliberately keeps as an opaque,
@@ -454,6 +556,13 @@ up, and it is a real, hardware-relevant behavior worth carrying into
    overrun a 4-byte global by 4 bytes; caught by manually checking every
    sibling buffer's size against every field offset a newly-real function
    uses, before building — not by a crash.
+9. **`CSysApiInstance`'s own vtable slots 2–5 left as generic stubs
+   (2026-07-27, commit `e0758e2`)** — the 9th confirmed instance of the
+   vtable-dispatch-stub-gap bug class (same family as item 2 above), and the
+   first found via live gdbstub tracing rather than a static audit; see the
+   dedicated "dynamic-investigation phase" section above and
+   `.claude/agent-memory/re-decompiler/LESSON_vtable_dispatch_stub_gap.md`
+   for the full pattern history across all 9 instances.
 
 **Found but deliberately left as-is** (genuine ground-truth behavior, not a
 reconstruction gap):
@@ -478,16 +587,15 @@ reconstruction gap):
   scope — the actual per-editor-page UI/model logic, same "indefinitely
   deferred" boundary as the Peg toolkit. Not constructed anywhere on the
   currently-wired boot path.
-- **2 of `CSTGUnsolMsgHandler`'s 30 methods** remain Tier-B link-stubs
-  (`ControlMsgHandler`/`VoiceModelMsgHandler`) — both reach into genuinely
-  deep `CControlSurface`/`CMMI`/`CModeManager`/`CStorage` state, re-checked
-  multiple times with no tractable angle found. **STALE-CLAIM CORRECTION
-  (2026-07-26 cross-check pass)**: this line originally also listed
-  `CombiMsgHandler`/`ProgramSlotMsgHandler`/`ProgramMsgHandler` as
-  Tier-B — all three were reconstructed for real in later 2026-07-26
-  commits (`08f208b`/`6ba0d3a`/`bcbc43f`) after this file was last
-  rewritten; see `include/stg_unsol_msg_handler.h`'s own per-method Tier
-  A/B comments for the current ground truth.
+- **1 of `CSTGUnsolMsgHandler`'s 30 methods** remains a Tier-B link-stub:
+  `ControlMsgHandler` — reaches into 18 distinct out-of-scope
+  `CMMI`/`CControlSurface`/`CHelpManager`/`CModeManager`/`CDiskUtil`/
+  `CSmplModeMgr`/Peg-`CForm`/raw-HAL-interrupt-mask subsystems, re-checked
+  multiple times (most recently a fresh from-scratch re-trace on
+  2026-07-27) with no tractable angle found. `VoiceModelMsgHandler`, listed
+  here as Tier-B in earlier versions of this document, was reconstructed for
+  real on 2026-07-27 (Tier A batch 8, commit `786fcd5`) — see "IPC / message
+  substrate" above.
 - **`CClientCommServer`'s one remaining method** (`OnReceiveMessage`) —
   genuinely blocked on a real `CMessage` definition.
 - **`CBatchDiskMainTask`'s deeper `CZ`-driven business logic** (`PreloadDir`/
@@ -512,11 +620,11 @@ reconstruction gap):
   reconstructed, but not reachable from the currently-wired boot path
   (gated behind `CreateUserModules()`'s own placeholder config table
   content).
-- **Manifest total (530 of 37,795)** remains a small, deliberately-scoped
-  slice by design — this stream of work follows real callers outward from
-  the working boot path rather than attempting broad coverage. Regenerate
-  via `manifest/gen_manifest.py` for the current count; do not trust a
-  cached figure from an old commit message.
+- **Manifest total (559 of 37,795, 1.479%)** remains a small,
+  deliberately-scoped slice by design — this stream of work follows real
+  callers outward from the working boot path rather than attempting broad
+  coverage. Regenerate via `manifest/gen_manifest.py` for the current count;
+  do not trust a cached figure from an old commit message.
 
 Per-item detail, exact addresses, and header-comment-level reasoning for
 everything above: see each subsystem's own header (`include/*.h`). Real
