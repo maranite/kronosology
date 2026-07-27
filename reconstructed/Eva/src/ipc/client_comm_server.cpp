@@ -29,11 +29,21 @@
  * still-Tier-B stub bodies declared below, same "real code, opaque helper" layering
  * already established elsewhere in this project (CConfigManager, etc).
  *
- * That leaves only `OnReceiveMessage(const CMessage&)` still Tier B (empty, real
- * signature) -- see header comment for the specific, examined reason it stays
- * deferred (needs `CMessage` reconstructed). [Stale "12 methods" count from an
- * earlier pass corrected 2026-07-26 -- this file only has the 1 Tier-B stub below;
- * header comment (`client_comm_server.h`) already stated 1/26 correctly.]
+ * FOURTH FOLLOW-UP PASS (2026-07-27, OnReceiveMessage() closeout): the last
+ * remaining Tier-B stub, `OnReceiveMessage(const CMessage&)`, is now real --
+ * the long-standing "genuinely blocked on CMessage" verdict turned out to be
+ * based on the parameter type alone, not an actual disassembly. A from-scratch
+ * `objdump -dr` trace (ground truth @0x08172010, 784 bytes) found it needs only
+ * 3 fixed CMessage-offset reads (the SAME opaque-fixed-offset convention
+ * already used throughout this file/CPoller/CChunkServer) plus dispatch
+ * through the 3 already-real `OnRxMsgWhenIn{IDLE,SENT,WAIT}` siblings -- see
+ * the method's own header comment in client_comm_server.h for the full
+ * derivation, including why OnRxMsgWhenInIDLE()/OnRxMsgWhenInSENT() needed
+ * their return types corrected from `void` back to `int` (their real return
+ * value is `CSexServiceTask::TransmitSysEx()`'s own, propagated through --
+ * confirmed via a real tail-jmp sibcall in the checksum path and a captured-eax
+ * `call` in the no-checksum path, invisible until this was the first real
+ * caller to use the result). CClientCommServer is now a full 26/26 Tier A.
  */
 
 #include "client_comm_server.h"
@@ -186,7 +196,57 @@ unsigned char CClientCommServer::ComputeCRCByte(unsigned char startIndex) const
 
 /* --- Tier B: still empty, real signature only -- see header comment. --------- */
 
-int CClientCommServer::OnReceiveMessage(const CMessage &) { return 0; }
+int CClientCommServer::OnReceiveMessage(const CMessage &msg)
+{
+	/* See the method's own header comment in client_comm_server.h for the full
+	 * derivation (ground truth @0x08172010, 784 bytes). CMessage stays a
+	 * forward-declared incomplete type -- same "raw reinterpret_cast<unsigned
+	 * char*>(&msg), fixed-offset field reads" convention already established
+	 * by CPoller/CChunkServer/CSysExMsgTaskBase.
+	 */
+	const unsigned char *raw = reinterpret_cast<const unsigned char *>(&msg);
+	const unsigned char *data = *reinterpret_cast<const unsigned char *const *>(raw + 0x10);
+	unsigned char len = raw[0xa];
+
+	/* Opaque 3-level pointer chase: ground truth's own msg+0x4 -> ptr+0x4 ->
+	 * ptr+0x20 -> byte@+0x8c. Modeled as raw untyped pointer arithmetic (no
+	 * named intermediate class, same "opaque resource-chain" treatment this
+	 * project already gives Api/mResource chains elsewhere) since the
+	 * resulting byte is only ever consumed as an opaque tag by the
+	 * Msg*WhenIn*() handlers below (copied into mEvTag's high byte via `x`,
+	 * never further interpreted).
+	 */
+	void *link = *reinterpret_cast<void *const *>(raw + 0x4);
+	void *res = *reinterpret_cast<void *const *>(reinterpret_cast<const char *>(link) + 0x4);
+	void *arr = *reinterpret_cast<void *const *>(reinterpret_cast<const char *>(res) + 0x20);
+	unsigned char x = *(reinterpret_cast<const unsigned char *>(arr) + 0x8c);
+
+	switch (mState) {
+	case 0: /* IDLE */
+		return (OnRxMsgWhenInIDLE(data, len, x) < 1) ? -1 : 0;
+	case 1:
+		/* SENT -- ground truth re-inlines OnRxMsgWhenInSENT()'s own body here
+		 * rather than calling it (this file's own well-established
+		 * GCC-duplicate-inlining pattern, see file header comment); modeled
+		 * as a call since the observable behavior is identical.
+		 */
+		return (OnRxMsgWhenInSENT(data, len, x) < 1) ? -1 : 0;
+	case 2:
+		/* WAIT -- ground truth ALSO re-inlines OnRxMsgWhenInWAIT()'s own body
+		 * here, and this specific inlined copy always returns 0
+		 * (`xor eax,eax`), regardless of what the standalone real function
+		 * would itself return in some other caller.
+		 */
+		OnRxMsgWhenInWAIT(data, len, x);
+		return 0;
+	default:
+		/* Real: soft log (Api vtbl+0x94, omitted -- matches this file's own
+		 * established "diagnostic-only, no behavioral effect" convention)
+		 * then return -1.
+		 */
+		return -1;
+	}
+}
 
 /* --- Tier A: real bodies, THIRD follow-up pass. ------------------------------- */
 
@@ -627,9 +687,13 @@ void CClientCommServer::OnRxSexWhenInSENT(ESexMsgType type, const unsigned char 
 	Error(eErrNotifyReserved);
 }
 
-/* .text+0x08171510, 2159 bytes. See header comment for the full writeup. */
-void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len,
-                                            unsigned char x)
+/* .text+0x08171510, 2159 bytes. See header comment for the full writeup
+ * (including why this is `int`, not `void` -- the real return value is
+ * `CSexServiceTask::TransmitSysEx()`'s own, propagated through unchanged in
+ * both branches).
+ */
+int CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len,
+                                           unsigned char x)
 {
 	unsigned char headerOff = static_cast<unsigned char>(kSexPacketOverhead + 1); /* 6 */
 	if (mModeService & 0x20)
@@ -677,7 +741,12 @@ void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned ch
 			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
 
 		mState = 1; /* SENT */
-		mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+		/* Real ground truth: a genuine TAIL JMP straight into
+		 * CSexServiceTask::TransmitSysEx() here (a real sibcall, confirmed by
+		 * there being no further instructions/ret after it on this path) --
+		 * this function's own return value IS TransmitSysEx()'s, unchanged.
+		 */
+		return mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
 	} else {
 		/* No-checksum ("raw") path: fixed type=1 marker, no sequence byte,
 		 * fire-and-forget, straight back to IDLE.
@@ -695,7 +764,12 @@ void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned ch
 		if (mEvBuf)
 			*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
 
-		mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
+		/* Real: this is a genuine `call` (not a tail jmp) -- ground truth
+		 * captures its return value (`mov esi,eax`) BEFORE the resets below
+		 * run, then reuses it as this function's own return value at the
+		 * real single shared epilogue.
+		 */
+		int result = mOwner->TransmitSysEx(reinterpret_cast<CLinkedEvent *>(&mEvTag), mEcb);
 
 		mState0c = 0;
 		mUnknown1c = 0;
@@ -710,12 +784,16 @@ void CClientCommServer::OnRxMsgWhenInIDLE(const unsigned char *data, unsigned ch
 		mState0d = 0;
 		mState = 0; /* IDLE */
 		mUnknown08 = 0;
+		return result;
 	}
 }
 
-/* .text+0x08171db0, 591 bytes. See header comment. */
-void CClientCommServer::OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len,
-                                            unsigned char x)
+/* .text+0x08171db0, 591 bytes. See header comment (including why this is
+ * `int`, not `void` -- ground truth's own tail-jmp propagates
+ * OnRxMsgWhenInIDLE()'s return value straight through unchanged).
+ */
+int CClientCommServer::OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len,
+                                          unsigned char x)
 {
 	mUnknown08 = 1;
 
@@ -726,9 +804,10 @@ void CClientCommServer::OnRxMsgWhenInSENT(const unsigned char *data, unsigned ch
 		*(static_cast<unsigned char *>(mEvBuf) - 3) &= 0x7f;
 
 	/* Real ground truth: a genuine tail-jmp into OnRxMsgWhenInIDLE() with the
-	 * same data/len/x this method was called with.
+	 * same data/len/x this method was called with -- return value propagated
+	 * straight through.
 	 */
-	OnRxMsgWhenInIDLE(data, len, x);
+	return OnRxMsgWhenInIDLE(data, len, x);
 }
 
 /* --- Tier A: real bodies, this follow-up pass. -------------------------------- */

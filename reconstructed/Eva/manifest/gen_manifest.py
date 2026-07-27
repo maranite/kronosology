@@ -613,6 +613,8 @@ RECONSTRUCTED = {
     "08172bf0",  # CClientCommServer::OnRxSexWhenInSENT(ESexMsgType, uchar const*, uchar, uchar)
     "08171510",  # CClientCommServer::OnRxMsgWhenInIDLE(uchar const*, uchar, uchar)
     "08171db0",  # CClientCommServer::OnRxMsgWhenInSENT(uchar const*, uchar, uchar)
+    "08172010",  # CClientCommServer::OnReceiveMessage(CMessage const&) -- 2026-07-27 closeout,
+                 # promoted from Tier B (see client_comm_server.h); closes CClientCommServer 26/26
 
     # --- Stage 6: breadth sweep, CHIDDriver/CLinuxPanelDriver batch (2026-07-25).
     # Found via a fresh nm -C class-inventory sweep for boot-path-DIRECT (not just

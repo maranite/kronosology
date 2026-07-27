@@ -30,6 +30,19 @@
 extern int g_ccsTestTransmitSysExCalls;
 extern unsigned char g_ccsTestLastTransmitEcb;
 
+/* Fake-CMessage builder for the OnReceiveMessage() KAT below (plain function,
+ * not a lambda -- this project's build is -std=gnu++98). See that KAT's own
+ * comment for the field-offset derivation.
+ */
+static void SetupFakeMsg(unsigned char *msgBuf, void *linkBuf, unsigned char len,
+                          void *payload)
+{
+	std::memset(msgBuf, 0, 0x18);
+	*reinterpret_cast<void **>(msgBuf + 0x4) = linkBuf;
+	msgBuf[0xa] = len;
+	*reinterpret_cast<void **>(msgBuf + 0x10) = payload;
+}
+
 /* Friend hook -- pokes mEvTag/mEvBuf directly so ComputeCRCByte() can be
  * exercised without running the real constructor (used only by the
  * ComputeCRCByte()/CheckIncomingSexCRCByte() block below, which predates
@@ -819,6 +832,105 @@ int main()
 			      " and reset to IDLE",
 			      g_ccsTestTransmitSysExCalls == callsBefore + 1 &&
 			          ClientCommServerTestHooks::State(ccs) == 0);
+		}
+
+		/* --- OnReceiveMessage(const CMessage&) -- 2026-07-27 closeout pass.
+		 * Real ground truth (.text+0x08172010, 784 bytes) reads 3 fixed
+		 * CMessage offsets (msg+0x10 data ptr, msg+0xa len byte, msg+0x4 an
+		 * opaque 3-level pointer chase to a byte@+0x8c "x" tag) and dispatches
+		 * on mState (IDLE/SENT/WAIT/default) through the 3 already-real
+		 * Msg*WhenIn* siblings, with a real `(result < 1) ? -1 : 0` transform
+		 * on the IDLE/SENT cases (ground truth's own `cmp eax,1`/`sbb eax,eax`).
+		 * See client_comm_server.h's own header comment on this method for the
+		 * full derivation. Fake-CMessage buffer built the same "raw bytes, not
+		 * a struct" way test_poller.cpp's own FakeMessage already established.
+		 */
+		{
+			unsigned char arrBuf[0x8d];
+			std::memset(arrBuf, 0, sizeof(arrBuf));
+			arrBuf[0x8c] = 0x77; /* the real "x" tag byte the chase ends on */
+
+			unsigned char resBuf[0x24];
+			std::memset(resBuf, 0, sizeof(resBuf));
+			*reinterpret_cast<void **>(resBuf + 0x20) = arrBuf;
+
+			unsigned char linkBuf[8];
+			std::memset(linkBuf, 0, sizeof(linkBuf));
+			*reinterpret_cast<void **>(linkBuf + 0x4) = resBuf;
+
+			unsigned char payload[4] = {0xde, 0xad, 0xbe, 0xef};
+			unsigned char msgBuf[0x18];
+			const CMessage &fakeMsg = *reinterpret_cast<const CMessage *>(msgBuf);
+
+			/* IDLE dispatch: sends once via OnRxMsgWhenInIDLE(); TransmitSysEx()'s
+			 * host-build stub always returns 0, so the real (<1)?-1:0 transform
+			 * yields -1.
+			 */
+			SetupFakeMsg(msgBuf, linkBuf, 4, payload);
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			ClientCommServerTestHooks::SetState(ccs, 0); /* IDLE */
+			int callsBefore = g_ccsTestTransmitSysExCalls;
+			int r = ccs.OnReceiveMessage(fakeMsg);
+			check("OnReceiveMessage() IDLE dispatch sends once via OnRxMsgWhenInIDLE()",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1);
+			check("OnReceiveMessage() IDLE dispatch resets back to IDLE",
+			      ClientCommServerTestHooks::State(ccs) == 0);
+			check("OnReceiveMessage() IDLE dispatch: real (<1)?-1:0 transform on "
+			      "TransmitSysEx()'s stubbed 0 return yields -1",
+			      r == -1);
+			check("OnReceiveMessage() correctly threads the msg+0x4 opaque "
+			      "pointer-chase 'x' tag byte through into mEvTag's high byte",
+			      ((static_cast<unsigned>(ClientCommServerTestHooks::EvTag(ccs)) >> 8) &
+			       0xff) == 0x77);
+
+			/* SENT dispatch: ground truth re-inlines OnRxMsgWhenInSENT()'s own
+			 * body here rather than calling it -- same observable effect
+			 * (mUnknown08=1, then tail-redispatch into OnRxMsgWhenInIDLE()).
+			 */
+			SetupFakeMsg(msgBuf, linkBuf, 4, payload);
+			ClientCommServerTestHooks::SetModeService(ccs, 0x00);
+			ClientCommServerTestHooks::SetState(ccs, 1); /* SENT */
+			ClientCommServerTestHooks::SetUnknown08(ccs, 0);
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			r = ccs.OnReceiveMessage(fakeMsg);
+			check("OnReceiveMessage() SENT dispatch redispatches into "
+			      "OnRxMsgWhenInIDLE(): one real send",
+			      g_ccsTestTransmitSysExCalls == callsBefore + 1);
+			check("OnReceiveMessage() SENT dispatch resets back to IDLE",
+			      ClientCommServerTestHooks::State(ccs) == 0);
+			check("OnReceiveMessage() SENT dispatch: same (<1)?-1:0 transform "
+			      "yields -1",
+			      r == -1);
+
+			/* WAIT dispatch: ground truth's own inlined copy of
+			 * OnRxMsgWhenInWAIT() always returns 0 (unconditional `xor eax,eax`)
+			 * regardless of TransmitSysEx() -- no send at all, straight to
+			 * Error()'s own reset.
+			 */
+			SetupFakeMsg(msgBuf, linkBuf, 4, payload);
+			ClientCommServerTestHooks::SetState(ccs, 2); /* WAIT */
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			r = ccs.OnReceiveMessage(fakeMsg);
+			check("OnReceiveMessage() WAIT dispatch does not send (goes straight "
+			      "to Error())",
+			      g_ccsTestTransmitSysExCalls == callsBefore);
+			check("OnReceiveMessage() WAIT dispatch resets back to IDLE (Error() "
+			      "reset)",
+			      ClientCommServerTestHooks::State(ccs) == 0);
+			check("OnReceiveMessage() WAIT dispatch always returns 0", r == 0);
+
+			/* Invalid/default mState: soft-log-only, returns -1, no send, no
+			 * state change at all.
+			 */
+			SetupFakeMsg(msgBuf, linkBuf, 4, payload);
+			ClientCommServerTestHooks::SetState(ccs, 9); /* sentinel, must stay 9 */
+			callsBefore = g_ccsTestTransmitSysExCalls;
+			r = ccs.OnReceiveMessage(fakeMsg);
+			check("OnReceiveMessage() invalid mState is a genuine no-op (no send)",
+			      g_ccsTestTransmitSysExCalls == callsBefore);
+			check("OnReceiveMessage() invalid mState leaves mState untouched",
+			      ClientCommServerTestHooks::State(ccs) == 9);
+			check("OnReceiveMessage() invalid mState returns -1", r == -1);
 		}
 
 		/* ~CClientCommServer() runs at scope exit -- if mEvBuf's chunk header

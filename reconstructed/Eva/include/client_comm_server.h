@@ -573,14 +573,34 @@ public:
 	 * sequence+checksum byte pair and transitions to SENT awaiting an ack/retry,
 	 * or (bit 0x20 clear) sends a fixed fire-and-forget marker and resets
 	 * straight back to IDLE.
+	 *
+	 * REVISED (OnReceiveMessage() closeout pass): real return type is `int`, not
+	 * `void` -- confirmed by tracing both real exit paths against ground truth.
+	 * The no-checksum path ends with a genuine `call TransmitSysEx` whose eax is
+	 * captured (`mov esi,eax` @0x81716bb) and threaded through as this
+	 * function's own return value; the checksum path ends with a genuine TAIL
+	 * JMP straight into `CSexServiceTask::TransmitSysEx` (`jmp 81797d0`
+	 * @0x81718d0, a real sibcall -- confirmed by there being exactly ONE `ret`
+	 * in this whole 2159-byte function, at the no-checksum path's own epilogue;
+	 * the checksum path never reaches it). So in BOTH paths this function's
+	 * real return value IS `TransmitSysEx()`'s own return value, propagated
+	 * unchanged. This was invisible before because nothing called this method
+	 * with the result used; `OnReceiveMessage()` is the first real caller that
+	 * does (see its own header comment).
 	 */
-	void OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len, unsigned char x);
+	int OnRxMsgWhenInIDLE(const unsigned char *data, unsigned char len, unsigned char x);
 
 	/* .text+0x08171db0, 591 bytes. Tier A -- third follow-up pass, see header
 	 * comment. Sets mUnknown08=1, one reacquire+release cycle, then a genuine
 	 * tail-jmp into OnRxMsgWhenInIDLE() with the SAME arguments unchanged.
+	 *
+	 * REVISED (OnReceiveMessage() closeout pass): real return type is `int`, not
+	 * `void` -- confirmed via the same single-tail-jmp-no-ret evidence as
+	 * OnRxMsgWhenInIDLE() above (`jmp 8171510` @0x8171eaa is the ONLY exit in
+	 * this whole 591-byte function). Return value is simply
+	 * OnRxMsgWhenInIDLE()'s own, passed straight through.
 	 */
-	void OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len, unsigned char x);
+	int OnRxMsgWhenInSENT(const unsigned char *data, unsigned char len, unsigned char x);
 
 	/* .text+0x0816ffd0, 59 bytes. Real return value is 1 (bool `true`) in ground
 	 * truth, but the committed real signature (functions.csv/symbols.csv, no
@@ -590,12 +610,67 @@ public:
 	 */
 	void OnRxMsgWhenInWAIT(const unsigned char *data, unsigned char len, unsigned char x);
 
-	/* Only remaining Tier B method (real signature, empty body) -- CMessage
-	 * itself is completely out of scope (forward-declared only), and this is
-	 * this class's own primary CMessage-typed entry point. NOT declared C++
-	 * `virtual` -- see sysex_msg_task_base.h's own header comment for why (this
-	 * project's raw-`mVtbl`-pointer convention, not real C++ polymorphism). Real
-	 * ground-truth vtable slot 0.
+	/* .text+0x08172010, 784 bytes. TIER A (promoted from the long-standing Tier-B
+	 * "blocked on CMessage" verdict -- see the dedicated re-assessment note in
+	 * HARDWARE_REVIEW_LOG.md/SESSION_SUMMARY for the full writeup). The prior
+	 * "genuinely blocked, CMessage would need a whole separate modeling effort"
+	 * verdict turned out to be based on the parameter TYPE alone, not on an
+	 * actual disassembly of the function body -- a from-scratch `objdump -dr`
+	 * trace shows it needs only 3 fixed CMessage-offset reads, the SAME
+	 * `reinterpret_cast<const unsigned char*>(&msg)`-at-fixed-offsets
+	 * convention this project already uses successfully in CPoller/
+	 * CChunkServer/CSysExMsgTaskBase, plus dispatch through 3 ALREADY-real
+	 * sibling methods below.
+	 *
+	 * NOT declared C++ `virtual` -- see sysex_msg_task_base.h's own header
+	 * comment for why (this project's raw-`mVtbl`-pointer convention, not real
+	 * C++ polymorphism). Real ground-truth vtable slot 0
+	 * (`PTR_OnReceiveMessage_08e898c8`).
+	 *
+	 * Real shape: reads 3 fixed offsets off `msg` (treated as opaque raw bytes,
+	 * NOT a defined type -- `CMessage` stays forward-declared, matching this
+	 * project's established convention):
+	 *   - `msg+0x10` -- a `const unsigned char*` payload pointer (`data`), the
+	 *     SAME field CPoller's own `Msg*(CMessage&)` handlers already read at
+	 *     this offset.
+	 *   - `msg+0xa` -- a byte (`len`), the SAME "tagged length" field
+	 *     CSysExMsgTaskBase::Exec() and CPoller already document at this offset.
+	 *   - `msg+0x4` -- an opaque pointer, chased 2 more levels
+	 *     (`*(*(msg+4)+4)+0x20`) to a byte at `+0x8c` (`x`). This chain is
+	 *     modeled exactly as ground truth computes it -- as raw untyped pointer
+	 *     arithmetic, no named intermediate class -- since the chased value is
+	 *     itself only ever consumed as an opaque tag byte by the `Msg*WhenIn*`
+	 *     handlers below (copied into `mEvTag`'s high byte, never further
+	 *     interpreted), exactly the same "opaque resource-chain" treatment this
+	 *     file already gives `Api`/`mResource` chains elsewhere.
+	 *
+	 * Then dispatches on `mState` (already a real field, IDLE=0/SENT=1/WAIT=2):
+	 *   - IDLE:  `return (OnRxMsgWhenInIDLE(data, len, x) < 1) ? -1 : 0;` --
+	 *     the real `cmp eax,1`/`sbb eax,eax` return-value transform.
+	 *   - SENT:  `return (OnRxMsgWhenInSENT(data, len, x) < 1) ? -1 : 0;` --
+	 *     ground truth re-inlines OnRxMsgWhenInSENT()'s own body here rather
+	 *     than calling it (this project's own well-established "GCC
+	 *     duplicate-inlines an already-real sibling" pattern, now confirmed for
+	 *     a 6th time in this codebase -- see SESSION_SUMMARY's "size is not
+	 *     depth" section), but the OBSERVABLE behavior is identical to calling
+	 *     it, so it's modeled as a call rather than re-transcribing a byte-exact
+	 *     duplicate.
+	 *   - WAIT:  ground truth ALSO re-inlines OnRxMsgWhenInWAIT()'s body here
+	 *     (a soft trace log + `Error(eErrNotifyReserved)`) and always returns 0
+	 *     on this specific inlined copy (`xor eax,eax`) -- modeled the same way,
+	 *     as a call to the existing method followed by `return 0`.
+	 *   - any other value: soft log (omitted, matches this file's own
+	 *     established "diagnostic-only, no behavioral effect" convention) then
+	 *     `return -1`.
+	 *
+	 * The remaining several dozen bytes of the real function are ALL soft-log
+	 * call sites GCC hoisted out-of-line (basic-block reordering placing rare
+	 * diagnostic paths away from the hot path, then jumping back) -- confirmed
+	 * by checking every one: each loads the same Api-like global, calls its
+	 * vtbl+0x94 slot with 2 fixed `.rodata` strings + a literal line-number
+	 * constant, then jumps straight back into the hot path with zero control-flow
+	 * side effect beyond the log itself. This closes CClientCommServer to a
+	 * full 26/26 Tier A.
 	 */
 	int OnReceiveMessage(const CMessage &msg);
 

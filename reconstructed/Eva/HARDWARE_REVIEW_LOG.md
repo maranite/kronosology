@@ -528,10 +528,36 @@ should know they exist and are untested/unmodeled, not silently absent.
   scope, not constructed anywhere on the currently-wired boot path; the
   actual per-editor-page UI/model logic behind every edit screen is
   entirely unmodeled.
-- **`CClientCommServer::OnReceiveMessage`** — the class's one remaining
-  unreconstructed method (23/26 → this is the last), genuinely blocked on
-  a real `CMessage` definition this project doesn't have; real inbound
-  comm-server traffic hitting this exact method is unmodeled.
+- **`CClientCommServer::OnReceiveMessage`** — RECONSTRUCTED 2026-07-27, closing
+  `CClientCommServer` to a full 26/26. The long-standing "genuinely blocked on
+  a real `CMessage` definition" verdict turned out to be based on the
+  parameter type alone, not an actual disassembly: a from-scratch `objdump -dr`
+  trace (ground truth @0x08172010, 784 bytes) found it needs only 3 fixed
+  `CMessage`-offset reads (`+0x10` data ptr, `+0xa` len byte, `+0x4` an opaque
+  3-level pointer chase to a byte@+0x8c tag), the SAME
+  `reinterpret_cast<const unsigned char*>(&msg)`-fixed-offset convention this
+  project already used successfully in CPoller/CChunkServer/
+  CSysExMsgTaskBase, plus dispatch through the 3 already-real
+  `OnRxMsgWhenIn{IDLE,SENT,WAIT}` siblings. Closing it also surfaced and fixed
+  a real, previously-hidden discrepancy: `OnRxMsgWhenInIDLE()`/
+  `OnRxMsgWhenInSENT()` had been committed as `void`, but ground truth's real
+  return value is `CSexServiceTask::TransmitSysEx()`'s own, propagated
+  through unchanged (confirmed via a genuine tail-jmp sibcall in one path and
+  a captured-eax `call` in the other) — invisible until `OnReceiveMessage()`
+  became the first real caller to use the result. Verified via 18 new host
+  KAT checks (including one that independently confirms the opaque
+  pointer-chase reads the correct byte) plus the full existing 38-check host
+  suite, all green; `test_client_comm_server` (the project's one known
+  build-dependent heisenbug) re-run 3x clean. **Not yet live-boot exercised**:
+  `CClientCommServer`'s own sole real ground-truth constructor caller,
+  `CSexServiceTask::RegisterMessageClient()`, remains a separate, deliberately
+  out-of-scope ~800-byte dependency (see this class's own header comment) --
+  so this fix, like the rest of the class, is verified via host KAT/
+  disassembly cross-check, not a live gdbstub trace; no per-instance vtable
+  was touched by this fix (`CClientCommServer::mVtbl` stays correctly
+  null/unwired, confirmed this same pass to be a non-issue rather than an 18th
+  vtable-dispatch-stub-gap instance, since nothing in the CURRENT
+  reconstruction's call graph ever dispatches through it).
 - **`CBatchDiskMainTask`'s 5 heaviest methods** (`PreloadDir`/
   `PreloadGroup`/`PrepareGroupsForPreload`/`AddItemToPreload`/
   `Exec(CMessage&)`) — confirmed `CZ`-container-scale, deferred; real

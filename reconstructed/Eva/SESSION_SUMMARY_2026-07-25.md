@@ -329,10 +329,20 @@ populated."
   `CForm` dialogs, raw `HAL_DisableInterrupts`/`HAL_EnableInterrupts`
   hardware interrupt-mask control) — not a misdiagnosis, correctly stays
   Tier-B with much more precise evidence than before.
-- **`CClientCommServer`/`CSysExMsgTaskBase`** — closed to **25 of 26** methods
-  real (the sole remaining stub, `OnReceiveMessage`, is genuinely blocked on
-  a real `CMessage` definition this project deliberately keeps as an opaque,
-  offset-read incomplete type rather than fully modeling). `CSysExMsgTaskBase`
+- **`CClientCommServer`/`CSysExMsgTaskBase`** — **CClientCommServer now closed
+  to a full 26/26** (2026-07-27 closeout pass): the last stub,
+  `OnReceiveMessage(const CMessage&)`, turned out NOT genuinely blocked on a
+  real `CMessage` definition after all -- the standing verdict had been based
+  on the parameter type alone, never an actual disassembly. A from-scratch
+  trace found it needs only 3 fixed `CMessage`-offset reads (the SAME
+  opaque-fixed-offset convention already used elsewhere in this file/
+  CPoller/CChunkServer) plus dispatch through the 3 already-real
+  `OnRxMsgWhenIn{IDLE,SENT,WAIT}` siblings -- closing it also caught a real,
+  previously-hidden bug: those 3 siblings' real return type is `int`
+  (`CSexServiceTask::TransmitSysEx()`'s own value, propagated through), not
+  `void` as previously committed, invisible until this was the first real
+  caller to use the result. See `HARDWARE_REVIEW_LOG.md` for the full
+  derivation. `CSysExMsgTaskBase`
   itself reached a full 14/14 Tier A once the `COutLink`/`COutLinkMono`/
   `CSysExMsgOutLink`/`CSysExMsgClientOutLink` output-link family was
   reconstructed. A recurring **6-FAIL** on `test_client_comm_server` was
@@ -596,8 +606,14 @@ reconstruction gap):
   here as Tier-B in earlier versions of this document, was reconstructed for
   real on 2026-07-27 (Tier A batch 8, commit `786fcd5`) — see "IPC / message
   substrate" above.
-- **`CClientCommServer`'s one remaining method** (`OnReceiveMessage`) —
-  genuinely blocked on a real `CMessage` definition.
+- ~~**`CClientCommServer`'s one remaining method** (`OnReceiveMessage`) —
+  genuinely blocked on a real `CMessage` definition.~~ **CLOSED 2026-07-27**:
+  reconstructed for real, see "IPC / message substrate" above and
+  `HARDWARE_REVIEW_LOG.md` — the class is now a full 26/26. Its own
+  ground-truth constructor caller (`CSexServiceTask::RegisterMessageClient()`)
+  remains a separate, deliberately out-of-scope dependency, so this fix is
+  not yet live-boot exercised — verified via host KAT + disassembly
+  cross-check instead.
 - **`CBatchDiskMainTask`'s deeper `CZ`-driven business logic** (`PreloadDir`/
   `PreloadGroup`/`PrepareGroupsForPreload`/`AddItemToPreload`/
   `Exec(CMessage&)`) — the mechanical majority of the class is now real, but
