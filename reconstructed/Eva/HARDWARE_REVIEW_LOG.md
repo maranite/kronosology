@@ -200,11 +200,38 @@ a small out-of-band progress-reporting channel through a `/proc` file,
 silently no-op if the file doesn't exist, and this project's own
 `OmapNKS4VirtualDriver` companion project does not currently expose this
 specific `/proc` file, so this path has never been exercised even in the
-VM/simulator environment, let alone on real hardware. No caller of any of
-the three was found anywhere in the 37,795-function export either, so it's
-unconfirmed whether real Kronos firmware itself ever actually drives this
-progress-bar channel in practice (vs. being dead/vestigial instrumentation
-in the shipping binary too).
+VM/simulator environment, let alone on real hardware.
+
+**CORRECTED 2026-07-27** (re-check triggered by the `CBDApiInstance`
+mangled-name-grep false-negative found the same day, see this file's own
+`CBDApiInstance` entry -- checking every other "no caller"/"zero callers"
+verdict in this project's docs against a fresh, independent `objdump -dr`
+sweep of the whole ground-truth binary, not a re-run of whatever the
+original search used). The original "no caller of any of the three was
+found anywhere in the 37,795-function export" claim was **wrong**, and not
+a one-off: it turned out to be representative of essentially this entire
+`ustg_user_api.h` "Stage 2 IPC substrate" batch (2026-07-25) -- see
+`include/ustg_user_api.h`'s own now-corrected per-method comments for
+`Disconnect`/`ConnectUnsolicitedFifo`/`ReadMessage`/
+`ReadMessageWithTimeout`/`ReadUnsolicitedMessage`/`SendPanelMessage` too,
+all of which had the identical false claim. For the progress channel
+specifically: `IncrementProgress()` has 72 real call sites (the KSF/KMP/KSC
+sample-format loader family -- `CLoadKsfManager::Load`/`CFileKMP::load`/
+`CFileKSC::load` -- plus `CDesktop`'s own ctor and `OnStartup()`);
+`SetProgress()` has 1 real caller (`CDesktop::OnStartup()`); `GetProgress()`
+has 2 real callers (both inside `CStorage::Initialize(CStaticLabel*,
+PegRect&)`). This **confirms**, rather than leaves unconfirmed, that real
+Kronos firmware genuinely drives this progress-bar channel during sample/
+bank loading and desktop startup -- it is real, actively-used
+instrumentation, not vestigial. No functional change needed here: every
+real caller found lives in a subsystem (KSF/KMP/KSC sample loaders,
+`CDesktop`, `CStorage`) this project has independently and separately
+confirmed out of scope, so `GetProgress`/`SetProgress`/`IncrementProgress`
+remain unreachable on THIS reconstruction's own traced call graph even
+though the "no caller anywhere in the export" framing itself was false.
+The real-HW-test question below stays open and is, if anything, now more
+likely to pay off (a large sample-bank load is a documented real trigger,
+not just a guess).
 
 Real-HW test that would help: on a real Kronos, trigger an operation
 plausibly associated with a progress indicator (loading a large sample

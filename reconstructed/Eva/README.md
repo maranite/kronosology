@@ -1176,11 +1176,27 @@ transport itself).
 
 **Real findings from reading all 12 decompiles:**
 
-- **`Disconnect()`/`ConnectUnsolicitedFifo()` have no caller anywhere in the 37,795-
-  function export** — same "real but currently unreachable" status this project has
-  already established for `OmegaExitThread` (Stage 3) and `CSTGHandleCache::Cleanup`
-  itself. Reconstructed anyway for IPC-surface completeness (Stage 2's whole point), not
-  because either is on the traced boot path.
+- **`Disconnect()`/`ConnectUnsolicitedFifo()` — "no caller anywhere in the 37,795-
+  function export" CORRECTED 2026-07-27, see `include/ustg_user_api.h`'s own per-method
+  comments and `HARDWARE_REVIEW_LOG.md`.** That claim, and the identical one this Stage 2
+  batch made for `ReadMessage`/`ReadMessageWithTimeout`/`ReadUnsolicitedMessage`/
+  `SendPanelMessage`/`GetProgress`/`SetProgress`/`IncrementProgress`, turned out to be
+  wrong across the board — a fresh full-binary `objdump -dr` sweep (triggered by the
+  `CBDApiInstance` mangled-name-grep false negative found the same day) found real
+  ground-truth callers for every one of them. `Disconnect()` is called from `CEditor::
+  CMainTask::Exec()`/`EnterCheckHardware(int)` (both already-named Tier-B stubs on this
+  project's own wired boot path); `ConnectUnsolicitedFifo()` from `CStorage::Initialize`;
+  the rest from the already-documented, deliberately out-of-scope ~150-class
+  `USTGAPIXxx::UpdateYyy()` RPC wrapper family. Net effect: none of this changes
+  reachability on THIS reconstruction's own traced call graph (every real caller found is
+  itself still an out-of-scope Tier-B stub or unreconstructed subsystem), but "no caller
+  anywhere in the export" was a false claim about ground truth, same class of error as
+  `CBDApiInstance`'s, just without CBDApiInstance's practical consequence — same "real but
+  currently unreachable [on our own call graph]" status this project has already
+  established for `OmegaExitThread` (Stage 3) and `CSTGHandleCache::Cleanup` itself
+  (independently re-verified this same pass to be a genuine 0-caller case). Reconstructed
+  anyway for IPC-surface completeness (Stage 2's whole point) — now confirmed to actually
+  BE the substrate the real USTGAPIXxx layer depends on, not just plausible scaffolding.
 - **A 5th real device node**: `ConnectUnsolicitedFifo()` opens `/dev/rtf5` (`O_NONBLOCK`)
   — the "unsolicited message" channel `ReadUnsolicitedMessage()` reads from. Together
   with `/dev/rtf0`/`/dev/rtf1`/`/dev/dmsg0` (`Connect()`, Stage 1) and `/dev/rtf7`
@@ -2503,7 +2519,18 @@ vtable array — see that commit message). This batch deliberately avoided
 touching `editor.cpp`/`editor.h`/`panel_ifc_task.*` to stay out of the other
 two passes' way, and surveyed three specific leads instead.
 
-**`CBDApiInstance` re-checked, confirmed a genuine dead end.** The prior
+**`CBDApiInstance` re-checked, confirmed a genuine dead end.** — **STALE NOTE,
+RETRACTED 2026-07-27: this verdict was WRONG, see `HARDWARE_REVIEW_LOG.md`'s
+`CBDApiInstance` entry.** The "zero call sites... confirmed by grepping every
+decompile for the mangled symbol" claim below rested on a hand-constructed
+Itanium mangled name with the wrong length-prefix digits (13/12 instead of
+the real 14/13 for `CBDApiInstance`/`CBatchDiskMan`), silently matching
+nothing. A corrected `objdump -dr` sweep found exactly one real call site,
+`CBatchDiskManConstructor::Create()` — already-reconstructed, boot-path-
+reachable code. `CBDApiInstance` is now fully reconstructed
+(`bd_api_instance.h`/`.cpp`) and `RegisterLoader()` is wired in for real.
+Left the rest of this section unmodified below as the historical record of
+how the mistake happened, not as current guidance. The prior
 survey's "no boot-path caller found" verdict was checked harder this round,
 specifically for virtual-dispatch-only callers (the technique that found
 `CClientCommServer`). Traced its one plausible real caller,
