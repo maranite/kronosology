@@ -299,6 +299,15 @@ int main(void)
 	QueueObj *q3objB = (QueueObj *)mmap32(sizeof(QueueObj));
 	q3objB->allocHandle = 5; q3objB->mask = 0xf;
 
+	/* CKorgUsbAudioDriverMidiPorts::sInstance is no longer constructed by
+	 * an automatic C++ static initializer (see the class comment in
+	 * oa_engine_init.h) -- called explicitly here, matching the real
+	 * kernel's do_mod_ctors()-before-init_module() timing that
+	 * src/init/init_module.cpp's own explicit call mirrors. All the
+	 * mocks it depends on (CSTGMidiPortManager::sInstance etc.) must be
+	 * in place first, same as before. */
+	CKorgUsbAudioDriverMidiPorts::sInstance.Construct();
+
 	printf("[1] CKorgUsbAudioDriverMidiPorts::sInstance -- static ctor sanity\n");
 	{
 		CSTGMidiInPortKorgUsb *in0 = CKorgUsbAudioDriverMidiPorts::sInstance.InPort(0);

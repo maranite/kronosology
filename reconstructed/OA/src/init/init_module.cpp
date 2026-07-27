@@ -169,6 +169,22 @@ int init_module(void)
 	void *current;
 	unsigned long originalCpuMask;
 
+	/* Manual substitute for the real kernel's do_mod_ctors()
+	 * (kernel/module.c), which runs every entry in this module's
+	 * .ctors section BEFORE init_module() is even entered (confirmed:
+	 * CONFIG_CONSTRUCTORS=y in /home/build/linux-kronos's .config,
+	 * do_mod_ctors() called from the init_module syscall handler
+	 * right before do_one_initcall(mod->init)). Ground truth's own
+	 * init_cpp_support() (step 1 below) is confirmed a literal 1-byte
+	 * `ret` precisely BECAUSE the kernel already ran .ctors by this
+	 * point -- not because no ctor mechanism exists. This project's
+	 * host GCC (12.x) has no -fno-use-init-array escape hatch, so
+	 * CKorgUsbAudioDriverMidiPorts::sInstance's real construction
+	 * (midi_korgusb_port.cpp) is called here explicitly, FIRST, to
+	 * match do_mod_ctors()'s real relative timing. See the class
+	 * comment in oa_engine_init.h for the full ground-truth trace. */
+	ConstructKorgUsbMidiPorts();
+
 	oa_debug_marker(1);
 	init_cpp_support();				/* step 1 */
 

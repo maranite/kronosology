@@ -1129,13 +1129,56 @@ struct CSTGMidiQueueMessageReader {
  * outPortFlagsInit=0}, pair1 = {korgUsbPort=1, stgPort=1,
  * inPortFlagsInit=1, outPortFlagsInit=0}.
  */
+/*
+ * `sInstance`'s real construction is NOT run via an automatic C++ static
+ * initializer -- deliberately. Ground truth's own compiler placed this
+ * ctor's dynamic-init call in `.ctors` (CONFIRMED: `_GLOBAL__I__ZN28
+ * CKorgUsbAudioDriverMidiPorts9sInstanceE`, `.text+0x340380`, is a
+ * literal entry inside OA.ko's own 584-entry `.ctors` array -- found at
+ * raw byte offset 0x4e0, via `objdump -s -j .ctors`), and this exact
+ * kernel (`/home/build/linux-kronos`, `CONFIG_CONSTRUCTORS=y`) really
+ * does run every `.ctors` entry: `kernel/module.c`'s `do_mod_ctors()`
+ * is called from the `init_module` syscall handler BEFORE `mod->init`
+ * (this project's own `init_module()`) is ever entered. This is a
+ * genuine, working ctor-array mechanism -- NOT the same situation as
+ * `init_cpp_support()` being a confirmed no-op (that function is a
+ * no-op precisely BECAUSE the kernel already ran `.ctors` before
+ * `init_module()` started, not because no ctor mechanism exists at all).
+ *
+ * The problem is toolchain drift: this project's host GCC (12.x) has no
+ * `-fno-use-init-array` escape hatch, so a plain global object with a
+ * non-trivial constructor here lands in `.init_array` instead --
+ * confirmed via `nm OA.o | grep GLOBAL`, symbol `_GLOBAL__sub_I__ZN28
+ * CKorgUsbAudioDriverMidiPorts9sInstanceE`. `do_mod_ctors()` only walks
+ * `.ctors` (grepped the whole of kernel/module.c -- no `.init_array`
+ * handling exists anywhere in it), so that initializer would NEVER run
+ * on the real target kernel, leaving `sInstance` permanently
+ * all-zero -- the same underlying bug class fixed in commit `804b909`
+ * for `CSTGAudioInputMixer`'s vtable, just manifesting as a whole-object
+ * ctor instead of two vtable-slot writes.
+ *
+ * Fix: give this class NO user-declared constructor at all (so
+ * declaring `sInstance` needs no dynamic initializer whatsoever -- it's
+ * plain zeroed BSS, exactly like it would be immediately before
+ * `do_mod_ctors()` ran in ground truth), and move the real construction
+ * logic into an ordinary method, `Construct()`, called explicitly and
+ * FIRST from `init_module()` (src/init/init_module.cpp) -- matching
+ * `do_mod_ctors()`'s real relative timing (strictly before every other
+ * init_module step, including `init_cpp_support()`). The host verify
+ * build (verify/test_midi_korgusb_port.cpp) calls the same `Construct()`
+ * explicitly too, for the same reason -- this project's convention of
+ * "explicit populate call instead of trusting a compiler-emitted ctor"
+ * already used for the `sMsgHandler` dispatch tables elsewhere.
+ */
 class CKorgUsbAudioDriverMidiPorts {
 public:
 	unsigned char storage[2 * 0xb48];
 
 	static CKorgUsbAudioDriverMidiPorts sInstance;
 
-	CKorgUsbAudioDriverMidiPorts();
+	/* Real construction logic -- see the class comment above for why
+	 * this is a plain method, not a constructor. */
+	void Construct();
 
 	/* Raw sub-object accessors -- see the class comment for why these
 	 * are offset-based rather than nested C++ members. `pairIdx` is 0

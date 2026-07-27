@@ -273,6 +273,7 @@ extern "C" {
 void oa_debug_marker(int) { }
 void init_cpp_support(void) { log_call("init_cpp_support"); }
 void cleanup_cpp_support(void) { log_call("cleanup_cpp_support"); }
+void ConstructKorgUsbMidiPorts(void) { log_call("ConstructKorgUsbMidiPorts"); }
 
 static unsigned char sFakeTask[0x100];
 static unsigned long sOriginalMask = 0xdeadbeef;

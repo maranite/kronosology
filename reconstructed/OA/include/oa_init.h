@@ -42,10 +42,38 @@ extern "C" {
  * void-returning) rather than sharing an implementation -- same pattern
  * as `OmapNKS4Module/main.cpp`'s own declarations. Not implemented here;
  * running the real static-constructor array is its own bounded unit of
- * work, out of scope for the init_module skeleton itself.
+ * work, out of scope for the init_module skeleton itself. Ground
+ * truth's own init_cpp_support() is confirmed a literal 1-byte `ret`
+ * (see startup_helpers.cpp) -- a genuine no-op, NOT evidence that no
+ * ctor mechanism exists: the real kernel's do_mod_ctors() (kernel/
+ * module.c, gated by CONFIG_CONSTRUCTORS=y in this project's own
+ * /home/build/linux-kronos .config) already runs every .ctors entry
+ * BEFORE init_module() is even entered, which is exactly why this
+ * function has nothing left to do.
  */
 void init_cpp_support(void);
 void cleanup_cpp_support(void);
+
+/*
+ * Manual substitute for ONE specific do_mod_ctors() entry that this
+ * project's own host toolchain (GCC 12.x, no -fno-use-init-array) can't
+ * reproduce faithfully: CKorgUsbAudioDriverMidiPorts::sInstance
+ * (midi_korgusb_port.cpp) has a real, non-trivial constructor that
+ * ground truth's OWN older compiler placed in `.ctors` (confirmed via
+ * objdump -s -j .ctors on the real OA.ko, entry at raw byte offset
+ * 0x4e0), which do_mod_ctors() genuinely runs. This project's build
+ * puts the equivalent C++ static initializer in `.init_array` instead
+ * (confirmed via nm on the built OA.o) -- a section do_mod_ctors()
+ * never scans (grepped the whole of kernel/module.c) -- so it would
+ * never run on the real target kernel. Called explicitly, FIRST, from
+ * init_module() to match do_mod_ctors()'s real relative timing (see
+ * that call site's own comment, and the class comment in
+ * oa_engine_init.h, for the full ground-truth trace). Plain free
+ * function (not the C++ method directly) so this project's existing
+ * init_module()-in-isolation host test can mock it like every other
+ * step, same as init_cpp_support() above.
+ */
+void ConstructKorgUsbMidiPorts(void);
 
 /* Step 3. Already reconstructed (STGEnabler/STGEnabler.c, real
  * signatures confirmed there, EXPORT_SYMBOL'd -- real first parameter is

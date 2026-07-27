@@ -148,9 +148,12 @@ extern "C" void *stg_get_current_task(void);
 CKorgUsbAudioDriverMidiPorts CKorgUsbAudioDriverMidiPorts::sInstance;
 
 /*
- * CKorgUsbAudioDriverMidiPorts::CKorgUsbAudioDriverMidiPorts() --
- * CONFIRMED real, full transcription. Builds both `CMidiPortPair`s at
- * their fixed raw offsets (see class comment, oa_engine_init.h):
+ * CKorgUsbAudioDriverMidiPorts::Construct() -- CONFIRMED real, full
+ * transcription of the real ctor's body (`.text+0x3400f0`, 170 bytes).
+ * Deliberately NOT a C++ constructor -- called explicitly instead, see
+ * the class comment in oa_engine_init.h for why (ctor-array/.init_array
+ * vs .ctors toolchain mismatch). Builds both `CMidiPortPair`s at their
+ * fixed raw offsets (see class comment, oa_engine_init.h):
  * selfPtr/callbackFnPtr, the base `CSTGMidiInPort` ctor (portType/
  * flagsInit CONFIRMED via register loads at each call site -- pair0:
  * stgPort=0,flagsInit=1; pair1: stgPort=1,flagsInit=1), the derived
@@ -159,7 +162,7 @@ CKorgUsbAudioDriverMidiPorts CKorgUsbAudioDriverMidiPorts::sInstance;
  * stgPort=0/1, flagsInit=0 for both -- CONFIRMED, the 3rd ctor arg is
  * pushed as a literal `0` at both call sites).
  */
-CKorgUsbAudioDriverMidiPorts::CKorgUsbAudioDriverMidiPorts()
+void CKorgUsbAudioDriverMidiPorts::Construct()
 {
 	for (int i = 0; i < 2; i++) {
 		unsigned char *pair = storage + i * 0xb48;
@@ -175,6 +178,18 @@ CKorgUsbAudioDriverMidiPorts::CKorgUsbAudioDriverMidiPorts()
 
 		new (outPort) CSTGMidiOutPortKorgUsb(i, i, 0);
 	}
+}
+
+/*
+ * Plain extern "C" wrapper around Construct() -- see the class comment
+ * in oa_engine_init.h and this call site's own comment in
+ * init_module.cpp for why this isn't just an automatic C++ static
+ * initializer. A free function so init_module()'s own isolated host
+ * test can mock it like every other init step.
+ */
+extern "C" void ConstructKorgUsbMidiPorts(void)
+{
+	CKorgUsbAudioDriverMidiPorts::sInstance.Construct();
 }
 
 /*
