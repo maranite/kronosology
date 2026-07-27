@@ -1350,6 +1350,40 @@ RECONSTRUCTED = {
     "082438c0",  # CBDApiInstance::IsPreloadRunning() const
     "08243830",  # CBDApiInstance::IsPreloadRunning(unsigned char, char const*) const
     "082456d0",  # TVector<CBatchDiskMan*,1>::MakeCapacity(unsigned int)
+
+    # --- Eva fresh broad-survey pass, 2026-07-27: cross-referenced every real
+    # PreKernelConstructor/PostKernelConstructor/PreKernelDestructor/
+    # PostKernelDestructor override in the ground-truth binary (symbols.csv) against
+    # this project's own CGlobalObjectBase-derived coverage. Found 4 real overriding
+    # classes never touched at all: CResFamily, CPool, CSlotPool, CKernelDeathNotifier.
+    # CPool/CSlotPool deferred (need an unmodeled TVector<T,N> template + a
+    # CSlotStateFree singleton, and their owning classes CSysExSnifferBase::
+    # CSampleItem/CSeqScheduler are themselves deep unmodeled subsystems) -- see
+    # PROJECT_BRAIN status.md for the full writeup. CResFamily/CKernelDeathNotifier
+    # ARE genuinely tractable (same "size is not depth" narrow-scope precedent as
+    # CJobStack/CRTRouterApiInstance above) and reconstructed for real this pass.
+
+    # CKernelDeathNotifier (kernel_death_notifier.h/.cpp): trivial 8-byte class, one
+    # real global (g_oKernelDeathNotifier), one real override (PreKernelDestructor).
+    "0817cbe0",  # CKernelDeathNotifier::PreKernelDestructor(unsigned long)
+    "0817cbf0",  # CKernelDeathNotifier::~CKernelDeathNotifier() [D1]
+    "0817cc10",  # CKernelDeathNotifier::~CKernelDeathNotifier() [D0, deleting]
+    "0805e780",  # global.constructors.keyed.to.g_oKernelDeathNotifier
+
+    # CResFamily (res_family.h/.cpp): construction/destruction + the 2 phase-hook
+    # overrides only. The class's own 15 business-logic methods (SetName/SetSize/
+    # Clear/GetFreeRes/GetResFreePosZ/SetLoadType/GetLoadedElemPos/
+    # GetLoadedElemCount/GetLoadedElem/RemoveLoadedElem/AppendLoadedElem/
+    # IsLoadedResListFull x2/GetGroupCount/GetCountZ/AddGroupElem) stay
+    # unreconstructed/out of scope -- same CZ-container-adjacent boundary
+    # CConfigManager::CreateResourceFamilies() itself already has (config_manager.cpp)
+    # -- NOT added here.
+    "08063480",  # CResFamily::CResFamily()
+    "0817ce10",  # CResFamily::~CResFamily() [D1]
+    "0817cfb0",  # CResFamily::~CResFamily() [D0, deleting]
+    "080633a0",  # CResFamily::PostKernelConstructor(unsigned long)
+    "08063300",  # CResFamily::PostKernelDestructor(unsigned long)
+    "08069b90",  # global.constructors.keyed.to.g_atResFamilies (32-instance array)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
