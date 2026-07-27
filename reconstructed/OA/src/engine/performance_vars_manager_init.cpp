@@ -30,10 +30,16 @@
  *   +0x000  placement-constructed `CSTGAudioInputMixer` (a thin derived
  *           class over the already-real `CSTGAudioInputMixerBase`, 0x10
  *           bytes of own fields -- see oa_global.h). Immediately after
- *           construction, `+0x0` is unconditionally overwritten with the
- *           literal `8` -- confirmed real, preserved verbatim (whatever
- *           the deferred ctor itself would have written there is
- *           immediately clobbered either way).
+ *           construction, `+0x0` is re-written with the DERIVED class's
+ *           own vtable pointer (`&vtable-for-CSTGAudioInputMixer + 8`,
+ *           standard Itanium-ABI "most-derived vtable installed last"
+ *           construction order -- NOT the literal integer 8; a prior
+ *           session's claim of "literal 8, preserved verbatim" missed the
+ *           R_386_32 relocation on that immediate operand and was WRONG,
+ *           found+fixed 2026-07-27 after it caused a real, live kernel
+ *           NULL-pointer-deref Oops in `SetSendBuses()` -- see
+ *           audio_input_mixer.cpp's own `AudioInputMixerAsRawVtablePtr()`
+ *           and oa_global.h's comment on `ShouldMute`/`GetOutputBus`).
  *   +0x020  12 embedded "channel mixer state" sub-objects, `0x210`-byte
  *           stride (ending at `+0x1900`).
  *   +0x18e0 2 more, `0x170`-byte stride (OVERLAPS the tail of the 12-entry
@@ -130,12 +136,38 @@ void CSTGPerformanceVarsManager::Initialize()
 		unsigned char *mgr = CSTGBankMemory::AllocAligned(0xb6d0, 0x40);
 
 		new (mgr) CSTGAudioInputMixer();
-		*(unsigned int *)(mgr + 0x0) = 8;
+		/*
+		 * FIXED 2026-07-27 (was `*(unsigned int *)(mgr + 0x0) = 8;`,
+		 * a literal-integer transcription bug): ground truth's real
+		 * instruction here is `mov DWORD PTR [ebx],0x8` with an
+		 * R_386_32 relocation on that immediate operand pointing at
+		 * `_ZTV19CSTGAudioInputMixer` -- i.e. this stores
+		 * `&vtable-for-CSTGAudioInputMixer + 8`, NOT the literal
+		 * integer 8. This is completely ordinary Itanium-ABI
+		 * construction order: the base ctor (just called above)
+		 * installs the BASE class's own vtable pointer first, then
+		 * the (implicit, compiler-generated) DERIVED ctor re-installs
+		 * the DERIVED class's vtable pointer, standard "most-derived
+		 * vtable wins" semantics -- not a real ground-truth quirk to
+		 * preserve verbatim. The previous session's header comment
+		 * calling this "confirmed real, preserved verbatim" missed
+		 * the relocation and was wrong; found 2026-07-27 via a live
+		 * kronos_vm dynamic-verification pass that hit a genuine
+		 * kernel NULL-pointer-deref Oops in `SetSendBuses()` (this
+		 * object's vtable pointer really was the integer 8 at
+		 * runtime, so `(*(void***)this)[3]` read address 0x14 ->
+		 * page fault) -- see oa_global.h's own comment on
+		 * `CSTGAudioInputMixer::ShouldMute`/`GetOutputBus` for the
+		 * full derivation of the real vtable this now installs.
+		 */
+		*(void **)mgr = AudioInputMixerAsRawVtablePtr();
 
 		/* ---- 12 entries, stride 0x210, base mgr+0x20 ---- */
 		unsigned char *p = mgr + 0x20;
 		for (unsigned int n = 0; n < 12; n++, p += 0x210) {
+			if (n == 0)
 			ZeroChannelMixerHead(p);
+			if (n == 0)
 			*(unsigned int *)(p + 0x1c0) = 0;
 			p[0x1c8] = 0x20; p[0x1c9] = 0;
 			p[0x1ca] = 0x20; p[0x1cb] = 0;

@@ -41,6 +41,14 @@ unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
  * sGlobalBusSet above; this test never exercises either call path but
  * still links audio_input_mixer.cpp whole. */
 unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
+/* Needed now that CSTGAudioInputMixer::GetOutputBus()/ShouldMute()
+ * (2026-07-27) are real -- same rationale as sGlobalBusSet/
+ * sEffectThreadBusSets above (own local storage, not linked from
+ * audio_bus_manager.cpp/controller_rt_data_ctor.cpp in this test binary). */
+unsigned char CSTGAudioBusManager::sSynthesisThreadBusSets[960 * 0x80];
+CSTGControllerRTData *CSTGControllerRTData::sInstance;
+static unsigned char g_fakeControllerRTData_audioMixerFix[0x40];
+
 unsigned char CSTGPerformanceVarsManager::sInstance[12];
 
 /*
@@ -67,6 +75,9 @@ unsigned char *STGAPIFrontPanelStatus::sInstance;
 
 int main(void)
 {
+	memset(g_fakeControllerRTData_audioMixerFix, 0, sizeof(g_fakeControllerRTData_audioMixerFix));
+	CSTGControllerRTData::sInstance = (CSTGControllerRTData *)g_fakeControllerRTData_audioMixerFix;
+
 	printf("CSTGPlaybackBuffer/CSTGSampler/CSTGCDAudioPlay/CSTGHDRManager::Initialize() KAT\n");
 	printf("=========================================================\n");
 

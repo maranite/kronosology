@@ -338,6 +338,18 @@ public:
 	 */
 	static unsigned char sGlobalBusSet[34 * 0x80];
 	static unsigned char sEffectThreadBusSets[240 * 0x80];
+
+	/*
+	 * sSynthesisThreadBusSets (found 2026-07-27 via a live kronos_vm
+	 * dynamic-verification pass, see CSTGAudioInputMixer::GetOutputBus()
+	 * below) -- a THIRD, separate 128-byte-per-bus static array,
+	 * confirmed real and correctly sized via `nm -S` against the real
+	 * `OA.ko` (`_ZN19CSTGAudioBusManager23sSynthesisThreadBusSetsE`,
+	 * 0x1e000 bytes = 960 slots). Indexed by `GetOutputBus()` for bus
+	 * IDs > 0x21 (33): `busId + channelCount*0x78 - 0x22`, confirmed via
+	 * that function's own disassembly.
+	 */
+	static unsigned char sSynthesisThreadBusSets[960 * 0x80];
 };
 
 struct CSTGPlaybackEvent;	/* forward decl, real definition in oa_engine_init.h */

@@ -91,6 +91,14 @@ unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 /* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
  * Initialize() are real too (batch 58), same rationale. */
 unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
+/* Needed now that CSTGAudioInputMixer::GetOutputBus()/ShouldMute()
+ * (2026-07-27) are real -- same rationale as sGlobalBusSet/
+ * sEffectThreadBusSets above (own local storage, not linked from
+ * audio_bus_manager.cpp/controller_rt_data_ctor.cpp in this test binary). */
+unsigned char CSTGAudioBusManager::sSynthesisThreadBusSets[960 * 0x80];
+CSTGControllerRTData *CSTGControllerRTData::sInstance;
+static unsigned char g_fakeControllerRTData_audioMixerFix[0x40];
+
 /* TSTGArrayManager<T>::sInstance's own generic (non-specialized) template
  * definition lives only in engine_init.cpp (not linked here) -- this file
  * links managers.cpp/playback_buffer_events.cpp directly and needs its
@@ -161,6 +169,9 @@ static unsigned char *FromU32(unsigned int v) { return (unsigned char *)(unsigne
 
 int main(void)
 {
+	memset(g_fakeControllerRTData_audioMixerFix, 0, sizeof(g_fakeControllerRTData_audioMixerFix));
+	CSTGControllerRTData::sInstance = (CSTGControllerRTData *)g_fakeControllerRTData_audioMixerFix;
+
 	printf("playback_buffer_events known-answer test\n");
 	printf("=========================================================\n");
 

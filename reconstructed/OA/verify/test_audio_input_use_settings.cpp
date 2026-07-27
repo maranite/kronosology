@@ -66,6 +66,14 @@ unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 /* Needed now that CSTGAudioInputMixer::Initialize()/CSTGMasterLRMixer::
  * Initialize() are real too (batch 58), same rationale. */
 unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
+/* Needed now that CSTGAudioInputMixer::GetOutputBus()/ShouldMute()
+ * (2026-07-27) are real -- same rationale as sGlobalBusSet/
+ * sEffectThreadBusSets above (own local storage, not linked from
+ * audio_bus_manager.cpp/controller_rt_data_ctor.cpp in this test binary). */
+unsigned char CSTGAudioBusManager::sSynthesisThreadBusSets[960 * 0x80];
+CSTGControllerRTData *CSTGControllerRTData::sInstance;
+static unsigned char g_fakeControllerRTData_audioMixerFix[0x40];
+
 
 /* Storage for the CSTGGlobal singleton pointer OnPerformanceDeactivate()
  * reads its `+0x680`/`+0x67f` fields through (batch 20). A plain buffer is
@@ -92,6 +100,9 @@ unsigned char *ResolveActivePerformanceVarsManagerRaw()
 
 int main(void)
 {
+	memset(g_fakeControllerRTData_audioMixerFix, 0, sizeof(g_fakeControllerRTData_audioMixerFix));
+	CSTGControllerRTData::sInstance = (CSTGControllerRTData *)g_fakeControllerRTData_audioMixerFix;
+
 	printf("CSTGAudioInput::UseSettings() known-answer test\n");
 	printf("================================================\n");
 

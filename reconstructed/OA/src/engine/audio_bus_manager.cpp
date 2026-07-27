@@ -43,6 +43,7 @@
 
 unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
 unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
+unsigned char CSTGAudioBusManager::sSynthesisThreadBusSets[960 * 0x80];
 
 void CSTGAudioBusManager::LRBusIndivMirror()
 {

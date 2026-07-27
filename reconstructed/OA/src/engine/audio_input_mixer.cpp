@@ -257,6 +257,111 @@ void CSTGAudioInputMixerBase::SetSendBuses()
 }
 
 /*
+ * CSTGAudioInputMixer's own vtable (found 2026-07-27, live dynamic-
+ * verification pass) -- REAL, ground-truthed via `.rel.rodata._ZTV19
+ * CSTGAudioInputMixer` (4 relocations at symbol+0x8/0xc/0x10/0x14):
+ * slot0/1 = the D1/D0 destructors (not dispatched anywhere in this
+ * project, left as safe no-ops), slot2 = `ShouldMute(unsigned int) const`,
+ * slot3 = `GetOutputBus(int)` -- the exact slot `SetSendBuses()`'s
+ * `(*(void***)this)[3]` dispatches, confirmed by the live NULL-deref Oops
+ * this fix resolves (see oa_global.h's own comment on both methods).
+ */
+namespace {
+/* Same non-virtual member-function-pointer -> raw void* type pun as
+ * control_msg_handler.cpp's own `AsRawFn` (see that file's header comment
+ * for the full Itanium-ABI justification) -- duplicated locally rather
+ * than shared since these are separate translation units. */
+template <typename T>
+void *AudioInputMixerAsRawFn(T memberFnPtr)
+{
+	void *raw;
+	__builtin_memcpy(&raw, &memberFnPtr, sizeof(raw));
+	return raw;
+}
+
+struct AudioInputMixerVtable {
+	void *offsetToTop;
+	void *rtti;
+	void *dtorComplete;
+	void *dtorDeleting;
+	void *shouldMute;
+	void *getOutputBus;
+};
+bool CSTGAudioInputMixerDtorPlaceholder(void *) { return false; }
+AudioInputMixerVtable g_audioInputMixerVtable = {
+	0, 0,
+	(void *)&CSTGAudioInputMixerDtorPlaceholder,
+	(void *)&CSTGAudioInputMixerDtorPlaceholder,
+	AudioInputMixerAsRawFn(&CSTGAudioInputMixer::ShouldMute),
+	AudioInputMixerAsRawFn(&CSTGAudioInputMixer::GetOutputBus),
+};
+} /* anonymous namespace */
+
+/* Exposed to performance_vars_manager_init.cpp (a separate TU) so it can
+ * install the real derived-class vtable pointer -- see oa_global.h's
+ * declaration and that file's own comment on the bug this replaces. */
+void *AudioInputMixerAsRawVtablePtr()
+{
+	return (void *)&g_audioInputMixerVtable.dtorComplete;
+}
+
+/*
+ * CSTGAudioInputMixer::ShouldMute(unsigned int) const (found 2026-07-27,
+ * `.text+0x68770`, 87 bytes) confirmed: true if the current double-buffer
+ * selector (`CSTGPerformanceVarsManager::sInstance[9]`) equals this
+ * object's own `channelCountByte`; else, if
+ * `CSTGControllerRTData::sInstance`'s `+0x22` word AND `+0x24` low-3-bytes
+ * are BOTH zero, returns the per-bus-entry mute byte at
+ * `mixerStateArray[busId*0x90 + 0x84]`; otherwise returns the INVERSE of
+ * bit `busId` of `CSTGControllerRTData::sInstance+0x26`. Not currently
+ * dispatched by any already-reconstructed code in this project (only
+ * `GetOutputBus`, slot3, is -- via `SetSendBuses()`), reconstructed here
+ * anyway since it was already fully disassembled while ground-truthing
+ * the vtable this fix installs.
+ */
+bool CSTGAudioInputMixer::ShouldMute(unsigned int busId) const
+{
+	if (CSTGPerformanceVarsManager::sInstance[9] == channelCountByte)
+		return true;
+
+	unsigned char *rt = (unsigned char *)CSTGControllerRTData::sInstance;
+	unsigned char *mixerArr = FromU32(mixerStateArray32);
+
+	if (*(unsigned short *)(rt + 0x22) == 0 &&
+	    (*(unsigned int *)(rt + 0x24) & 0xffffff) == 0) {
+		return mixerArr[busId * 0x90 + 0x84] != 0;
+	}
+
+	unsigned char flags = rt[0x26];
+	bool bit = (flags >> (busId & 0x1f)) & 1;
+	return !bit;
+}
+
+/*
+ * CSTGAudioInputMixer::GetOutputBus(int) (found 2026-07-27, `.text+0x687d0`,
+ * 27 bytes) confirmed: for `busId <= 0x21` (33), returns a pointer into
+ * `CSTGAudioBusManager::sGlobalBusSet` at `busId*0x80`. For `busId > 0x21`,
+ * returns a pointer into the newly-identified `CSTGAudioBusManager::
+ * sSynthesisThreadBusSets` (see oa_engine.h) at
+ * `(busId + channelCountByte*0x78 - 0x22) * 0x80`. THIS is the function
+ * `SetSendBuses()` (below) genuinely dispatches via vtable slot3, with
+ * fixed busId args `0x32`/`0x34` (both > 0x21, so both calls take the
+ * sSynthesisThreadBusSets branch) -- confirmed by a live kronos_vm boot
+ * NULL-deref Oops at this exact dispatch site before this fix (the
+ * derived vtable pointer had been mis-transcribed as a literal integer
+ * `8` instead of the real `&_ZTV19CSTGAudioInputMixer+8`, see
+ * performance_vars_manager_init.cpp).
+ */
+void *CSTGAudioInputMixer::GetOutputBus(int busId)
+{
+	if ((unsigned int)busId <= 0x21)
+		return CSTGAudioBusManager::sGlobalBusSet + (unsigned int)busId * 0x80;
+
+	unsigned int idx = (unsigned int)busId + (unsigned int)channelCountByte * 0x78 - 0x22;
+	return CSTGAudioBusManager::sSynthesisThreadBusSets + idx * 0x80;
+}
+
+/*
  * CSTGAudioInputMixer::Initialize(unsigned int) (batch 58, `.text+0x68800`,
  * 117 bytes) confirmed -- see this method's own declaration comment in
  * oa_global.h for the full derivation (fixed 6-entry base Initialize()

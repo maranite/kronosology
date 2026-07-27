@@ -1905,7 +1905,39 @@ struct CSTGAudioInputMixer : public CSTGAudioInputMixerBase {
 	unsigned char channelCountByte;	/* +0x10, confirmed real, write-only */
 
 	void Initialize(unsigned int count);
+
+	/*
+	 * ShouldMute(unsigned int)/GetOutputBus(int) -- CSTGAudioInputMixer's
+	 * own vtable overrides (found 2026-07-27, live kronos_vm dynamic-
+	 * verification pass: `CSTGPerformanceVarsManager::Initialize()`
+	 * genuinely dispatches `SetSendBuses()`'s `(*(void***)this)[3]` call
+	 * through THIS derived class's own vtable, not the base's -- ground
+	 * truth's real `CSTGAudioInputMixerBase::CSTGAudioInputMixerBase()`
+	 * installs the base vtable+8 first, but the very next instruction in
+	 * `CSTGPerformanceVarsManager::Initialize()` re-installs THIS
+	 * derived vtable+8 immediately after, standard Itanium-ABI
+	 * most-derived-vtable-wins construction order -- confirmed via
+	 * `readelf -rW`/raw `.rel.rodata._ZTV19CSTGAudioInputMixer` relocation
+	 * read against the real binary, NOT by trusting the prior session's
+	 * own header-comment claim that this was "unconditionally overwritten
+	 * with the literal 8" -- that claim missed the R_386_32 relocation
+	 * attached to that immediate operand and was WRONG; it caused a real,
+	 * live kernel NULL-pointer-deref Oops in `SetSendBuses()` every time
+	 * OA.ko's init_module actually ran on real hardware/a real kernel
+	 * (only ever silently missed before because no build with this
+	 * function present had ever actually been insmod-tested until this
+	 * pass). See performance_vars_manager_init.cpp's own updated comment
+	 * for the fix and audio_input_mixer.cpp for both methods' bodies.
+	 */
+	bool ShouldMute(unsigned int busId) const;
+	void *GetOutputBus(int busId);
 };
+
+/* Real `&vtable-for-CSTGAudioInputMixer + 8` (audio_input_mixer.cpp) --
+ * exposed so performance_vars_manager_init.cpp can install it after
+ * placement-constructing a `CSTGAudioInputMixer`, matching ground truth's
+ * own construction-order behavior (see that file's own comment). */
+void *AudioInputMixerAsRawVtablePtr();
 
 /*
  * CSTGMasterLRMixer -- confirmed real (batch 53, relocation from

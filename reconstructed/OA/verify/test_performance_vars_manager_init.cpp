@@ -43,6 +43,16 @@ static unsigned char *mmap32(unsigned long size)
 static int g_ctorCalls;
 CSTGAudioInputMixerBase::CSTGAudioInputMixerBase() { g_ctorCalls++; }
 
+/* Mock for the real `&vtable-for-CSTGAudioInputMixer + 8` accessor
+ * (audio_input_mixer.cpp, not linked here -- matches this file's own
+ * established "mock the heavy callee" convention). A fixed sentinel value
+ * is enough: this test only needs to confirm Initialize() installs
+ * WHATEVER this function returns at mgr+0x0 (replacing the old, WRONG
+ * "literal 8" expectation -- see performance_vars_manager_init.cpp's own
+ * updated comment on the 2026-07-27 fix), not the real vtable address. */
+static void *const kFakeVtablePtr = (void *)0xdeadbeefu;
+void *AudioInputMixerAsRawVtablePtr() { return kFakeVtablePtr; }
+
 static int g_aimInitCalls;
 static void *g_aimInitThis[4];
 static unsigned int g_aimInitArg[4];
@@ -137,7 +147,9 @@ int main(void)
 
 	printf("[3] per-mgr scalar fields (slot 0)\n");
 	{
-		check_eq("mgr0+0x0 == 8", *(unsigned int *)(mgr0 + 0x0), 8);
+		check_eq("mgr0+0x0 == AudioInputMixerAsRawVtablePtr() (FIXED 2026-07-27, was wrongly literal 8)",
+			 (unsigned int)(unsigned long)(*(void **)(mgr0 + 0x0)),
+			 (unsigned int)(unsigned long)kFakeVtablePtr);
 		check_eq("mgr0+0x23d0 == 0 (slot index i=0)", mgr0[0x23d0], 0);
 		check_eq("mgr0+0x23d1 == 0", mgr0[0x23d1], 0);
 		check_eq("mgr0+0x23dc == 0", mgr0[0x23dc], 0);

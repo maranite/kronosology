@@ -55,6 +55,18 @@ unsigned char CSTGAudioBusManager::sGlobalBusSet[34 * 0x80];
  * sGlobalBusSet above, own local storage, not linked from
  * audio_bus_manager.cpp in this test binary. */
 unsigned char CSTGAudioBusManager::sEffectThreadBusSets[240 * 0x80];
+/* Needed now that CSTGAudioInputMixer::GetOutputBus() (2026-07-27) is
+ * real -- same rationale as sGlobalBusSet/sEffectThreadBusSets above. */
+unsigned char CSTGAudioBusManager::sSynthesisThreadBusSets[960 * 0x80];
+
+/* CSTGControllerRTData::sInstance -- needed now that
+ * CSTGAudioInputMixer::ShouldMute() (2026-07-27) is real and dereferences
+ * it directly. Own local storage + a zeroed backing object (neutral
+ * default: +0x22==0 and +0x24's low 3 bytes==0, taking the "read the
+ * per-bus mute byte" branch rather than the bitmask-inverse branch),
+ * matching this file's own established per-test-file storage precedent. */
+CSTGControllerRTData *CSTGControllerRTData::sInstance;
+static unsigned char g_fakeControllerRTData[0x40];
 
 /* Raw vtable-slot-3 target SetFXCtrlBus/SetHDRBus both dispatch through
  * (matching the project's established raw-vtable-dispatch convention,
@@ -75,6 +87,9 @@ int main(void)
 {
 	printf("CSTGAudioInputMixerBase known-answer test\n");
 	printf("=========================================================\n");
+
+	memset(g_fakeControllerRTData, 0, sizeof(g_fakeControllerRTData));
+	CSTGControllerRTData::sInstance = (CSTGControllerRTData *)g_fakeControllerRTData;
 
 	/* Layout: +0x0 vtable ptr (8 bytes here -- see note below), +0x8
 	 * mixerStateArray32 (packed 32-bit, matches the real target's own
