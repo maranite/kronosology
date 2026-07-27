@@ -2192,15 +2192,33 @@ bool CSTGGlobal::CheckDeferExtModeChange()
 	return false;
 }
 
-void CSTGGlobal::RemoveExtCCFunctionAssignment(unsigned int tag)
+/*
+ * RemoveExtCCFunctionAssignmentByKind() (sec 10.90, corrected 2026-07-27):
+ * shared helper for BOTH real RemoveExtCCFunctionAssignment overloads.
+ * Ground truth (`objdump -dr` against OA_real.ko) confirms these are two
+ * genuinely separate `.text` addresses, `.text+0x8cf0`/`.text+0x8d30`
+ * (57 bytes each), NOT one function -- the header previously documented
+ * only the `eControllerAssign` one; the `ePerfSwitchAssign` sibling was
+ * missed entirely. Both scan the same 120-slot claim table (the SAME
+ * table `UpdateCCAssign()`'s own step 1 scans inline, sec 10.74) but
+ * differ in which `kind` byte (slot+2) they match: 0 for the
+ * `eControllerAssign` overload, 1 for `ePerfSwitchAssign` (confirmed via
+ * the real `cmpb $0x0,(%eax)` vs `cmpb $0x1,(%eax)` at the two distinct
+ * addresses).
+ */
+static void RemoveExtCCFunctionAssignmentByKind(CSTGGlobal *self, unsigned char kind, unsigned int tag)
 {
-	unsigned char *base = (unsigned char *)this;
+	unsigned char *base = (unsigned char *)self;
 	for (unsigned int i = 0; i < 0x78; i++) {
 		unsigned char *slot = base + 0x29cc11c + i * 8;
-		if (slot[2] == 0 && *(unsigned int *)(slot + 4) == tag)
+		if (slot[2] == kind && *(unsigned int *)(slot + 4) == tag)
 			slot[0] = 0;
 	}
 }
+void CSTGGlobal::RemoveExtCCFunctionAssignment(unsigned int tag)
+{ RemoveExtCCFunctionAssignmentByKind(this, 0, tag); }
+void CSTGGlobal::RemoveExtPerfSwitchFunctionAssignment(unsigned int tag)
+{ RemoveExtCCFunctionAssignmentByKind(this, 1, tag); }
 
 void CSTGGlobal::SendFXDisableCCToMidiOut(unsigned char ccNumber, bool enabled)
 {
@@ -2218,6 +2236,44 @@ void CSTGGlobal::BeginPerformanceChange(int mode, unsigned int value1, unsigned 
 	CSTGPerfChangeRequest request;
 	request.tag = 0;
 	request.mode = (unsigned int)mode;
+	request.value1 = value1;
+	request.value2 = value2;
+	request.source = source;
+	request.field14 = 0;
+	request.field18 = 0;
+	SubmitPerfChangeRequest(request);
+}
+
+/*
+ * BeginPerformanceChangeForType(eSTGPerformanceType, unsigned int,
+ * unsigned int, eSTGPerformanceChangeSource) (sec 10.90, added
+ * 2026-07-27): the real binary's SECOND `BeginPerformanceChange`
+ * overload (`.text+0x6770`, 86 bytes) -- missed by an earlier pass,
+ * which only characterized/implemented the `eGlobalMode`-taking one
+ * above. Ground-truthed via `objdump -dr`: translates `perfType`
+ * (0..2, unsigned-bounds-checked -- `ja` skips the table read and
+ * leaves the fallback 0 for any out-of-range value) through a
+ * confirmed 3-entry `.rodata` table (`{1, 0, 2}`, i.e. `eSTGPerformanceType`
+ * 0/1 map to `eGlobalMode` 1/0 -- Program/Combi are swapped between
+ * the two enums -- and 2 maps to 2 unchanged) before building the
+ * identical `CSTGPerfChangeRequest` shape and forwarding to
+ * `SubmitPerfChangeRequest`, same as the `eGlobalMode` overload.
+ * Named distinctly rather than C++-overloaded (this project's
+ * established "genuinely separate real .text addresses -> genuinely
+ * separate functions" precedent, e.g. `RemoveExtCCFunctionAssignment`/
+ * `RemoveExtPerfSwitchFunctionAssignment` above) since both real
+ * enums are otherwise modeled as plain `unsigned int` here, which
+ * would collide as a real C++ overload.
+ */
+void CSTGGlobal::BeginPerformanceChangeForType(unsigned int perfType, unsigned int value1,
+						 unsigned int value2, unsigned int source)
+{
+	static const unsigned int kPerfTypeToGlobalMode[3] = { 1, 0, 2 };
+	unsigned int mode = (perfType <= 2) ? kPerfTypeToGlobalMode[perfType] : 0;
+
+	CSTGPerfChangeRequest request;
+	request.tag = 0;
+	request.mode = mode;
 	request.value1 = value1;
 	request.value2 = value2;
 	request.source = source;

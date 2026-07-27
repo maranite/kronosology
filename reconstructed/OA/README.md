@@ -41,7 +41,7 @@ OA/
 | 0. Foundations | manifest, plan, and host verify harness in place |
 | 1. Copy-protection / auth | Fully reconstructed - KLM stamping, AT88 handshake, product glue, AuthorizationStrings/CD-ROM check, `/proc/.oacmd` procfs plumbing, and `ProcessOACmd` (all 12 real commands, byte-exact dispatch) |
 | 2. Shared utilities | Fully implemented and tested - crypto/hash primitives (`moancjsd82`, `DecodeBytesFromAscii`, `md5`), the `CSTGBankMemory` heap, `CSTGQuad`/list primitives, the `Scale*` leaf math family, and the `operator new`/`delete` allocator substrate |
-| 3. Engine core | `init_module`'s full call graph is reconstructed, including `CSTGEngine::Initialize()` and `CSTGGlobal`'s 3124-byte constructor. `CSTGGlobal`'s broader ~195-method surface (mostly per-parameter `UpdateXXX` message handlers) is partially covered - see below for what's done and what remains |
+| 3. Engine core | `init_module`'s full call graph is reconstructed, including `CSTGEngine::Initialize()` and `CSTGGlobal`'s 3124-byte constructor. `CSTGGlobal`'s broader ~195-method surface (mostly per-parameter `UpdateXXX` message handlers) is essentially fully covered as of 2026-07-27 - only 4 tiny vtable-slot methods remain, blocked on an unrecovered data layout, not a "mostly unwritten" state as earlier revisions of this table implied; see below |
 | 4. Voice models & DSP | Not started |
 | 5. Breadth sweep | Not started |
 
@@ -420,9 +420,12 @@ constants `1/120`, `+16.0`, `-16.0` are extracted from the real rodata and
 match) clamped to `[-16,16]`, but its exact FPU-conditional-move branch
 structure was not resolved with enough confidence to ship.
 
-**Message handlers.** Roughly 150 of `CSTGGlobal`'s ~195 methods are
+**Message handlers.** `CSTGGlobal`'s ~195-method surface includes 110 real
 `UpdateXXX(CSTGMessageContext&, STGConvertedParam&)` handlers, one per
-settable global parameter. Implemented so far:
+settable global parameter - **all 110 are now implemented** (confirmed via
+`nm -C` against the real binary, 2026-07-27; an earlier pass here
+undercounted this and separately mis-stated two whole families as
+"deferred", corrected below). A representative sample:
 
 | Handler(s) | Size | Behavior |
 |---|---|---|
@@ -439,12 +442,21 @@ settable global parameter. Implemented so far:
 | `UpdateCombiChangeEnable`, `UpdateAftertouchChangeEnable`, `UpdateControlChangeEnable`, `UpdateSysExEnable` | - | bool-converted stores into 4 consecutive flag bytes, `+0x6d7..+0x6da` |
 | `UpdateHeadroom` | 53 B | the first confirmed case of `STGConvertedParam.value` read as a **float** rather than `int`; broadcasts into the same `gAllPlusHeadroom`/`gAllMinusHeadroom` globals `CSTGAudioBusManager`'s constructor sets to unity gain |
 
-Two clusters are deliberately deferred, not yet implemented: the 9
-`UpdateAudioInputXXX` handlers all delegate into a whole separate,
-~30-method `CSTGAudioInput` class (some methods up to 962 bytes); the
-22-method `UpdateXXXCCAssign` family (141 bytes each) is a genuinely
-complex table-scan-and-reassign mechanism that clears old CC bindings and
-updates a reverse-lookup table.
+**Both previously-deferred clusters are now implemented** (stale claim
+corrected 2026-07-27 during a fresh survey - the code and
+`verify/test_global.cpp` coverage already existed, this section's prose
+just hadn't been reconciled after the batch that added them): the 9
+`UpdateAudioInputXXX` handlers all delegate into `CSTGAudioInput`'s own 9
+real `UpdateXXX` methods (`CSTGGlobal::CSTGAudioInput` sub-object at
+`this+0x608`, sec 10.80); the 22-method `UpdateXXXCCAssign` family (141
+bytes each) shares one `UpdateCCAssign` helper implementing the real
+table-scan-and-reassign algorithm (clears old CC bindings by linear scan,
+then reassigns via the "already-sentinel falls through" quirk faithfully
+preserved from the disassembly), plus `UpdateChordSwCCAssign` (the 23rd,
+slightly larger real sibling) and `UpdateRTKnobFuncCCAssign`/
+`UpdatePadFuncCCAssign` (a related but distinct indexed variant via
+`UpdateIndexedCCAssign`). All of it is covered by
+`verify/test_global.cpp` (see its "[12]" and CCAssign-family sections).
 
 ### Manager constructors
 
@@ -1105,10 +1117,36 @@ live physical interaction — a normal scoped task, not an open mystery.
 - **`CSTGMessageProcessor`'s declared size (`0x1040`) is a lower bound,
   not an exact `sizeof()`** - unlike the other three partially
   reconstructed managers, whose exact real sizes are confirmed.
-- **Roughly two-thirds of `CSTGGlobal`'s ~195 methods remain
-  unimplemented**, most notably the 9-method `CSTGAudioInput`-delegating
-  `UpdateAudioInputXXX` family and the 22-method `UpdateXXXCCAssign`
-  table-scan-and-reassign family, both characterized but not written.
+- **`CSTGGlobal` is essentially fully reconstructed, not "roughly
+  two-thirds unimplemented" as this section previously (incorrectly)
+  claimed** - corrected 2026-07-27 after a fresh survey found the prose
+  here badly out of sync with the actual source tree. A full `nm -C`
+  accounting against the real binary (169 distinct real methods,
+  excluding the ctor/dtor's expected C1/C2 duplicate symbols) found:
+  all 110 real `UpdateXXX` message handlers implemented (including the
+  `UpdateAudioInputXXX`/`UpdateXXXCCAssign` families a still-earlier pass
+  had also incorrectly flagged as "deferred"); the entire non-`UpdateXXX`
+  "performance change" cluster this section used to call "genuinely deep,
+  not yet attempted" (`SubmitPerfChangeRequest`, `ProcessPerfChangeRequest`,
+  `StartPendingPerformanceChange`, `CompletePerformanceChange`,
+  `InitializePerformances` - at 7021 bytes the single largest method in
+  this class besides the constructor - and everything else in that family)
+  is likewise already implemented, just spread across several files
+  (`global.cpp`, `init_performances.cpp`, and others) rather than
+  centralized, which is what threw off the earlier survey. The audit
+  turned up exactly two genuinely still-missing real methods, both small
+  and both now fixed: `RemoveExtCCFunctionAssignment(ePerfSwitchAssign)`
+  (a second real overload of a function only one overload of which had
+  been characterized - now `RemoveExtPerfSwitchFunctionAssignment`) and
+  `BeginPerformanceChange(eSTGPerformanceType, ...)` (a second real
+  overload of `BeginPerformanceChange` - now
+  `BeginPerformanceChangeForType`, including the confirmed real
+  `eSTGPerformanceType`->`eGlobalMode` translation table). What's left,
+  confirmed genuinely open: the 4 tiny (0-6 byte) real vtable-slot methods
+  `GetNumParams`/`GetParamDescriptors`/`GetMessageHandlers`/
+  `GetValueGetters` - correctly still deferred, blocked on recovering the
+  unrelated `CSTGParamDescriptor` layout (see `CSTGParamsOwner` above),
+  not a documentation gap.
 - **`CSTGVectorManager::Initialize()`'s "batch2" object ranges are never
   activated by any reconstructed code path** - whether some other,
   not-yet-reconstructed function activates them, or half the constructed

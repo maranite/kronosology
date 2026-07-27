@@ -2920,6 +2920,16 @@ int main(void)
 		check_eq("matching-tag slot un-claimed", slotA[0], 0);
 		check_eq("non-matching-tag slot untouched", slotB[0], 1);
 
+		printf("  -- RemoveExtPerfSwitchFunctionAssignment: kind-1 sibling, added 2026-07-27 --\n");
+		memset(buf + 0x29cc11c, 0, 0x78 * 8);
+		unsigned char *slotC = buf + 0x29cc11c + 3 * 8;
+		unsigned char *slotD = buf + 0x29cc11c + 4 * 8;
+		slotC[0] = 1; slotC[2] = 1; *(unsigned int *)(slotC + 4) = 0x40;
+		slotD[0] = 1; slotD[2] = 0; *(unsigned int *)(slotD + 4) = 0x40; /* same tag, wrong kind */
+		g->RemoveExtPerfSwitchFunctionAssignment(0x40);
+		check_eq("matching kind+tag slot un-claimed", slotC[0], 0);
+		check_eq("matching tag but kind-0 slot untouched", slotD[0], 1);
+
 		printf("  -- SendFXDisableCCToMidiOut: standalone 3-byte MIDI CC send --\n");
 		/* Enlarged to 0x300 (from 0x100) and given a fake ringCtl at
 		 * +0x208 (sec 10.150): SubmitPerfChangeRequest below now
@@ -2960,6 +2970,27 @@ int main(void)
 		check_eq("value1 == p1", PendingRequest(buf).value1, 0x44u);
 		check_eq("value2 == p2", PendingRequest(buf).value2, 0x55u);
 		check_eq("source == p3", PendingRequest(buf).source, 0x66u);
+
+		printf("  -- BeginPerformanceChangeForType: the missed 2nd overload, added 2026-07-27 --\n");
+		/* Confirmed real .rodata+0x58 table: {1, 0, 2} for perfType 0/1/2
+		 * (Program/Combi swapped between eSTGPerformanceType and
+		 * eGlobalMode), and 0 (the array-index fallback) for any
+		 * out-of-range perfType. */
+		buf[0x2975185] = 0;
+		g->BeginPerformanceChangeForType(0, 0x77, 0x88, 0x99);
+		check_eq("perfType 0 -> mode 1", PendingRequest(buf).mode, 1u);
+		buf[0x2975185] = 0;
+		g->BeginPerformanceChangeForType(1, 0x77, 0x88, 0x99);
+		check_eq("perfType 1 -> mode 0", PendingRequest(buf).mode, 0u);
+		buf[0x2975185] = 0;
+		g->BeginPerformanceChangeForType(2, 0x77, 0x88, 0x99);
+		check_eq("perfType 2 -> mode 2", PendingRequest(buf).mode, 2u);
+		check_eq("value1 == p2", PendingRequest(buf).value1, 0x77u);
+		check_eq("value2 == p3", PendingRequest(buf).value2, 0x88u);
+		check_eq("source == p4", PendingRequest(buf).source, 0x99u);
+		buf[0x2975185] = 0;
+		g->BeginPerformanceChangeForType(99, 0x77, 0x88, 0x99);
+		check_eq("out-of-range perfType -> mode 0 (fallback)", PendingRequest(buf).mode, 0u);
 
 		printf("  -- GetIsSetListActiveAndSeqPerfType --\n");
 		memset(buf + 0x6a4, 0, 3);

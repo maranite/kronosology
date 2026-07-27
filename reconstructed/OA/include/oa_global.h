@@ -4141,8 +4141,24 @@ public:
 	 * "preserve real structure" precedent (e.g. `SendFXDisableCCToMidiOut`
 	 * below vs. `UpdateFXDisable`'s own inlined copy of the same MIDI
 	 * send). Real (not yet confirmed) caller not identified in this
-	 * pass. */
+	 * pass.
+	 *
+	 * CORRECTED 2026-07-27: this is actually ONE of TWO real overloads
+	 * -- `RemoveExtCCFunctionAssignment(eControllerAssign)` (this one,
+	 * matches slot kind byte 0) and a previously-undocumented sibling,
+	 * `RemoveExtCCFunctionAssignment(ePerfSwitchAssign)`
+	 * (`.text+0x8d30`, also 57 bytes, matches slot kind byte 1) --
+	 * confirmed via independent `objdump -dr` re-derivation, both
+	 * genuinely different real mangled symbols. Modeled as a distinctly-
+	 * named function, `RemoveExtPerfSwitchFunctionAssignment`, rather
+	 * than a true C++ overload, since both real enum parameter types are
+	 * otherwise represented as plain `unsigned int` in this project
+	 * (same reasoning as `HandleControllerChange`'s own comment above)
+	 * and would collide if actually overloaded. Both share one
+	 * file-local `RemoveExtCCFunctionAssignmentByKind(self, kind, tag)`
+	 * helper in global.cpp. */
 	void RemoveExtCCFunctionAssignment(unsigned int tag);
+	void RemoveExtPerfSwitchFunctionAssignment(unsigned int tag);
 
 	/* SendFXDisableCCToMidiOut(unsigned char ccNumber, bool enabled)
 	 * (.text+0x8bf0, 61 bytes) confirmed: a standalone, externally-
@@ -4161,9 +4177,24 @@ public:
 	 * 64/65 bytes) confirmed: both build a `CSTGPerfChangeRequest` (see
 	 * its own declaration above for the confirmed field layout, ground-
 	 * truthed via these exact two functions) on the stack and forward it
-	 * to `SubmitPerfChangeRequest`. */
+	 * to `SubmitPerfChangeRequest`.
+	 *
+	 * CORRECTED 2026-07-27: `BeginPerformanceChange` actually has a
+	 * SECOND real overload, `BeginPerformanceChange(eSTGPerformanceType,
+	 * unsigned int, unsigned int, eSTGPerformanceChangeSource)`
+	 * (`.text+0x6770`, 86 bytes) -- missed by the pass that wrote this
+	 * comment, confirmed via independent `objdump -dr` re-derivation.
+	 * It translates `perfType` (0..2, else falls back to 0) through a
+	 * confirmed 3-entry `.rodata+0x58` table (`{1, 0, 2}` --
+	 * `eSTGPerformanceType` 0/1 swap to `eGlobalMode` 1/0, 2 stays 2)
+	 * to get `request.mode`, then builds the identical request shape.
+	 * Modeled as the distinctly-named `BeginPerformanceChangeForType`
+	 * rather than a true overload, same reasoning as
+	 * `RemoveExtPerfSwitchFunctionAssignment` above. */
 	void BeginPerformanceChange(int mode, unsigned int value1, unsigned int value2,
 				     unsigned int source);
+	void BeginPerformanceChangeForType(unsigned int perfType, unsigned int value1,
+					    unsigned int value2, unsigned int source);
 	void BeginSetListSlotChange(unsigned int value1, unsigned int value2,
 				     unsigned int source);
 
