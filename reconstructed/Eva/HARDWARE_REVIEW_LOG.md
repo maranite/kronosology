@@ -536,21 +536,51 @@ should know they exist and are untested/unmodeled, not silently absent.
   semantics, only its `sizeof`.
 - **`CStorage`/`CControlSurface`/`CMMI`/`CModeManager`** — confirmed
   genuinely deep UI/control-surface state backing `CSTGUnsolMsgHandler`'s
-  remaining Tier-B leaves below (`ControlMsgHandler` in full,
-  `VoiceModelMsgHandler`'s one MOSS-algorithm leaf); not tested on real
+  remaining Tier-B leaves below (`ControlMsgHandler`'s 38 still-unpromoted
+  outer subcodes, `VoiceModelMsgHandler`'s one MOSS-algorithm leaf); not tested on real
   hardware because none of these classes are modeled beyond stub
   declarations.
-- **`CSTGUnsolMsgHandler::ControlMsgHandler`** — the last of 30 message
-  handlers still a full Tier-B stub, confirmed genuinely deep (re-checked
-  multiple times across the session, no tractable angle found): a real call-target
-  survey of the ground-truth disassembly shows 18 distinct out-of-scope
-  subsystems (`CMMI`, `CControlSurface`, `CHelpManager`, `CModeManager`,
-  `CZ`, `CDiskUtil`, several real Peg-toolkit `CForm` dialogs, and 4
-  real `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` front-panel
-  interrupt-mask critical sections), not a repeated mechanical shape — real
-  front-panel button/switch semantic dispatch, not tractable in isolation. A
-  real `ControlMsgHandler` message arriving on real hardware currently hits
-  an unimplemented stub in this reconstruction, not real behavior.
+- **`CSTGUnsolMsgHandler::ControlMsgHandler`** — PARTIALLY PROMOTED 2026-07-27
+  (commit `d8a30ed`): re-applied this project's own "size is not depth, check
+  for a tractable sub-piece" lens (already validated on `CJobStack`'s and
+  `CEditClient`'s ctor/dtor) to the last remaining full Tier-B handler. 6 of
+  its 44 outer subcodes turned out to be provably self-contained (zero
+  crossjump into or out of their own code range) and now have real bodies:
+  subcodes 37/38 call two **new** real `USTGAPIControl` methods
+  (`BeginLongErPActivity()`/`EndLongErPActivity()`, same `ErPShutdownMsgShape`
+  send shape as the existing `ForceErPShutdown()`), subcode 16 reuses the
+  already-real `CEditor::IsSwitchPressed()`, and subcodes 9/10/11 each do a
+  bounds-checked lookup in a real `.rodata` button-code table before falling
+  into a shared tail that reuses the already-real
+  `CEditor::CPanelIfcTask::OnButtonEvent()`.
+  The other 38 subcodes are CONFIRMED genuinely deep, and more precisely so
+  than before: a full jump/call-target-vs-owning-case-range audit of the real
+  disassembly found GCC has cross-jumped/tail-merged them into a single
+  ~2KB interconnected CFG hub that carries essentially all 18 out-of-scope
+  subsystem calls previously documented (`CMMI`, `CControlSurface`,
+  `CHelpManager`, 4 real Peg-toolkit `CForm` dialogs, `CModeManager`,
+  `CDiskUtil`, `CSmplModeMgr`, and raw HAL interrupt-mask control) — one
+  shared hub reached from ~20 directions, not 44 independent leaves, so
+  reconstructing any one of those subcodes faithfully would require
+  reconstructing the hub too. Those 38 still route to a documented
+  not-implemented stub (`ControlMsgHandlerUnimplementedSubcode()`); a real
+  message hitting one of them on real hardware currently gets no real
+  behavior from this reconstruction.
+  **Real hazard found in ground truth, flagged for the real-hardware
+  comparison pass**: subcode 11's real disassembly (0x0891b4ce/0x0891b4d1)
+  only excludes `code==7` exactly and has **no upper-bound check at all**
+  before indexing its 9-entry button-code table — for `code==9` the real
+  binary reads `0x201f` out of unrelated adjacent `.rodata` (not a real
+  button code), and `code` 10–15 read zeros. This reconstruction deliberately
+  does **not** reproduce this as an out-of-bounds C array read (undefined
+  behavior); it adds an explicit `code < 9` bound instead, matching the real
+  "0 → no-op" behavior for every input except the one genuinely garbage
+  `code==9` case. Open question for real hardware: does a real `code==9`
+  message on this subcode actually crash/misbehave on real hardware, or is
+  there some other guard (upstream sender never producing `code==9`, a caller
+  contract this project hasn't seen, etc.) that makes it harmless in
+  practice? Worth deliberately exercising this exact input during
+  hardware bring-up.
 - **`CSTGUnsolMsgHandler::VoiceModelMsgHandler`** — RECONSTRUCTED FOR REAL
   2026-07-27 (commit `786fcd5`, Tier A batch 8), promoted from Tier B: a
   from-scratch `objdump -dr -M intel` re-trace of the real 2512-byte
