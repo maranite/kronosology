@@ -43,6 +43,14 @@
 #ifndef OA_ENGINE_H
 #define OA_ENGINE_H
 
+/* Forward decl, real definition in oa_global.h -- mirrors that file's
+ * own `struct CSTGParamDescriptor;` forward decl of a type defined
+ * here, same reason: several TUs (engine.cpp among them) include
+ * oa_engine.h BEFORE oa_global.h, and USTGParamConvertor below only
+ * ever takes STGConvertedParam by reference, which doesn't need the
+ * full definition at this point. */
+struct STGConvertedParam;
+
 /* ---- Minimal opaque manager singletons touched by the implemented methods ---- */
 
 /* Real static method, confirmed via its own mangled-name relocation; not
@@ -70,9 +78,200 @@ public:
  * `_ZN19CSTGParamDescriptor26sTypical99ToFloatParamDescE` symbol, per
  * this project's "preserve obfuscated-but-real symbol names" convention.
  */
+/*
+ * Per-instance layout confirmed batch 55 by USTGParamConvertor's ~55
+ * convert/taper functions (src/engine/param_convertor.cpp) -- every
+ * offset below is read directly by at least one of those functions
+ * (IntToFloatConvertor/IntCountFromZeroConvertor/ConvertParam/
+ * UnConvertParam etc), cross-checked against a from-scratch x86-32
+ * execution harness (real OA.ko bytes, relocations patched in, run
+ * natively via `gcc -m32`) rather than hand-simulated x87 stack
+ * tracing. Total confirmed size 0x34 bytes, matching
+ * sTypical99ToFloatParamDesc's own array size above (that static IS
+ * one instance of this same class, byte-for-byte).
+ *
+ *   +0x00..+0x1b  (28 bytes) unconfirmed -- likely name/id/enum
+ *                 fields, never touched by ParamConvertor code.
+ *   +0x1c  int    rawMin    -- raw (integer-domain) minimum value.
+ *   +0x20  int    rawMax    -- raw (integer-domain) maximum value.
+ *   +0x24  float  floatMin  -- converted-domain minimum.
+ *   +0x28  float  floatMax  -- converted-domain maximum (also reused
+ *                 as a generic "scale" constant by several Convertors).
+ *   +0x2c  int8_t convertType -- index into USTGParamConvertor's
+ *                 mConvertFunc/mUnConvertFunc tables (0..19; 19 ==
+ *                 UnsupportedConversion, the sentinel that also makes
+ *                 ConvertParam/UnConvertParam skip +0x2d and use taper
+ *                 index 0 (NoTaper) instead).
+ *   +0x2d  int8_t taperType -- index into mTaperFunc/mInverseTaperFunc
+ *                 (0..22).
+ *   +0x2e..+0x33  (6 bytes) unconfirmed.
+ *
+ * IntCountFromZeroUnConvertor is a confirmed real quirk: it reads only
+ * the LOW 16 BITS of +0x1c (`movzx eax, WORD PTR [eax+0x1c]`) where
+ * every other reader treats it as a full 32-bit int -- faithfully
+ * preserved in UnConvertParam's sibling, not "fixed" to a full read.
+ */
 struct CSTGParamDescriptor {
 	static unsigned char sTypical99ToFloatParamDesc[0x34];
+
+	unsigned char _unrecovered_head[0x1c];	/* +0x00..+0x1b, unconfirmed */
+	int rawMin;				/* +0x1c, confirmed */
+	int rawMax;				/* +0x20, confirmed */
+	float floatMin;				/* +0x24, confirmed */
+	float floatMax;				/* +0x28, confirmed */
+	signed char convertType;		/* +0x2c, confirmed (0..19) */
+	signed char taperType;			/* +0x2d, confirmed (0..22) */
+	unsigned char _unrecovered_tail[6];	/* +0x2e..+0x33, unconfirmed */
 };
+
+/*
+ * eSTGTaper -- the 23 taper curve IDs, in the exact order confirmed by
+ * dumping USTGParamConvertor::mTaperFunc's real relocation table
+ * (batch 55, src/engine/param_convertor.cpp). Same ordinal values used
+ * by CSTGParamDescriptor::taperType above and by mInverseTaperFunc
+ * (not every entry there has a real inverse -- see param_convertor.cpp
+ * for which ones resolve to UnsupportedTaper).
+ */
+enum eSTGTaper {
+	eSTGTaper_NoTaper = 0,
+	eSTGTaper_PiecewiseLinear1 = 1,
+	eSTGTaper_EffectLFOFreq1 = 2,
+	eSTGTaper_EffectLFOFreqDModIntensity1 = 3,
+	eSTGTaper_EffectLFOFreq2 = 4,
+	eSTGTaper_EffectLFOFreqDModIntensity2 = 5,
+	eSTGTaper_EffectDelayTime1 = 6,
+	eSTGTaper_EffectDelayTime2 = 7,
+	eSTGTaper_EffectDelayTime3 = 8,
+	eSTGTaper_EffectDelayModDepth1 = 9,
+	eSTGTaper_EffectFixedFreq1 = 10,
+	eSTGTaper_EffectFixedFreqDModIntensity1 = 11,
+	eSTGTaper_EffectEQFreq1 = 12,
+	eSTGTaper_WaveSeqDuration1 = 13,
+	eSTGTaper_KeyOnDelay = 14,
+	eSTGTaper_VectorDuration = 15,
+	eSTGTaper_PitchSemitone = 16,
+	eSTGTaper_EffectCompAttackTime1 = 17,
+	eSTGTaper_EffectCompReleaseTime1 = 18,
+	eSTGTaper_EQMidFreq = 19,
+	eSTGTaper_Headroom = 20,
+	eSTGTaper_SmoothingFactor = 21,
+	eSTGTaper_SeamlessHoldTime = 22,
+};
+
+/*
+ * USTGParamConvertor (batch 55) -- the front-panel-parameter <->
+ * DSP-value conversion toolbox: 20 Convertor/UnConvertor pairs (raw
+ * int <-> tapered float/int, dispatched through CSTGParamDescriptor::
+ * convertType) plus 23 taper curve functions (piecewise linear/
+ * reciprocal warp shapes, dispatched through ::taperType) plus their
+ * inverses. Confirmed instance-less (called with a "static this" the
+ * same way USTGAliasBankTypes/TranslateAudioInputParamId are, sec
+ * 10.90/10.152) -- every method here is `static`.
+ *
+ * Ground truth for the 23 pure single-float Taper/InverseTaper
+ * functions was cross-checked against real OA.ko machine code (not
+ * hand-simulated x87 stack tracing) via a throwaway `gcc -m32` harness
+ * that mmaps the real function bytes, patches their R_386_32
+ * relocations to real copies of .rodata/.rodata.cst4/.rodata.cst8, and
+ * calls each one natively with ~90 sample inputs spanning every
+ * breakpoint found in the disassembly -- see param_convertor.cpp's own
+ * header comment for the full methodology writeup.
+ *
+ * TaperSmoothingFactor is the one exception: its real body calls
+ * `am_exp2_ess` (`.text+0x244e6`, a separate, not-yet-independently-
+ * reconstructed fast exp2 approximation) -- reconstructed here too
+ * (see param_convertor.cpp), so no deferral was actually needed.
+ */
+struct USTGParamConvertor {
+	/* ---- Convertor family (raw int -> tapered float/int) ---- */
+	static bool IntToPercentConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntToTempoConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntToFloatConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntToFloatSquaredConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntToFloatPanRandomConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntToFloatPanControllerConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool IntCountFromZeroConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static int  IntCountFromZeroUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static bool TaperOnlyConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool NoConversion(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static bool UnsupportedConversion(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static int  IntToFloatUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  IntToFloatSquaredUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  TaperOnlyUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  IntToTempoUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  IntToFloatPanRandomUnConvertor(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  NoUnConversion(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static int  UnsupportedUnConversion(const CSTGParamDescriptor &desc, const STGConvertedParam &in);
+	static bool IntToFloatPanConvertor(float x, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+
+	/* ---- Dispatchers ---- */
+	static bool ConvertParam(int rawValue, const CSTGParamDescriptor &desc, STGConvertedParam &out);
+	static float GetTaperValue(float x, eSTGTaper taper);
+	static int  UnConvertParam(const STGConvertedParam &in, const CSTGParamDescriptor &desc);
+	static float GetInverseTaperValue(float x, eSTGTaper taper);
+
+	/* ---- Taper curve family (pure float -> float shaping) ---- */
+	static float UnsupportedTaper(float x);
+	static float NoTaper(float x);
+	static float PiecewiseLinear1Taper(float x);
+	static float EffectLFOFreq1Taper(float x);
+	static float EffectLFOFreq1InverseTaper(float x);
+	static float EffectLFOFreqDModIntensity1Taper(float x);
+	static float EffectLFOFreqDModIntensity1InverseTaper(float x);
+	static float EffectLFOFreq2Taper(float x);
+	static float EffectLFOFreqDModIntensity2Taper(float x);
+	static float EffectDelayTime1Taper(float x);
+	static float EffectDelayTime2Taper(float x);
+	static float EffectDelayTime3Taper(float x);
+	static float EffectDelayModDepth1Taper(float x);
+	static float EffectFixedFreq1Taper(float x);
+	static float EffectFixedFreqDModIntensity1Taper(float x);
+	static float EffectEQFreq1Taper(float x);
+	static float WaveSeqDuration1Taper(float x);
+	static float InverseWaveSeqDuration1Taper(float x);
+	static float TaperKeyOnDelay(float x);
+	static float InverseTaperKeyOnDelay(float x);
+	static float VectorDurationTaper(float x);
+	static float VectorDurationInverseTaper(float x);
+	static float PitchSemitoneTaper(float x);
+	static float InversePitchSemitoneTaper(float x);
+	static float EffectCompAttackTime1Taper(float x);
+	static float EffectCompReleaseTime1Taper(float x);
+	static float TaperEQMidFreq(float x);
+	static float InverseTaperEQMidFreq(float x);
+	static float TaperHeadroom(float x);
+	static float InverseTaperSmoothingFactor(float x);
+	static float SeamlessHoldTimeTaper(float x);
+	static float TaperSmoothingFactor(float x);
+
+	/* Real static const function-pointer tables (`.data`, confirmed via
+	 * `readelf -r` on the real .ko: 20/20/23/23 entries respectively).
+	 * Convert/UnConvert indexed by CSTGParamDescriptor::convertType,
+	 * Taper/InverseTaper by ::taperType. Exposed so ConvertParam/
+	 * UnConvertParam/GetTaperValue/GetInverseTaperValue's real
+	 * table-indirect-call dispatch is reproduced exactly, not
+	 * reimplemented as a switch. */
+	typedef bool (*ConvertFn)(float, const CSTGParamDescriptor &, STGConvertedParam &);
+	typedef int  (*UnConvertFn)(const CSTGParamDescriptor &, const STGConvertedParam &);
+	typedef float (*TaperFn)(float);
+	static const ConvertFn mConvertFunc[20];
+	static const UnConvertFn mUnConvertFunc[20];
+	static const TaperFn mTaperFunc[23];
+	static const TaperFn mInverseTaperFunc[23];
+};
+
+/* am_exp2_ess (`.text+0x244e6`, 177 bytes) -- fast single-precision
+ * exp2 approximation (clamp to +-127.49999, split integer/fractional
+ * exponent, IEEE-754 bit-trick ldexp for the integer part, degree-2/2
+ * rational minimax approximation for the fractional part). The ONLY
+ * external symbol USTGParamConvertor::TaperSmoothingFactor calls.
+ * Reconstructed for real, not stubbed -- see param_convertor.cpp. Real
+ * ground truth uses SSE (movss/mulss/rcpss), so this file (unlike the
+ * rest of param_convertor.cpp) needs the project's existing
+ * `-mfpmath=sse` per-TU override to match; kept in its own translation
+ * unit (am_exp2_ess.cpp) for exactly that reason.
+ */
+extern "C" float am_exp2_ess(float x);
 
 /*
  * STGProgramParams (0xbc8 bytes) / STGCommonStepSeqParams (0x2a4 bytes)

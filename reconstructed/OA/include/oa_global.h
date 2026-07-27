@@ -80,11 +80,41 @@ bool SKSTGGate_ShouldSyncExternalClock();
  *     (used as an array index) and UpdatePadFuncMIDIChannel (bound-checked
  *     against 7 before use) -- likely a channel/slot/index selecting which
  *     instance of a per-N-thing parameter this update targets.
+ *   STGConvertedParam.displayValue (+0x18): confirmed batch 55 by
+ *     USTGParamConvertor (src/engine/param_convertor.cpp) -- nearly every
+ *     *Convertor function writes the SAME computed value to both +0x00
+ *     and +0x18 (`fst [edx]; fstp [edx+0x18]`), while the plain integer
+ *     ones (IntCountFromZeroConvertor, IntCountFromZeroUnConvertor's
+ *     read side) only ever touch +0x00. Real field semantics/type not
+ *     otherwise confirmed (int-domain functions write an int bit
+ *     pattern to both slots via `mov`, float-domain ones write a float
+ *     bit pattern via `fst`/`fstp` -- same "polymorphic slot,
+ *     reinterpreted by convention" treatment as +0x00 itself); grown
+ *     the placeholder gap to reach it without touching the already-
+ *     confirmed +0x00..+0x03 layout any other caller relies on.
+ *   STGConvertedParam.clampedRaw (+0x10): confirmed batch 55 by
+ *     USTGParamConvertor::ConvertParam (`mov [ecx+0x10],eax`) -- the
+ *     raw integer input, clamped to [rawMin,rawMax], BEFORE taper/
+ *     convert are applied. A third, independent slot from +0x00/+0x18.
+ *   IntToFloatPanConvertor is a confirmed real quirk: it writes its
+ *     second STGMonoPanCoeffs field directly to +0x04 (inside the
+ *     +0x04..+0x0f gap below), not to +0x18 like every other
+ *     Convertor -- reproduced via a raw offset write in
+ *     param_convertor.cpp, not given its own named field here since
+ *     it's the only caller and the semantics don't generalize.
  */
 struct STGConvertedParam {
 	int value;			/* +0x00, confirmed */
-	unsigned char _unrecovered[4];	/* real size unconfirmed; small placeholder
-					 * since nothing here needs sizeof() to be exact */
+	unsigned char _unrecovered_a[0x0c];	/* +0x04..+0x0f, unconfirmed
+						 * (IntToFloatPanConvertor writes
+						 * a raw float bit-pattern to
+						 * +0x04 specifically, see above) */
+	int clampedRaw;			/* +0x10, confirmed */
+	unsigned char _unrecovered_b[4];	/* +0x14..+0x17, unconfirmed */
+	int displayValue;		/* +0x18, confirmed (see above; float
+					 * callers bit-reinterpret via a
+					 * pointer cast, matching +0x00's own
+					 * established convention) */
 };
 
 /*

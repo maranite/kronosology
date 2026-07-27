@@ -176,7 +176,9 @@ OA-objs := src/auth/klm_manager.o \
            src/init/control_msg_handler.o \
            src/init/front_panel_msg_handler.o \
            src/init/omap_nks_msg_handler.o \
-           src/engine/seq_led.o
+           src/engine/seq_led.o \
+           src/engine/param_convertor.o \
+           src/engine/am_exp2_ess.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -265,6 +267,7 @@ CFLAGS_wave_sample_convert.o := -mhard-float -msse2 -mfpmath=sse
 # libgcc soft-float helpers under the kernel's own -msoft-float default
 # (batch 28).
 CFLAGS_lfo_tables.o := -mhard-float -msse2 -mfpmath=sse
+CFLAGS_am_exp2_ess.o := -mhard-float -msse2 -mfpmath=sse
 
 # Same reasoning again: keybed_debounce.cpp's CSTGKeybedKeyDebounceFilter_
 # Initialize() does one genuine plain-C float multiply chain (busGainScale
@@ -483,7 +486,9 @@ SRC := src/auth/klm_manager.cpp \
        src/init/control_msg_handler.cpp \
        src/init/front_panel_msg_handler.cpp \
        src/init/omap_nks_msg_handler.cpp \
-       src/engine/seq_led.cpp
+       src/engine/seq_led.cpp \
+       src/engine/param_convertor.cpp \
+       src/engine/am_exp2_ess.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -584,7 +589,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_control_msg_handler \
          verify/test_front_panel_msg_handler \
          verify/test_omap_nks_msg_handler \
-         verify/test_seq_led
+         verify/test_seq_led \
+         verify/test_param_convertor
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -740,6 +746,9 @@ verify/test_seq_led: verify/test_seq_led.cpp src/engine/seq_led.cpp include/oa_s
 
 verify/test_front_panel_msg_handler: verify/test_front_panel_msg_handler.cpp src/init/front_panel_msg_handler.cpp include/oa_front_panel_msg_handler.h include/oa_control_msg_handler.h include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_front_panel_msg_handler.cpp src/init/front_panel_msg_handler.cpp -o $@
+
+verify/test_param_convertor: verify/test_param_convertor.cpp src/engine/param_convertor.cpp src/engine/am_exp2_ess.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_param_convertor.cpp src/engine/param_convertor.cpp src/engine/am_exp2_ess.cpp src/engine/audio_input_mixer.cpp src/mem/bank_memory.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
