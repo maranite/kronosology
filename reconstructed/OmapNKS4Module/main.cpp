@@ -105,6 +105,44 @@ static struct kernel_param __param_vm_video_stress
 	{ __param_str_vm_video_stress, 0644, 0, param_set_int, param_get_int,
 	  { &sVmVideoStress } };
 
+/* gFixAudioInputFrameOrder - real hardware's /sbin/loadoa (loadoa/loadoa.c,
+ * "5. Identify USB host controller; set IRQ affinity") ALWAYS passes
+ * "gFixAudioInputFrameOrder=<0|1>" as this module's insmod parameter string
+ * (0 for xhci_hcd, 1 for ehci_hcd/neither - confirmed real: the literal
+ * format string and the xhci_hcd/ehci_hcd probe both exist verbatim in the
+ * genuine stock loadoa binary, md5 8a3d61f3332d7bcf694e8c05845b4754, RestoreDVD_
+ * SystemMNT/mnt/sbin/loadoa). Ground-truthed against the CORRECT, factory-
+ * current OmapNKS4Module.ko (md5 461156bba798c21f94871cb6c8da1595, 89849
+ * bytes, RestoreDVD_SystemMNT/mnt/sbin/OmapNKS4Module.ko - see docs/modules/
+ * OmapNKS4Module.ko.md's own binary-version warning): that binary has ZERO
+ * "__param" ELF section, ZERO "gFixAudioInputFrameOrder"/"FrameOrder"/
+ * "xhci"/"ehci"/byte-swap-adjacent string anywhere (`readelf -S`, `nm`,
+ * `strings` all confirm this independently) - i.e. the real shipping module
+ * declares NO module_param at all, and has no code touching audio-frame
+ * byte order in any form. This isn't a case of "the logic exists but wasn't
+ * found" - there IS no such logic in ground truth to reconstruct.
+ *
+ * Why loadoa can pass an unrecognized param without insmod ever failing on
+ * real hardware, when this project's OWN linux-kronos build tree's
+ * kernel/params.c hard-aborts load_module() on ANY unrecognized parameter
+ * (confirmed via direct kernel source read, parse_args()/parse_one(),
+ * -ENOENT -> "Unknown parameter" -> load_module() returns early) is NOT
+ * resolved here - plausibly a difference in the real production Korg kernel
+ * vs this reconstructed dev tree's exact kernel/params.c behavior. Whatever
+ * the real kernel does, this module ends up loading successfully with the
+ * param present, so the correct, honest fix for THIS reconstruction is: just
+ * declare the parameter (matching sVmVirtualProbe/sVmVideoStress's own
+ * established convention) so a real loadoa's "gFixAudioInputFrameOrder=N"
+ * insmod argument doesn't hard-fail against this project's own build/VM
+ * testing - the value itself is read and stored, but (matching ground
+ * truth) genuinely never consulted by anything else in this module. */
+int sFixAudioInputFrameOrder;
+static const char __param_str_fix_audio_input_frame_order[] = "gFixAudioInputFrameOrder";
+static struct kernel_param __param_gFixAudioInputFrameOrder
+	__attribute__((used, section("__param"), aligned(sizeof(void *)))) =
+	{ __param_str_fix_audio_input_frame_order, 0644, 0, param_set_int, param_get_int,
+	  { &sFixAudioInputFrameOrder } };
+
 /* Definition for the extern declared in omapnks4_internal.h - see that declaration's
  * own comment. Zero-initialized; real initialization happens via init_completion()
  * (not yet added - see docs/gaps.md), matching the pattern struct completion needs

@@ -918,7 +918,7 @@ verify/test_controller_info_button_handler: verify/test_controller_info_button_h
 verify/test_rtwrap: verify/test_rtwrap.cpp src/init/rtwrap.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtwrap.cpp src/init/rtwrap.cpp -o $@
 
-verify/test_drumpad_init: verify/test_drumpad_init.cpp src/init/drumpad_init.cpp include/oa_init.h
+verify/test_drumpad_init: verify/test_drumpad_init.cpp src/init/drumpad_init.cpp include/oa_init.h include/oa_control_msg_handler.h include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_drumpad_init.cpp src/init/drumpad_init.cpp -o $@
 
 verify/test_keybed_debounce: verify/test_keybed_debounce.cpp src/init/keybed_debounce.cpp include/oa_keybed_init.h include/oa_engine.h

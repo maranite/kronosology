@@ -276,6 +276,7 @@ void cleanup_cpp_support(void) { log_call("cleanup_cpp_support"); }
 void ConstructKorgUsbMidiPorts(void) { log_call("ConstructKorgUsbMidiPorts"); }
 void ConstructPerformanceVarsManagerSelectorState(void) { log_call("ConstructPerformanceVarsManagerSelectorState"); }
 void ConstructChannelValuesTemplate(void) { log_call("ConstructChannelValuesTemplate"); }
+void ConstructDrumPadClient(void) { log_call("ConstructDrumPadClient"); }
 
 static unsigned char sFakeTask[0x100];
 static unsigned long sOriginalMask = 0xdeadbeef;

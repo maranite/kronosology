@@ -126,6 +126,28 @@ void ConstructPerformanceVarsManagerSelectorState(void);
  */
 void ConstructChannelValuesTemplate(void);
 
+/*
+ * Manual substitute for a FOURTH do_mod_ctors() entry, found during the
+ * 2026-07-27 `gFixAudioInputFrameOrder`/`CSTGDrumPadClient` loose-ends
+ * pass: ground truth's real
+ * `_GLOBAL__I__ZN20CSTGDrumPadInterface9sInstanceE` ctor (`.text+0x33d350`,
+ * 38 bytes) installs `sDrumPadClient`'s (a real `CSTGDrumPadClient`
+ * object, see oa_control_msg_handler.h) vtable pointer. UNLIKE the other
+ * 3 entries above, this one was previously mis-triaged as a no-op by
+ * that same 2026-07-27 sweep -- the real instruction (`mov dword ptr
+ * [0x26d38c], 0x8`) carries a SECOND `R_386_32` relocation on its
+ * immediate operand (against `_ZTV17CSTGDrumPadClient`) that a plain
+ * `objdump -d` read missed; the real stored value is
+ * `&_ZTV17CSTGDrumPadClient + 8`, not the literal integer 8 -- the same
+ * "relocation hidden as a plausible small immediate" trap already found
+ * 3 other times in this project (see drumpad_init.cpp's own comment for
+ * the full correction). This entry's OTHER writes (zeroing the ring
+ * buffer's write/read indices and armed flag) are redundant with plain
+ * BSS zero-init, matching the other 3 entries' own convention of not
+ * reproducing zero-equivalent writes.
+ */
+void ConstructDrumPadClient(void);
+
 /* Step 3. Already reconstructed (STGEnabler/STGEnabler.c, real
  * signatures confirmed there, EXPORT_SYMBOL'd -- real first parameter is
  * `struct task_struct *`; represented here as `void *` since init_module

@@ -186,15 +186,28 @@ int init_module(void)
 	 * order ground truth's own `.ctors` array lists them (raw byte
 	 * offsets 0x4e0 / -- see each function's own oa_init.h comment for
 	 * its individual ground-truth trace). Third sweep instance
-	 * (CSTGSampleRateMonitor/CW83627/CSTGDrumPadInterface/
-	 * CProfiler/CSTGCalibrationMsgHandler's own real .ctors entries were
+	 * (CSTGSampleRateMonitor/CW83627/CProfiler/
+	 * CSTGCalibrationMsgHandler's own real .ctors entries were
 	 * independently checked and confirmed to write only values already
 	 * matching plain BSS zero-init, i.e. genuinely no-ops -- not fixed
 	 * because there is nothing to fix; see re-decompiler agent memory
-	 * for the full 584-entry triage). */
+	 * for the full 584-entry triage).
+	 *
+	 * CORRECTION (2026-07-27, gFixAudioInputFrameOrder/CSTGDrumPadClient
+	 * loose-ends pass): CSTGDrumPadInterface's own real .ctors entry was
+	 * WRONGLY included in that "genuinely no-op" set above -- its
+	 * `mov dword ptr [sDrumPadClient], 0x8` instruction carries a
+	 * SECOND relocation on the immediate operand (against
+	 * `_ZTV17CSTGDrumPadClient`) that a plain `objdump -d` read without
+	 * `-r` missed, the same "relocation hidden as a plausible small
+	 * immediate" trap this project has now hit 4 times. It's a real
+	 * vtable-pointer install, not a no-op -- see
+	 * ConstructDrumPadClient()'s own oa_init.h comment and
+	 * drumpad_init.cpp for the fix. */
 	ConstructKorgUsbMidiPorts();
 	ConstructPerformanceVarsManagerSelectorState();
 	ConstructChannelValuesTemplate();
+	ConstructDrumPadClient();
 
 	oa_debug_marker(1);
 	init_cpp_support();				/* step 1 */

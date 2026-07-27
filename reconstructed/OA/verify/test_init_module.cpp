@@ -53,6 +53,7 @@ void cleanup_cpp_support(void) { log_call("cleanup_cpp_support"); }
 void ConstructKorgUsbMidiPorts(void) { log_call("ConstructKorgUsbMidiPorts"); }
 void ConstructPerformanceVarsManagerSelectorState(void) { log_call("ConstructPerformanceVarsManagerSelectorState"); }
 void ConstructChannelValuesTemplate(void) { log_call("ConstructChannelValuesTemplate"); }
+void ConstructDrumPadClient(void) { log_call("ConstructDrumPadClient"); }
 
 static unsigned char sFakeTask[0x100];
 static unsigned long sOriginalMask = 0xdeadbeef;
@@ -157,6 +158,7 @@ int main(void)
 		"ConstructKorgUsbMidiPorts;"
 		"ConstructPerformanceVarsManagerSelectorState;"
 		"ConstructChannelValuesTemplate;"
+		"ConstructDrumPadClient;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -181,6 +183,7 @@ int main(void)
 		"ConstructKorgUsbMidiPorts;"
 		"ConstructPerformanceVarsManagerSelectorState;"
 		"ConstructChannelValuesTemplate;"
+		"ConstructDrumPadClient;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;stg_log_startup_error;"
@@ -198,6 +201,7 @@ int main(void)
 		"ConstructKorgUsbMidiPorts;"
 		"ConstructPerformanceVarsManagerSelectorState;"
 		"ConstructChannelValuesTemplate;"
+		"ConstructDrumPadClient;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -219,6 +223,7 @@ int main(void)
 		"ConstructKorgUsbMidiPorts;"
 		"ConstructPerformanceVarsManagerSelectorState;"
 		"ConstructChannelValuesTemplate;"
+		"ConstructDrumPadClient;"
 		"init_cpp_support;cpu_features_ok;stg_cpumask_of_cpu(0);stg_set_cpus_allowed;"
 		"CSTGFile_Open;"
 		"InitializeSTGHeap;IncProgressBar;InitSharedMemProcInterface;"
@@ -242,6 +247,7 @@ int main(void)
 		"ConstructKorgUsbMidiPorts;"
 		"ConstructPerformanceVarsManagerSelectorState;"
 		"ConstructChannelValuesTemplate;"
+		"ConstructDrumPadClient;"
 		"init_cpp_support;cpu_features_ok;stg_log_startup_error;"
 		"cleanup_cpp_support;");
 

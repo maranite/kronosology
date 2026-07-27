@@ -177,19 +177,124 @@ void COmapNKS4Driver_StartScanning(void);
 
 /*
  * `CSTGDrumPadInterface` -- referenced by `StartSTG` only. This project
- * already has `CSTGDrumPadInterface_Initialize()`/`_Cleanup()` as
- * deliberately-deferred free functions (oa_init.h, init_module Step 15,
- * itself never reconstructed) for the SAME real class's ctor-adjacent
- * lifecycle; `StartScanning()` is a genuinely different real method
- * (confirmed via relocation, `.text+0xaa90`-adjacent region) added here
- * as its own minimal declaration -- own body deliberately not
- * reconstructed (real drum-pad scan-trigger hardware protocol, out of
- * scope for this control-message dispatch cluster).
+ * has `CSTGDrumPadInterface_Initialize()`/`_Cleanup()` as real free
+ * functions (oa_init.h, init_module Step 15, drumpad_init.cpp -- see
+ * `CSTGDrumPadClient` below for the 2026-07-27 fix to their bodies);
+ * `StartScanning()` is a genuinely different real method (confirmed via
+ * relocation, `.text+0xaa90`-adjacent region) added here as its own
+ * minimal declaration -- own body deliberately not reconstructed (real
+ * drum-pad scan-trigger hardware protocol, out of scope for this
+ * control-message dispatch cluster). Ground truth's real `sInstance` is
+ * actually a 76-byte (0x4c) VALUE object (confirmed `nm`/`readelf -sW`:
+ * `OBJECT GLOBAL 76 CSTGDrumPadInterface::sInstance`), not a pointer --
+ * this class's pointer typing is a known, separate, already-repeatedly-
+ * deferred mismatch (see `CSTGDrumPadClient`'s own comment below for how
+ * its 3 real methods route around this rather than fix it this pass).
  */
 class CSTGDrumPadInterface {
 public:
 	static CSTGDrumPadInterface *sInstance;
 	void StartScanning();
+};
+
+/*
+ * CSTGDrumPadClient -- the REAL, live drum-pad receive interface that
+ * CSTGDrumPadInterface's Initialize()/Cleanup() register/unregister with
+ * the external USB MIDI accessory driver. Ground truth: OA_real.ko
+ * `.text._ZN17CSTGDrumPadClient*` (3 real methods, confirmed via raw
+ * `objdump -dr`) + `.rodata._ZTV17CSTGDrumPadClient` (confirmed via
+ * `.rel.rodata._ZTV17CSTGDrumPadClient`: 3 relocations at vtable
+ * +0x8/+0xc/+0x10 -- CanReceiveTriggerEvent/ReceiveTriggerEvent/
+ * ReceiveNotification; +0x0/+0x4, offset-to-top/RTTI, are literal 0, no
+ * relocation -- confirmed -fno-rtti, no virtual destructor). `sizeof ==
+ * 4`: this class has NO data members beyond its own vtable pointer --
+ * every method operates entirely on 3 already-real global singletons
+ * (a private CSTGDrumPadInterface::sInstance ring buffer,
+ * CSTGGlobal::sInstance, CSTGMessageProcessor::sInstance), never on
+ * `this` (confirmed: none of the 3 real bodies ever reads EAX).
+ *
+ * THIS IS THE EXACT GAP flagged during the 2026-07-27 literal-vs-
+ * relocation sweep ("CSTGDrumPadInterface's constructor installs a
+ * CSTGDrumPadClient vtable pointer that isn't modeled anywhere in this
+ * project"). Ground truth's real singleton, `sDrumPadClient` (`.bss+
+ * 0x26d38c`, immediately after CSTGDrumPadInterface::sInstance's own
+ * 0x4c-byte footprint), gets its vtable pointer installed by
+ * `_GLOBAL__I__ZN20CSTGDrumPadInterface9sInstanceE` -- and that install
+ * is a SECOND, independently-found instance of this project's recurring
+ * "objdump without -r hides a relocation as a plausible small immediate"
+ * trap (see oa_audioinputmixer_vtable_literal8_bug_2026-07-27 for the
+ * first 3 instances): the real instruction is `mov dword ptr
+ * [0x26d38c], 0x8`, which LOOKS like a literal-8 store, but carries a
+ * SECOND `R_386_32` relocation (in addition to the expected one on the
+ * `.bss` destination operand) against `_ZTV17CSTGDrumPadClient` on the
+ * immediate source operand -- the real stored value is
+ * `&_ZTV17CSTGDrumPadClient + 8`, the standard Itanium-ABI vtable-ptr
+ * convention already used throughout this project, not the integer 8.
+ * This directly corrects init_module.cpp's own same-day claim that this
+ * exact `.ctors` entry was "confirmed to write only values already
+ * matching plain BSS zero-init, i.e. genuinely no-op" -- that check read
+ * the raw immediate without checking for an attached relocation on it,
+ * the same class of miss as the other 3 instances. See drumpad_init.cpp
+ * for the real install (`ConstructDrumPadClient()`).
+ *
+ * A DIFFERENT, UNRELATED class -- `CUSBMidiAccessory_DrumPadClient`
+ * (oa_engine.h) -- shares a similar name and lives in the same OA.ko
+ * translation unit, but is confirmed DEAD CODE there:
+ * `.rel.rodata._ZTV31CUSBMidiAccessory_DrumPadClient` has only 3
+ * relocations (2 to `__cxa_pure_virtual` for its own
+ * CanReceiveTriggerEvent/ReceiveTriggerEvent, 1 to its own no-op
+ * ReceiveNotification), and a whole-binary `readelf -r` sweep confirms
+ * ZERO relocations anywhere construct an object with that vtable -- it's
+ * compiled into OA.ko only because a shared header got included, never
+ * instantiated here (the real concrete instance, if any, would live in
+ * USBMidiAccessory.ko, out of this project's scope). This corrects
+ * oa_engine.h's own existing comment on that class ("the only concrete
+ * override ... remains genuinely blocked") -- it isn't blocked, it's
+ * simply inert/unused in this binary; left exactly as-is, not touched
+ * this pass.
+ *
+ * CSTGDrumPadInterface::sInstance's own ring-buffer fields (write index
+ * +0x40, read index +0x44, "armed" gate flag +0x48 -- all CONFIRMED via
+ * this class's own real disassembly) are NOT added as real fields of the
+ * existing (already out-of-scope, pointer-typed) `CSTGDrumPadInterface`
+ * class above -- fixing THAT class's own representation is a separate,
+ * larger, already-repeatedly-deferred task (this file's own existing
+ * comment: "this project does not model CSTGDrumPadInterface as a class
+ * at all"). Instead, the 3 known fields these 3 methods actually touch
+ * get their own small, dedicated raw storage (`gDrumPadInterfaceRing`,
+ * drumpad_init.cpp) at the confirmed real offsets -- logically the SAME
+ * memory ground truth's ring buffer occupies (the struct's own `sizeof`
+ * comes out to exactly 0x4c, matching ground truth's real object size,
+ * a nice independent confirmation), just not yet unified with
+ * `CSTGDrumPadInterface::sInstance`'s own (currently wrong) pointer
+ * typing. A future session that fixes that representation only needs to
+ * repoint this storage at the real singleton object.
+ *
+ * regparm(3): `this` in EAX (confirmed real, but genuinely UNUSED by all
+ * 3 bodies). `STGDrumPadTriggerEvent` is a 16-bit type (confirmed: EDX's
+ * DL/DH split into 2 consecutive ring-buffer bytes, low byte first).
+ * `eNotificiation` reuses `CUSBMidiAccessory_DrumPadClient::eNotificiation`
+ * (already modeled `int` in oa_engine.h) -- the real mangled parameter
+ * type is literally that same nested typedef, confirmed via the real
+ * mangled symbol name.
+ *
+ * NOT modeled with real C++ `virtual` (this project's established
+ * host/target vtable-corruption caution, sec 10.153/10.225) -- the
+ * vtable pointer is a plain hand-installed field, matching every other
+ * "install a real vtable, dispatch through it only where a real live
+ * caller needs it" class in this project. Nothing in OA.ko itself
+ * dispatches through `sDrumPadClient` (the external USBMidiAccessory.ko
+ * driver does, out of scope) -- so the 3 methods below are ordinary,
+ * directly-callable member functions, with the vtable's own slot values
+ * installed purely for byte-faithful in-memory representation.
+ */
+class CSTGDrumPadClient {
+public:
+	void *_vtablePtr;	/* +0x0 -- real: `_ZTV17CSTGDrumPadClient + 8` */
+
+	int CanReceiveTriggerEvent();
+	void ReceiveTriggerEvent(unsigned short event);
+	void ReceiveNotification(CUSBMidiAccessory_DrumPadClient::eNotificiation n);
 };
 
 /*
