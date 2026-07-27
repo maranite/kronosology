@@ -149,10 +149,17 @@ void CSTGKeybedInterface_Cleanup(void);
  * Initialize` across any of its 6 per-round retry iterations), 6
  * attempts/round x 10 rounds instead of the free pair's 6 ports x 10
  * rounds. No confirmed caller of this member pair exists anywhere in
- * this project yet (plausibly a later/manual "keybed rescan" entry
- * point, e.g. `CSTGControlMsgHandler::TakeOverKeybedComm`, itself not
- * yet reconstructed) -- named `_MemberStartup`/`_MemberCleanup` here to
- * avoid colliding with the free pair's own established names.
+ * this project (RE-CHECKED 2026-07-27, fresh survey): the one candidate
+ * named here previously, `CSTGControlMsgHandler::TakeOverKeybedComm`, is
+ * now reconstructed (`control_msg_handler.cpp`) and confirmed to do
+ * something else entirely -- it just writes a one-byte enqueue-gate flag
+ * (`KEYBED_OFF_ENQUEUE_GATE1`) on the free pair's own `sInstance` blob,
+ * no call to `MemberStartup`/`MemberCleanup`/`TryComPort` anywhere in its
+ * body. So this member pair remains genuinely dead code from this
+ * project's own reachability analysis, exercised only by
+ * `test_keybed_interface.cpp`'s mocks -- a real, still-open gap, not a
+ * stale claim. Named `_MemberStartup`/`_MemberCleanup` here to avoid
+ * colliding with the free pair's own established names.
  */
 int CSTGKeybedInterface_MemberStartup(void);
 void CSTGKeybedInterface_MemberCleanup(void);
