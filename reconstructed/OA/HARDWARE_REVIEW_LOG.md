@@ -9,6 +9,42 @@ Format: `## <fn/topic>` + what's uncertain + what real-HW test would confirm.
 
 ---
 
+## CSTGMidiPortManager::Initialize() port loop — 2 real crashes went live for the first time, 1 fixed, 1 still open (2026-07-27)
+
+Found during the project's first OA.ko+Eva joint integration boot test.
+`5a1b107`'s fix (calling `ConstructKorgUsbMidiPorts()` explicitly as the
+first statement of `init_module()`) had an unverified side effect: it made
+`CSTGMidiPortManager::Initialize()`'s port-registration loop — previously
+confirmed dead code, since `sMidiInPorts[]`/`sMidiOutPorts[]` were always
+all-NULL — genuinely live for the first time, since `RegisterMidiInPort()`/
+`RegisterMidiOutPort()` now run for real during construction. Two real
+crashes surfaced on a live boot as a result (commit `13fba9f`):
+
+1. **Fixed**: `CSTGMidiInPortKorgUsb`'s placeholder vtable was a literal
+   `{0, 0, 0}` — safe only while nothing ever dispatched through it.
+   `PortQuery()` now calls slot 0 for real, which was NULL, causing a kernel
+   NULL-pointer-dereference Oops. Fixed with a clearly-labeled safe stub
+   (`KorgUsbInPortPortQueryStub`, returns `false`) instead of the crashing
+   literal zero.
+2. **Still open**: after fixing (1), a second, deeper crash appeared in the
+   same loop on the out-port side — `CSTGMidiOutPort`'s own vtable POINTER
+   FIELD (not just a slot within it) read back NULL for at least one live
+   instance, despite that class being documented elsewhere as using genuine
+   C++ virtual dispatch that should never leave it null. Root-causing WHY
+   needs real `objdump -dr` ground-truth work against the real OA.ko binary
+   — explicitly out of scope for the pass that found it. A defensive
+   null-guard was added in `PortQuery()`/`PortRegister()` (treat a null
+   vtable pointer as "query says no") so this doesn't Oops the kernel while
+   the deeper question is unresolved. **This is a genuine open item for a
+   future session, and a good real-hardware comparison point**: on real
+   hardware, does this vtable pointer field ever actually read NULL for a
+   live `CSTGMidiOutPort` instance, or is this purely a reconstruction gap
+   (a missing/incomplete constructor path) that real ground truth never hits?
+
+Verified: host `verify/` suite green, live `kronos_vm` boot reached
+`OA_DEBUG_MARKER 17`/`OA: init_module succeeded` with zero Oops, Eva
+launched and confirmed alive 8s later.
+
 ## CSTGDrumPadClient's own vtable — 6th confirmed `.ctors`-vs-`.init_array` instance, real bug fixed (2026-07-27)
 
 The `CSTGDrumPadClient` reconstruction added earlier the same day (`e00cd3e`,
