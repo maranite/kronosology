@@ -28,10 +28,15 @@
  *          the same batch (`cz_util.h` gained an opaque `CZ(unsigned)`/`~CZ()`
  *          sufficient for placement, `rm_job.h`'s `CRMJob::CRMJob()` is now a
  *          real reconstructed body). This ctor now matches ground truth
- *          exactly: malloc, then placement-construct the real `CRMJob`. Note
- *          `mains.cpp`'s own `RMApiInstance` ctor still uses the old raw-blob
- *          treatment for its own, separate `CRMJob*` -- that one is unrelated
- *          to this fix and was not touched this pass.
+ *          exactly: malloc, then placement-construct the real `CRMJob`.
+ *          STALE SUB-CLAIM, CORRECTED 2026-07-27: this comment previously said
+ *          `mains.cpp`'s own `RMApiInstance` ctor still used the old raw-blob
+ *          treatment for its own, separate `CRMJob*` and was untouched by this
+ *          pass -- false; the SAME `a5ff6aa` commit that made this fix also
+ *          real-constructed `RMApiInstance`'s own `CRMJob` (`new (job) CRMJob()`,
+ *          `mains.cpp`'s `ConstructRMApiInstance()`), this header comment just
+ *          never got updated to say so. Both instances are real as of that
+ *          commit.
  *   +0x34..+0x74  mUnknown34[0x40]  13 undecoded int/byte scalars the real ctor
  *          writes at fixed offsets within this range (-1 at +0x34, 3 bytes of
  *          0xff at +0x68..+0x6a, 0 everywhere else observed) -- real per-field
