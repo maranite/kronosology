@@ -59,27 +59,48 @@ struct CSTGCPUInfo {
  * "query" method (confirmed via disassembly: `test al,al` on the return
  * value gates the slot-1 call); slot 1 hands the port a region pointer.
  *
- * DEFENSIVE NULL-GUARD (2026-07-27, integration-boot regression): this
- * loop (below) was genuinely dead code until the same-day fix that made
- * `ConstructKorgUsbMidiPorts()` run for real during `init_module()` (see
- * that function's own comment, midi_korgusb_port.cpp) -- before that,
- * `sMidiInPorts[]`/`sMidiOutPorts[]` were always all-NULL and this
- * dispatch never actually ran. Now live for the first time, it hit TWO
- * separate real crashes on a live kronos_vm boot: (1) a literal null
- * FUNCTION POINTER in `CSTGMidiInPortKorgUsb`'s still-placeholder vtable
- * (fixed separately, see that array's own comment) and (2) this port's
- * OWN vtable POINTER FIELD reading back NULL for at least one
- * `CSTGMidiOutPort`-family instance -- a genuinely deeper, still-
- * unexplained issue (that class is documented elsewhere as using real
- * C++ virtual dispatch with a compiler-emitted vtable, which should
- * never be null for a properly constructed object; root-causing WHY it
- * is null here needs real objdump -dr ground-truth work, not guessing).
- * Rather than leave a second NULL-pointer-call crash blocking every live
- * boot while that deeper question is unresolved, this guard makes
- * "vtable pointer itself is null" behave as "query says no" (the same
- * safe default `CSTGMidiInPortKorgUsb`'s own placeholder fix uses) --
- * this does not resolve or explain the deeper bug, it only stops it from
- * Oopsing the kernel. Flagged for a dedicated future pass.
+ * DEFENSIVE NULL-GUARD (2026-07-27, integration-boot regression, ROOT
+ * CAUSE NOW FOUND AND FIXED): this loop (below) was genuinely dead code
+ * until the same-day fix that made `ConstructKorgUsbMidiPorts()` run for
+ * real during `init_module()` (see that function's own comment,
+ * midi_korgusb_port.cpp) -- before that, `sMidiInPorts[]`/
+ * `sMidiOutPorts[]` were always all-NULL and this dispatch never
+ * actually ran. Now live for the first time, it hit TWO separate real
+ * crashes on a live kronos_vm boot: (1) a literal null FUNCTION POINTER
+ * in `CSTGMidiInPortKorgUsb`'s still-placeholder vtable (fixed
+ * separately, see that array's own comment) and (2) this port's OWN
+ * vtable POINTER FIELD reading back NULL for `CSTGMidiOutPortKorgUsb`
+ * instances.
+ *
+ * (2) is now root-caused: confirmed via direct `objdump -dr -M intel`
+ * against ground truth OA.ko that BOTH `CSTGMidiOutPort::CSTGMidiOutPort()`
+ * (`.text+0xf8270`) and `CSTGMidiOutPortKorgUsb::CSTGMidiOutPortKorgUsb()`
+ * (`.text+0x340650`) write this field as their own first/last act
+ * respectively (`mov [this],0x8` + an `R_386_32` relocation to
+ * `_ZTV15CSTGMidiOutPort`/`_ZTV22CSTGMidiOutPortKorgUsb`) -- this
+ * project's own hand-modeled, non-`virtual` `vtable` field (see
+ * oa_engine_init.h's class comment for why real C++ `virtual` was
+ * reverted) simply never had an equivalent assignment anywhere in either
+ * reconstructed ctor. Fixed in `midi_korgusb_port.cpp`: a real
+ * `_ZTV22CSTGMidiOutPortKorgUsb[9]` array (every slot a genuine,
+ * already-reconstructed method -- no stubs needed) is now written into
+ * `outPort+0x00` immediately after `Construct()`'s placement-new,
+ * matching the InPort side's own established precedent 2 lines up in
+ * that same file. `CSTGMidiOutPortKorgUsb` is the ONLY currently-live
+ * `CSTGMidiOutPort`-family construction site in this project (the
+ * physical-DIN `CSTGMidiOutPortSerial` class has no construction site at
+ * all yet) -- so this fully resolves the crash for every port this loop
+ * can currently reach.
+ *
+ * This guard is kept anyway as cheap defense-in-depth, NOT because a
+ * correctly-constructed instance is ever genuinely supposed to have a
+ * null `vtable` field (ground truth's own ctors write it unconditionally
+ * as literally their first act) -- this exact "reconstructed ctor
+ * transcribes every field write except the vtable pointer" mistake has
+ * now recurred twice in this project (this bug, and `CSTGDrumPadClient`'s
+ * `.init_array` vtable, `87e446d`), so a future incomplete
+ * `CSTGMidiOutPortSerial` (or similar) construction reintroducing it
+ * fails safe instead of Oopsing.
  */
 static bool PortQuery(void *port)
 {

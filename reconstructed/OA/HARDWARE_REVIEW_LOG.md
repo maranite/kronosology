@@ -9,7 +9,7 @@ Format: `## <fn/topic>` + what's uncertain + what real-HW test would confirm.
 
 ---
 
-## CSTGMidiPortManager::Initialize() port loop — 2 real crashes went live for the first time, 1 fixed, 1 still open (2026-07-27)
+## CSTGMidiPortManager::Initialize() port loop — 2 real crashes went live for the first time, ALL NOW FIXED (2026-07-27)
 
 Found during the project's first OA.ko+Eva joint integration boot test.
 `5a1b107`'s fix (calling `ConstructKorgUsbMidiPorts()` explicitly as the
@@ -26,24 +26,95 @@ crashes surfaced on a live boot as a result (commit `13fba9f`):
    NULL-pointer-dereference Oops. Fixed with a clearly-labeled safe stub
    (`KorgUsbInPortPortQueryStub`, returns `false`) instead of the crashing
    literal zero.
-2. **Still open**: after fixing (1), a second, deeper crash appeared in the
-   same loop on the out-port side — `CSTGMidiOutPort`'s own vtable POINTER
-   FIELD (not just a slot within it) read back NULL for at least one live
-   instance, despite that class being documented elsewhere as using genuine
-   C++ virtual dispatch that should never leave it null. Root-causing WHY
-   needs real `objdump -dr` ground-truth work against the real OA.ko binary
-   — explicitly out of scope for the pass that found it. A defensive
-   null-guard was added in `PortQuery()`/`PortRegister()` (treat a null
-   vtable pointer as "query says no") so this doesn't Oops the kernel while
-   the deeper question is unresolved. **This is a genuine open item for a
-   future session, and a good real-hardware comparison point**: on real
-   hardware, does this vtable pointer field ever actually read NULL for a
-   live `CSTGMidiOutPort` instance, or is this purely a reconstruction gap
-   (a missing/incomplete constructor path) that real ground truth never hits?
+2. **Root-caused and fixed (2026-07-27, follow-up)**: after fixing (1), a
+   second, deeper crash appeared in the same loop on the out-port side —
+   `CSTGMidiOutPort`'s own vtable POINTER FIELD (not just a slot within it)
+   read back NULL for `CSTGMidiOutPortKorgUsb` instances. `13fba9f` shipped a
+   defensive null-guard in `PortQuery()`/`PortRegister()` (treat a null
+   vtable pointer as "query says no") and explicitly deferred root-causing
+   WHY. Direct `objdump -dr -M intel` against ground truth
+   (`/home/share/Decomp/OA.ko_Decomp/OA.ko`) resolved it:
+   - `CSTGMidiOutPort::CSTGMidiOutPort()` (`.text+0xf8270`) writes
+     `this+0x00 = &_ZTV15CSTGMidiOutPort + 8` as literally its first
+     instruction; `CSTGMidiOutPortKorgUsb::CSTGMidiOutPortKorgUsb()`
+     (`.text+0x340650`) then overwrites it with
+     `&_ZTV22CSTGMidiOutPortKorgUsb + 8` right after the base ctor call
+     returns — standard Itanium-ABI vtable-pointer establishment. Neither
+     write existed anywhere in the reconstructed C++ ctors (both faithfully
+     transcribe every OTHER field write) — a pure missing-field-write gap,
+     NOT a `.ctors`/`.init_array` issue (this ctor genuinely runs, via
+     `Construct()`/placement-new, already fixed by `5a1b107`), and NOT a
+     "used before constructed" ordering issue (ground truth's own ctors
+     never leave a real window where the field is unset).
+   - `.rel.rodata._ZTV22CSTGMidiOutPortKorgUsb` (9 relocations) resolves
+     EVERY slot to an already-reconstructed real method (no stubs needed):
+     slot0 `ShouldActivate() const` (`return true;`), slot1 `Activate`,
+     slot2 `Deactivate`, slot3 `BumpTimers` (inherited, not overridden),
+     slot4 `CanSendRealTime`, slot5 `CanSendRegular`, slot6
+     `ProcessRegularMessage`, slot7 `SendRealTime`, slot8 `SendSingleByte`.
+     This also independently resolves the ambiguity `midi_korgusb_port.cpp`'s
+     own header comment had flagged as unreconciled ("slot 0 bool query vs.
+     dtor"): ground truth's `CSTGMidiPortManager::Initialize()`
+     (`.text+0xf4f60`) itself does `call [edx]` (slot 0, `test al,al`-gated)
+     then `call [ecx+0x4]` (slot 1, region pointer in edx) for all 8 port
+     slots — byte-identical to this project's own `PortQuery()`/
+     `PortRegister()` shape, and slot 0 is `ShouldActivate()`
+     (unconditionally `return true;` in all 3 ground-truth comdat
+     instances), not a destructor.
+   - **Fix**: a real `_ZTV22CSTGMidiOutPortKorgUsb[9]` array of forwarding
+     trampolines (same technique as `KorgUsbInPortPortQueryStub`) is written
+     into `outPort+0x00` immediately after `Construct()`'s placement-new
+     (`midi_korgusb_port.cpp`), mirroring the InPort side's own established
+     precedent 2 lines up in that same function.
+   - Making this path live for the first time exposed **2 further,
+     independently root-caused bugs** in the now-reachable
+     `STGMidiOutPortKorgUsb_OutputThread()`/`sOutputWaitQueueHead` pump
+     infrastructure (both fixed in the same pass, confirmed via
+     `objdump -dr` byte-for-byte against `.text+0x3409ea`-`0x340a06` and
+     `readelf -x .data`+`readelf -rW` at `.data+0xa5c4`):
+     - The per-iteration `wait_queue_t` stand-in (`waitEntry`) was an
+       entirely uninitialized raw buffer — ground truth writes all 5 real
+       fields (`flags=0`, `private=current`, `func=&autoremove_wake_function`,
+       self-linked `task_list`) fresh every time through the sleep branch,
+       immediately before `prepare_to_wait()`. Missing this crashed inside
+       `finish_wait()`'s own `list_del_init()` on garbage stack contents
+       (live boot Oops: `CR2=0x7f`, `EIP: finish_wait+0x37`, pid
+       `STGMidiOutKorgU`).
+     - The global `sOutputWaitQueueHead` was modeled as a zero-initialized
+       `unsigned char[8]` — undersized (real `wait_queue_head_t` is 12
+       bytes: 4-byte spinlock + 8-byte `list_head`) AND wrongly zeroed: a
+       real empty `list_head` must self-reference, never point at NULL.
+       Ground truth's own `.data+0xa5c4` bytes + 2 `R_386_32` relocations
+       (both resolving back to `.data+0xa5c8`, the list_head's own address)
+       confirm a compile-time `DECLARE_WAIT_QUEUE_HEAD()`-style static
+       initializer, never a runtime `init_waitqueue_head()` call. Missing
+       this crashed inside `prepare_to_wait()`'s own `list_add()` writing
+       through a NULL `task_list.next` (live boot Oops: `CR2=0x00000004`,
+       `EIP: prepare_to_wait+0x4b`, same thread/pid). Fixed by replacing the
+       raw byte array with a properly-sized, self-referencing C++ static
+       initializer (a real link-time constant — a static object's own
+       address is a valid constant expression, so this carries no
+       `.ctors`/`.init_array` risk).
+   - The defensive null-guard in `PortQuery()`/`PortRegister()`
+     (`midi_port_manager.cpp`) is KEPT as cheap defense-in-depth (this exact
+     "ctor transcribes every field except the vtable pointer" mistake has
+     now recurred twice project-wide — this bug, and `CSTGDrumPadClient`'s
+     `.init_array` vtable, `87e446d` below) but its comment is rewritten:
+     null is never legitimate for a correctly-constructed instance, ground
+     truth's own ctors write it unconditionally.
 
-Verified: host `verify/` suite green, live `kronos_vm` boot reached
-`OA_DEBUG_MARKER 17`/`OA: init_module succeeded` with zero Oops, Eva
-launched and confirmed alive 8s later.
+Verified: host `verify/` suite green (97/97 test binaries pass, same set
+before/after), clean `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+rebuild, and 3 successive live `kronos_vm` boots in a disposable worktree
+(disk image copy + `guestfish` module injection, never touching another
+session's instance) tracking each fix in turn: boot 1 (vtable-population fix
+only) still Oopsed inside `finish_wait()`; boot 2 (+ `waitEntry` fix) Oopsed
+one layer deeper inside `prepare_to_wait()`; boot 3 (+ `sOutputWaitQueueHead`
+fix) reached `OA_DEBUG_MARKER 17`/`OA: init_module succeeded` with **zero**
+`BUG:`/`Oops:`/`Call Trace:` in the console log, Eva launched and confirmed
+alive 8s later, then hit the separate, already-documented (2026-07-27)
+fakefb.ko `register_framebuffer()` stall — identical to the pre-existing
+known issue, unrelated to this fix.
 
 ## CSTGDrumPadClient's own vtable — 6th confirmed `.ctors`-vs-`.init_array` instance, real bug fixed (2026-07-27)
 

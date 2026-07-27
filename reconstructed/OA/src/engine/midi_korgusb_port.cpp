@@ -147,6 +147,126 @@ static const unsigned int _ZTV21CSTGMidiInPortKorgUsb[3] = {
 	0, 0, (unsigned int)(unsigned long)&KorgUsbInPortPortQueryStub
 };
 
+/*
+ * ROOT-CAUSE FIX (2026-07-27, follow-up to the 13fba9f integration-boot
+ * regression): unlike the InPort side just above, `CSTGMidiOutPort`
+ * (oa_engine_init.h) DOES carry an explicit, CONFIRMED-correct `vtable`
+ * field (+0x00) -- but nothing anywhere in this project ever WROTE to
+ * it. Confirmed via direct `objdump -dr -M intel` against ground truth
+ * OA.ko:
+ *
+ *   CSTGMidiOutPort::CSTGMidiOutPort(...)   .text+0xf8270:
+ *     f827a: c7 00 08 00 00 00   mov DWORD PTR [eax],0x8
+ *            f827c: R_386_32  _ZTV15CSTGMidiOutPort
+ *
+ *   CSTGMidiOutPortKorgUsb::CSTGMidiOutPortKorgUsb(...) .text+0x340650:
+ *     340688: c7 03 08 00 00 00  mov DWORD PTR [ebx],0x8
+ *             34068a: R_386_32  _ZTV22CSTGMidiOutPortKorgUsb
+ *
+ * i.e. the real base ctor's FIRST instruction writes `&_ZTV15CSTGMidiOutPort
+ * + 8` into `this+0x00` (standard Itanium ABI: +8 skips the 2-word
+ * offset-to-top/typeinfo RTTI header, landing on slot 0), then the real
+ * derived ctor unconditionally overwrites it with `&_ZTV22CSTGMidiOutPortKorgUsb
+ * + 8` right after the base ctor call returns. This project's own
+ * reconstructed `CSTGMidiOutPort::CSTGMidiOutPort()` (midi_out_port_serial.cpp)
+ * and `CSTGMidiOutPortKorgUsb::CSTGMidiOutPortKorgUsb()` (below) both
+ * faithfully transcribe every OTHER instruction in these two ctors but
+ * neither ever assigns the `vtable` field -- a genuine missing-field-write
+ * gap, not a `.ctors`/`.init_array` issue (this ctor runs for real, via
+ * the explicit `Construct()`/placement-new below, already fixed by
+ * `5a1b107`). Left unfixed, `outPort->vtable` stays whatever the placement
+ * storage happened to contain (0, for `CKorgUsbAudioDriverMidiPorts::
+ * sInstance`'s zero-initialized `.bss` storage) -- exactly the live-boot
+ * NULL `PortQuery()`/`PortRegister()` crash `13fba9f` stopped with a
+ * defensive guard rather than explaining.
+ *
+ * `.rel.rodata._ZTV22CSTGMidiOutPortKorgUsb` (9 entries, readelf -rW)
+ * resolves EVERY one of the 9 slots to a real, non-pure function --
+ * unlike the InPort side above, no stub is needed here, every slot is
+ * already a genuine reconstructed method on this class (or, for slot 3,
+ * the inherited base `CSTGMidiOutPort::BumpTimers()` body -- confirmed
+ * by the relocation's own symbol value being 0, i.e. not overridden):
+ *   slot0 (+0x08) ShouldActivate() const   -- CSTGMidiOutPortKorgUsb, `return true;`
+ *   slot1 (+0x0c) Activate(CSTGMidiQueue*) -- CSTGMidiOutPortKorgUsb
+ *   slot2 (+0x10) Deactivate()             -- CSTGMidiOutPortKorgUsb
+ *   slot3 (+0x14) BumpTimers()             -- CSTGMidiOutPort (base, not overridden)
+ *   slot4 (+0x18) CanSendRealTime() const  -- CSTGMidiOutPortKorgUsb
+ *   slot5 (+0x1c) CanSendRegular() const   -- CSTGMidiOutPortKorgUsb
+ *   slot6 (+0x20) ProcessRegularMessage()  -- CSTGMidiOutPortKorgUsb
+ *   slot7 (+0x24) SendRealTime(uchar)      -- CSTGMidiOutPortKorgUsb
+ *   slot8 (+0x28) SendSingleByte(uchar)    -- CSTGMidiOutPortKorgUsb
+ * This independently CONFIRMS (rather than guesses) `PortQuery()`/
+ * `PortRegister()`'s own existing slot-0/slot-1 semantics
+ * (midi_port_manager.cpp): ground truth `CSTGMidiPortManager::Initialize()`
+ * (`.text+0xf4f60`) itself does `call DWORD PTR [edx]` (slot 0, gated by
+ * `test al,al`) then conditionally `call DWORD PTR [ecx+0x4]` (slot 1,
+ * with the region pointer in edx) for every one of the 8 port slots --
+ * byte-identical to this project's own `PortQuery()`/`PortRegister()`
+ * shape. Also independently resolves the "slot 0 bool query vs dtor"
+ * ambiguity this file's own header comment (above) flagged as
+ * unreconciled: slot 0 is `ShouldActivate() const` (always returns
+ * `true` in ground truth, confirmed by direct disassembly of the
+ * 6-byte comdat body), NOT a destructor -- the dtor genuinely doesn't
+ * exist as a virtual slot in this hierarchy at all.
+ *
+ * Non-virtual forwarding trampolines (same technique as
+ * `KorgUsbInPortPortQueryStub` above): this project deliberately does
+ * NOT use real C++ `virtual` for this class (see oa_engine_init.h's own
+ * class comment -- a compiler-generated vtable pointer would silently
+ * shift every field offset below +0x40), so there is no `&Class::Method`
+ * address directly usable as a `void*`-callable slot; each trampoline
+ * just forwards `(void *this, ...)` to the already-real ordinary member
+ * call, matching this whole TU's regparm(3) convention so `PortQuery()`/
+ * `PortRegister()`'s own `(Fn)vtable[N]` casts dispatch correctly.
+ */
+static bool OutPortKorgUsb_ShouldActivate(void *p)
+{
+	return ((CSTGMidiOutPortKorgUsb *)p)->ShouldActivate();
+}
+static void OutPortKorgUsb_Activate(void *p, void *q3)
+{
+	((CSTGMidiOutPortKorgUsb *)p)->Activate((CSTGMidiQueue *)q3);
+}
+static void OutPortKorgUsb_Deactivate(void *p)
+{
+	((CSTGMidiOutPortKorgUsb *)p)->Deactivate();
+}
+static void OutPortKorgUsb_BumpTimers(void *p)
+{
+	((CSTGMidiOutPort *)p)->BumpTimers();
+}
+static bool OutPortKorgUsb_CanSendRealTime(void *p)
+{
+	return ((CSTGMidiOutPortKorgUsb *)p)->CanSendRealTime();
+}
+static bool OutPortKorgUsb_CanSendRegular(void *p)
+{
+	return ((CSTGMidiOutPortKorgUsb *)p)->CanSendRegular();
+}
+static bool OutPortKorgUsb_ProcessRegularMessage(void *p)
+{
+	return ((CSTGMidiOutPortKorgUsb *)p)->ProcessRegularMessage();
+}
+static void OutPortKorgUsb_SendRealTime(void *p, unsigned char b)
+{
+	((CSTGMidiOutPortKorgUsb *)p)->SendRealTime(b);
+}
+static void OutPortKorgUsb_SendSingleByte(void *p, unsigned char b)
+{
+	((CSTGMidiOutPortKorgUsb *)p)->SendSingleByte(b);
+}
+static const unsigned int _ZTV22CSTGMidiOutPortKorgUsb[9] = {
+	(unsigned int)(unsigned long)&OutPortKorgUsb_ShouldActivate,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_Activate,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_Deactivate,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_BumpTimers,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_CanSendRealTime,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_CanSendRegular,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_ProcessRegularMessage,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_SendRealTime,
+	(unsigned int)(unsigned long)&OutPortKorgUsb_SendSingleByte,
+};
+
 /* ---------------------------------------------------------------------
  * Companion-module (KorgUsbAudioDriver.ko-family) externs. All confirmed
  * `U` in ground truth OA.ko. See the file header comment above for the
@@ -226,6 +346,18 @@ void CKorgUsbAudioDriverMidiPorts::Construct()
 		inPort[0x2e8] = (unsigned char)i;   /* midiPortIndex */
 
 		new (outPort) CSTGMidiOutPortKorgUsb(i, i, 0);
+		/* ROOT-CAUSE FIX (2026-07-27): ground truth's own derived ctor
+		 * (`.text+0x340650`) overwrites `this+0x00` with
+		 * `&_ZTV22CSTGMidiOutPortKorgUsb + 8` as its own last act (see
+		 * this array's own header comment above) -- the reconstructed
+		 * C++ ctor never performed this write, leaving `outPort->vtable`
+		 * at whatever this placement storage already held (0, for this
+		 * `.bss`-backed `sInstance`), which is exactly the NULL
+		 * `PortQuery()`/`PortRegister()` dispatch `13fba9f`'s defensive
+		 * guard was papering over. Explicit post-construction write here
+		 * matches this exact file's own established precedent for the
+		 * InPort side, 2 lines up. */
+		*(unsigned int *)(outPort + 0x00) = ToU32((unsigned char *)_ZTV22CSTGMidiOutPortKorgUsb);
 	}
 }
 
@@ -521,7 +653,46 @@ static unsigned char sThreadKeepRunning;   /* real .bss+0x26f958 */
 static unsigned char sSRQPending;          /* real .bss+0x26f951 -- set by ScheduleFromRTAI */
 static unsigned char sLinuxPending;        /* real .bss+0x26f950 -- set by ScheduleFromLinux, NEVER cleared (see below) */
 static int sOutputSRQ = -1;                /* real .bss+0x26f954 */
-static unsigned char sOutputWaitQueueHead[8];   /* real .data+0xa5c4, opaque wait_queue_head_t */
+
+/*
+ * wait_queue_head_t stand-in for `sOutputWaitQueueHead` -- CONFIRMED
+ * real 12-byte layout AND static initializer via direct `readelf -x
+ * .data`/`readelf -rW` against ground truth (`.data+0xa5c4`): a 4-byte
+ * spinlock (raw bytes `00000000`, i.e. statically unlocked) followed by
+ * an 8-byte `list_head` whose OWN two `R_386_32` relocations (at
+ * `+0xa5c8`/`+0xa5cc`) both resolve back to `.data+0xa5c8` -- i.e.
+ * `task_list.next`/`task_list.prev` both self-reference the list_head's
+ * own address, the exact compile-time shape `DECLARE_WAIT_QUEUE_HEAD()`
+ * / `__WAIT_QUEUE_HEAD_INITIALIZER()` produces. Ground truth has NO
+ * runtime `init_waitqueue_head()` call anywhere in this cluster -- this
+ * head is only ever statically initialized, matching the C++ static
+ * initializer below (a real link-time constant, since a static-storage
+ * object's own address is a valid constant expression -- no `.ctors`/
+ * `.init_array` risk).
+ *
+ * ROOT-CAUSE FIX (2026-07-27): the prior revision modeled this as a
+ * plain zero-initialized `unsigned char[8]` -- undersized by 4 bytes
+ * (real size is 12) AND, critically, an all-zero `list_head` is NOT a
+ * valid empty-list state (a real empty list_head must self-reference,
+ * never point at NULL) -- confirmed via a live kronos_vm boot Oops one
+ * layer further into the exact code path the `waitEntry` fix (below,
+ * `STGMidiOutPortKorgUsb_OutputThread`) had just unblocked:
+ * `prepare_to_wait()`'s own `__add_wait_queue()`/`list_add()` wrote
+ * through the bogus NULL `task_list.next`, crashing at `CR2=0x00000004`
+ * (`[NULL+4]`, i.e. `next->prev = new` with `next` read back as 0).
+ */
+struct WaitQueueHeadLayout {
+	unsigned int lock;
+	void *listNext;
+	void *listPrev;
+};
+static WaitQueueHeadLayout sOutputWaitQueueHeadStorage = {
+	0,
+	&sOutputWaitQueueHeadStorage.listNext,
+	&sOutputWaitQueueHeadStorage.listNext,
+};
+static void * const sOutputWaitQueueHead = &sOutputWaitQueueHeadStorage;
+
 static unsigned char sExitCompletion[0x10];     /* real .data+0xa5d0, opaque struct completion */
 
 /*
@@ -582,17 +753,62 @@ extern "C" int STGMidiOutPortKorgUsb_OutputThread(void *arg)
 
 	while (sThreadKeepRunning) {
 		if (!sSRQPending && !sLinuxPending) {
-			unsigned char waitEntry[24];
+			/*
+			 * `wait_queue_t` stand-in -- CONFIRMED real layout+init via
+			 * direct `objdump -dr -M intel` (`.text+0x3409ea`-`0x340a06`,
+			 * inside this exact `if` branch, re-run fresh every outer-loop
+			 * iteration): `struct __wait_queue` is `{flags; private; func;
+			 * task_list{next,prev};}`, 20 bytes on -m32. Ground truth writes
+			 * all 5 fields EVERY time through this branch, immediately
+			 * before `prepare_to_wait()`: flags=0, private=current task
+			 * (`self`, captured once at function entry), func=
+			 * `&autoremove_wake_function` (declared extern below already),
+			 * task_list.next=task_list.prev=&task_list itself (the
+			 * standard empty-list self-link `INIT_LIST_HEAD()` produces).
+			 *
+			 * ROOT-CAUSE FIX (2026-07-27): the prior revision of this
+			 * function declared `waitEntry` as a raw, entirely
+			 * UNINITIALIZED 24-byte buffer -- none of these 5 fields were
+			 * ever written. `prepare_to_wait()`'s own real body checks
+			 * `list_empty(&wait->task_list)` before linking it in, and
+			 * `finish_wait()` unconditionally calls `list_del_init()` on
+			 * it -- both read/write garbage stack contents from a never-
+			 * initialized `task_list`, corrupting the real wait queue and
+			 * crashing (confirmed via a live kronos_vm boot Oops inside
+			 * `finish_wait()`, pid `STGMidiOutKorgU`, CR2 0x7f/EBP 0x7b --
+			 * classic leftover-stack-garbage pointer values). This
+			 * function was entirely unreachable before the SAME-DAY
+			 * `CSTGMidiOutPort` vtable-population fix (see
+			 * `_ZTV22CSTGMidiOutPortKorgUsb`'s own comment above) made
+			 * `Activate()`/`Connect()`/`STGMidiOutPortKorgUsb_Initialize()`
+			 * -- and therefore this thread -- reachable for the first
+			 * time; this is a 3rd, independently root-caused bug in the
+			 * same integration-boot cascade, not a symptom of the vtable
+			 * fix itself.
+			 */
+			struct {
+				unsigned int flags;
+				void *priv;
+				void *func;
+				void *listNext;
+				void *listPrev;
+			} waitEntry;
+			waitEntry.flags = 0;
+			waitEntry.priv = self;
+			waitEntry.func = (void *)&autoremove_wake_function;
+			waitEntry.listNext = &waitEntry.listNext;
+			waitEntry.listPrev = &waitEntry.listNext;
+
 			long timeout = 4;
 			for (;;) {
-				prepare_to_wait(sOutputWaitQueueHead, waitEntry, 2);
+				prepare_to_wait(sOutputWaitQueueHead, &waitEntry, 2);
 				if (sSRQPending)
 					break;
 				timeout = schedule_timeout(timeout);
 				if (timeout == 0)
 					break;
 			}
-			finish_wait(sOutputWaitQueueHead, waitEntry);
+			finish_wait(sOutputWaitQueueHead, &waitEntry);
 		}
 
 		if (sSRQPending) {
