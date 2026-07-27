@@ -747,40 +747,114 @@ void *SysExApi = 0;
  * SeqApi -> 20 (matches EditApiInstance's own headroom convention), RTRouterApi
  * -> 16. DumpApi/RMApi are untouched -- nothing reconstructed dispatches through
  * either past slot 5 yet.
+ *
+ * WORKAROUND #4 (vtable-dispatch-stub-gap sweep, 2026-07-27, 10th-16th confirmed
+ * instances of LESSON_vtable_dispatch_stub_gap): all 7 of these arrays still had
+ * slots 2-5 (byte offsets +8/+0xc/+0x10/+0x14 -- CGlobalObjectBase's own
+ * PreKernelConstructor/PostKernelConstructor/PreKernelDestructor/PostKernelDestructor
+ * phase hooks) left as `EvaVTableStub`, exactly the bug this WORKAROUND block's own
+ * opening paragraph already proved is genuinely, unconditionally dispatched by
+ * CKernel::CKernel()/~CKernel()'s sm_poGlobalObjectList walks for every one of
+ * these 7 objects on every real boot -- the same class of bug as
+ * CSysApiInstance's own 9th-instance fix (sysapi_instance.cpp/global_object_base.h,
+ * commit e0758e2), just never propagated to these 7 siblings. Ground-truth
+ * confirmed via a direct `.rodata` byte read of the real Eva binary
+ * (Decomp/EVA_Decomp/Eva) at each symbol's real link address:
+ *
+ *   - EditApiInstance/SeqApiInstance/ChkApiInstance/DumpApiInstance/
+ *     SysExApiInstance: all 4 slots are the unmodified base no-ops
+ *     (0x0804cc10/20/30/40, global_object_base.cpp's own
+ *     CGlobalObjectBase_Pre/PostKernelConstructor/Destructor) -- same fix as
+ *     CSysApiInstance, wired to those exact same function pointers below.
+ *   - RTRouterApiInstance/RMApiInstance are real exceptions: slots 3/4 (+0xc/+0x10,
+ *     PostKernelConstructor/PreKernelDestructor) are the base no-ops, but slots 2/5
+ *     (+8/+0x14, PreKernelConstructor/PostKernelDestructor) are REAL overrides
+ *     (CRTRouterApiInstance::PreKernelConstructor@0x08085790/
+ *     PostKernelDestructor@0x08086330; CRMApiInstance::PreKernelConstructor@
+ *     0x08165490/PostKernelDestructor@0x08164d80) -- reconstructed below.
+ *     CRMApiInstance::PreKernelConstructor's real body lazily heap-constructs a
+ *     `CJobStack` (malloc(0x18) + placement CJobStack::CJobStack(), which itself
+ *     malloc(0x54)s+placement-constructs a CRMJob) into RMApiInstance+0x24 --
+ *     `CJobStack` is the same CResMan/CJobStack "god object" family already
+ *     confirmed genuinely out of scope elsewhere in this project (batch_disk_main_task.h,
+ *     rm_api_callback.h -- it owns its own 7-slot primary vtable shared with
+ *     CRMApiCallBack, PLUS a 2-real-slot secondary vtable, none of which this
+ *     project models), so PreKernelConstructor is deliberately left as
+ *     `EvaVTableStub` rather than forcing a fake CJobStack -- precisely scoped, not
+ *     silently dropped: see the real function's own comment below. This is safe
+ *     (not a hidden inconsistency): RMApiInstance+0x24 is explicitly zeroed by
+ *     ConstructRMApiInstance() and nothing else ever sets it, so
+ *     PostKernelDestructor's own real conditional dispatch through it (a generic
+ *     opaque-vtable-slot+4 call, same idiom as sysapi_instance.cpp's CallUninit)
+ *     correctly never fires -- reconstructed faithfully below, fully tractable
+ *     without needing CJobStack's type. RMApiInstance+0x8 (the CRMJob* already
+ *     placement-constructed by ConstructRMApiInstance() itself) is real and DOES
+ *     get destructed+freed for real once PostKernelDestructor is wired.
  */
 extern "C" void *PTR__CEditApiInstance_08e85da8[20] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
+	(void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CSeqApiInstance_08e88fa8[20] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
+	(void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CChkApiInstance_08e855c8[16] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
+	(void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CDumpApiInstance_08e85ba8[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor,
+	(void *)CGlobalObjectBase_PostKernelConstructor, (void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor,
 };
+/* CRTRouterApiInstance::PreKernelConstructor@0x08085790 (39 bytes) / ::PostKernelDestructor@
+ * 0x08086330 (58 bytes) -- both fully self-contained (raw malloc/free, no external
+ * class dependency), reconstructed for real. Real signature matches
+ * global_object_base.h's own established `int Fn(unsigned long)` shape (CallVSlot2,
+ * ckernel.cpp, always calls with arg=0 -- extra stack arg the callee never reads).
+ * self+0x4/self+0x8 (a malloc(0x50)'d 20-entry pointer buffer + its own capacity
+ * constant 0x14) and self+0x14 (a second, always-null-in-this-reconstruction pointer
+ * field -- ConstructRTRouterApiInstance() explicitly zeroes it and nothing else ever
+ * sets it, so PostKernelDestructor's own real "free if non-null" second branch
+ * faithfully never fires here, same preserved-dead-branch idiom as CRMJob's dtor).
+ */
+extern "C" {
+int CRTRouterApiInstance_PreKernelConstructor(unsigned long self_)
+{
+	unsigned char *self = (unsigned char *)self_;
+	*(void **)(self + 4) = malloc(0x50);
+	*(int *)(self + 8) = 0x14;
+	return 0;
+}
+
+int CRTRouterApiInstance_PostKernelDestructor(unsigned long self_)
+{
+	unsigned char *self = (unsigned char *)self_;
+	void *p;
+	if ((p = *(void **)(self + 4)) != 0)
+		free(p);
+	if ((p = *(void **)(self + 0x14)) != 0)
+		free(p);
+	return 0;
+}
+} // extern "C"
 extern "C" void *PTR__CRTRouterApiInstance_08e822e8[16] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CRTRouterApiInstance_PreKernelConstructor, (void *)CGlobalObjectBase_PostKernelConstructor,
+	(void *)CGlobalObjectBase_PreKernelDestructor, (void *)CRTRouterApiInstance_PostKernelDestructor, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };
 extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)CGlobalObjectBase_PreKernelConstructor,
+	(void *)CGlobalObjectBase_PostKernelConstructor, (void *)CGlobalObjectBase_PreKernelDestructor, (void *)CGlobalObjectBase_PostKernelDestructor,
 };
 /* RMApiInstance's own ctor transiently installs these 2 before overwriting with its
  * real, final CRMApiInstance vtable (see the ctor below) -- included for the same
@@ -795,10 +869,49 @@ extern "C" void *PTR__CSysExApiInstance_08e89a28[6] = {
  * yields the correct (array-base) address unchanged.
  */
 extern "C" void *PTR__CRMApi_08e88de8 = 0;
-/* Final, real, dispatched-through vtable -- same fix as the 6 above. */
+/* CRMApiInstance::PostKernelDestructor@0x08164d80 (93 bytes) -- reconstructed for
+ * real (see WORKAROUND #4 above): destructs+frees the real CRMJob at self+0x8
+ * (ConstructRMApiInstance()'s own placement-constructed job), then a generic opaque
+ * vtable dispatch (slot+4, the D1 complete-object-destructor shape) through
+ * self+0x24 if non-null -- safe without needing CJobStack's type since self+0x24
+ * always stays null in this reconstruction (see WORKAROUND #4). PreKernelConstructor
+ * (slot 2, +0x8) is the one confirmed-genuinely-deep gap in this whole sweep --
+ * left as `EvaVTableStub`, not forced -- its real body lazily heap-constructs a
+ * `CJobStack` object, an entire unmodeled class of the same CResMan/CJobStack
+ * "god object" family this project has repeatedly, deliberately left out of scope
+ * (batch_disk_main_task.h, rm_api_callback.h) -- own primary vtable (7 slots, 2
+ * real D1/D0 dtors + 5 slots inherited unchanged from CRMApiCallBack) plus a
+ * secondary (multiple-inheritance) vtable with 2 more real, unreconstructed
+ * functions. Precisely scoped, not silently dropped.
+ */
+extern "C" {
+typedef void (*OpaqueDtorFn)(void *);
+
+int CRMApiInstance_PostKernelDestructor(unsigned long self_)
+{
+	unsigned char *self = (unsigned char *)self_;
+
+	void *job = *(void **)(self + 8);
+	if (job != 0) {
+		((CRMJob *)job)->~CRMJob();
+		free(job);
+	}
+	*(void **)(self + 8) = 0;
+
+	void *jobStack = *(void **)(self + 0x24);
+	if (jobStack != 0) {
+		void *vtbl = *(void **)jobStack;
+		OpaqueDtorFn fn = *(OpaqueDtorFn *)((char *)vtbl + 4);
+		fn(jobStack);
+	}
+	*(void **)(self + 0x24) = 0;
+
+	return 0;
+}
+} // extern "C"
 extern "C" void *PTR__CRMApiInstance_08e88c48[6] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
-	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
+	(void *)CGlobalObjectBase_PostKernelConstructor, (void *)CGlobalObjectBase_PreKernelDestructor, (void *)CRMApiInstance_PostKernelDestructor,
 };
 extern "C" void *DAT_08e88d80 = 0; /* real 2nd vtable-like slot RMApiInstance+4 installs */
 
