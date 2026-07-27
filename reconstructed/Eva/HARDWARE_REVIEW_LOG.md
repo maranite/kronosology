@@ -345,6 +345,142 @@ the `"sr"` argument means.
 
 ---
 
+## Vtable-dispatch-stub-gap bug class — 16 confirmed instances (2026-07-25/27), all reconstruction-only; carry the *detection method* into real-hardware bring-up, not the individual fixes
+
+**This entry is a different kind of thing than every section above.** The
+sections above are open real-hardware-BEHAVIOR questions about code this
+project has reconstructed. This one is a closed bug-class post-mortem: a
+recurring defect class, found entirely through this project's own internal
+cross-checking (reconstruction vs. the real binary's ground-truth bytes), with
+no open behavioral question left for real hardware to answer. It's included
+here anyway per this project's standing "log all issues and questions for the
+end, to work through with real hardware" instruction — the *methodology* that
+finally caught it is worth having on hand if anything looks subtly wrong
+during real-hardware bring-up later.
+
+### The pattern
+
+When reconstructing a C++ class's per-instance vtable (the `PTR__ClassName_<addr>[]`
+arrays in `omega_vtables.cpp`/`mains.cpp`), any slot not yet individually
+verified against the real binary defaults to a generic no-op placeholder
+(`EvaVTableStub`). That default is silent and structurally harmless: the array
+is still the right size, still links, still passes every internal-consistency
+check and the full host KAT suite — because those checks only verify the
+reconstruction agrees with *itself*. The bug only exists relative to the real
+binary: if a genuinely-reconstructed dispatcher elsewhere in the project
+(`CModuleManager`, the `CKernel` global-object bring-up/teardown loops,
+`Api`-facade slot dispatch, etc.) raw-calls through that exact slot on a real
+boot path, the call silently no-ops instead of reaching the real, already-correctly-reconstructed
+target method — even though that target method's own code is sitting right
+there in the same file, fully correct, just never wired in. The clearest
+illustration: `CEditor::Setup()` was independently confirmed live (a debug
+marker fired) for an entire session before anyone noticed `CEditor`'s own
+vtable slots 2-4 were still stubs — meaning the confirmed-live constructor's
+entire `Setup()` fan-out (`CPanelIfcTask`/`CSTGUnsolMsgHandler`/`CChunkServer`/
+`CAlphaKeybIfcTask`) had been silently dead the whole time.
+
+A closely related but not identical failure mode shows up in a few of the 16
+instances below (`CApiDescriptor`, `CRMApiCallBack`): instead of a
+correctly-sized array with one wrong-target slot, the array itself was
+undersized or a bare `NULL` scalar rather than a real array at all. The
+project's own commit messages label this the "undersized-vtable-array bug
+class" in places, distinct in mechanism from the "correctly-sized array,
+wrong-target slot" pattern that `CEditor`/`CPanel`/`CSysApiInstance`/the
+`XxxApiInstance` family exhibit. Both produce the identical externally-visible
+symptom (a real caller's dispatch through a real slot silently fails to reach
+the real target) and both are invisible to the same static/host-test checks,
+which is why this project's own `LESSON_vtable_dispatch_stub_gap.md` groups
+all 16 under one running count — but a future sweep should not assume "check
+the slot target" alone is a complete audit; "check the array's own size and
+existence" is a separate, necessary check.
+
+### Detection method that finally worked
+
+Six rounds of static analysis (call-graph tracing, `.rodata` vtable-slot byte
+reads, cross-referencing header comments against the arrays they described)
+found most of the first 8 instances but converged on "exhausted" multiple
+times while instances 9-16 sat undetected — including one case
+(`CSysApiInstance`, instance 9) where a header comment had already documented
+the correct fix, citing a direct ground-truth byte read, and nobody had
+actually applied it to the array. **What finally worked was live dynamic
+tracing**, using QEMU's native gdbstub against a real `kronosvm` boot (not the
+SLIRP-forwarded gdbserver path, which reliably dies at a fixed ~74-75s wall
+clock — a QEMU `-gdb tcp::PORT` argument bypasses that entirely). Two
+refinements mattered:
+
+- **Boot with `-S` (halt at the reset vector) before attaching.** The
+  `CGlobalObjectBase` phase hooks these bugs live in fire during C++
+  static-init (`.init_array`), milliseconds after `execve()` — attaching mid-boot
+  is provably too late (confirmed by trying it first and getting zero hits).
+- **Break on the generic dispatch helper's own indirect-call site
+  (`CallVSlot1`/`CallVSlot2`'s `call eax` instruction), not the target stub's
+  entry point.** Breaking on the stub's entry seems more direct but is
+  actively misleading: gdb stops at the stub's very first instruction, before
+  its own `push ebp; mov ebp,esp` runs, so at that exact PC the frame-pointer
+  chain still belongs to the *caller's* caller — gdb's automatic backtrace
+  misattributes which frame is really "the caller of the stub" (confirmed by
+  disassembling several flagged call sites and finding the claimed caller
+  didn't actually contain an indirect call to the stub at all). Breaking
+  instead on `CallVSlot1`/`CallVSlot2`'s own `call eax` site means the
+  helper's own prologue has already executed, so `obj`, the byte offset, the
+  resolved call target (`$eax`), and the true caller return address
+  (`*(unsigned int*)($ebp+4)`, or read straight off the stack at that PC) are
+  all unambiguous direct reads — no backtrace involved.
+
+This is a genuine methodological find, not just a bug list: five to six
+independent "the static sweep is exhausted" verdicts across the session were
+each individually reasonable and each individually wrong, because this bug
+class is by definition invisible to any check that only compares the
+reconstruction against itself.
+
+### All 16 confirmed instances
+
+1. `CModuleManager::AddModule()` / `mModules` — commit `aa8843e` (2026-07-25)
+2. `CModuleManager::AddConstructor()` / `mConstructors` — commit `7d5bc26` (2026-07-25)
+3. `CChunkMan::Config()`'s Api vtable slot 17 — commit `a357593` (2026-07-25)
+4. `CRMApiCallBack`'s vtable (`PTR__CRMApiCallBack_08e886e8`, was a bare `NULL` scalar, not sized as an array at all) — commit `f68d0d9` (2026-07-25)
+5. `CApiDescriptor`'s vtable, via `CSysApiInstance::RegisterApi()`'s own Api slot `+0xa4` — commit `3f20499` (2026-07-25)
+6. `CPanel`'s own per-instance vtable (`PTR__CPanel_08f7c328` slots Setup/Config/Start) — commit `9a72d91` (2026-07-26)
+7. `CEditor`'s own per-instance vtable (`PTR__CEditor_08f29b88` slots Setup/Config/Start) — commit `552cbe4` (2026-07-26)
+8. `CDirEntry`'s vtable slot 2 (`HasValidLongNameExt`) — commit `4fd12a5` (2026-07-26)
+9. `CSysApiInstance`'s own vtable slots 2-5 (`Pre/PostKernelConstructor`, `Pre/PostKernelDestructor`) — commit `e0758e2` (2026-07-27); live-boot-confirmed on the actual rebuilt binary the same day (see `eva_9th_vtable_fix_live_boot_confirmed_2026-07-27.md`, re-decompiler agent memory)
+10-16. The 7-member `XxxApiInstance` sibling family — `EditApiInstance`, `SeqApiInstance`, `ChkApiInstance`, `DumpApiInstance`, `SysExApiInstance` (all 4 slots fixed, same base no-ops as #9), `RTRouterApiInstance` (fixed with 2 real class-specific override functions, not just the shared base no-ops), `RMApiInstance` (3 of 4 slots fixed; slot 2/`PreKernelConstructor` deliberately left `EvaVTableStub` — it needs an entirely unmodeled `CJobStack` class, precisely scoped and documented rather than forced) — commit `34eda81` (2026-07-27), dynamically re-verified live via 26 real gdbstub hits during a real `CKernel::CKernel()` construction pass on the freshly `tools/build_lenny.sh`-built binary
+
+Running total: 16, found across three sessions (2026-07-25 through 2026-07-27).
+Both the count and the commit-by-commit mapping above were independently
+re-verified against this repo's actual `git log`/`git show` output while
+writing this entry (not copied uncritically from agent memory) — all 10
+commit hashes and their descriptions check out against the real diffs.
+
+### Real-hardware relevance
+
+**Low, for this specific bug class.** All 16 instances are bugs purely in
+*this reconstruction's* wiring of its own vtable arrays — the real Kronos
+binary's actual vtables were never wrong; every fix was derived from and
+verified against a direct byte read of the real binary's own `.rodata`. Once
+fixed, each instance was verified via the host KAT suite, a from-scratch
+rebuild, and — for 9 through 16 specifically — a live dynamic trace against
+the real rebuilt binary showing the dispatch now lands on the correct
+function. There is no known behavioral difference left to test on real
+hardware *for this bug class specifically*: real hardware runs Korg's own
+binary, which never had this defect, and this project's reconstruction has
+now had all 16 known instances of it fixed (with one slot, `RMApiInstance`'s
+`PreKernelConstructor`, deliberately and visibly left as a documented stub
+rather than silently wrong).
+
+What *is* worth carrying forward into real-hardware bring-up of the
+reconstructed code: the **methodology**, not the fix list. If reconstructed
+Eva code is ever deployed toward real hardware and something behaves subtly
+wrong in a way static review and the host test suite can't explain — especially
+anything involving a per-instance object that a generic manager/dispatcher
+walks polymorphically — the same two-step method (ground-truth `.rodata`
+byte comparison of the suspect vtable's slots, plus a live gdbstub trace
+breaking on the dispatch helper's own indirect-call site rather than the
+target's entry point) is the proven way to find it, having already
+outperformed six rounds of static-only analysis in this exact codebase.
+
+---
+
 ## Deferred/out-of-scope registry — quick index, added for the final pre-hardware-testing pass (2026-07-26)
 
 Everything below is a genuine "confirmed genuinely out of scope" or
