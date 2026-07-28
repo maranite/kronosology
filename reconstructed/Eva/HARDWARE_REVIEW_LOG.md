@@ -1220,3 +1220,14 @@ should know they exist and are untested/unmodeled, not silently absent.
   struct-undersize root cause -- passes clean under both a plain rebuild with
   ASLR disabled and an `-fsanitize=address,undefined` build) -- see that
   memory file's own updated note. Eva manifest 1034 -> 1086/37,795 (2.873%).
+
+- **`CRamSample::operator=(CUsrSample&)`** (`.text+0x08427ff0`, 2026-07-28) —
+  deferred while reconstructing `CRamSample`/`CMultiSample`/`CRamSampleRelative`
+  (`ram_sample.h`/`.cpp`, 68/69 methods). Real body needs 2 unmodeled internal
+  sub-structs of `CUsrSample` (a flags pair at `*(this+0x4)+0x3c/0x3d` and a
+  6-dword block at `*(this+0x8)`) copied verbatim into `CRamSample::mName`,
+  which the reconstruction confirms is genuinely dual-use (plain name buffer
+  vs. raw scratch storage) depending on caller. Not attempted to avoid
+  fabricating an unverified `CUsrSample` layout; see `ram_sample.h`'s own
+  header comment for the full disassembly-derived writeup. Not real-hardware
+  relevant on its own (host-side reconstruction gap only).
