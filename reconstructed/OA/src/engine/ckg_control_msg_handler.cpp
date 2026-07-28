@@ -8,6 +8,11 @@
  */
 
 #include "oa_ckg_control_ui_msg.h"
+#include "oa_ckg_midi_msg_handler.h"	/* real CSKMIDIInMsgHandler class + its
+					 * ms_bShouldStopSendingNoteOnsToSTG
+					 * static, used by SetSendingBulkDump()
+					 * below -- oa_ckg_control_ui_msg.h only
+					 * forward-declares the class. */
 
 bool CKGControlMsgHandler::ms_bIsNowDumpingSong;
 bool CKGControlMsgHandler::ms_bIsNowDumpingCombi;
@@ -17,7 +22,8 @@ bool CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage;
 unsigned char *CKGRTCHandler::ms_poInstance;
 unsigned char *CKGMIDIMsgProcessor::ms_poInstance;
 unsigned char *CSKMIDIMsgProcessor::ms_poInstance;
-bool CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG;
+/* Definition now lives in ckg_midi_msg_handler.cpp (the class's own real
+ * TU, reconstructed 2026-07-28) -- only declared/used here. */
 unsigned char *CMIDIFlowParamHolder::ms_poThis;
 
 /* .text+0x3c7ed0, 35 bytes (C1) -- installs the real vtable pointer

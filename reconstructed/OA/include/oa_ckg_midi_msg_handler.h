@@ -10,6 +10,10 @@
 					 * comment right above where it pulls this
 					 * file in). When included from anywhere else,
 					 * this line pulls them in normally. */
+#include "oa_bank_memory.h"		/* CSTGBankMemory::AllocAligned(), used by
+					 * CSKMIDIInMsgHandler's own ctor to
+					 * placement-allocate its embedded
+					 * CSKSysExMsgHandler (see below). */
 
 /*
  * oa_ckg_midi_msg_handler.h  -  CSKMIDIMsgHandler / CSKSpecialMsgHandler /
@@ -36,13 +40,14 @@
  * bytes, not by inheritance.
  *
  * `CSKMIDIInMsgHandler` (the OTHER real direct child of CSKMIDIMsgHandler,
- * confirmed via its own vtable sharing the same 0x08-0x40 prefix) is
- * DELIBERATELY NOT reconstructed this batch -- deeper (33 methods, real
- * dying-note-tracking array arithmetic, a 922-byte ctor) and is this
- * project's own next continuation target; the existing 1-field opaque
- * stand-in for it (oa_ckg_control_ui_msg.h, `ms_bShouldStopSendingNoteOnsToSTG`)
- * is left untouched so this batch's blast radius stays limited to the 3
- * classes below.
+ * confirmed via its own vtable sharing the same 0x08-0x40 prefix) was
+ * DELIBERATELY NOT reconstructed in this original batch -- deeper (33
+ * methods, real dying-note-tracking array arithmetic, a 922-byte ctor)
+ * and was left as this project's own next continuation target. That
+ * continuation happened in a LATER 2026-07-28 batch (see this file's own
+ * "UPDATE" section further down) -- CSKMIDIInMsgHandler and its 5 real
+ * children are now fully reconstructed below; the 1-field opaque
+ * stand-in mentioned here no longer exists.
  *
  * === The "this IS in EAX, not ECX" gotcha ===
  * Ghidra labels every real method here `__thiscall`, which it uses
@@ -177,6 +182,28 @@ extern "C" void SPRMain_ReceiveDrumTrackParameterChangeMessageFromSeqEvent(unsig
 extern "C" void SPRMain_RecInternalSysExMessage(unsigned char byte) __attribute__((regparm(3)));
 extern "C" void SPRMain_RecSysExMessageOnAutomationTrack(int a, int b, int c) __attribute__((regparm(3)));
 extern "C" void SPRMain_RecSysExMessageFromMIDIPort(unsigned char byte) __attribute__((regparm(3)));
+/* CSKMIDIInMsgHandler's own free-function dependencies (real mangled
+ * names confirmed the same way as above). `SPRMain_KeyboardOn` is a
+ * plain C++ global function (not extern "C") -- its natural mangling
+ * already matches the real symbol `_Z18SPRMain_KeyboardOnbiii`, no
+ * `asm()` alias needed. */
+extern "C" void SKSTGGate_StartMonitorSTGQueue(void) __attribute__((regparm(3)));
+extern "C" bool SKSTGGate_EndMonitorSTGQueue(void) __attribute__((regparm(3)));
+extern "C" void SPRMain_RecAutomationTrackMessage(int statusType, int data1, int data2, int channel)
+	__attribute__((regparm(3)));
+extern "C" void SPRMain_RecMIDITrackMessage(int statusType, int data1, int data2, int channel)
+	__attribute__((regparm(3)));
+extern bool SPRMain_KeyboardOn(bool onOff, int note, int channel, int velocity) __attribute__((regparm(3)));
+
+/*
+ * CKGEventDisplayManager -- UI note-event notifier, reached via
+ * CKGEngine::ms_poKGEventDisplayManager (own real static, see
+ * oa_ckg_module_param_msg_handler.h). Own class layout out of scope.
+ */
+struct CKGEventDisplayManager {
+	void NoteOn(int note);
+	void NoteOff(int note);
+};
 
 /*
  * === CSKMIDIMsgHandler ===
@@ -388,6 +415,411 @@ public:
 	void ProcessSTGParamChange();
 	/* .text+0x346b70, 27 bytes. */
 	void ProcessKarmaDisableInput();
+};
+
+/*
+ * === UPDATE 2026-07-28 (later batch): CSKMIDIInMsgHandler and its 5
+ * children reconstructed ===
+ *
+ * Fresh `objdump -r` sweep against `.rodata._ZTV*` (same ground-truth
+ * object as above) resolved the full real class graph, correcting this
+ * header's own earlier "deliberately not reconstructed" note:
+ *
+ *   CSKMIDIMsgHandler (15 slots, above)
+ *     -> CSKMIDIInMsgHandler (50 slots: 15 inherited + 35 new, 8 of
+ *        which stay PURE at this level -- genuinely abstract)
+ *          -> CSKMIDIPortMsgHandler (50 slots, all overrides, no new
+ *             slots)
+ *               -> CSKPadNoteByMIDIPortMsgHandler (50 slots, overrides
+ *                  only dtor + ShouldNotifyToKarmaController +
+ *                  CheckNoteMessageAndTriggerPad)
+ *          -> CSKMIDILocalCtrlMsgHandler (64 slots: 50 inherited + 14
+ *             new)
+ *               -> CSKMIDIKarmaCtrlMsgHandler (64 slots, overrides only
+ *                  dtor + ShouldNotifyToKarmaController +
+ *                  CheckNoteMessageAndTriggerPad)
+ *               -> CSKPadNoteByLocalCtrlMsgHandler (64 slots, same 3
+ *                  overrides as CSKMIDIKarmaCtrlMsgHandler)
+ *
+ * No virtual inheritance anywhere in this sub-tree (no VTT/_ZTC
+ * symbols) -- plain single inheritance throughout, unlike the CKGSwitch
+ * widget family. Every real vtable-dispatch call in the raw disassembly
+ * below was resolved via `rodata_offset = call_offset + 8` (see this
+ * header's own "*this + N" gotcha above) against each class's own
+ * captured relocation dump -- an easy off-by-slot trap the first pass
+ * through this batch actually fell into twice (misreading which named
+ * method a given `call [edx+N]` really targets) before insisting on a
+ * full, explicit call_off->rodata_off->name table per class instead of
+ * eyeballing individual offsets.
+ *
+ * === Object layout (CSKMIDIInMsgHandler, shared by every child) ===
+ * All fields below confirmed directly from CSKMIDIInMsgHandler's own
+ * 922-byte constructor's real zero-init sequence (`.text+0x344210`),
+ * cross-checked against every method that reads/writes each offset:
+ *   +0xc    unsigned char m_noteDownCount[128]  -- per-note held-down
+ *                                                   counter, index = MIDI
+ *                                                   note number
+ *   +0x8c   int           m_noteOnCount         -- total currently-held
+ *                                                   note count
+ *   +0x90   CSKSysExMsgHandler *m_sysExHandler  -- heap-allocated via
+ *                                                   CSTGBankMemory::
+ *                                                   AllocAligned(sizeof
+ *                                                   (CSKSysExMsgHandler),
+ *                                                   0x10) + placement-new,
+ *                                                   never freed
+ *   +0x94   bool          m_bDamperOn
+ *   +0x95   bool          m_bSostenutoOn
+ *   +0x96   bool          m_softPedal
+ *   +0x98   unsigned int  m_lastNotePerChannel[16]  -- init 0xff
+ *   +0xd8   CDyingNoteInfo m_dyingNoteMIDIPort[16]  -- per-channel, own
+ *                                                       0x84-byte opaque
+ *                                                       type (see below)
+ *   +0x918  CDyingNoteInfo m_dyingNoteSTG[16]
+ *   +0x115c unsigned int  m_bypassKarmaNoteOnEvent[128]  -- raw 4-byte
+ *                                                            event
+ *                                                            snapshot,
+ *                                                            index = note
+ *   +0x135c int           m_dyingDamperTicks[16]   -- per-channel;
+ *                                                       CheckDyingDamper()
+ *                                                       tests >0
+ *   +0x139c unsigned char m_dyingDamperFlag[16]    -- set by
+ *                                                       CheckDyingDamper(),
+ *                                                       consumed by
+ *                                                       CSKMIDILocalCtrlMsgHandler
+ *                                                       ::SendDyingDamperMessageToMIDIPort()
+ *   +0x13ac unsigned char m_noteOnHoldCount[128]   -- Process()'s own
+ *                                                       per-note counter
+ *                                                       (STG-side gate,
+ *                                                       distinct array
+ *                                                       from
+ *                                                       m_noteDownCount)
+ *   +0x142c unsigned char m_extNoteOnChecker[128]  -- CSKMIDILocalCtrlMsgHandler
+ *                                                       only (Regist/
+ *                                                       UnRegist/
+ *                                                       IsSendingNoteOnToExt,
+ *                                                       PLUS reused
+ *                                                       channel-indexed
+ *                                                       [0..15] by
+ *                                                       CheckDuplicateMessage()
+ *                                                       for ChannelAftertouch
+ *                                                       dup-suppression --
+ *                                                       a real, confirmed
+ *                                                       dual use of the
+ *                                                       same storage, not
+ *                                                       a transcription
+ *                                                       error)
+ *   +0x14ac int           m_perNoteTimbreTranspose[128][16]  -- CSKMIDILocalCtrlMsgHandler
+ *                                                       only, zeroed by
+ *                                                       its own ctor;
+ *                                                       row=note (0-127),
+ *                                                       col=timbre
+ *                                                       (0-15); see the
+ *                                                       2 lower-confidence
+ *                                                       methods below
+ *
+ * === CDyingNoteInfo ===
+ * Own class, size confirmed exactly 0x84 (132) bytes from both arrays'
+ * channel stride AND `KillAllDyingNotes()`'s own `rep movs` (ecx=0x21
+ * dwords = 0x84 bytes). Real mangled non-virtual (regparm(3): this=EAX,
+ * explicit arg=EDX) methods only -- own internal layout out of scope.
+ */
+class CDyingNoteInfo {
+	unsigned char m_opaque[0x84];
+public:
+	void Initialize();
+	void TurnOn(int note);
+	void TurnOff(int note);
+	bool IsNoteOn(int note);
+	bool IsAnyNotesOn();
+};
+
+/*
+ * === CSKMIDIInMsgHandler ===
+ * Class region `.text+0x353370`..`.text+0x3549b8`. Real direct child of
+ * CSKMIDIMsgHandler, genuinely ABSTRACT: 8 of its own 35 new vtable
+ * slots stay pure at this level (AnalizeAndSetParameter,
+ * SendChannelMessageToMIDIPort, ShouldSendChannelMessageToMIDIPort,
+ * ShouldNotifyToKarmaController, CheckGlobalParameterPreSendToKarmaEngine,
+ * CheckGlobalParameterPreSendToSTG, ConvertPreMIDINote,
+ * NotifyNoteCountToUI), each implemented by both
+ * CSKMIDIPortMsgHandler and CSKMIDILocalCtrlMsgHandler independently.
+ * No `virtual ~CSKMIDIMsgHandler()` exists at the base -- this class is
+ * the FIRST one in the tree to add a real virtual destructor (extends
+ * the vtable by 2 slots, D1/D0), which is why every child below needs no
+ * hand-written destructor at all -- g++ regenerates the standard
+ * install-vtable-ptr-then-call-base-dtor boilerplate matching ground
+ * truth's own D1/D0 bodies automatically once the inheritance chain is
+ * declared correctly.
+ */
+class CSKMIDIInMsgHandler : public CSKMIDIMsgHandler {
+public:
+	unsigned char m_noteDownCount[128];		/* +0xc */
+	int m_noteOnCount;				/* +0x8c */
+	CSKSysExMsgHandler *m_sysExHandler;		/* +0x90 */
+	bool m_bDamperOn;				/* +0x94 */
+	bool m_bSostenutoOn;				/* +0x95 */
+	bool m_softPedal;				/* +0x96 */
+	unsigned int m_lastNotePerChannel[16];		/* +0x98 */
+	CDyingNoteInfo m_dyingNoteMIDIPort[16];	/* +0xd8 */
+	CDyingNoteInfo m_dyingNoteSTG[16];		/* +0x918 */
+	unsigned int m_bypassKarmaNoteOnEvent[128];	/* +0x115c */
+	int m_dyingDamperTicks[16];			/* +0x135c */
+	unsigned char m_dyingDamperFlag[16];		/* +0x139c */
+	unsigned char m_noteOnHoldCount[128];		/* +0x13ac */
+
+	static bool ms_bShouldStopSendingNoteOnsToSTG;
+
+	/* .text+0x354210, 922 bytes. */
+	CSKMIDIInMsgHandler();
+	virtual ~CSKMIDIInMsgHandler() {}
+
+	/* .text+0x353400, 56 bytes. */
+	virtual bool ShouldSendChannelMessageToKarmaEngine();
+	/* .text+0x353440, 116 bytes. */
+	virtual void StoreNoteEvent();
+	/* .text+0x3534d0, 59 bytes. */
+	virtual void CheckDamperStatus();
+	/* .text+0x353510, 59 bytes. */
+	virtual void CheckSostenutoStatus();
+	/* .text+0x353550, 1 byte -- empty. */
+	virtual void NotifyDamperStatusToUI();
+	/* .text+0x353560, 1 byte -- empty. */
+	virtual void NotifySostenutoStatusToUI();
+	/* .text+0x353570, 8 bytes. */
+	virtual bool IsDamperOn();
+	/* .text+0x353580, 8 bytes. */
+	virtual bool IsSostenutoOn();
+	/* .text+0x353590, 6 bytes. */
+	virtual bool CheckDuplicateMessage();
+	/* .text+0x3535a0, 134 bytes, regparm(3). */
+	virtual bool AnalizeAndProcessNoteOffWhilePerformanceChange(unsigned char *buf, int len);
+	/* .text+0x353630, 41 bytes. */
+	virtual void ReserveBypassKARMANoteOnEvent(int note);
+	/* .text+0x353670, 176 bytes. */
+	virtual bool CheckBypassKARMANoteOnEvent(int note);
+	/* .text+0x353730, 216 bytes. */
+	virtual bool CheckDyingNoteForMIDIPort();
+	/* .text+0x353820, 67 bytes. */
+	virtual void ProcessForDyingNote();
+	/* .text+0x353870, 227 bytes. */
+	virtual bool IsEnableViaRPPR();
+	/* .text+0x353970, 235 bytes. */
+	virtual void NotifyNoteEventToUI();
+	/* .text+0x353a60, 100 bytes. */
+	virtual void CheckSoftPedalStatus();
+	/* .text+0x353ad0, 352 bytes. */
+	virtual bool ShouldRecChannelMessageToSequencer();
+	/* .text+0x353c40, 316 bytes. */
+	virtual bool ShouldSendChannelMessageToSTG();
+	/* .text+0x353d90, 60 bytes. */
+	virtual void SendChannelMessageToKarmaEngine();
+	/* .text+0x353dd0, 95 bytes. */
+	virtual bool CheckNoteMessageAndTriggerPad();
+	/* .text+0x353e30, 81 bytes. */
+	virtual void NotifyCCToKarmaController();
+	/* .text+0x353e90, 652 bytes. */
+	virtual void Process();
+	/* .text+0x354130, 209 bytes, regparm(3). */
+	virtual bool AnalizeAndProcess(unsigned char *buf, int len);
+	/* .text+0x3545b0, 631 bytes. */
+	void KillAllDyingNotes();
+	/* .text+0x354830, 1 byte -- empty, non-virtual (own overload,
+	 * distinct from the base class's virtual same-named method). */
+	void StoreDyingNoteInfoForSTG(CMIDIMessage *msg) { (void)msg; }
+	/* .text+0x354840, 1 byte -- empty, non-virtual. */
+	void StoreDyingNoteInfoForMIDPort(CMIDIMessage *msg) { (void)msg; }
+	/* .text+0x354850, 46 bytes. */
+	void ClearKeyboardStatus();
+	/* .text+0x354880, 312 bytes. */
+	void CheckDyingDamper();
+
+	/* === Pure virtuals -- no body at this level, first implemented by
+	 * CSKMIDIPortMsgHandler / CSKMIDILocalCtrlMsgHandler below === */
+	virtual bool AnalizeAndSetParameter(unsigned char *buf, int len) = 0;
+	virtual void SendChannelMessageToMIDIPort() = 0;
+	virtual bool ShouldSendChannelMessageToMIDIPort() = 0;
+	virtual bool ShouldNotifyToKarmaController() = 0;
+	virtual bool CheckGlobalParameterPreSendToKarmaEngine() = 0;
+	virtual bool CheckGlobalParameterPreSendToSTG() = 0;
+	virtual void ConvertPreMIDINote() = 0;
+	virtual void NotifyNoteCountToUI() = 0;
+
+	/* .text+0x353390, 93 bytes -- NOT pure (real base body), overridden
+	 * only by the 2 CSKPadNoteBy* leaves via a different vtable slot
+	 * layer up the tree (CSKMIDIPortMsgHandler/CSKMIDILocalCtrlMsgHandler
+	 * keep this exact base body unchanged, confirmed by both classes'
+	 * own vtable relocations still pointing at this symbol). */
+	virtual void ProcessPadTriggerNote();
+};
+
+/*
+ * === CSKMIDIPortMsgHandler ===
+ * Class region `.text+0x355a30`..`.text+0x355d3f` (ctor). Direct child
+ * of CSKMIDIInMsgHandler, implements all 8 inherited pure virtuals, adds
+ * no new vtable slots of its own.
+ */
+class CSKMIDIPortMsgHandler : public CSKMIDIInMsgHandler {
+public:
+	/* .text+0x355d10, 47 bytes. */
+	CSKMIDIPortMsgHandler();
+
+	/* .text+0x355a30, 3 bytes. */
+	virtual bool ShouldSendChannelMessageToMIDIPort();
+	/* .text+0x355a40, 1 byte -- empty. */
+	virtual void SendChannelMessageToMIDIPort();
+	/* .text+0x355a50, 1 byte -- empty. */
+	virtual void ConvertPreMIDINote();
+	/* .text+0x355a70, 93 bytes. */
+	virtual bool CheckGlobalParameterPreSendToSTG();
+	/* .text+0x355ae0, 37 bytes. */
+	virtual bool ShouldNotifyToKarmaController();
+	/* .text+0x355b10, 178 bytes, regparm(3). */
+	virtual bool AnalizeAndSetParameter(unsigned char *buf, int len);
+	/* .text+0x355bd0, 42 bytes. */
+	virtual void NotifyNoteCountToUI();
+	/* .text+0x355c20, 223 bytes. */
+	virtual bool CheckGlobalParameterPreSendToKarmaEngine();
+
+	/* .text+0x355a60, 1 byte -- empty; own vtable slot inherited from
+	 * CSKMIDIMsgHandler (not CSKMIDIInMsgHandler's own extension). */
+	virtual void ConvertPreMIDIAfterTouch();
+};
+
+/*
+ * === CSKPadNoteByMIDIPortMsgHandler ===
+ * Class region `.text+0x355c00`..`.text+0x355c1f`. Leaf, overrides only
+ * the 2 pad-note slots (both trivial `return false`).
+ */
+class CSKPadNoteByMIDIPortMsgHandler : public CSKMIDIPortMsgHandler {
+public:
+	/* .text+0x355c00, 3 bytes. */
+	virtual bool ShouldNotifyToKarmaController();
+	/* .text+0x355c10, 3 bytes. */
+	virtual bool CheckNoteMessageAndTriggerPad();
+};
+
+/*
+ * === CSKMIDILocalCtrlMsgHandler ===
+ * Class region `.text+0x3549c0`..`.text+0x345a0`. Direct child of
+ * CSKMIDIInMsgHandler, implements the same 8 inherited pure virtuals
+ * (independently from CSKMIDIPortMsgHandler) AND adds 14 genuinely new
+ * vtable slots of its own (inherited unchanged by both
+ * CSKMIDIKarmaCtrlMsgHandler and CSKPadNoteByLocalCtrlMsgHandler below).
+ *
+ * 2 methods below (both SendChannelMessageInCombiOtherTimbreToMIDIPort
+ * overloads) are a LOWER-CONFIDENCE reconstruction than everything else
+ * in this file: real control flow was traced from raw disassembly
+ * (confirmed calls, branch conditions, and the real
+ * `m_perNoteTimbreTranspose[note][timbre]` addressing math), but the
+ * exact per-branch register-to-parameter mapping was not independently
+ * re-verified against a second read the way every other method in this
+ * batch was (see this header's own "3 real transcription bugs" section
+ * above for why that 2nd pass matters) -- flagged here explicitly rather
+ * than silently presented as equally solid. Left in (not stubbed to a
+ * no-op) because leaving either slot pure would make this whole class,
+ * plus its own CSKMIDIKarmaCtrlMsgHandler and
+ * CSKPadNoteByLocalCtrlMsgHandler children, non-instantiable.
+ */
+class CSKMIDILocalCtrlMsgHandler : public CSKMIDIInMsgHandler {
+public:
+	unsigned char m_extNoteOnChecker[128];			/* +0x142c */
+	int m_perNoteTimbreTranspose[128][16];			/* +0x14ac */
+
+	/* .text+0x3458d0, 245 bytes. */
+	CSKMIDILocalCtrlMsgHandler();
+
+	/* === Overrides of CSKMIDIInMsgHandler's 8 pure virtuals (any
+	 * declaration order -- these occupy already-fixed inherited vtable
+	 * slots, not new ones) === */
+	/* .text+0x345010, 107 bytes, regparm(3). */
+	virtual bool AnalizeAndSetParameter(unsigned char *buf, int len);
+	/* .text+0x345170, 61 bytes. */
+	virtual void SendChannelMessageToMIDIPort();
+	/* .text+0x345380, 181 bytes. */
+	virtual bool ShouldSendChannelMessageToMIDIPort();
+	/* .text+0x344ec0, 13 bytes. */
+	virtual bool ShouldNotifyToKarmaController();
+	/* .text+0x344e40, 13 bytes. */
+	virtual bool CheckGlobalParameterPreSendToKarmaEngine();
+	/* .text+0x344e50, 13 bytes. */
+	virtual bool CheckGlobalParameterPreSendToSTG();
+	/* .text+0x344e60, 69 bytes. */
+	virtual void ConvertPreMIDINote();
+	/* .text+0x345080, 42 bytes. */
+	virtual void NotifyNoteCountToUI();
+
+	/* === Overrides of 3 more CSKMIDIInMsgHandler REAL (non-pure)
+	 * virtuals (also already-fixed inherited slots) === */
+	/* .text+0x3450f0, 84 bytes. */
+	virtual bool CheckDuplicateMessage();
+	/* .text+0x3450b0, 23 bytes. */
+	virtual void NotifyDamperStatusToUI();
+	/* .text+0x3450d0, 23 bytes. */
+	virtual void NotifySostenutoStatusToUI();
+
+	/* === 14 genuinely NEW virtual slots (rodata 0xd0-0x104), inherited
+	 * unchanged by CSKMIDIKarmaCtrlMsgHandler and
+	 * CSKPadNoteByLocalCtrlMsgHandler below -- declaration order here
+	 * MUST match real vtable order (confirmed via `objdump -r`), unlike
+	 * every override group above. === */
+	/* .text+0x344ed0, 28 bytes. */
+	virtual void InitializeExtNoteOnChecker();
+	/* .text+0x344f40, 51 bytes. */
+	virtual void CopyNoteOnStatus(unsigned char *dst);
+	/* .text+0x344f80, 31 bytes. */
+	virtual bool IsKeyboardAllOff();
+	/* .text+0x344fb0, 94 bytes. */
+	virtual void ClearNoteStatus();
+	/* .text+0x345830, 156 bytes. */
+	virtual bool IsNotThruKarma(int channel);
+	/* .text+0x345790, 146 bytes. */
+	virtual unsigned int GetKarmaControlledChannelPat(bool includeAllModules);
+	/* .text+0x3451b0, 444 bytes -- LOWER CONFIDENCE, see class comment. */
+	virtual void SendChannelMessageInCombiOtherTimbreToMIDIPort();
+	/* .text+0x3454e0, 371 bytes -- LOWER CONFIDENCE, see class comment. */
+	virtual void SendChannelMessageInCombiOtherTimbreToMIDIPort(int timbre, bool applySustainFilter);
+	/* .text+0x3449c0, 1090 bytes. */
+	virtual void SendDyingDamperMessageToMIDIPort();
+	/* .text+0x345440, 145 bytes. */
+	virtual bool CheckGlobalParameterPreSendToMIDIPort();
+	/* .text+0x345670, 262 bytes. */
+	virtual bool CheckTimbreParameterPreSendToMIDIPort(int timbre);
+	/* .text+0x344ef0, 14 bytes. */
+	virtual void RegistExtNoteOn(int note);
+	/* .text+0x344f00, 28 bytes. */
+	virtual void UnRegistExtNoteOn(int note);
+	/* .text+0x344f20, 21 bytes. */
+	virtual bool IsSendingNoteOnToExt(int note);
+};
+
+/*
+ * === CSKMIDIKarmaCtrlMsgHandler ===
+ * Class region `.text+0x345a00`..`.text+0x345a2f`. Leaf, overrides only
+ * the 2 pad-note slots.
+ */
+class CSKMIDIKarmaCtrlMsgHandler : public CSKMIDILocalCtrlMsgHandler {
+public:
+	/* .text+0x345a00, 33 bytes. */
+	CSKMIDIKarmaCtrlMsgHandler();
+
+	/* .text+0x3459d0, 3 bytes. */
+	virtual bool ShouldNotifyToKarmaController();
+	/* .text+0x3459e0, 24 bytes. */
+	virtual bool CheckNoteMessageAndTriggerPad();
+};
+
+/*
+ * === CSKPadNoteByLocalCtrlMsgHandler ===
+ * Class region `.text+0x345150`..`.text+0x34516f`. Leaf, overrides only
+ * the 2 pad-note slots (both trivial `return false`, same shape as
+ * CSKPadNoteByMIDIPortMsgHandler above).
+ */
+class CSKPadNoteByLocalCtrlMsgHandler : public CSKMIDILocalCtrlMsgHandler {
+public:
+	/* .text+0x345150, 3 bytes. */
+	virtual bool ShouldNotifyToKarmaController();
+	/* .text+0x345160, 3 bytes. */
+	virtual bool CheckNoteMessageAndTriggerPad();
 };
 
 #endif /* OA_CKG_MIDI_MSG_HANDLER_H */

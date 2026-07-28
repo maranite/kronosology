@@ -478,6 +478,28 @@ struct CKGEngine {
 	void KarmaTurnOffWhenStartDump();
 	void SendCCOffsetBack();
 	void SetBendRange(int range, unsigned int arg2, unsigned int arg3);
+
+	/*
+	 * 2 more real instance methods, discovered reconstructing
+	 * CSKMIDIInMsgHandler::Process()/SendChannelMessageToKarmaEngine()
+	 * (oa_ckg_midi_msg_handler.h) -- same cast-through-`ms_poInstance`
+	 * idiom. Own bodies out of scope.
+	 */
+	void SendChannelMessage(unsigned char statusType, unsigned char channel,
+				 signed char data1, signed char data2);
+	bool ShouldForceTimbreZoneBypass(int channel, int flagsChannel);
+
+	/*
+	 * A real, plain static pointer (own relocation
+	 * `_ZN9CKGEngine26ms_poKGEventDisplayManagerE`, same class-scope-
+	 * static idiom as `ms_poInstance` itself, NOT an offset field on
+	 * the instance) -- discovered reconstructing CSKMIDIInMsgHandler::
+	 * NotifyNoteEventToUI() (oa_ckg_midi_msg_handler.h), whose own
+	 * CKGEventDisplayManager type is declared there (this header's own
+	 * include chain sits below it, hence `unsigned char *` here rather
+	 * than the real pointer type; cast at each use site).
+	 */
+	static unsigned char *ms_poKGEventDisplayManager;
 };
 
 /*

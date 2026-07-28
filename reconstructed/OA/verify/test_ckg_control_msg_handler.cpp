@@ -50,11 +50,14 @@ static int g_setupTemplateCalls[64], g_setupTemplateCount;
 void CKGBankManager::SetupTemplateAfterLoading(int i) { g_setupTemplateCalls[g_setupTemplateCount++] = i; }
 
 /* CKGRTCHandler::ms_poInstance, CKGMIDIMsgProcessor::ms_poInstance,
- * CSKMIDIMsgProcessor::ms_poInstance,
- * CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG, and
- * CMIDIFlowParamHolder::ms_poThis are all defined by
- * ckg_control_msg_handler.cpp itself (linked in below) -- not redefined
- * here. */
+ * CSKMIDIMsgProcessor::ms_poInstance, and CMIDIFlowParamHolder::ms_poThis
+ * are all defined by ckg_control_msg_handler.cpp itself (linked in
+ * below) -- not redefined here.
+ * CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG's real
+ * definition moved to ckg_midi_msg_handler.cpp (2026-07-28 batch, that
+ * class's own real reconstruction) -- NOT linked into this test, so it
+ * needs its own mock definition here now. */
+bool CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG;
 void CKGRTCHandler::ChangePerformance() { mark("RTC::ChangePerformance"); }
 void CKGRTCHandler::ResetAllScene() { mark("RTC::ResetAllScene"); }
 void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue() { mark("ResetKarmaGeneratedCCValue"); }

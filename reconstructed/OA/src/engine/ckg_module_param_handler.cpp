@@ -16,6 +16,7 @@
  */
 unsigned char *CKGEngine::ms_poInstance;
 CKGParamEdit *CKGEngine::ms_poKGParamEdit;
+unsigned char *CKGEngine::ms_poKGEventDisplayManager;
 unsigned char *CKGUIMsgProcessor::ms_poInstance;
 CSPRSysExBufManager *CSPRMIDIMsgProcessor::ms_poSysExPlayBuf;
 

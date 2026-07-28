@@ -24,6 +24,8 @@
  */
 
 #include "oa_ckg_midi_msg_handler.h"
+#include "oa_internal.h"	/* placement operator new(size_t, void*), used by
+				 * CSKMIDIInMsgHandler's own ctor below */
 /* CKGChordTrigger's 2 static flags (CheckPadsMIDIOutFilter()'s own gate) --
  * canonical declaration lives in oa_ckg_switch_family.h, not included here
  * (its own #include chain re-enters oa_ckg_control_ui_msg.h in a way that's
@@ -851,4 +853,1204 @@ void CSKSysExMsgHandler::ProcessKarmaDisableInput()
 {
 	if ((m_flags & 0xf) == 0)
 		KGMain_ReceiveKarmaDisableInputMessage(m_buf, m_bufIndex);
+}
+
+/*
+ * ==================== UPDATE 2026-07-28: CSKMIDIInMsgHandler and its 5
+ * children ====================
+ * See oa_ckg_midi_msg_handler.h's own "UPDATE" comment for the full
+ * class-graph writeup and evidence. Every `call [edx+N]` in the raw
+ * disassembly below was resolved via `rodata_offset = N + 8` against
+ * each class's own captured vtable relocation dump before being written
+ * as a plain C++ virtual call -- not eyeballed.
+ */
+
+bool CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG;
+
+/* .text+0x354210, 922 bytes -- fully unrolled in ground truth (16
+ * straight-line repetitions for the 2 CDyingNoteInfo arrays + the 4
+ * per-channel field groups, 128 straight-line repetitions for the 3
+ * per-note byte/dword arrays); reconstructed here as plain loops since
+ * loop order has no effect on the final zeroed state. */
+CSKMIDIInMsgHandler::CSKMIDIInMsgHandler() : CSKMIDIMsgHandler()
+{
+	/* Real ground truth allocates exactly 0x3c (60) bytes -- NOT
+	 * `sizeof(CSKSysExMsgHandler)`, which host g++ computes as 56 here
+	 * because that class's own (pre-existing, prior-batch) declaration
+	 * has no explicit padding field for the real 4-byte gap between
+	 * CSKMIDIMsgHandler's 8-byte base and CSKSysExMsgHandler's own
+	 * m_bufIndex at ground-truth offset +0xc. Using the literal keeps
+	 * *this* function's own allocation faithful regardless of that
+	 * unrelated class's C++ layout. */
+	unsigned char *buf = CSTGBankMemory::AllocAligned(0x3c, 0x10);
+	m_sysExHandler = new (buf) CSKSysExMsgHandler();
+
+	for (int i = 0; i < 128; i++) {
+		m_noteDownCount[i] = 0;
+		m_bypassKarmaNoteOnEvent[i] = 0;
+		m_noteOnHoldCount[i] = 0;
+	}
+
+	m_noteOnCount = 0;
+	m_bDamperOn = false;
+	m_bSostenutoOn = false;
+	m_softPedal = false;
+
+	for (int i = 0; i < 16; i++) {
+		m_lastNotePerChannel[i] = 0xff;
+		m_dyingNoteMIDIPort[i].Initialize();
+		m_dyingNoteSTG[i].Initialize();
+		m_dyingDamperTicks[i] = 0;
+		m_dyingDamperFlag[i] = 0;
+	}
+
+	ms_bShouldStopSendingNoteOnsToSTG = false;
+}
+
+/* .text+0x353390, 93 bytes -- NOT pure, a real base body, see header. */
+void CSKMIDIInMsgHandler::ProcessPadTriggerNote()
+{
+	if (CKGBankManager::ms_poInstance[0x97c7ba] != 0)
+		return;
+	if ((m_flags & 0xf) == 1)
+		SendChannelMessageToMIDIPortWithCorrectLength();
+	ConvertPostMIDINote();
+	if (CheckGlobalParameterPreSendToSTG())
+		RecChannelMessageToSequencer();
+}
+
+/* .text+0x353400, 56 bytes. */
+bool CSKMIDIInMsgHandler::ShouldSendChannelMessageToKarmaEngine()
+{
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType == 0xc0)
+		return true;
+	if (statusType == 0xb0) {
+		if (m_data1 == 0 || m_data1 == 0x20)
+			return true;
+		return ShouldRecChannelMessageToSequencer();
+	}
+	return ShouldRecChannelMessageToSequencer();
+}
+
+/* .text+0x353440, 116 bytes -- +0xc/+0x8c are m_noteDownCount and
+ * m_noteOnCount, already-established field names matching the ctor's
+ * own zero-init of both. Calls the still-pure NotifyNoteCountToUI,
+ * rodata 0x9c, call_off 0x94. */
+void CSKMIDIInMsgHandler::StoreNoteEvent()
+{
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType != 0x90 && statusType != 0x80) {
+		NotifyNoteCountToUI();
+		return;
+	}
+
+	int note = m_data1;
+	if (statusType == 0x90) {
+		m_noteDownCount[note]++;
+		m_noteOnCount++;
+	} else {
+		if (m_noteDownCount[note] != 0) {
+			m_noteDownCount[note]--;
+		} else if (m_noteOnCount <= 0) {
+			return;
+		} else {
+			m_noteOnCount--;
+		}
+	}
+	NotifyNoteCountToUI();
+}
+
+/* .text+0x3534d0, 59 bytes. */
+void CSKMIDIInMsgHandler::CheckDamperStatus()
+{
+	if ((m_status & 0xf0) != 0xb0)
+		return;
+	if (m_data1 != 0x40)
+		return;
+	bool on = (m_data2 > 0x3f);
+	if (m_bDamperOn == on)
+		return;
+	m_bDamperOn = on;
+	NotifyDamperStatusToUI();
+}
+
+/* .text+0x353510, 59 bytes. */
+void CSKMIDIInMsgHandler::CheckSostenutoStatus()
+{
+	if ((m_status & 0xf0) != 0xb0)
+		return;
+	if (m_data1 != 0x42)
+		return;
+	bool on = (m_data2 > 0x3f);
+	if (m_bSostenutoOn == on)
+		return;
+	m_bSostenutoOn = on;
+	NotifySostenutoStatusToUI();
+}
+
+/* .text+0x353550, 1 byte -- empty. */
+void CSKMIDIInMsgHandler::NotifyDamperStatusToUI()
+{
+}
+
+/* .text+0x353560, 1 byte -- empty. */
+void CSKMIDIInMsgHandler::NotifySostenutoStatusToUI()
+{
+}
+
+/* .text+0x353570, 8 bytes. */
+bool CSKMIDIInMsgHandler::IsDamperOn()
+{
+	return m_bDamperOn;
+}
+
+/* .text+0x353580, 8 bytes. */
+bool CSKMIDIInMsgHandler::IsSostenutoOn()
+{
+	return m_bSostenutoOn;
+}
+
+/* .text+0x353590, 6 bytes. */
+bool CSKMIDIInMsgHandler::CheckDuplicateMessage()
+{
+	return true;
+}
+
+/* .text+0x3535a0, 134 bytes -- uses regparm 3 calling convention. */
+bool CSKMIDIInMsgHandler::AnalizeAndProcessNoteOffWhilePerformanceChange(unsigned char *buf, int len)
+{
+	if (!AnalizeAndSetParameter(buf, len))
+		return false;
+
+	ConvertNoteOnVelocity0IntoNoteOff();
+	if ((m_status & 0xf0) != 0x80)
+		return false;
+
+	StoreNoteEvent();
+	ConvertPreMIDINote();
+	if (ShouldSendChannelMessageToMIDIPort())
+		SendChannelMessageToMIDIPort();
+
+	ConvertPostMIDINote();
+	ConvertPostMIDIVelocity();
+	m_flags |= 0x40;
+	SendChannelMessageToSTG();
+	return true;
+}
+
+/* .text+0x353630, 41 bytes. */
+void CSKMIDIInMsgHandler::ReserveBypassKARMANoteOnEvent(int note)
+{
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType == 0x90)
+		m_bypassKarmaNoteOnEvent[note] = *(unsigned int *)&m_status;
+	else if (statusType == 0x80)
+		m_bypassKarmaNoteOnEvent[note] = 0;
+}
+
+/* .text+0x353670, 176 bytes. */
+bool CSKMIDIInMsgHandler::CheckBypassKARMANoteOnEvent(int note)
+{
+	if ((m_status & 0xf0) != 0x80)
+		return false;
+
+	unsigned char offVelocity = m_data2;
+	unsigned int origEvent = *(unsigned int *)&m_status;
+	CSKMIDIMsgHandler scratch;	/* real ground truth places a scratch
+					 * CSKMIDIMsgHandler on the stack here
+					 * and never reads it again afterward --
+					 * kept for faithful side effects
+					 * (install-only ctor, no observable
+					 * effect either way). */
+
+	unsigned int reserved = m_bypassKarmaNoteOnEvent[note];
+	bool result = false;
+	if ((reserved & 0xf0) == 0x90 && (reserved & 0xf) == (m_status & 0xf)) {
+		*(unsigned int *)&m_status = reserved;
+		m_status = 0x80 | (reserved & 0xf);
+		m_data2 = offVelocity;
+		SendChannelMessageToSTG();
+		*(unsigned int *)&m_status = origEvent;
+		result = true;
+	}
+	m_bypassKarmaNoteOnEvent[note] = 0;
+	return result;
+}
+
+/* .text+0x353730, 216 bytes. */
+bool CSKMIDIInMsgHandler::CheckDyingNoteForMIDIPort()
+{
+	int channel = m_status & 0xf;
+	int note = (signed char)m_data1;
+	unsigned char statusType = m_status & 0xf0;
+
+	if (statusType == 0x90) {
+		m_dyingNoteSTG[channel].TurnOn(note);
+		return true;
+	}
+	if (statusType != 0x80)
+		return true;
+
+	if (m_dyingNoteMIDIPort[channel].IsNoteOn(note)) {
+		ProcessForDyingNote();
+		m_dyingNoteMIDIPort[channel].TurnOff(note);
+		return false;
+	}
+	if (m_dyingNoteSTG[channel].IsNoteOn(note)) {
+		m_dyingNoteSTG[channel].TurnOff(note);
+		return true;
+	}
+	return false;
+}
+
+/* .text+0x353820, 67 bytes. */
+void CSKMIDIInMsgHandler::ProcessForDyingNote()
+{
+	((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->SetStatus(CMIDIFlowParamHolder::eStatus_1);
+	if (ShouldSendChannelMessageToMIDIPort())
+		SendChannelMessageToMIDIPort();
+	((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->SetStatus(CMIDIFlowParamHolder::eStatus_0);
+}
+
+/* .text+0x353870, 227 bytes. */
+bool CSKMIDIInMsgHandler::IsEnableViaRPPR()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+
+	if (((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetVoiceMode() != 2) {
+		int statusChannel = m_status & 0xf;
+		if (statusChannel != (signed char)bm[0x97c747])
+			return true;
+	}
+
+	if (bm[0x97c749] == 0 && (m_flags & 0xf) != 0)
+		return true;
+
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType == 0x90)
+		return SPRMain_KeyboardOn(true, m_data1, m_status & 0xf, m_data2);
+	if (statusType != 0x80)
+		return true;
+	return SPRMain_KeyboardOn(false, m_data1, m_status & 0xf, m_data2);
+}
+
+/* .text+0x353970, 235 bytes -- CKGBankManager::ms_poInstance[+8] is
+ * itself a POINTER, dereferenced once, to a separate note-display
+ * buffer, NOT the giant opaque blob's own raw offsets like every other
+ * `ms_poInstance[N]` access in this project -- a real, confirmed extra
+ * indirection. */
+void CSKMIDIInMsgHandler::NotifyNoteEventToUI()
+{
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType != 0x90 && statusType != 0x80)
+		return;
+
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	int note = (signed char)m_data1;
+
+	if (statusType == 0x80) {
+		((CKGEventDisplayManager *)CKGEngine::ms_poKGEventDisplayManager)->NoteOff(note);
+		sub[0x147a6] = m_data1;
+		sub[0x147a7] = 0;
+		if (note < 0) {
+			for (int i = 0; i < 0x80; i++)
+				sub[0x147a8 + i] = 0;
+			sub[0x147a6] = 0;
+			sub[0x147a7] = 0;
+		} else {
+			sub[0x147a8 + note] = 0;
+		}
+	} else {
+		((CKGEventDisplayManager *)CKGEngine::ms_poKGEventDisplayManager)->NoteOn(note);
+		sub[0x147a6] = m_data1;
+		sub[0x147a7] = m_data2;
+		if (note < 0) {
+			for (int i = 0; i < 0x80; i++)
+				sub[0x147a8 + i] = 0;
+			sub[0x147a6] = 0;
+			sub[0x147a7] = 0;
+		} else {
+			sub[0x147a8 + note] = m_data2;
+		}
+	}
+}
+
+/* .text+0x353a60, 100 bytes. */
+void CSKMIDIInMsgHandler::CheckSoftPedalStatus()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	if ((m_status & 0xf) != (signed char)bm[0x97c747])
+		return;
+	if ((m_status & 0xf0) != 0xb0)
+		return;
+	if (m_data1 != 0x43)
+		return;
+
+	bool on = (m_data2 > 0x3f);
+	m_softPedal = on;
+	if (CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage)
+		return;
+
+	CKGUIMsgSender *sender = (CKGUIMsgSender *)(CKGUIMsgProcessor::ms_poInstance + 0x5c);
+	sender->UpdateSoftPedalStatus(on);
+}
+
+/* .text+0x353ad0, 352 bytes. */
+bool CSKMIDIInMsgHandler::ShouldRecChannelMessageToSequencer()
+{
+	bool result = CheckGlobalParameterPreSendToSTG();
+	unsigned char statusType = m_status & 0xf0;
+
+	if (statusType == 0xc0)
+		return true;
+	if (statusType == 0xb0 && (m_data1 == 0 || m_data1 == 0x20))
+		return SKSTGGate_CheckVJSCCToMIDIPortFilter((signed char)m_data1, m_flags & 0xf);
+
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int n = mf->GetNumOfKARMAModule();
+	for (int i = 0; i < n; i++) {
+		int in = mf->GetKARMARealInputChannel(i);
+		int out = mf->GetKARMARealOutputChannel(i);
+		int loc = mf->GetRealInputLocalControllerChannel(i);
+		int statusChannel = m_status & 0xf;
+
+		if (((out == in) || (out == loc)) && out == statusChannel) {
+			if (mf->IsKARMAOn() || mf->IsKARMATimbreThruInternalAction(i))
+				return false;
+		}
+	}
+
+	if (!result)
+		return false;
+	if (statusType == 0xb0)
+		return SKSTGGate_CheckVJSCCToMIDIPortFilter((signed char)m_data1, m_flags & 0xf);
+	if (statusType == 0xe0 && (m_flags & 0xf) == 4)
+		return CKGBankManager::ms_poInstance[0x97c7b9] != 0;
+	return result;
+}
+
+/* .text+0x353c40, 316 bytes -- same per-module KARMA-channel scan as
+ * ShouldRecChannelMessageToSequencer above, but a DIFFERENT tail gate:
+ * m_flags&0xf==4 plus a GetLocalControlChannel match, no CC/PitchBend
+ * distinction at all. */
+bool CSKMIDIInMsgHandler::ShouldSendChannelMessageToSTG()
+{
+	bool result = CheckGlobalParameterPreSendToSTG();
+	unsigned char statusType = m_status & 0xf0;
+
+	if (statusType == 0xc0)
+		return true;
+	if (statusType == 0xb0 && (m_data1 == 0 || m_data1 == 0x20))
+		return SKSTGGate_CheckVJSCCToMIDIPortFilter((signed char)m_data1, m_flags & 0xf);
+
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int n = mf->GetNumOfKARMAModule();
+	for (int i = 0; i < n; i++) {
+		int in = mf->GetKARMARealInputChannel(i);
+		int out = mf->GetKARMARealOutputChannel(i);
+		int loc = mf->GetRealInputLocalControllerChannel(i);
+		int statusChannel = m_status & 0xf;
+
+		if (((out == in) || (out == loc)) && out == statusChannel) {
+			if (mf->IsKARMAOn() || mf->IsKARMATimbreThruInternalAction(i))
+				return false;
+		}
+	}
+
+	if (!result)
+		return false;
+	if ((m_flags & 0xf) != 4)
+		return true;
+	if ((m_status & 0xf) != mf->GetLocalControlChannel())
+		return false;
+	return result;
+}
+
+/* .text+0x353d90, 60 bytes. */
+void CSKMIDIInMsgHandler::SendChannelMessageToKarmaEngine()
+{
+	CKGEngine *eng = (CKGEngine *)CKGEngine::ms_poInstance;
+	eng->SendChannelMessage(m_status & 0xf0, m_status & 0xf, (signed char)m_data1, (signed char)m_data2);
+}
+
+/* .text+0x353dd0, 95 bytes -- NOT pure at this level, see header. The
+ * 5th, "EChangeSource", argument to CKGRTCHandler::
+ * AnalizeAndProcessNoteMessage is really the STACK-arg-5 computed
+ * value below, NOT m_data1 -- a naive Ghidra-order reading gets this
+ * backwards: data1/data2 are stack args 3/4, the computed 1-or-2 value
+ * is stack arg 5, confirmed by the real store offsets [esp]/[esp+4]/
+ * [esp+8] at the real call site. */
+bool CSKMIDIInMsgHandler::CheckNoteMessageAndTriggerPad()
+{
+	if (!ShouldNotifyToKarmaController())
+		return false;
+
+	int src = ((m_flags & 0xf) == 0) ? 2 : 1;
+	CKGRTCHandler *rtc = (CKGRTCHandler *)CKGRTCHandler::ms_poInstance;
+	return rtc->AnalizeAndProcessNoteMessage(m_status & 0xf, m_status & 0xf0,
+						  (signed char)m_data1, (signed char)m_data2, src);
+}
+
+/* .text+0x353e30, 81 bytes -- same call shape as
+ * CheckNoteMessageAndTriggerPad above, no return-value use. */
+void CSKMIDIInMsgHandler::NotifyCCToKarmaController()
+{
+	int src = ((m_flags & 0xf) == 0) ? 2 : 1;
+	CKGRTCHandler *rtc = (CKGRTCHandler *)CKGRTCHandler::ms_poInstance;
+	rtc->AnalizeAndProcessCCMessage(m_status & 0xf, m_status & 0xf0,
+					 (signed char)m_data1, (signed char)m_data2, src);
+}
+
+/* .text+0x353e90, 652 bytes -- the real ground-truth `edi`/`consumed`
+ * local is reused across the NoteOn/NoteOff/generic sub-paths: for a
+ * NoteOff whose per-note hold counter was already nonzero, it becomes
+ * the CKGBankManager::ms_poInstance[0x97c749] gate-flag value itself,
+ * 0 or 1, preserved -- not reset -- into the shared StoreNoteEvent-
+ * onward tail; every other path resets it to 0 first. See the header's
+ * own writeup for the full derivation -- this function needed the most
+ * careful re-derivation of the whole batch, an earlier pass on this
+ * exact function twice mis-resolved 2 different `call [edx+N]` targets
+ * before insisting on the definitive per-class call_off table. */
+void CSKMIDIInMsgHandler::Process()
+{
+	if (m_status > 0xef)
+		return;
+
+	ConvertNoteOnVelocity0IntoNoteOff();
+	unsigned char statusType = m_status & 0xf0;
+	int note = (signed char)m_data1;
+	bool consumed = false;
+
+	if (statusType == 0x90) {
+		if (*(int *)(CKGEngine::ms_poInstance + 0x14) != 4)
+			return;
+		if (ms_bShouldStopSendingNoteOnsToSTG)
+			return;
+		if (CKGBankManager::ms_poInstance[0x97c749] == 0)
+			m_noteOnHoldCount[note]++;
+	} else if (statusType == 0x80) {
+		if (m_noteOnHoldCount[note] != 0) {
+			m_noteOnHoldCount[note]--;
+			consumed = (CKGBankManager::ms_poInstance[0x97c749] != 0);
+			if (consumed)
+				SKSTGGate_StartMonitorSTGQueue();
+		}
+	}
+
+	StoreNoteEvent();
+	CheckDamperStatus();
+	CheckSostenutoStatus();
+	CheckSoftPedalStatus();
+	ConvertPreMIDINote();
+	ConvertPreMIDIAfterTouch();
+
+	if (CheckDuplicateMessage() && IsEnableViaRPPR()) {
+		bool triggered = false;
+		if (CheckNoteMessageAndTriggerPad()) {
+			ProcessPadTriggerNote();
+			triggered = true;
+		}
+		if (!triggered) {
+			if (CheckDyingNoteForMIDIPort()) {
+				if (ShouldSendChannelMessageToMIDIPort())
+					SendChannelMessageToMIDIPort();
+			}
+			if (ShouldNotifyToKarmaController())
+				NotifyCCToKarmaController();
+
+			ConvertPostMIDINote();
+			if (ShouldSendChannelMessageToKarmaEngine())
+				SendChannelMessageToKarmaEngine();
+			if (ShouldSendChannelMessageToSTG())
+				RecChannelMessageToSequencer();
+			if (ShouldSendChannelMessageToMIDIPort()) {
+				ConvertPostMIDIAfterTouch();
+				ConvertPostMIDIVelocity();
+
+				CKGEngine *eng = (CKGEngine *)CKGEngine::ms_poInstance;
+				bool forceBypass = eng->ShouldForceTimbreZoneBypass(m_status & 0xf, m_flags & 0xf);
+				if (forceBypass)
+					m_flags |= 0x40;
+				else
+					m_flags &= ~0x40;
+
+				bool karmaOn = ((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->IsKARMAOn();
+				if (karmaOn)
+					m_flags |= 0x20;
+				else
+					m_flags &= ~0x20;
+
+				SendChannelMessageToSTG();
+				ReserveBypassKARMANoteOnEvent(note);
+			}
+		}
+	}
+
+	NotifyNoteEventToUI();
+	CheckBypassKARMANoteOnEvent(note);
+
+	if (consumed) {
+		if (!SKSTGGate_EndMonitorSTGQueue())
+			SendChannelMessageToSTG();
+	}
+}
+
+/* .text+0x354130, 209 bytes -- uses regparm 3 calling convention. */
+bool CSKMIDIInMsgHandler::AnalizeAndProcess(unsigned char *buf, int len)
+{
+	if (m_sysExHandler->AnalizeAndProcess(buf, len))
+		return true;
+
+	if (!AnalizeAndSetParameter(buf, len))
+		return false;
+
+	unsigned char flagsChannel = m_flags & 0xf;
+	if (flagsChannel == 2) {
+		SPRMain_RecAutomationTrackMessage(m_status & 0xf0, (signed char)m_data1,
+						   (signed char)m_data2, m_status & 0xf);
+	} else if (flagsChannel == 0xa) {
+		SPRMain_RecMIDITrackMessage(m_status & 0xf0, (signed char)m_data1,
+					     (signed char)m_data2, m_status & 0xf);
+	} else {
+		Process();
+	}
+	return true;
+}
+
+/* .text+0x3445b0, 631 bytes. */
+void CSKMIDIInMsgHandler::KillAllDyingNotes()
+{
+	for (int ch = 0; ch < 16; ch++) {
+		if (m_dyingNoteMIDIPort[ch].IsAnyNotesOn()) {
+			m_status = (m_status & 0xf0) | ch;
+			for (int note = 0; note < 128; note++) {
+				if (m_dyingNoteMIDIPort[ch].IsNoteOn(note)) {
+					m_data1 = (unsigned char)note;
+					ProcessForDyingNote();
+					m_dyingNoteMIDIPort[ch].TurnOff(note);
+				}
+			}
+		}
+	}
+
+	/* real ground truth: per-channel `rep movs` (sizeof(CDyingNoteInfo)
+	 * = 0x84) copying the STG-side snapshot into the MIDI-port-side
+	 * array, then resetting the STG-side slot -- reconstructed as a
+	 * plain struct assignment (CDyingNoteInfo is a trivially-copyable
+	 * byte blob). */
+	for (int ch = 0; ch < 16; ch++) {
+		m_dyingNoteMIDIPort[ch] = m_dyingNoteSTG[ch];
+		m_dyingNoteSTG[ch].Initialize();
+	}
+}
+
+/* .text+0x354850, 46 bytes. */
+void CSKMIDIInMsgHandler::ClearKeyboardStatus()
+{
+	for (int i = 0; i < 128; i++)
+		m_noteDownCount[i] = 0;
+	m_noteOnCount = 0;
+	NotifyNoteCountToUI();
+}
+
+/* .text+0x354880, 312 bytes. */
+void CSKMIDIInMsgHandler::CheckDyingDamper()
+{
+	if (((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetVoiceMode() != 0)
+		return;
+
+	for (int i = 0; i < 16; i++) {
+		if (m_dyingDamperTicks[i] > 0)
+			m_dyingDamperFlag[i] = 1;
+	}
+}
+
+/* ==================== CSKMIDIPortMsgHandler ==================== */
+
+/* .text+0x355d10, 47 bytes. */
+CSKMIDIPortMsgHandler::CSKMIDIPortMsgHandler() : CSKMIDIInMsgHandler()
+{
+	m_flags &= 0xf0;
+	m_sysExHandler->m_flags &= 0xf0;
+}
+
+/* .text+0x355a30, 3 bytes. */
+bool CSKMIDIPortMsgHandler::ShouldSendChannelMessageToMIDIPort()
+{
+	return false;
+}
+
+/* .text+0x355a40, 1 byte -- empty. */
+void CSKMIDIPortMsgHandler::SendChannelMessageToMIDIPort()
+{
+}
+
+/* .text+0x355a50, 1 byte -- empty. */
+void CSKMIDIPortMsgHandler::ConvertPreMIDINote()
+{
+}
+
+/* .text+0x355a60, 1 byte -- empty; own vtable slot inherited from
+ * CSKMIDIMsgHandler, not CSKMIDIInMsgHandler's own extension. */
+void CSKMIDIPortMsgHandler::ConvertPreMIDIAfterTouch()
+{
+}
+
+/* .text+0x355a70, 93 bytes. */
+bool CSKMIDIPortMsgHandler::CheckGlobalParameterPreSendToSTG()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	unsigned char statusType = m_status & 0xf0;
+
+	if (statusType == 0xc0)
+		return bm[0x97c748] & 1;
+	if (statusType == 0xe0)
+		return (bm[0x97c748] >> 4) & 1;
+	if (statusType != 0xb0)
+		return true;
+	if (m_data1 != 0 && m_data1 != 0x20)
+		return (bm[0x97c748] >> 4) & 1;
+	return (bm[0x97c748] >> 1) & 1;
+}
+
+/* .text+0x355ae0, 37 bytes. */
+bool CSKMIDIPortMsgHandler::ShouldNotifyToKarmaController()
+{
+	if ((m_status & 0xf0) != 0xb0)
+		return false;
+	return (CKGBankManager::ms_poInstance[0x97c748] >> 4) & 1;
+}
+
+/* .text+0x355b10, 178 bytes -- uses regparm 3 calling convention. */
+bool CSKMIDIPortMsgHandler::AnalizeAndSetParameter(unsigned char *buf, int len)
+{
+	(void)len;
+	m_status = buf[0];
+	m_data1  = buf[1];
+	m_data2  = buf[2];
+	m_flags  = buf[3] & 0xf0;
+
+	unsigned char status = buf[0];
+	if (status > 0xef)
+		return false;
+
+	unsigned char statusType = status & 0xf0;
+	if (statusType == 0x80 || statusType == 0x90 || statusType == 0xa0 ||
+	    statusType == 0xb0 || statusType == 0xe0) {
+		if ((signed char)buf[1] < 0 || (signed char)buf[2] < 0)
+			return false;
+		m_status = status;
+		m_data1 = buf[1];
+		m_data2 = buf[2];
+		return true;
+	}
+	if (statusType == 0xc0 || statusType == 0xd0) {
+		if ((signed char)buf[1] < 0)
+			return false;
+		m_status = status;
+		m_data1 = buf[1];
+		return true;
+	}
+	return false;
+}
+
+/* .text+0x355bd0, 42 bytes. */
+void CSKMIDIPortMsgHandler::NotifyNoteCountToUI()
+{
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	sub[0x147a2] = (m_noteOnCount != 0);
+}
+
+/* .text+0x355c20, 223 bytes. */
+bool CSKMIDIPortMsgHandler::CheckGlobalParameterPreSendToKarmaEngine()
+{
+	unsigned char statusType = m_status & 0xf0;
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+
+	if (statusType == 0xd0) {
+		if ((bm[0x97c748] & 0x8) == 0)
+			return false;
+	} else if (statusType == 0xe0 || statusType == 0xb0) {
+		if ((bm[0x97c748] & 0x10) == 0)
+			return false;
+	}
+
+	if (bm[0x97c7c0] != 0)
+		return true;
+
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int channel = m_status & 0xf;
+	int n = mf->GetNumOfKARMAModule();
+	for (int i = 0; i < n; i++) {
+		if (mf->GetKARMARealInputChannel(i) == channel)
+			return false;
+		if (mf->GetRealInputLocalControllerChannel(i) == channel)
+			return false;
+	}
+	return true;
+}
+
+/* ==================== CSKPadNoteByMIDIPortMsgHandler ==================== */
+
+/* .text+0x355c00, 3 bytes. */
+bool CSKPadNoteByMIDIPortMsgHandler::ShouldNotifyToKarmaController()
+{
+	return false;
+}
+
+/* .text+0x355c10, 3 bytes. */
+bool CSKPadNoteByMIDIPortMsgHandler::CheckNoteMessageAndTriggerPad()
+{
+	return false;
+}
+
+/* ==================== CSKMIDILocalCtrlMsgHandler ==================== */
+
+/* .text+0x3458d0, 245 bytes. */
+CSKMIDILocalCtrlMsgHandler::CSKMIDILocalCtrlMsgHandler() : CSKMIDIInMsgHandler()
+{
+	m_flags = (m_flags & 0xf0) | 1;
+	m_sysExHandler->m_flags = (m_sysExHandler->m_flags & 0xf0) | 1;
+
+	for (int note = 0; note < 128; note++)
+		for (int timbre = 0; timbre < 16; timbre++)
+			m_perNoteTimbreTranspose[note][timbre] = 0;
+}
+
+/* .text+0x3449c0, 1090 bytes -- iterates the 16-entry
+ * m_dyingDamperFlag[] array set by CheckDyingDamper; for each flagged
+ * channel, synthesizes+sends a Sustain-CC, same CC#/value as the
+ * triggering message with the channel swapped, then updates
+ * m_dyingDamperTicks[i] from the response and maybe clears the flag. */
+void CSKMIDILocalCtrlMsgHandler::SendDyingDamperMessageToMIDIPort()
+{
+	if ((m_status & 0xf0) != 0xb0)
+		return;
+	if (m_data1 != 0x40)
+		return;
+
+	unsigned char origStatus = m_status;
+	for (int i = 0; i < 16; i++) {
+		if (m_dyingDamperFlag[i]) {
+			m_status = 0xb0 | i;
+			SendChannelMessageToMIDIPortWithCorrectLength();
+			signed char data2 = (signed char)m_data2;
+			m_dyingDamperTicks[i] = data2;
+			if (data2 == 0)
+				m_dyingDamperFlag[i] = 0;
+		}
+	}
+	m_status = origStatus;
+}
+
+/* .text+0x344e40, 13 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::CheckGlobalParameterPreSendToKarmaEngine()
+{
+	return CKGBankManager::ms_poInstance[0x97c749] != 0;
+}
+
+/* .text+0x344e50, 13 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::CheckGlobalParameterPreSendToSTG()
+{
+	return CKGBankManager::ms_poInstance[0x97c749] != 0;
+}
+
+/* .text+0x344e60, 69 bytes. */
+void CSKMIDILocalCtrlMsgHandler::ConvertPreMIDINote()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	if (*(int *)(bm + 0x97c74c) != 0)
+		return;
+	unsigned char statusType = m_status & 0xf0;
+	if (statusType != 0x90 && statusType != 0x80)
+		return;
+
+	int note = (signed char)m_data1 + (signed char)bm[0x97c744];
+	if (note > 0x7f) {
+		note -= 12;
+	} else if (note < 0) {
+		note += 12;
+	}
+	m_data1 = (unsigned char)note;
+}
+
+/* .text+0x344ec0, 13 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::ShouldNotifyToKarmaController()
+{
+	return CKGBankManager::ms_poInstance[0x97c749] != 0;
+}
+
+/* .text+0x344ed0, 28 bytes. */
+void CSKMIDILocalCtrlMsgHandler::InitializeExtNoteOnChecker()
+{
+	for (int i = 0; i < 128; i++)
+		m_extNoteOnChecker[i] = 0;
+}
+
+/* .text+0x344ef0, 14 bytes. */
+void CSKMIDILocalCtrlMsgHandler::RegistExtNoteOn(int note)
+{
+	if ((unsigned int)note <= 0x7f)
+		m_extNoteOnChecker[note]++;
+}
+
+/* .text+0x344f00, 28 bytes. */
+void CSKMIDILocalCtrlMsgHandler::UnRegistExtNoteOn(int note)
+{
+	if ((unsigned int)note <= 0x7f && m_extNoteOnChecker[note] != 0)
+		m_extNoteOnChecker[note]--;
+}
+
+/* .text+0x344f20, 21 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::IsSendingNoteOnToExt(int note)
+{
+	return (unsigned int)note <= 0x7f && m_extNoteOnChecker[note] != 0;
+}
+
+/* .text+0x344f40, 51 bytes. */
+void CSKMIDILocalCtrlMsgHandler::CopyNoteOnStatus(unsigned char *dst)
+{
+	for (int i = 0; i < 128; i++)
+		dst[i] = m_noteDownCount[i];
+}
+
+/* .text+0x344f80, 31 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::IsKeyboardAllOff()
+{
+	for (int i = 0; i < 128; i++)
+		if (m_noteDownCount[i] != 0)
+			return false;
+	return true;
+}
+
+/* .text+0x344fb0, 94 bytes. */
+void CSKMIDILocalCtrlMsgHandler::ClearNoteStatus()
+{
+	for (int i = 0; i < 128; i++)
+		m_noteDownCount[i] = 0;
+	m_noteOnCount = 0;
+	m_bDamperOn = false;
+	m_bSostenutoOn = false;
+	NotifyNoteCountToUI();
+	NotifyDamperStatusToUI();
+	NotifySostenutoStatusToUI();
+}
+
+/* .text+0x345010, 107 bytes -- uses regparm 3 calling convention. */
+bool CSKMIDILocalCtrlMsgHandler::AnalizeAndSetParameter(unsigned char *buf, int len)
+{
+	(void)len;
+	m_status = buf[0];
+	m_data1  = buf[1];
+	m_data2  = buf[2];
+	m_flags  = buf[3];
+
+	if ((signed char)m_status >= 0)
+		return false;
+	if ((signed char)m_data1 < 0 || (signed char)m_data2 < 0 || (signed char)m_flags < 0)
+		return false;
+
+	return (m_flags & 0xf) != 5;
+}
+
+/* .text+0x345080, 42 bytes. */
+void CSKMIDILocalCtrlMsgHandler::NotifyNoteCountToUI()
+{
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	sub[0x147a1] = (m_noteOnCount != 0);
+}
+
+/* .text+0x3450b0, 23 bytes. */
+void CSKMIDILocalCtrlMsgHandler::NotifyDamperStatusToUI()
+{
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	sub[0x147a3] = m_bDamperOn;
+}
+
+/* .text+0x3450d0, 23 bytes. */
+void CSKMIDILocalCtrlMsgHandler::NotifySostenutoStatusToUI()
+{
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	sub[0x147a4] = m_bSostenutoOn;
+}
+
+/* .text+0x3450f0, 84 bytes -- ChannelAftertouch, status 0xd0,
+ * dup-suppression REUSES m_extNoteOnChecker[], indexed by CHANNEL
+ * (0-15 this time, not by note number) -- a real, confirmed dual use of
+ * the same storage, see the header comment, not a transcription error. */
+bool CSKMIDILocalCtrlMsgHandler::CheckDuplicateMessage()
+{
+	unsigned char statusType = m_status & 0xf0;
+	int channel = m_status & 0xf;
+
+	if (statusType == 0xd0) {
+		bool dup = (m_extNoteOnChecker[channel] == (signed char)m_data1);
+		m_extNoteOnChecker[channel] = m_data1;
+		return !dup;
+	}
+
+	m_extNoteOnChecker[channel] = m_data1;
+	return true;
+}
+
+/* .text+0x345170, 61 bytes. */
+void CSKMIDILocalCtrlMsgHandler::SendChannelMessageToMIDIPort()
+{
+	SendChannelMessageToSTGWithCorrectLength();
+	if (((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetVoiceMode() == 0)
+		SendChannelMessageInCombiOtherTimbreToMIDIPort();
+	SendChannelMessageInCombiOtherTimbreToMIDIPort();
+}
+
+/* .text+0x345380, 181 bytes -- the `mov edi,[eax+0xd8]` in ground truth
+ * reads this object's OWN vtable at vptr+0xd8, i.e. rodata_offset
+ * 0xd8+8=0xe0, which is IsNotThruKarma's own slot, then calls it via
+ * the raw function-pointer value with `this`/`channel` in EAX/EDX --
+ * i.e. a perfectly ordinary IsNotThruKarma virtual call through
+ * `channel`, just compiled through an explicit pointer load instead of
+ * the usual `call [edx+N]` shape, same +8 rule, applied consistently. */
+bool CSKMIDILocalCtrlMsgHandler::ShouldSendChannelMessageToMIDIPort()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+
+	if (bm[0x97c749] != 0 && mf->IsKARMAOn() && mf->GetVoiceMode() != 0) {
+		if (mf->GetVoiceMode() != 2)
+			return false;
+		int channel = mf->GetLocalControlChannel();
+		if (!IsNotThruKarma(channel))
+			return false;
+		/* falls through to the common tail below */
+	}
+
+	if (mf->GetVoiceMode() == 2) {
+		int status = mf->GetCurrentTrackStatus();
+		return status <= 1;
+	}
+	return CheckGlobalParameterPreSendToMIDIPort();
+}
+
+/* .text+0x345440, 145 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::CheckGlobalParameterPreSendToMIDIPort()
+{
+	unsigned char statusType = m_status & 0xf0;
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+
+	if (statusType == 0xd0)
+		return (bm[0x97c748] >> 3) & 1;
+
+	if (statusType == 0xe0) {
+		if ((bm[0x97c748] & 0x10) == 0)
+			return false;
+		if ((m_flags & 0xf) != 4)
+			return true;
+		return CKGBankManager::ms_poInstance[0x97c7b9] != 0;
+	}
+
+	if (statusType != 0xb0)
+		return true;
+
+	if ((bm[0x97c748] & 0x10) == 0)
+		return true;
+	return SKSTGGate_CheckVJSCCToMIDIPortFilter((signed char)m_data1, m_flags & 0xf);
+}
+
+/* .text+0x345670, 262 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::CheckTimbreParameterPreSendToMIDIPort(int timbre)
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	unsigned char statusType = m_status & 0xf0;
+
+	if (statusType == 0xb0)
+		return mf->IsEnableTimbreCC((signed char)m_data1, timbre);
+
+	if (statusType == 0x80 || statusType == 0x90) {
+		int note = (signed char)m_data1;
+		if (note < mf->GetTimbreBottomKey(timbre))
+			return false;
+		if (note > mf->GetTimbreTopKey(timbre))
+			return false;
+		if (statusType == 0x80)
+			return false;
+		int velocity = (signed char)m_data2;
+		if (velocity < mf->GetTimbreLowVelocity(timbre))
+			return false;
+		return velocity <= mf->GetTimbreHighVelocity(timbre);
+	}
+
+	if (statusType == 0xe0)
+		return mf->IsEnableTimbrePitchBend(timbre);
+	if (statusType == 0xd0)
+		return mf->IsEnableTimbreAftertouch(timbre);
+
+	return false;
+}
+
+/* .text+0x345790, 146 bytes. */
+unsigned int CSKMIDILocalCtrlMsgHandler::GetKarmaControlledChannelPat(bool includeAllModules)
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	unsigned int pat = 0;
+	int n = mf->GetNumOfKARMAModule();
+
+	for (int i = 0; i < n; i++) {
+		if (includeAllModules) {
+			pat |= (1u << mf->GetKARMARealOutputChannel(i));
+		} else if (mf->IsKARMATimbreThru(i)) {
+			pat |= (1u << mf->GetKARMARealOutputChannel(i));
+		}
+	}
+	return pat;
+}
+
+/* .text+0x345830, 156 bytes. */
+bool CSKMIDILocalCtrlMsgHandler::IsNotThruKarma(int channel)
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int n = mf->GetNumOfKARMAModule();
+
+	for (int i = 0; i < n; i++) {
+		int in  = mf->GetKARMARealInputChannel(i);
+		int out = mf->GetKARMARealOutputChannel(i);
+		int loc = mf->GetRealInputLocalControllerChannel(i);
+
+		if (((in == channel) || (loc == channel)) && out == channel)
+			return false;
+	}
+	return true;
+}
+
+/*
+ * .text+0x3451b0, 444 bytes, and .text+0x3454e0, 371 bytes -- LOWER
+ * CONFIDENCE than every other method in this file, see the class's own
+ * header comment. Real control flow, real call targets, and the real
+ * `m_perNoteTimbreTranspose[note][timbre]` addressing math, confirmed
+ * independently via the ctor's own 128-row zero-init loop, are all
+ * traced from raw disassembly; per-branch fidelity has not been
+ * independently re-verified the way the rest of this batch was. The
+ * 2-arg overload's real shape: gate on GetTimbreStatus in {3,4} and a
+ * GetLocalControlChannel mismatch against channel, then
+ * CheckTimbreParameterPreSendToMIDIPort; on pass, synthesize a
+ * per-timbre-channel copy of the current event, remapping the note
+ * through a per-note-per-timbre transpose value that is COMPUTED --
+ * via CMIDIFlowParamHolder's own GetTimbreTranspose -- and REMEMBERED
+ * on Note On, then RECALLED, not recomputed, on the matching Note Off
+ * -- so a note stays correctly paired even if the live timbre
+ * transpose setting changes while the note is held.
+ */
+void CSKMIDILocalCtrlMsgHandler::SendChannelMessageInCombiOtherTimbreToMIDIPort()
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	bool karmaOn = mf->IsKARMAOn();
+	bool statusIsNoteOn = (m_status & 0xf0) == 0x90;
+
+	for (int timbre = 0; timbre < 16; timbre++) {
+		int channel = mf->GetTimbreChannel(timbre);
+
+		if (channel <= 0xf) {
+			if (statusIsNoteOn && !mf->IsEnableTimbreNoteOn(timbre))
+				continue;
+			if (!karmaOn) {
+				SendChannelMessageInCombiOtherTimbreToMIDIPort(timbre, false);
+				continue;
+			}
+		} else {
+			if (statusIsNoteOn && !mf->IsEnableTimbreNoteOn(timbre))
+				continue;
+		}
+
+		unsigned char statusType = m_status & 0xf0;
+		if (statusType == 0x80) {
+			continue;
+		}
+		if (statusType == 0xb0 && m_data1 == 0x40)
+			SendChannelMessageInCombiOtherTimbreToMIDIPort(timbre, true);
+	}
+}
+
+void CSKMIDILocalCtrlMsgHandler::SendChannelMessageInCombiOtherTimbreToMIDIPort(int timbre, bool applySustainFilter)
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int channel = mf->GetTimbreChannel(timbre);
+	if (channel > 0xf)
+		channel = mf->GetLocalControlChannel();
+
+	int timbreStatus = mf->GetTimbreStatus(timbre) - 3;
+	unsigned char savedStatus = m_status;
+	if ((unsigned int)timbreStatus > 1)
+		return;
+
+	if (mf->GetLocalControlChannel() == channel)
+		return;
+	if (!CheckTimbreParameterPreSendToMIDIPort(timbre))
+		return;
+
+	unsigned char savedData1 = m_data1;
+	unsigned char statusType = savedStatus & 0xf0;
+	bool wasNoteOn = (statusType == 0x90);
+	m_status = (unsigned char)(channel | statusType);
+
+	int note = (signed char)savedData1;
+	int transposedNote;
+	if (wasNoteOn) {
+		int transpose = mf->GetTimbreTranspose(timbre);
+		m_perNoteTimbreTranspose[note & 0x7f][timbre] = transpose;
+		transposedNote = note + transpose;
+	} else if (statusType == 0x80) {
+		transposedNote = note + m_perNoteTimbreTranspose[note & 0x7f][timbre];
+	} else {
+		transposedNote = -1;	/* not used below (neither NoteOn nor NoteOff) */
+	}
+
+	if ((statusType == 0x80 || wasNoteOn) && (unsigned int)transposedNote <= 0x7f) {
+		m_data1 = (unsigned char)transposedNote;
+	} else {
+		m_data1 = savedData1;
+	}
+
+	if (!applySustainFilter) {
+		SendChannelMessageToSTGWithCorrectLength();
+	} else if (statusType == 0xb0 && note == 0x40) {
+		if (m_dyingDamperFlag[channel] && !wasNoteOn) {
+			m_dyingDamperFlag[channel] = 0;
+		}
+	}
+
+	m_data1 = savedData1;
+	m_status = savedStatus;
+}
+
+/* ==================== CSKMIDIKarmaCtrlMsgHandler ==================== */
+
+/* .text+0x345a00, 33 bytes. */
+CSKMIDIKarmaCtrlMsgHandler::CSKMIDIKarmaCtrlMsgHandler() : CSKMIDILocalCtrlMsgHandler()
+{
+}
+
+/* .text+0x3459d0, 3 bytes. */
+bool CSKMIDIKarmaCtrlMsgHandler::ShouldNotifyToKarmaController()
+{
+	return false;
+}
+
+/* .text+0x3459e0, 24 bytes. */
+bool CSKMIDIKarmaCtrlMsgHandler::CheckNoteMessageAndTriggerPad()
+{
+	unsigned char statusType = m_status & 0xf0;
+	return statusType == 0x90 || statusType == 0x80;
+}
+
+/* ==================== CSKPadNoteByLocalCtrlMsgHandler ==================== */
+
+/* .text+0x345150, 3 bytes. */
+bool CSKPadNoteByLocalCtrlMsgHandler::ShouldNotifyToKarmaController()
+{
+	return false;
+}
+
+/* .text+0x345160, 3 bytes. */
+bool CSKPadNoteByLocalCtrlMsgHandler::CheckNoteMessageAndTriggerPad()
+{
+	return false;
 }

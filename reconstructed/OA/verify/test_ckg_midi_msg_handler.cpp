@@ -162,6 +162,111 @@ extern "C" void SPRMain_RecInternalSysExMessage(unsigned char) { g_recInternalCa
 extern "C" void SPRMain_RecSysExMessageOnAutomationTrack(int, int, int) {}
 extern "C" void SPRMain_RecSysExMessageFromMIDIPort(unsigned char) {}
 
+/* ==================== CSKMIDIInMsgHandler-family mocks ==================== */
+
+/* CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage and
+ * CKGUIMsgProcessor::ms_poInstance are normally defined in
+ * ckg_control_msg_handler.cpp / ckg_ui_msg_sender.cpp (not linked into
+ * this standalone test) -- own definitions here, same convention as
+ * CSKSpecialMsgHandler::m_NowHandlingSamplingPerformanceChange above. */
+bool CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage;
+unsigned char *CKGUIMsgProcessor::ms_poInstance;
+static unsigned char g_uiMsgProcBuf[0x100];
+static bool g_lastSoftPedalOn;
+static int g_softPedalCalls;
+void CKGUIMsgSender::UpdateSoftPedalStatus(bool on) { g_lastSoftPedalOn = on; g_softPedalCalls++; }
+
+unsigned char *CKGEngine::ms_poKGEventDisplayManager;
+static unsigned char g_eventDisplayBuf[0x10];
+static int g_lastNoteOnUI = -1, g_lastNoteOffUI = -1;
+void CKGEventDisplayManager::NoteOn(int note) { g_lastNoteOnUI = note; }
+void CKGEventDisplayManager::NoteOff(int note) { g_lastNoteOffUI = note; }
+
+/* CDyingNoteInfo -- own real layout out of scope (opaque 0x84-byte blob),
+ * mocked here as a simple per-note bitset + "any notes on" counter so the
+ * KATs below can observe real TurnOn/TurnOff/IsNoteOn/IsAnyNotesOn
+ * round-trips. */
+struct CDyingNoteInfoMockState { bool on[128]; int count; };
+static CDyingNoteInfoMockState *dni_state(CDyingNoteInfo *p) { return reinterpret_cast<CDyingNoteInfoMockState *>(p); }
+void CDyingNoteInfo::Initialize() { auto *s = dni_state(this); for (int i = 0; i < 128; i++) s->on[i] = false; s->count = 0; }
+void CDyingNoteInfo::TurnOn(int note) { auto *s = dni_state(this); if (!s->on[note]) { s->on[note] = true; s->count++; } }
+void CDyingNoteInfo::TurnOff(int note) { auto *s = dni_state(this); if (s->on[note]) { s->on[note] = false; s->count--; } }
+bool CDyingNoteInfo::IsNoteOn(int note) { return dni_state(this)->on[note]; }
+bool CDyingNoteInfo::IsAnyNotesOn() { return dni_state(this)->count != 0; }
+static_assert(sizeof(CDyingNoteInfoMockState) <= sizeof(CDyingNoteInfo), "mock state must fit in the opaque blob");
+
+/* CSTGBankMemory::AllocAligned -- real bump allocator out of scope (see
+ * src/mem/bank_memory.cpp, not linked here); a fixed static buffer is
+ * enough for the single CSKSysExMsgHandler allocation the ctor makes. */
+static unsigned char g_sysExAllocBuf[0x40] __attribute__((aligned(16)));
+unsigned char *CSTGBankMemory::AllocAligned(unsigned int, unsigned int) { return g_sysExAllocBuf; }
+
+/* CMIDIFlowParamHolder -- real KARMA-routing singleton, out of scope.
+ * Every getter below is independently settable per-test via the
+ * matching g_mf_* global, defaulting to 0/false. */
+static CMIDIFlowParamHolder::EStatus g_mf_lastStatus = CMIDIFlowParamHolder::eStatus_0;
+static int g_mf_voiceMode, g_mf_numKarmaModules, g_mf_currentTrackStatus, g_mf_localControlChannel;
+static bool g_mf_karmaOn;
+static int g_mf_karmaIn[8], g_mf_karmaOut[8], g_mf_karmaLoc[8];
+static bool g_mf_karmaThruInternal[8], g_mf_karmaThru[8];
+static int g_mf_timbreChannel[16], g_mf_timbreStatus[16], g_mf_timbreTranspose[16];
+static bool g_mf_timbreNoteOnEnable[16], g_mf_timbrePitchBendEnable[16], g_mf_timbreAftertouchEnable[16];
+static int g_mf_timbreBottomKey[16], g_mf_timbreTopKey[16], g_mf_timbreLowVel[16], g_mf_timbreHighVel[16];
+static bool g_mf_timbreCCEnable;
+void CMIDIFlowParamHolder::SetStatus(EStatus s) { g_mf_lastStatus = s; }
+int CMIDIFlowParamHolder::GetVoiceMode() { return g_mf_voiceMode; }
+int CMIDIFlowParamHolder::GetNumOfKARMAModule() { return g_mf_numKarmaModules; }
+int CMIDIFlowParamHolder::GetKARMARealInputChannel(int m) { return g_mf_karmaIn[m]; }
+int CMIDIFlowParamHolder::GetKARMARealOutputChannel(int m) { return g_mf_karmaOut[m]; }
+int CMIDIFlowParamHolder::GetRealInputLocalControllerChannel(int m) { return g_mf_karmaLoc[m]; }
+bool CMIDIFlowParamHolder::IsKARMAOn() { return g_mf_karmaOn; }
+bool CMIDIFlowParamHolder::IsKARMATimbreThruInternalAction(int m) { return g_mf_karmaThruInternal[m]; }
+bool CMIDIFlowParamHolder::IsKARMATimbreThru(int m) { return g_mf_karmaThru[m]; }
+int CMIDIFlowParamHolder::GetLocalControlChannel() { return g_mf_localControlChannel; }
+int CMIDIFlowParamHolder::GetCurrentTrackStatus() { return g_mf_currentTrackStatus; }
+int CMIDIFlowParamHolder::GetTimbreChannel(int t) { return g_mf_timbreChannel[t]; }
+int CMIDIFlowParamHolder::GetTimbreStatus(int t) { return g_mf_timbreStatus[t]; }
+int CMIDIFlowParamHolder::GetTimbreTranspose(int t) { return g_mf_timbreTranspose[t]; }
+bool CMIDIFlowParamHolder::IsEnableTimbreNoteOn(int t) { return g_mf_timbreNoteOnEnable[t]; }
+int CMIDIFlowParamHolder::GetTimbreBottomKey(int t) { return g_mf_timbreBottomKey[t]; }
+int CMIDIFlowParamHolder::GetTimbreTopKey(int t) { return g_mf_timbreTopKey[t]; }
+int CMIDIFlowParamHolder::GetTimbreLowVelocity(int t) { return g_mf_timbreLowVel[t]; }
+int CMIDIFlowParamHolder::GetTimbreHighVelocity(int t) { return g_mf_timbreHighVel[t]; }
+bool CMIDIFlowParamHolder::IsEnableTimbrePitchBend(int t) { return g_mf_timbrePitchBendEnable[t]; }
+bool CMIDIFlowParamHolder::IsEnableTimbreAftertouch(int t) { return g_mf_timbreAftertouchEnable[t]; }
+bool CMIDIFlowParamHolder::IsEnableTimbreCC(int, int) { return g_mf_timbreCCEnable; }
+
+static int g_lastRtcNoteChannel = -1, g_lastRtcNoteStatusType = -1, g_lastRtcNoteData1 = -1, g_lastRtcNoteData2 = -1, g_lastRtcNoteSrc = -1;
+bool CKGRTCHandler::AnalizeAndProcessNoteMessage(int channel, int statusType, int data1, int data2, int src)
+{ g_lastRtcNoteChannel = channel; g_lastRtcNoteStatusType = statusType; g_lastRtcNoteData1 = data1; g_lastRtcNoteData2 = data2; g_lastRtcNoteSrc = src; return true; }
+static int g_lastRtcCcChannel = -1, g_lastRtcCcStatusType = -1, g_lastRtcCcData1 = -1, g_lastRtcCcData2 = -1, g_lastRtcCcSrc = -1;
+void CKGRTCHandler::AnalizeAndProcessCCMessage(int channel, int statusType, int data1, int data2, int src)
+{ g_lastRtcCcChannel = channel; g_lastRtcCcStatusType = statusType; g_lastRtcCcData1 = data1; g_lastRtcCcData2 = data2; g_lastRtcCcSrc = src; }
+
+static unsigned char g_lastSentStatusType, g_lastSentChannel;
+static signed char g_lastSentData1, g_lastSentData2;
+void CKGEngine::SendChannelMessage(unsigned char statusType, unsigned char channel, signed char data1, signed char data2)
+{ g_lastSentStatusType = statusType; g_lastSentChannel = channel; g_lastSentData1 = data1; g_lastSentData2 = data2; }
+static bool g_forceTimbreZoneBypass;
+bool CKGEngine::ShouldForceTimbreZoneBypass(int, int) { return g_forceTimbreZoneBypass; }
+
+static bool g_lastKeyboardOnOnOff, g_keyboardOnResult;
+static int g_lastKeyboardOnNote = -1, g_lastKeyboardOnChannel = -1, g_lastKeyboardOnVelocity = -1;
+bool SPRMain_KeyboardOn(bool onOff, int note, int channel, int velocity)
+{ g_lastKeyboardOnOnOff = onOff; g_lastKeyboardOnNote = note; g_lastKeyboardOnChannel = channel; g_lastKeyboardOnVelocity = velocity; return g_keyboardOnResult; }
+
+static int g_startMonitorCalls, g_endMonitorCalls;
+static bool g_endMonitorResult;
+extern "C" void SKSTGGate_StartMonitorSTGQueue() { g_startMonitorCalls++; }
+extern "C" bool SKSTGGate_EndMonitorSTGQueue() { g_endMonitorCalls++; return g_endMonitorResult; }
+
+static int g_lastAutoTrackStatus = -1, g_lastAutoTrackData1 = -1, g_lastAutoTrackData2 = -1, g_lastAutoTrackChannel = -1;
+extern "C" void SPRMain_RecAutomationTrackMessage(int statusType, int data1, int data2, int channel)
+{ g_lastAutoTrackStatus = statusType; g_lastAutoTrackData1 = data1; g_lastAutoTrackData2 = data2; g_lastAutoTrackChannel = channel; }
+static int g_lastMidiTrackStatus = -1, g_lastMidiTrackData1 = -1, g_lastMidiTrackData2 = -1, g_lastMidiTrackChannel = -1;
+extern "C" void SPRMain_RecMIDITrackMessage(int statusType, int data1, int data2, int channel)
+{ g_lastMidiTrackStatus = statusType; g_lastMidiTrackData1 = data1; g_lastMidiTrackData2 = data2; g_lastMidiTrackChannel = channel; }
+
 static void reset_all_mocks()
 {
 	memset(g_bankBuf, 0, sizeof(g_bankBuf));
@@ -177,6 +282,56 @@ static void reset_all_mocks()
 	g_isExclusive = true;
 	g_recInternalCalls = 0;
 	g_sendToMIDIPortCalls = 0;
+
+	memset(g_uiMsgProcBuf, 0, sizeof(g_uiMsgProcBuf));
+	CKGUIMsgProcessor::ms_poInstance = g_uiMsgProcBuf;
+	CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage = false;
+	g_softPedalCalls = 0;
+	memset(g_eventDisplayBuf, 0, sizeof(g_eventDisplayBuf));
+	CKGEngine::ms_poKGEventDisplayManager = g_eventDisplayBuf;
+	g_lastNoteOnUI = g_lastNoteOffUI = -1;
+	/* CKGBankManager::ms_poInstance[+8] is itself a pointer (see
+	 * NotifyNoteEventToUI()'s own header comment) -- point it at a
+	 * scratch note-display buffer, distinct from g_uiMsgProcBuf. */
+	static unsigned char noteDisplayBuf[0x200];
+	memset(noteDisplayBuf, 0, sizeof(noteDisplayBuf));
+	*(unsigned char **)(g_bankBuf + 8) = noteDisplayBuf;
+
+	g_mf_voiceMode = 0;
+	g_mf_numKarmaModules = 0;
+	g_mf_currentTrackStatus = 0;
+	g_mf_localControlChannel = 0;
+	g_mf_karmaOn = false;
+	memset(g_mf_karmaIn, 0, sizeof(g_mf_karmaIn));
+	memset(g_mf_karmaOut, 0, sizeof(g_mf_karmaOut));
+	memset(g_mf_karmaLoc, 0, sizeof(g_mf_karmaLoc));
+	memset(g_mf_karmaThruInternal, 0, sizeof(g_mf_karmaThruInternal));
+	memset(g_mf_karmaThru, 0, sizeof(g_mf_karmaThru));
+	memset(g_mf_timbreChannel, 0, sizeof(g_mf_timbreChannel));
+	memset(g_mf_timbreStatus, 0, sizeof(g_mf_timbreStatus));
+	memset(g_mf_timbreTranspose, 0, sizeof(g_mf_timbreTranspose));
+	memset(g_mf_timbreNoteOnEnable, 0, sizeof(g_mf_timbreNoteOnEnable));
+	memset(g_mf_timbrePitchBendEnable, 0, sizeof(g_mf_timbrePitchBendEnable));
+	memset(g_mf_timbreAftertouchEnable, 0, sizeof(g_mf_timbreAftertouchEnable));
+	memset(g_mf_timbreBottomKey, 0, sizeof(g_mf_timbreBottomKey));
+	memset(g_mf_timbreTopKey, 0, sizeof(g_mf_timbreTopKey));
+	memset(g_mf_timbreLowVel, 0, sizeof(g_mf_timbreLowVel));
+	memset(g_mf_timbreHighVel, 0, sizeof(g_mf_timbreHighVel));
+	g_mf_timbreCCEnable = false;
+
+	g_lastRtcNoteChannel = g_lastRtcNoteStatusType = g_lastRtcNoteData1 = g_lastRtcNoteData2 = g_lastRtcNoteSrc = -1;
+	g_lastRtcCcChannel = g_lastRtcCcStatusType = g_lastRtcCcData1 = g_lastRtcCcData2 = g_lastRtcCcSrc = -1;
+	g_lastSentStatusType = g_lastSentChannel = 0;
+	g_lastSentData1 = g_lastSentData2 = 0;
+	g_forceTimbreZoneBypass = false;
+	g_lastKeyboardOnOnOff = false;
+	g_keyboardOnResult = true;
+	g_lastKeyboardOnNote = g_lastKeyboardOnChannel = g_lastKeyboardOnVelocity = -1;
+	g_startMonitorCalls = g_endMonitorCalls = 0;
+	g_endMonitorResult = true;
+	g_lastAutoTrackStatus = g_lastAutoTrackData1 = g_lastAutoTrackData2 = g_lastAutoTrackChannel = -1;
+	g_lastMidiTrackStatus = g_lastMidiTrackData1 = g_lastMidiTrackData2 = g_lastMidiTrackChannel = -1;
+	CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG = false;
 }
 
 int main(void)
@@ -343,6 +498,283 @@ int main(void)
 		h.m_data2 = 0x30;
 		h.ProcessProgramChangeMessage();
 		check("Seq: index == m_data2 (raw)", (long)g_lastSeqIndex, 0x30);
+	}
+
+	/*
+	 * ==================== CSKMIDIInMsgHandler and its 5 children
+	 * (2026-07-28 batch) ====================
+	 * Independent-oracle derivation for the non-trivial arithmetic below
+	 * lives in scratchpad oracle_ckg_midi_inmsg.py (StoreNoteEvent's
+	 * counter pair, CheckBypassKARMANoteOnEvent's reservation-slot
+	 * match/mismatch, and the shared per-module KARMA-channel-scan loop
+	 * used by both ShouldRecChannelMessageToSequencer and
+	 * ShouldSendChannelMessageToSTG) -- everything else below is either
+	 * a direct field-flag round trip or a structural vtable-dispatch
+	 * check, verified by inspection against the reconstructed source's
+	 * own inline comments rather than a separate oracle.
+	 */
+
+	printf("-- structural: abstract CSKMIDIInMsgHandler* dispatches to the right leaf --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler port;
+		CSKMIDIInMsgHandler *base = &port;
+		check("Port: base* ShouldSendChannelMessageToMIDIPort()==false (pure at InMsgHandler)",
+		      base->ShouldSendChannelMessageToMIDIPort(), 0);
+
+		reset_all_mocks();
+		CSKMIDILocalCtrlMsgHandler local;
+		base = &local;
+		g_bankBuf[0x97c749] = 0;
+		check("LocalCtrl: base* CheckGlobalParameterPreSendToKarmaEngine()==false when gate clear",
+		      base->CheckGlobalParameterPreSendToKarmaEngine(), 0);
+		g_bankBuf[0x97c749] = 1;
+		check("LocalCtrl: base* CheckGlobalParameterPreSendToKarmaEngine()==true when gate set",
+		      base->CheckGlobalParameterPreSendToKarmaEngine(), 1);
+
+		reset_all_mocks();
+		CSKMIDIKarmaCtrlMsgHandler karma;
+		CSKMIDILocalCtrlMsgHandler *localBase = &karma;
+		karma.m_status = 0x90;
+		check("Karma leaf: CheckNoteMessageAndTriggerPad() true for NoteOn (own override)",
+		      localBase->CheckNoteMessageAndTriggerPad(), 1);
+		karma.m_status = 0xb0;
+		check("Karma leaf: CheckNoteMessageAndTriggerPad() false for CC (own override)",
+		      localBase->CheckNoteMessageAndTriggerPad(), 0);
+
+		reset_all_mocks();
+		CSKPadNoteByMIDIPortMsgHandler padPort;
+		check("PadByPort leaf: ShouldNotifyToKarmaController()==false (own override)",
+		      padPort.ShouldNotifyToKarmaController(), 0);
+		CSKPadNoteByLocalCtrlMsgHandler padLocal;
+		check("PadByLocal leaf: CheckNoteMessageAndTriggerPad()==false (own override)",
+		      padLocal.CheckNoteMessageAndTriggerPad(), 0);
+	}
+
+	printf("-- CSKMIDIInMsgHandler::StoreNoteEvent() note-down/note-on counters --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		h.m_status = 0x90; h.m_data1 = 60; h.m_data2 = 0x40;
+		h.StoreNoteEvent();
+		check("NoteOn(60): m_noteDownCount[60]==1", h.m_noteDownCount[60], 1);
+		check("NoteOn(60): m_noteOnCount==1", h.m_noteOnCount, 1);
+		h.m_status = 0x80;
+		h.StoreNoteEvent();
+		check("NoteOff(60): m_noteDownCount[60]==0", h.m_noteDownCount[60], 0);
+		check("NoteOff(60): m_noteOnCount unchanged at 1 (decremented via down-count path)", h.m_noteOnCount, 1);
+	}
+
+	printf("-- CSKMIDIInMsgHandler::CheckBypassKARMANoteOnEvent() reservation round-trip --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		/* Reserve a Note-On on channel 3, note 60. */
+		h.m_status = 0x93; h.m_data1 = 60; h.m_data2 = 0x40; h.m_flags = 0;
+		h.ReserveBypassKARMANoteOnEvent(60);
+		check("reserved slot low nibble == 0x90|3", h.m_bypassKarmaNoteOnEvent[60] & 0xff, 0x93);
+
+		/* A later Note-Off on the SAME channel should bypass-consume it. */
+		h.m_status = 0x83; h.m_data1 = 60; h.m_data2 = 0x10;
+		bool consumed = h.CheckBypassKARMANoteOnEvent(60);
+		check("matching-channel Note-Off consumes the reservation", consumed, 1);
+		check("slot cleared after consumption", h.m_bypassKarmaNoteOnEvent[60], 0);
+		check("this->m_status restored to the real current Note-Off afterward", h.m_status, 0x83);
+		check("this->m_data2 restored to the real current Note-Off velocity afterward", h.m_data2, 0x10);
+
+		/* Reserve again, then a Note-Off on a DIFFERENT channel must NOT consume it. */
+		h.m_status = 0x93; h.m_data1 = 61; h.m_data2 = 0x40;
+		h.ReserveBypassKARMANoteOnEvent(61);
+		h.m_status = 0x85; h.m_data1 = 61; h.m_data2 = 0x10;
+		consumed = h.CheckBypassKARMANoteOnEvent(61);
+		check("mismatched-channel Note-Off does NOT consume", consumed, 0);
+		check("slot still cleared regardless (unconditional tail)", h.m_bypassKarmaNoteOnEvent[61], 0);
+	}
+
+	printf("-- CSKMIDIInMsgHandler::CheckDyingNoteForMIDIPort() dying-note arrays --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		h.m_status = 0x90; h.m_data1 = 60; h.m_flags = 0;
+		check("NoteOn always returns true (marks STG-side array)", h.CheckDyingNoteForMIDIPort(), 1);
+		check("STG-side array now has note 60 on", h.m_dyingNoteSTG[0].IsNoteOn(60), 1);
+
+		h.m_status = 0x80; h.m_data1 = 60;
+		bool r = h.CheckDyingNoteForMIDIPort();
+		check("matching NoteOff against STG-side array returns true", r, 1);
+		check("STG-side array cleared afterward", h.m_dyingNoteSTG[0].IsNoteOn(60), 0);
+
+		h.m_status = 0x80; h.m_data1 = 61;
+		r = h.CheckDyingNoteForMIDIPort();
+		check("NoteOff with no tracked note in either array returns false", r, 0);
+	}
+
+	printf("-- shared KARMA-channel-scan gate (ShouldRecChannelMessageToSequencer / ShouldSendChannelMessageToSTG) --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		g_bankBuf[0x97c749] = 1;	/* CheckGlobalParameterPreSendToSTG() initial gate: true */
+		h.m_status = 0x93; h.m_data1 = 0x40; h.m_data2 = 0x40; h.m_flags = 0;	/* generic CC, not 0/0x20 */
+		g_mf_numKarmaModules = 1;
+		g_mf_karmaIn[0] = 3; g_mf_karmaOut[0] = 3; g_mf_karmaLoc[0] = 3;
+		g_mf_karmaOn = true;
+		check("ShouldRecChannelMessageToSequencer(): module fully matches status channel + KARMA on -> false",
+		      h.ShouldRecChannelMessageToSequencer(), 0);
+		check("ShouldSendChannelMessageToSTG(): same scan, same result -> false",
+		      h.ShouldSendChannelMessageToSTG(), 0);
+
+		reset_all_mocks();
+		g_bankBuf[0x97c749] = 1;
+		h.m_status = 0x93; h.m_data1 = 0x40; h.m_data2 = 0x40; h.m_flags = 0;
+		g_mf_numKarmaModules = 1;
+		g_mf_karmaIn[0] = 3; g_mf_karmaOut[0] = 3; g_mf_karmaLoc[0] = 3;
+		g_mf_karmaOn = false;
+		g_mf_karmaThruInternal[0] = false;
+		check("ShouldRecChannelMessageToSequencer(): module matches but KARMA off + no thru-internal -> falls through to true",
+		      h.ShouldRecChannelMessageToSequencer(), 1);
+	}
+
+	printf("-- CSKMIDIInMsgHandler::IsEnableViaRPPR() gate --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		g_mf_voiceMode = 0;			/* != 2 */
+		g_bankBuf[0x97c747] = 5;		/* "current channel" != status channel below */
+		h.m_status = 0x93; h.m_data1 = 60; h.m_data2 = 0x40; h.m_flags = 0;
+		check("channel mismatch against ms_poInstance[0x97c747] -> true unconditionally",
+		      h.IsEnableViaRPPR(), 1);
+
+		reset_all_mocks();
+		g_mf_voiceMode = 0;
+		g_bankBuf[0x97c747] = 3;		/* matches status channel */
+		g_bankBuf[0x97c749] = 0;		/* gate clear */
+		h.m_status = 0x93; h.m_flags = 1;	/* m_flags&0xf != 0 -> early true */
+		check("gate clear + m_flags&0xf!=0 -> true", h.IsEnableViaRPPR(), 1);
+
+		reset_all_mocks();
+		g_mf_voiceMode = 0;
+		g_bankBuf[0x97c747] = 3;
+		g_bankBuf[0x97c749] = 1;		/* gate set -> falls to status dispatch */
+		h.m_status = 0x93; h.m_data1 = 60; h.m_data2 = 0x40; h.m_flags = 0;
+		g_keyboardOnResult = true;
+		bool r = h.IsEnableViaRPPR();
+		check("NoteOn dispatch calls SPRMain_KeyboardOn(true,...) and returns its result", r, 1);
+		check("SPRMain_KeyboardOn onOff arg", g_lastKeyboardOnOnOff, 1);
+		check("SPRMain_KeyboardOn note arg", g_lastKeyboardOnNote, 60);
+		check("SPRMain_KeyboardOn channel arg", g_lastKeyboardOnChannel, 3);
+	}
+
+	printf("-- CSKMIDIInMsgHandler::Process() Note-On/Note-Off STG-monitor gate --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		*(int *)(g_engineBuf + 0x14) = 4;	/* NoteOn gate: engine field+0x14 must == 4 */
+		CSKMIDIInMsgHandler::ms_bShouldStopSendingNoteOnsToSTG = false;
+		g_bankBuf[0x97c749] = 0;		/* gate clear -> increments hold counter */
+		h.m_status = 0x90; h.m_data1 = 60; h.m_data2 = 0x40; h.m_flags = 0;
+		h.Process();
+		check("NoteOn: m_noteOnHoldCount[60] incremented", h.m_noteOnHoldCount[60], 1);
+		check("NoteOn: no STG-monitor calls (gate was clear)", g_startMonitorCalls, 0);
+
+		g_bankBuf[0x97c749] = 1;		/* gate set for the matching Note-Off */
+		h.m_status = 0x80; h.m_data1 = 60; h.m_data2 = 0;
+		g_endMonitorResult = true;		/* EndMonitorSTGQueue()==true -> no extra SendChannelMessageToSTG */
+		h.Process();
+		check("NoteOff: m_noteOnHoldCount[60] decremented back to 0", h.m_noteOnHoldCount[60], 0);
+		check("NoteOff: StartMonitorSTGQueue() called once (gate was set)", g_startMonitorCalls, 1);
+		check("NoteOff: EndMonitorSTGQueue() called once (consumed path)", g_endMonitorCalls, 1);
+
+		reset_all_mocks();
+		*(int *)(g_engineBuf + 0x14) = 0;	/* gate mismatch -> NoteOn ignored entirely */
+		h.m_status = 0x90; h.m_data1 = 61; h.m_data2 = 0x40;
+		h.Process();
+		check("NoteOn ignored when engine field+0x14 != 4", h.m_noteOnHoldCount[61], 0);
+	}
+
+	printf("-- CSKMIDIPortMsgHandler::AnalizeAndSetParameter() byte validation --\n");
+	{
+		reset_all_mocks();
+		CSKMIDIPortMsgHandler h;
+		unsigned char buf[4] = { 0x90, 60, 0x40, 0x05 };
+		bool ok = h.AnalizeAndSetParameter(buf, 4);
+		check("valid NoteOn accepted", ok, 1);
+		check("m_status stored", h.m_status, 0x90);
+		check("m_data1 stored", h.m_data1, 60);
+		check("m_data2 stored", h.m_data2, 0x40);
+		check("m_flags masked to high nibble only", h.m_flags, 0);
+
+		unsigned char bad[4] = { 0x90, 0x80 /* invalid, sign bit set */, 0x40, 0 };
+		ok = h.AnalizeAndSetParameter(bad, 4);
+		check("data1 with bit7 set rejected", ok, 0);
+
+		unsigned char pc[4] = { 0xc0, 5, 0, 0 };
+		ok = h.AnalizeAndSetParameter(pc, 4);
+		check("ProgramChange (1 data byte) accepted", ok, 1);
+		check("m_data1 stored for ProgramChange", h.m_data1, 5);
+	}
+
+	printf("-- CSKMIDILocalCtrlMsgHandler::AnalizeAndSetParameter() byte validation --\n");
+	{
+		reset_all_mocks();
+		CSKMIDILocalCtrlMsgHandler h;
+		unsigned char buf[4] = { 0x90, 60, 0x40, 3 };	/* flags&0xf==3 != 5 */
+		bool ok = h.AnalizeAndSetParameter(buf, 4);
+		check("valid frame, flags!=5 -> accepted", ok, 1);
+		check("m_flags stored verbatim (all bits, unlike Port's variant)", h.m_flags, 3);
+
+		unsigned char buf5[4] = { 0x90, 60, 0x40, 5 };	/* flags&0xf==5 -> rejected */
+		ok = h.AnalizeAndSetParameter(buf5, 4);
+		check("flags&0xf==5 -> rejected", ok, 0);
+
+		unsigned char nonStatus[4] = { 0x40, 60, 0x40, 3 };	/* bit7 clear -> not a status byte */
+		ok = h.AnalizeAndSetParameter(nonStatus, 4);
+		check("byte0 without bit7 set -> rejected (not a real status byte)", ok, 0);
+	}
+
+	printf("-- CSKMIDILocalCtrlMsgHandler ext-note-on tracker + duplicate-message dedup --\n");
+	{
+		reset_all_mocks();
+		CSKMIDILocalCtrlMsgHandler h;
+		h.InitializeExtNoteOnChecker();
+		check("IsSendingNoteOnToExt(60) initially false", h.IsSendingNoteOnToExt(60), 0);
+		h.RegistExtNoteOn(60);
+		check("IsSendingNoteOnToExt(60) true after Regist", h.IsSendingNoteOnToExt(60), 1);
+		h.UnRegistExtNoteOn(60);
+		check("IsSendingNoteOnToExt(60) false again after UnRegist", h.IsSendingNoteOnToExt(60), 0);
+
+		reset_all_mocks();
+		h.m_status = 0xd3;	/* ChannelAftertouch, channel 3 */
+		h.m_data1 = 0x40;
+		check("first ChannelAftertouch value on channel 3 -> not a duplicate", h.CheckDuplicateMessage(), 1);
+		check("second identical value -> duplicate suppressed", h.CheckDuplicateMessage(), 0);
+		h.m_data1 = 0x41;
+		check("changed value -> not a duplicate again", h.CheckDuplicateMessage(), 1);
+
+		reset_all_mocks();
+		h.m_status = 0x90; h.m_data1 = 60;	/* NoteOn: always "not duplicate" */
+		check("non-ChannelAftertouch message always returns true", h.CheckDuplicateMessage(), 1);
+		check("still true immediately again (no dedup for this status type)", h.CheckDuplicateMessage(), 1);
+	}
+
+	printf("-- CSKMIDILocalCtrlMsgHandler::IsNotThruKarma() / GetKarmaControlledChannelPat() --\n");
+	{
+		reset_all_mocks();
+		CSKMIDILocalCtrlMsgHandler h;
+		g_mf_numKarmaModules = 2;
+		g_mf_karmaIn[0] = 5; g_mf_karmaOut[0] = 5; g_mf_karmaLoc[0] = 1;
+		g_mf_karmaIn[1] = 2; g_mf_karmaOut[1] = 6; g_mf_karmaLoc[1] = 2;
+		check("channel 5 (module0's in==out==5) -> thru-KARMA -> false",
+		      h.IsNotThruKarma(5), 0);
+		check("channel 7 (no module) -> not thru-KARMA -> true", h.IsNotThruKarma(7), 1);
+
+		g_mf_karmaThru[0] = true;
+		g_mf_karmaThru[1] = false;
+		unsigned int pat = h.GetKarmaControlledChannelPat(false);
+		check("gated pattern: only module0 (IsKARMATimbreThru==true) contributes bit 5",
+		      (long)pat, 1L << 5);
+		pat = h.GetKarmaControlledChannelPat(true);
+		check("unconditional pattern: both modules contribute bits 5 and 6",
+		      (long)pat, (1L << 5) | (1L << 6));
 	}
 
 	printf("\n%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");

@@ -161,6 +161,25 @@ struct CKGRTCHandler {
 	 */
 	void FlashBufferdValue();
 	void StartBuffering();
+
+	/*
+	 * 2 more real instance methods, discovered reconstructing
+	 * CSKMIDIInMsgHandler::CheckNoteMessageAndTriggerPad()/
+	 * NotifyCCToKarmaController() (oa_ckg_midi_msg_handler.h) -- same
+	 * cast-through-`ms_poInstance` idiom. Both forward a raw channel-
+	 * message tuple into the KARMA RTC engine; `EChangeSource` here is
+	 * NOT a per-controller "who changed me" tag like CKGController's
+	 * own enum of the same name (a real, textually distinct type by
+	 * mangling -- `N13CKGController13EChangeSourceE` -- but reused
+	 * here since both real call sites pass literal small ints 1/2
+	 * through it and no other CKGController::EChangeSource value is
+	 * ever observed at these two call sites). Own return-value/body
+	 * semantics otherwise out of scope.
+	 */
+	bool AnalizeAndProcessNoteMessage(int channel, int statusType, int note, int velocity,
+					   int changeSource);
+	void AnalizeAndProcessCCMessage(int channel, int statusType, int data1, int data2,
+					 int changeSource);
 };
 
 /*
@@ -249,13 +268,13 @@ struct CSKMIDIMsgProcessor {
 };
 
 /*
- * CSKMIDIInMsgHandler -- only its one static bool flag is needed here
- * (SetSendingBulkDump() toggles it around KGOutGate_StopSendingToMIDIPort()).
- * Own class layout out of scope.
+ * CSKMIDIInMsgHandler -- forward-declared only here; the real class (with
+ * ms_bShouldStopSendingNoteOnsToSTG as a genuine static member, used below
+ * by SetSendingBulkDump() around KGOutGate_StopSendingToMIDIPort()) lives
+ * in oa_ckg_midi_msg_handler.h, reconstructed in a later batch. Any TU
+ * that references the static field must also include that header.
  */
-struct CSKMIDIInMsgHandler {
-	static bool ms_bShouldStopSendingNoteOnsToSTG;
-};
+class CSKMIDIInMsgHandler;
 
 /*
  * CMIDIFlowParamHolder -- MIDI-flow-parameter singleton, only its
@@ -275,6 +294,45 @@ struct CMIDIFlowParamHolder {
 	 */
 	void SetCurrentVoiceMode();
 	void ChangePerformance();
+
+	/*
+	 * Real instance methods discovered reconstructing
+	 * CSKMIDIInMsgHandler (oa_ckg_midi_msg_handler.h) -- same
+	 * cast-through-`ms_poThis` idiom as Start() above. Own bodies out
+	 * of scope; `EStatus` real enumerator names unconfirmed beyond the
+	 * 2 literal values (1/0) ProcessForDyingNote() passes.
+	 */
+	enum EStatus { eStatus_0 = 0, eStatus_1 = 1 };
+	void SetStatus(EStatus status);
+	int GetVoiceMode();
+	int GetNumOfKARMAModule();
+	int GetKARMARealInputChannel(int module);
+	int GetKARMARealOutputChannel(int module);
+	int GetRealInputLocalControllerChannel(int module);
+	bool IsKARMAOn();
+	bool IsKARMATimbreThruInternalAction(int module);
+	int GetLocalControlChannel();
+
+	/*
+	 * Real instance methods discovered reconstructing
+	 * CSKMIDILocalCtrlMsgHandler (oa_ckg_midi_msg_handler.h) -- same
+	 * cast-through-`ms_poThis` idiom, all per-timbre (0-15) getters for
+	 * the KARMA multi-timbral combi routing engine. Own bodies out of
+	 * scope.
+	 */
+	int GetTimbreChannel(int timbre);
+	int GetTimbreStatus(int timbre);
+	int GetTimbreTranspose(int timbre);
+	bool IsEnableTimbreNoteOn(int timbre);
+	int GetTimbreBottomKey(int timbre);
+	int GetTimbreTopKey(int timbre);
+	int GetTimbreLowVelocity(int timbre);
+	int GetTimbreHighVelocity(int timbre);
+	bool IsEnableTimbrePitchBend(int timbre);
+	bool IsEnableTimbreAftertouch(int timbre);
+	bool IsEnableTimbreCC(int ccNumber, int timbre);
+	bool IsKARMATimbreThru(int module);
+	int GetCurrentTrackStatus();
 };
 
 /*
