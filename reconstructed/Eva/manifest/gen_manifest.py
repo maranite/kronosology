@@ -2615,6 +2615,26 @@ RECONSTRUCTED = {
     "08bd1ac0",  # CListIter::operator()()
     "08bd1af0",  # CListIter::operator++()
     "08bd1b40",  # CListIter::operator--()
+
+    # --- CWaveformTemplate, LFO waveform-shape generator (2026-07-28) -- partial
+    # batch, see waveform_template.h for the full scope-decision writeup (8 of 20
+    # Equation* bodies -- the pure-integer, no-runtime-table ones -- plus
+    # GetData()/Shape()/dtor; ctor/MakeShapeTable/EquationPolyline/RandomSH1-3/
+    # RandomCnt1-3/the 5 FPU Equation*/DrawWave deliberately NOT reconstructed
+    # this pass, each for a distinct documented reason). Divisors for every
+    # magic-multiply idiom confirmed via a scripted x86 interpreter used as a
+    # ground-truth oracle (see waveform_template.cpp's per-function comments).
+    "089847a0",  # CWaveformTemplate::EquationNone(int,int,int)
+    "089847b0",  # CWaveformTemplate::EquationTriangle(int,int,int)
+    "08984800",  # CWaveformTemplate::EquationSaw(int,int,int)
+    "08984820",  # CWaveformTemplate::EquationSquare(int,int,int)
+    "08984840",  # CWaveformTemplate::EquationStepTri4(int,int,int)
+    "089848a0",  # CWaveformTemplate::EquationStepTri6(int,int,int)
+    "08984960",  # CWaveformTemplate::EquationStepSaw4(int,int,int)
+    "089849d0",  # CWaveformTemplate::EquationStepSaw6(int,int,int)
+    "08985870",  # CWaveformTemplate::~CWaveformTemplate() (D1/D2 folded, same address)
+    "089858e0",  # CWaveformTemplate::GetData(int) const
+    "08985990",  # CWaveformTemplate::Shape(char) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
