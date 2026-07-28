@@ -1171,17 +1171,22 @@ public:
  *     CKGMIDIOutMsgHandler child despite the similar role, confirmed by
  *     its own vtable being 16 slots total vs the other three's 30).
  *
- * CKGMIDIOutMsgHandler itself is not one of this batch's 2 assigned
- * targets -- its own ctor (565 bytes) and most of its own virtuals stay
- * genuinely out of scope (real internal state implied by e.g. the
- * 621-byte KillAllDyingNotes() and 701-byte SendExecToMIDIPortInCombi(),
- * not modeled here). Since every leaf class below must stay instantiable,
- * every out-of-scope slot gets a minimal INLINE, in-class stub body --
+ * CKGMIDIOutMsgHandler's own real ctor (565 bytes) stays genuinely out of
+ * scope (it also calls CDyingNoteInfo::Initialize() 32x for the primary/
+ * backup arrays below, not reproduced here -- this project's own ctor
+ * stays deliberately minimal, matching the established convention that
+ * fields are zero-initialized only where a reconstructed method actually
+ * relies on it, see m_noteTransposeCache below). Every genuinely
+ * out-of-scope slot gets a minimal INLINE, in-class stub body --
  * deliberately keeping it out of the manifest's name-based heuristic
  * (`ClassName::Method(...) {` out-of-line text is what that heuristic
  * matches; an in-class inline body never produces that shape, same
  * technique documented in ckg_control_ui_msg_family.md's manifest-
  * generator-gotcha section). Do not move these out-of-line.
+ *
+ * KillAllDyingNotes() (621 bytes) and SendExecToMIDIPortInCombi()/InSong()
+ * (701/368 bytes) -- the class's own deepest real bodies -- ARE now
+ * modeled (KillAllDyingNotes in an earlier batch; Combi/Song here).
  *
  * Process() (rodata 0x44) DOES get a real out-of-line body -- it's the
  * actual function invoked by 3 of CKGMIDIMsgProcessor's own methods via
@@ -1208,18 +1213,36 @@ public:
 	CDyingNoteInfo m_dyingNoteInfo[16];
 	CDyingNoteInfo m_dyingNoteInfoBackup[16];
 
-	CKGMIDIOutMsgHandler() {}
+	/* Real ground-truth offset +0x1090 (unit-index 0x424, right after
+	 * m_dyingNoteInfoBackup's own +0x108c end -- 4 bytes of gap/unknown
+	 * field in between not modeled, harmless for the same reason the
+	 * +0xc/+0x84c gap above is). A per-(origNote,timbre) transpose cache,
+	 * confirmed two ways: (1) SendExecToMIDIPortInCombi()'s own real
+	 * `i + note*16 + 0x424` unit-index arithmetic at both its write site
+	 * (NoteOn stores GetTimbreTranspose(i) here right before a successful
+	 * send) and its read site (NoteOff reads THIS cache instead of calling
+	 * GetTimbreTranspose(i) again, so the note it turns off matches
+	 * whatever was actually turned on even if the timbre's transpose
+	 * setting changed in between); (2) the real ctor's own 128-iteration
+	 * zero-init loop at `.text+0x3bc255`..`0x3bc30c` (`mov eax,0x80` down
+	 * to 0, zeroing 16 DWORDs -- one full timbre row -- per iteration
+	 * starting at ebx+0x1090), independently confirming both the exact
+	 * offset and the [128][16] shape. Zero-initialized here via the ctor's
+	 * mem-initializer to match; the rest of the ctor stays deliberately
+	 * minimal (see below). */
+	int m_noteTransposeCache[128][16];
+
+	CKGMIDIOutMsgHandler() : m_noteTransposeCache() {}
 
 	void Process();
 
 	/* Declared in the EXACT real vtable order (rodata 0x48-0x78), since
 	 * slot ORDER (not name) is what keeps the leaves' own genuinely-
-	 * reconstructed overrides dispatching correctly. 11 of the 13 now
-	 * have real bodies (out-of-line, src/engine/ckg_midi_msg_handler.cpp);
-	 * SendExecToMIDIPortInCombi/InSong stay inline no-op stubs -- both
-	 * are real, substantial, previously-uncatalogued dispatch bodies
-	 * (~140/~300 instructions of per-timbre MIDI-flow-holder scanning)
-	 * deferred to a future batch, see re-decompiler agent memory. */
+	 * reconstructed overrides dispatching correctly. All 13 now have real
+	 * bodies (out-of-line, src/engine/ckg_midi_msg_handler.cpp).
+	 * SendExecToMIDIPortInCombi()/InSong() were the last 2, reconstructed
+	 * from previously-captured full disassembly (.text+0x3bbdf0/
+	 * 0x3bbc80) -- see re-decompiler agent memory for the derivation. */
 	virtual void SendChannelMessageToMIDIPort();
 	virtual bool ShouldSendChannelMessageToMIDIPort();
 	virtual bool ShouldSendChannelMessageToMIDIPortInEachMode() { return false; }
@@ -1227,8 +1250,8 @@ public:
 	virtual bool ShouldRecChannelMessageToSequencer();
 	virtual void SendChannelMessageOfActiveTimbreToMIDIPort();
 	virtual void SendExecToMIDIPortInProgram();
-	virtual void SendExecToMIDIPortInCombi() {}
-	virtual void SendExecToMIDIPortInSong() {}
+	virtual void SendExecToMIDIPortInCombi();
+	virtual void SendExecToMIDIPortInSong();
 	virtual bool CheckZoneOfNoteOn(int hiNote, int loNote, int hiVel, int loVel);
 	virtual bool CheckZoneOfNoteOff(int hiNote, int loNote);
 	virtual bool CheckDyingNoteForMIDIPort();

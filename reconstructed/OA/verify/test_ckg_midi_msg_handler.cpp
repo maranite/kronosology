@@ -146,8 +146,20 @@ void CSPRSysExBufManager::SetValue(CSKParameterChangeMessage *msg) { g_lastSetVa
 extern "C" void SKSTGGate_SendToSTG(const unsigned char *, unsigned short) {}
 static int g_sendToMIDIPortCalls;
 static unsigned short g_lastSendToMIDIPortLen;
-extern "C" void SKSTGGate_SendToMIDIPort(const unsigned char *, unsigned short len)
-{ g_sendToMIDIPortCalls++; g_lastSendToMIDIPortLen = len; }
+/* Sent-note log, added for SendExecToMIDIPortInCombi()/InSong()'s own KAT
+ * (needs to see which m_data1 byte was actually in the buffer at send
+ * time, not just a call count) -- buf[0]=status,[1]=data1,[2]=data2,
+ * [3]=flags per CSKMIDIMsgHandler's own field layout, &m_status is what
+ * every caller of SKSTGGate_SendToMIDIPort() passes. */
+static unsigned char g_sentNoteLog[32];
+static int g_sentNoteLogCount;
+extern "C" void SKSTGGate_SendToMIDIPort(const unsigned char *buf, unsigned short len)
+{
+	g_sendToMIDIPortCalls++;
+	g_lastSendToMIDIPortLen = len;
+	if (g_sentNoteLogCount < (int)(sizeof(g_sentNoteLog) / sizeof(g_sentNoteLog[0])) && len >= 2)
+		g_sentNoteLog[g_sentNoteLogCount++] = buf[1];
+}
 static bool g_vjsccFilterResult = true;
 extern "C" bool SKSTGGate_CheckVJSCCToMIDIPortFilter(int, int) { return g_vjsccFilterResult; }
 static int g_lastRecStatus = -1, g_lastRecNote = -1, g_lastRecCC = -1, g_lastRecChannel = -1;
@@ -445,6 +457,7 @@ static void reset_all_mocks()
 	g_isExclusive = true;
 	g_recInternalCalls = 0;
 	g_sendToMIDIPortCalls = 0;
+	g_sentNoteLogCount = 0;
 
 	memset(g_uiMsgProcBuf, 0, sizeof(g_uiMsgProcBuf));
 	CKGUIMsgProcessor::ms_poInstance = g_uiMsgProcBuf;
@@ -1214,6 +1227,152 @@ int main(void)
 		unsigned char msg[1] = { 0x37 };	/* low nibble 7 -> channel 7 */
 		kgproc->StoreCCMessage((CMIDIMessage *)msg);
 		check("StoreCCMessage(): completes without crashing (routes to m_ccReset[7])", 1, 1);
+	}
+
+	/*
+	 * CKGMIDIOutMsgHandler::SendExecToMIDIPortInSong()/InCombi() -- every
+	 * expected value below was independently computed by a standalone
+	 * Python re-implementation of the same algorithm straight from the
+	 * raw x86 disassembly (scratchpad oracle_send_exec.py, NOT
+	 * copy-pasted from the .cpp under test); see that script's own
+	 * scenario-by-scenario output for the derivation. g_sentNoteLog[]
+	 * records m_data1 as it actually was in the object at each real
+	 * SKSTGGate_SendToMIDIPort() call.
+	 */
+	printf("-- CKGMIDIOutMsgHandler::SendExecToMIDIPortInSong() --\n");
+	{
+		reset_all_mocks();
+		CKGMIDIOutMsgHandler h;
+		h.m_flags = 0;	/* keep CheckZoneOfNoteOn/Off's own +0x40 bypass bit clear */
+
+		/* Scenario 1: first candidate timbre fails its NoteOn zone
+		 * check, scan continues to the second, which passes. */
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 3;
+		g_mf_timbreBottomKey[0] = 70; g_mf_timbreTopKey[0] = 80;
+		g_mf_timbreLowVel[0] = 0; g_mf_timbreHighVel[0] = 127;
+		g_mf_timbreStatus[1] = 2; g_mf_timbreChannel[1] = 3;
+		g_mf_timbreBottomKey[1] = 50; g_mf_timbreTopKey[1] = 70;
+		g_mf_timbreLowVel[1] = 0; g_mf_timbreHighVel[1] = 127;
+		h.m_status = 0x93; h.m_data1 = 60; h.m_data2 = 100;
+		h.SendExecToMIDIPortInSong();
+		check("Song NoteOn: zone-fail-then-pass -> exactly 1 send", g_sendToMIDIPortCalls, 1);
+		check("Song NoteOn: sent note == 60 (unchanged, no transpose in Song)", g_sentNoteLog[0], 60);
+
+		/* Scenario 2: default status type (ProgramChange) sent
+		 * unconditionally, first eligible timbre wins even though a
+		 * second candidate also matches. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 5;
+		g_mf_timbreStatus[1] = 2; g_mf_timbreChannel[1] = 5;
+		h.m_status = 0xc5; h.m_data1 = 10; h.m_data2 = 0;
+		h.SendExecToMIDIPortInSong();
+		check("Song default (ProgramChange): unconditional, first match only -> 1 send", g_sendToMIDIPortCalls, 1);
+
+		/* Scenario 3: CC gated off then on. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 1;
+		h.m_status = 0xb1; h.m_data1 = 20; h.m_data2 = 64;
+		g_mf_timbreCCEnable = false;
+		h.SendExecToMIDIPortInSong();
+		check("Song CC: gated off -> no send", g_sendToMIDIPortCalls, 0);
+		g_mf_timbreCCEnable = true;
+		h.SendExecToMIDIPortInSong();
+		check("Song CC: gated on -> 1 send", g_sendToMIDIPortCalls, 1);
+	}
+
+	printf("-- CKGMIDIOutMsgHandler::SendExecToMIDIPortInCombi() --\n");
+	{
+		reset_all_mocks();
+		CKGMIDIOutMsgHandler h;
+		h.m_flags = 0;
+
+		/* Scenario 1: timbre channel sentinel (>0xf) falls back to
+		 * GetLocalControlChannel() -- CC message to isolate this from
+		 * NoteOn's own extra gating. */
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 0x1f;
+		g_mf_timbreCCEnable = true;
+		g_mf_localControlChannel = 2;
+		h.m_status = 0xb2; h.m_data1 = 20; h.m_data2 = 64;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi: local-control-channel fallback matches -> 1 send", g_sendToMIDIPortCalls, 1);
+
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 0x1f;
+		g_mf_timbreCCEnable = true;
+		g_mf_localControlChannel = 5;
+		h.m_status = 0xb2; h.m_data1 = 20; h.m_data2 = 64;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi: local-control-channel fallback mismatches -> 0 sends", g_sendToMIDIPortCalls, 0);
+
+		/* Scenario 2: NoteOn broadcasts to ALL matching timbres (unlike
+		 * Song), 2 timbres with different transpose both fire. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 4; g_mf_timbreNoteOnEnable[0] = true;
+		g_mf_timbreBottomKey[0] = 0; g_mf_timbreTopKey[0] = 127; g_mf_timbreLowVel[0] = 0; g_mf_timbreHighVel[0] = 127;
+		g_mf_timbreTranspose[0] = 0;
+		g_mf_timbreStatus[1] = 2; g_mf_timbreChannel[1] = 4; g_mf_timbreNoteOnEnable[1] = true;
+		g_mf_timbreBottomKey[1] = 0; g_mf_timbreTopKey[1] = 127; g_mf_timbreLowVel[1] = 0; g_mf_timbreHighVel[1] = 127;
+		g_mf_timbreTranspose[1] = 12;
+		h.m_status = 0x94; h.m_data1 = 60; h.m_data2 = 100;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi NoteOn: 2 timbres, different transpose -> 2 sends", g_sendToMIDIPortCalls, 2);
+		check("Combi NoteOn: timbre0 sent untransposed note 60", g_sentNoteLog[0], 60);
+		check("Combi NoteOn: timbre1 sent transposed note 72 (60+12)", g_sentNoteLog[1], 72);
+		check("Combi NoteOn: m_data1 restored to original (60) after the scan", h.m_data1, 60);
+
+		/* Scenario 3: 2 timbres transposing to the SAME note dedup to
+		 * exactly 1 send. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 4; g_mf_timbreNoteOnEnable[0] = true;
+		g_mf_timbreBottomKey[0] = 0; g_mf_timbreTopKey[0] = 127; g_mf_timbreLowVel[0] = 0; g_mf_timbreHighVel[0] = 127;
+		g_mf_timbreTranspose[0] = 12;
+		g_mf_timbreStatus[1] = 2; g_mf_timbreChannel[1] = 4; g_mf_timbreNoteOnEnable[1] = true;
+		g_mf_timbreBottomKey[1] = 0; g_mf_timbreTopKey[1] = 127; g_mf_timbreLowVel[1] = 0; g_mf_timbreHighVel[1] = 127;
+		g_mf_timbreTranspose[1] = 12;
+		h.m_status = 0x94; h.m_data1 = 48; h.m_data2 = 100;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi NoteOn dedup: 2 timbres -> same transposed note -> 1 send", g_sendToMIDIPortCalls, 1);
+		check("Combi NoteOn dedup: sent note == 60 (48+12)", g_sentNoteLog[0], 60);
+
+		/* Scenario 4: transpose pushes the note out of 0..0x7f -> no
+		 * send at all (not even an error). */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 4; g_mf_timbreNoteOnEnable[0] = true;
+		g_mf_timbreBottomKey[0] = 0; g_mf_timbreTopKey[0] = 127; g_mf_timbreLowVel[0] = 0; g_mf_timbreHighVel[0] = 127;
+		g_mf_timbreTranspose[0] = 100;
+		h.m_status = 0x94; h.m_data1 = 60; h.m_data2 = 100;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi NoteOn: transpose out of range -> 0 sends", g_sendToMIDIPortCalls, 0);
+
+		/* Scenario 5: NoteOff must use the CACHED transpose from the
+		 * matching NoteOn, not a fresh (possibly since-changed)
+		 * GetTimbreTranspose() value. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 4; g_mf_timbreNoteOnEnable[0] = true;
+		g_mf_timbreBottomKey[0] = 0; g_mf_timbreTopKey[0] = 127; g_mf_timbreLowVel[0] = 0; g_mf_timbreHighVel[0] = 127;
+		g_mf_timbreTranspose[0] = 12;
+		h.m_status = 0x94; h.m_data1 = 60; h.m_data2 = 100;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi NoteOn (setup for NoteOff test): 1 send, note 72 (60+12)", g_sentNoteLog[0], 72);
+		g_mf_timbreTranspose[0] = 5;	/* simulate the timbre's transpose
+						 * setting changing before the NoteOff
+						 * arrives */
+		g_sendToMIDIPortCalls = 0; g_sentNoteLogCount = 0;
+		h.m_status = 0x84; h.m_data1 = 60; h.m_data2 = 0;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi NoteOff: uses CACHED transpose (72), not the new live one (65)", g_sendToMIDIPortCalls, 1);
+		check("Combi NoteOff: sent note == 72", g_sentNoteLog[0], 72);
+		check("Combi NoteOff: m_data1 restored to original (60) after the scan", h.m_data1, 60);
+
+		/* Scenario 6: CC/Aftertouch/anything-else still return
+		 * immediately after the first match, exactly like Song. */
+		reset_all_mocks();
+		g_mf_timbreStatus[0] = 2; g_mf_timbreChannel[0] = 6;
+		g_mf_timbreStatus[1] = 2; g_mf_timbreChannel[1] = 6;
+		g_mf_timbreCCEnable = true;
+		h.m_status = 0xb6; h.m_data1 = 20; h.m_data2 = 64;
+		h.SendExecToMIDIPortInCombi();
+		check("Combi CC: 2 candidates, returns after first match -> 1 send", g_sendToMIDIPortCalls, 1);
 	}
 
 	printf("\n%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");

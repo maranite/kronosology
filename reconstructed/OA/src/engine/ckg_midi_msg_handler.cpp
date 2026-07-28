@@ -2950,6 +2950,184 @@ void CKGMIDIOutMsgHandler::SendExecToMIDIPortInProgram()
 	SendChannelMessageToMIDIPortWithCorrectLength();
 }
 
+/*
+ * .text+0x3bbdf0, ~752 bytes, regparm(3). Combi-mode per-timbre scan --
+ * same overall shape as SendExecToMIDIPortInSong() below (status-type
+ * dispatch, per-timbre CheckZoneOfNoteOn/Off()/IsEnableTimbreCC()/
+ * IsEnableTimbreAftertouch() gating, default-send for anything else), but
+ * 3 real differences confirmed from raw disassembly
+ * (.text+0x3bbdf0..0x3bc0e0):
+ *
+ *  1. Channel match: GetTimbreChannel() is compared directly only when
+ *     it's a real channel number (<=0xf); a sentinel >0xf means "follow
+ *     the current Local Control channel" and falls back to
+ *     GetLocalControlChannel() instead. (Song has no such fallback.)
+ *  2. NoteOn/NoteOff never return after a single send here -- they keep
+ *     scanning all 16 timbres (CC/Aftertouch/anything-else still return
+ *     immediately after their first send, exactly like Song).
+ *  3. NoteOn/NoteOff apply the timbre's transpose to m_data1 before
+ *     sending (temporarily overwriting it, always restored to the
+ *     original value right after, whether or not a send happened), with
+ *     a per-call dedup list (stack-local, reset every call -- NOT
+ *     m_noteTransposeCache, which is a separate persistent cache, see
+ *     below) so 2 timbres transposing to the SAME physical note don't
+ *     fire 2 identical MIDI messages. A resulting note outside 0..0x7f is
+ *     silently dropped (no send, still counts as "processed" and
+ *     continues the scan). NoteOn computes+caches the transpose it
+ *     actually used, indexed by [origNote][timbre], in
+ *     m_noteTransposeCache; NoteOff looks up that SAME cached value
+ *     (never a fresh GetTimbreTranspose() call) so it turns off the exact
+ *     note that was turned on even if the timbre's own transpose setting
+ *     has since changed -- confirmed by NoteOff's own raw disassembly
+ *     reading `this[+edx*4]` at the identical `i+note*16+0x424`
+ *     unit-index instead of calling GetTimbreTranspose() again.
+ */
+void CKGMIDIOutMsgHandler::SendExecToMIDIPortInCombi()
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int eventChannel = m_status & 0xf;
+	int type = m_status & 0xf0;
+	unsigned char origData1 = m_data1;
+
+	/* Per-call dedup list of already-sent (post-transpose) notes, reset
+	 * every call -- real ground truth uses a 0x14-byte stack buffer for
+	 * this (only ever needs up to 16 entries, one per timbre). */
+	unsigned char dedup[16];
+	int dedupCount = 0;
+
+	for (int timbre = 0; timbre < 16; timbre++) {
+		if (mf->GetTimbreStatus(timbre) <= 1)
+			continue;
+
+		int tch = mf->GetTimbreChannel(timbre);
+		int effectiveChannel = (tch <= 0xf) ? tch : mf->GetLocalControlChannel();
+		if (effectiveChannel != eventChannel)
+			continue;
+
+		switch (type) {
+		case 0x90: { /* NoteOn */
+			if (!mf->IsEnableTimbreNoteOn(timbre))
+				continue;
+			if (!CheckZoneOfNoteOn(mf->GetTimbreTopKey(timbre), mf->GetTimbreBottomKey(timbre),
+						mf->GetTimbreHighVelocity(timbre), mf->GetTimbreLowVelocity(timbre)))
+				continue;
+
+			/* note is always a MIDI 7-bit data byte (0..0x7f) in
+			 * practice, matching ground truth's own assumption --
+			 * it performs the identical unbounded array-index
+			 * arithmetic with no separate range check of its own. */
+			int note = (signed char)origData1;
+			int transpose = mf->GetTimbreTranspose(timbre);
+			int newNote = note + transpose;
+			if ((unsigned)newNote > 0x7f)
+				continue;
+
+			m_noteTransposeCache[note][timbre] = transpose;
+			m_data1 = (unsigned char)newNote;
+
+			bool dup = false;
+			for (int j = 0; j < dedupCount; j++) {
+				if (dedup[j] == (unsigned char)newNote) { dup = true; break; }
+			}
+			if (!dup) {
+				dedup[dedupCount++] = (unsigned char)newNote;
+				SendChannelMessageToMIDIPortWithCorrectLength();
+			}
+			m_data1 = origData1;
+			break;
+		}
+		case 0x80: { /* NoteOff */
+			if (!CheckZoneOfNoteOff(mf->GetTimbreTopKey(timbre), mf->GetTimbreBottomKey(timbre)))
+				continue;
+
+			int note = (signed char)m_data1;
+			int newNote = note + m_noteTransposeCache[note][timbre];
+			if ((unsigned)newNote > 0x7f)
+				continue;
+
+			m_data1 = (unsigned char)newNote;
+
+			bool dup = false;
+			for (int j = 0; j < dedupCount; j++) {
+				if (dedup[j] == (unsigned char)newNote) { dup = true; break; }
+			}
+			if (!dup) {
+				dedup[dedupCount++] = (unsigned char)newNote;
+				SendChannelMessageToMIDIPortWithCorrectLength();
+			}
+			m_data1 = origData1;
+			break;
+		}
+		case 0xb0: /* CC */
+			if (!mf->IsEnableTimbreCC((signed char)m_data1, timbre))
+				continue;
+			SendChannelMessageToMIDIPortWithCorrectLength();
+			return;
+		case 0xd0: /* Aftertouch */
+			if (!mf->IsEnableTimbreAftertouch(timbre))
+				continue;
+			SendChannelMessageToMIDIPortWithCorrectLength();
+			return;
+		default:
+			SendChannelMessageToMIDIPortWithCorrectLength();
+			return;
+		}
+	}
+}
+
+/*
+ * .text+0x3bbc80, 368 bytes, regparm(3). Song-mode per-timbre scan: finds
+ * the FIRST timbre whose status is active (GetTimbreStatus()>1) and whose
+ * own MIDI channel matches the raw incoming event's channel (m_status &
+ * 0xf, no Local-Control-channel fallback -- see SendExecToMIDIPortInCombi()
+ * above for the contrast), then dispatches exactly once and returns. Song
+ * mode never scans past the first eligible timbre and has no transpose/
+ * dedup logic at all. NoteOn/NoteOff are gated by this class's own
+ * CheckZoneOfNoteOn()/CheckZoneOfNoteOff(); CC/Aftertouch are gated by
+ * CMIDIFlowParamHolder::IsEnableTimbreCC()/IsEnableTimbreAftertouch(); any
+ * other status type (ProgramChange, PitchBend, PolyPressure, ...) is sent
+ * unconditionally. A gating failure continues the scan to the next
+ * timbre; any actual send always returns immediately.
+ */
+void CKGMIDIOutMsgHandler::SendExecToMIDIPortInSong()
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	int eventChannel = m_status & 0xf;
+	int type = m_status & 0xf0;
+
+	for (int timbre = 0; timbre < 16; timbre++) {
+		if (mf->GetTimbreStatus(timbre) <= 1)
+			continue;
+		if (mf->GetTimbreChannel(timbre) != eventChannel)
+			continue;
+
+		switch (type) {
+		case 0x90: /* NoteOn */
+			if (!CheckZoneOfNoteOn(mf->GetTimbreTopKey(timbre), mf->GetTimbreBottomKey(timbre),
+						mf->GetTimbreHighVelocity(timbre), mf->GetTimbreLowVelocity(timbre)))
+				continue;
+			break;
+		case 0x80: /* NoteOff */
+			if (!CheckZoneOfNoteOff(mf->GetTimbreTopKey(timbre), mf->GetTimbreBottomKey(timbre)))
+				continue;
+			break;
+		case 0xb0: /* CC */
+			if (!mf->IsEnableTimbreCC((signed char)m_data1, timbre))
+				continue;
+			break;
+		case 0xd0: /* Aftertouch */
+			if (!mf->IsEnableTimbreAftertouch(timbre))
+				continue;
+			break;
+		default:
+			break;
+		}
+
+		SendChannelMessageToMIDIPortWithCorrectLength();
+		return;
+	}
+}
+
 /* .text+0x3bb740, regparm(3): this=EAX, hiNote=EDX, loNote=ECX,
  * hiVel=stack0, loVel=stack4 (confirmed by the comparison directions,
  * not assumed from the declared parameter names). */
