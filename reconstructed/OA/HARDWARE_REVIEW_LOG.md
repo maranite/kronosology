@@ -2504,3 +2504,133 @@ KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko` produced
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGVPMOutputMixer + CSTGKeyTrack + CSTGPortamentoBase value-getter families -- 20 methods (batch 12, 2026-07-28)
+
+Continuing the ~2300-method STG value-getter family, manifest
+2384 -> 2404/21,689 (11.084%). Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`).
+
+First act this batch: spot-checked every "unconfirmed" candidate carried
+over from batches 9-11's own notes before picking anything new.
+`CSTGFrontPanelSmoothers`/`CSTGCommonStepSeq`/`CSTGAudioInput`/
+`CSTGHDRTrack`/`CSTGHDRMiniModel`/`CSTGProgramModeProgramSlot` all
+CONFIRMED already-modeled via word-boundary grep (each has real hits in
+`oa_global.h`/`oa_engine_init.h` and multiple `src/engine/*.cpp` ctor/
+init call sites) -- zero real ctx-only weak candidates for any of them
+either, cross-confirmed via `nm`. `CRPPRManager`/`CSPRRecDataMerger`/
+`CSPRAudioPlayer`/`CSPRSongControl` all CONFIRMED NOT part of this
+family -- `nm` shows 100% global ('T') linkage for all four (23/22/22/17
+methods respectively), every one taking extra args beyond ctx
+(`SetRPPRMode(int, int)`, `GetTrackInfo(int)`, `GetPattern(int)`, etc),
+same different-mechanism outcome as the already-rejected
+`CSPRSeqDataManager`/`CSTGPCMModelPatch` precedents. All 10 carryover
+candidates now resolved -- remove from future candidate lists.
+
+Re-ran the full survey with a corrected methodology: rather than
+per-class `nm` greps (error-prone on class-name length-prefix
+mismatches, caught and fixed one such bug mid-session), dumped every
+real ctx-only weak symbol in the whole binary in one pass and grouped by
+mangled length-prefixed class name, giving a complete, authoritative
+picture of every class in the family with at least one real candidate
+regardless of prior pending-count-based surveys. This surfaced
+`CSTGTG92OscBase` (10 raw candidates) as the next-largest untried class
+by size -- picked first, then dropped after disassembly revealed a
+genuinely new, more severe outlier shape (below); replaced with three
+smaller but fully clean classes from the same fresh-candidate sweep.
+
+**New outlier class, first of its kind: vtable slot resolves to
+`__cxa_pure_virtual` in the candidate's OWN class.**
+`CSTGTG92OscBase`'s 9 of 10 real candidates (all but `GetFreqOffset`,
+a plain fixed-K dword) load ctx's dynamic-index field, then do
+`mov edx,[eax]` (this's own vtable pointer) followed by
+`call [edx+0xd4]` BEFORE the usual stride-multiply-and-field-load
+sequence -- superficially the same "virtual-call-mediated sub-object
+base pointer" shape as `CSTGPianoModelPatch`'s own
+`AccessSustainPedalDown/UpVelocityZones` precedent from batch 6. This
+time, decompiling the vtable target directly (per that batch's own
+"decompile before assuming outlier" rule of thumb) found the raw
+`.rodata._ZTV15CSTGTG92OscBase` relocation at that slot points to
+`__cxa_pure_virtual`, confirmed by cross-referencing the vtable's
+raw-offset-to-call-offset relationship (vptr = section base + 8, so
+`call [edx+0xd4]` resolves to raw section offset 0xdc) against two
+already-known real, concrete symbols at nearby raw offsets in the same
+vtable (`GetRestrikeLimitForNote` at raw 0xc8, `GetRequiredVoiceInfo` at
+raw 0xcc) to validate the offset math before trusting the pure-virtual
+read. Unlike the `CSTGPianoModelPatch` precedent (concrete override,
+mechanically trivial, safely inlined), a pure-virtual slot in the
+candidate class's OWN vtable means `CSTGTG92OscBase` is genuinely
+abstract at this method -- real behavior depends entirely on which
+concrete subclass overrides it at runtime, which cannot be determined
+statically from this class's own disassembly alone. Correctly treated as
+a class-level Tier-B scope deferral (needs the concrete subclass, e.g.
+whichever `CSTGXxxTG92Osc`-family class actually instantiates this base,
+identified and its own vtable's slot 0xd4 target decompiled instead) --
+not attempted, no file written for this class this batch. Rule of thumb
+for future classes: after finding a virtual-call-mediated base pointer,
+always decompile/cross-check whether the target resolves to
+`__cxa_pure_virtual` before concluding the shape is safely inlineable
+like `CSTGPianoModelPatch`'s own case -- a superficially identical call
+site can resolve to either a trivial concrete accessor or a genuinely
+abstract slot, and only checking the actual relocation target
+distinguishes them.
+
+All three picked classes came back fully clean -- zero outliers, fourth
+batch of the last five with a full clean sweep (batches 9, 10, 11 also
+clean; only the dropped `CSTGTG92OscBase` broke the streak, and it was
+never actually attempted as a file). `CSTGKeyTrack` (STG key-tracking/
+keyboard-scaling patch component) is the simplest dialect yet -- 7 plain
+fixed-K byte fields, zero ctx-index, three unsigned key-position bytes
+plus four signed ramp bytes, all single-write. `CSTGPortamentoBase` (STG
+pitch-glide patch component) packs three independent single-bit booleans
+(Enabled/Fingered/ConstantTime) into one byte at +0x1d via the
+established shift-then-mask bitfield shape, plus plain fixed-K Time/
+AMSSource/AMSIntensity fields, zero ctx-index.
+
+**New confirmed ctx-index premultiply factor: x9.** `CSTGVPMOutputMixer`
+(VPM engine per-operator output mixer -- level, pan, phase invert, plus
+AMS siblings for level and pan) uses `lea edx,[edx+edx*8]` to premultiply
+ctx's dynamic-index field by 9 -- every prior lea-premultiply shape in
+this family used factor 5. Combined with an explicit x2 SIB scale on the
+field load itself (`[eax+edx*2+K]`), the effective stride is 18 -- a new
+confirmed value, decoded via the existing "SIB scale multiplies into the
+existing premultiply stride" generalized rule from batch 8, no decoder
+code change needed. `CSTGVPMOutputMixer::GetPhaseInvert` also uses the
+established ctx-shift single-bit-boolean shape (`CtxShift`) off a fixed
+byte field at +0x78, first confirmed on `CSTGVPMModelPatch`'s
+`GetInterMixerLink`/`GetOscMacroClass`.
+
+**Tooling: hit and fixed two fresh instances of the parenthesis-swallow
+`DEF_RE` gotcha in `oa_stg_vpm_output_mixer.h`, both in the SAME file on
+the first draft** -- "a new confirmed stride value (18, distinct from
+the family's prior 10/20/25 ... variants)" and, after fixing the first,
+a second independent trigger "Field-shape summary (record base =
+CtxIndex(ctx, 0x4, 18)):" whose own embedded parenthesized code-like
+expression (a real call-shaped mention of `CtxIndex(...)`) still had no
+semicolon before it to break the runaway, letting the greedy capture
+skip straight past the real `CtxIndex`/`CtxShift` definitions again.
+Also hit the same "field (+0xc)"-shaped bracketed-offset annotations used
+throughout that file's field-shape summary list, reworded to "field at
++0xc" prose with zero parens per the established convention, rather than
+just fixing the two literal triggers and leaving the rest as latent
+risk. Confirmed clean via the standard two-check discipline -- comment
+open/close-count balance and an exact `DEF_RE` captured-name-set diff --
+re-run after each fix, not just once. `CSTGKeyTrack`'s and
+`CSTGPortamentoBase`'s header/`.cpp` pairs passed both checks clean on
+the first draft, no fixes needed.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 3 new
+KATs passing. Real `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+Kbuild build: clean link, `OA.ko` produced (502300 bytes), zero warnings
+or errors traceable to the 3 new files (confirmed via a build-log grep
+scoped to each new filename). `DECOMPILE_ERRORS.md` stays empty -- no
+compile/link blocker hit (the `CSTGTG92OscBase` pure-virtual finding is
+a scope deferral, not a compile/link failure, so it's logged here
+instead per this file's own documented distinction).
+`manifest/gen_oa_manifest.py` regenerated, OA.ko manifest 2384 ->
+2404/21,689 (11.084%), delta exactly +20, matching the sum of all three
+classes' real candidate counts (7+7+6) with zero regressions.
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.
