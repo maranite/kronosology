@@ -1058,3 +1058,47 @@ should know they exist and are untested/unmodeled, not silently absent.
   tested on real hardware -- no reconstructed caller anywhere in this project
   yet (same status as the rest of the Stage 2 substrate). Eva manifest
   646 -> 678/37,795.
+- **`CScsiDriverBase::SetCommandParameter`/`Execute`/`AfterProcess`+6
+  `AfterProcessXxx`** (2026-07-28 storage-cluster follow-up) — 11 methods,
+  `.text+0x08308760`-`0x0830ab30`, deliberately deferred while the class's
+  other 39 methods (ctor/dtor/`GetResultOfScsiCommandAsync` + all 35 standalone
+  `SetParamXxx(SDriverIOPbuf*)` CDB builders) are now fully reconstructed --
+  see `include/scsi_driver_base.h`'s own header comment for the complete
+  per-method address/size table. `SetCommandParameter` alone is a 2935-byte,
+  39-case `jmp [ecx*4+...]` jump table that reimplements, INLINE, the exact
+  same per-SCSI-command CDB-building logic each standalone `SetParamXxx`
+  already covers (spot-checked several cases byte-for-byte identical in
+  structure) -- genuinely tractable in principle (same field-mapping technique
+  already worked out for the 35 siblings) but a large mechanical transcription
+  effort on its own, left for a dedicated follow-up rather than rushed.
+  `AfterProcess`/`AfterProcessXxx` are the untouched response-side mirror
+  (parses returned sense/mode/inquiry data, `sm_oDataBuf`-shaped) -- not yet
+  even field-mapped. Independently confirmed and worth flagging for
+  real-hardware relevance: none of the 35 already-reconstructed `SetParamXxx`
+  methods has ANY caller anywhere in the whole `Eva` binary (verified by
+  grepping every `call` instruction against all 35 addresses) --
+  `CScsiDriverBase::Execute()` (also deferred, `.text+0x0830a6c0`) only ever
+  calls `SetCommandParameter()` and `AfterProcess()`, meaning the deferred pair
+  is what's actually on any real optical-drive I/O path, while the 35
+  reconstructed methods are dead code kept for completeness under the
+  "decompile everything" goal. `CFileIoCdda` (41 overrides, largest single
+  method 1866 bytes) and `CFileIoUdf` (35 overrides, `format()` alone 4791
+  bytes of real VFAT-format logic) were surveyed and explicitly passed over
+  this batch as less tractable than `CScsiDriverBase`'s mostly-small,
+  mostly-independent CDB builders -- both remain fully out of scope, still
+  real future-pass candidates. Also worth recording: `file_io_base.h`'s
+  original "OUT OF SCOPE" list names a `CFileIoKge` class that does not exist
+  in the binary -- `nm -C` only has an unrelated `CFileKge` (GE/bank
+  sample-storage file format, no `CFileIoBase` relationship), almost certainly
+  a mistaken guess in an earlier pass, corrected in `scsi_driver_base.h`'s own
+  header comment; treat any other reference to "CFileIoKge" in this tree as
+  stale. Verified with 12 new byte-exact KAT checks
+  (`verify/test_scsi_driver_base.cpp`, covering the fixed-CDB/no-pbuf-read
+  family, BE16/BE32/24-bit field packing, the READ(10)/WRITE(10)
+  direction+opcode branch, and 2 confirmed real quirks --
+  `SetParamReserveTrack`'s data pointer sourced from `pbuf+0xc` instead of the
+  usual `+0x8`, and `SetParamSetSpeed`'s conditional per-word CDB-byte skip)
+  plus the full existing host `make verify` suite (0 failures). Not tested on
+  real hardware -- no reconstructed caller anywhere in this project yet (same
+  status as the rest of the storage/disk-driver cluster). Eva manifest
+  738 -> 778/37,795.

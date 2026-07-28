@@ -1602,6 +1602,61 @@ RECONSTRUCTED = {
     "08318e20",  # CFileIoUnknown::format(EDevice_Id, int)
     "08995490",  # CFileIoUnknown::~CFileIoUnknown() (D1, complete object)
     "089954a0",  # CFileIoUnknown::~CFileIoUnknown() (D0, deleting)
+
+    # --- CScsiDriverBase, ctor/dtor/GetResultOfScsiCommandAsync + all 35
+    # standalone SetParamXxx CDB builders (2026-07-28 storage-cluster
+    # follow-up). Picked over CFileIoCdda (41 overrides, all far smaller than
+    # this) and CFileIoUdf (format() alone is 4791 bytes of real VFAT logic,
+    # not tractable in one batch); "CFileIoKge" from file_io_base.h's original
+    # out-of-scope list does not exist in the binary (a real but unrelated
+    # CFileKge class was mistaken for it in an earlier pass). The remaining 11
+    # methods (SetCommandParameter/Execute/AfterProcess + 6 AfterProcessXxx,
+    # the giant jump-table dispatcher family) are deferred -- documented in
+    # include/scsi_driver_base.h, not reconstructed this pass. Independently
+    # confirmed real finding: none of the 35 SetParamXxx below has any caller
+    # anywhere in the binary (Execute() calls SetCommandParameter's own
+    # inlined duplicate of the same logic instead) -- dead code, faithfully
+    # reconstructed anyway per the "decompile everything" standing goal.
+    "083086e0",  # CScsiDriverBase::CScsiDriverBase(unsigned char)
+    "083086a0",  # CScsiDriverBase::~CScsiDriverBase() (D1, complete object)
+    "083086c0",  # CScsiDriverBase::~CScsiDriverBase() (D0, deleting)
+    "083086b0",  # CScsiDriverBase::GetResultOfScsiCommandAsync()
+    "083092e0",  # CScsiDriverBase::SetParamGetEventStatusNtf(SDriverIOPbuf*)
+    "08309340",  # CScsiDriverBase::SetParamSendEvent(SDriverIOPbuf*)
+    "083093a0",  # CScsiDriverBase::SetParamGetPerformance(SDriverIOPbuf*)
+    "08309440",  # CScsiDriverBase::SetParamReadDVDStructure(SDriverIOPbuf*)
+    "083094e0",  # CScsiDriverBase::SetParamSendDVDStructure(SDriverIOPbuf*)
+    "08309540",  # CScsiDriverBase::SetParamReportKey(SDriverIOPbuf*)
+    "083095e0",  # CScsiDriverBase::SetParamSendKey(SDriverIOPbuf*)
+    "08309640",  # CScsiDriverBase::SetParamWriteAndVerify(SDriverIOPbuf*)
+    "083096b0",  # CScsiDriverBase::SetParamFormatUnit(SDriverIOPbuf*)
+    "08309710",  # CScsiDriverBase::SetParamReadFmtCapacity(SDriverIOPbuf*)
+    "08309770",  # CScsiDriverBase::SetParamGetConfiguration(SDriverIOPbuf*)
+    "083097d0",  # CScsiDriverBase::SetParamTestUnitReady(SDriverIOPbuf*)
+    "08309830",  # CScsiDriverBase::SetParamInquiry(SDriverIOPbuf*)
+    "08309890",  # CScsiDriverBase::SetParamRmvLock(SDriverIOPbuf*)
+    "083098c0",  # CScsiDriverBase::SetParamRequestSense(SDriverIOPbuf*)
+    "08309900",  # CScsiDriverBase::SetParamModeSense10(SDriverIOPbuf*)
+    "08309960",  # CScsiDriverBase::SetParamModeSelect6(SDriverIOPbuf*)
+    "083099e0",  # CScsiDriverBase::SetParamModeSelect10(SDriverIOPbuf*)
+    "08309a30",  # CScsiDriverBase::SetParamReadCapacity(SDriverIOPbuf*)
+    "08309a80",  # CScsiDriverBase::SetParamReadDiskInfo(SDriverIOPbuf*)
+    "08309ad0",  # CScsiDriverBase::SetParamReadTrackInfo(SDriverIOPbuf*)
+    "08309b30",  # CScsiDriverBase::SetParamReserveTrack(SDriverIOPbuf*)
+    "08309b90",  # CScsiDriverBase::SetParamSeek(SDriverIOPbuf*)
+    "08309be0",  # CScsiDriverBase::SetParamReadWrite(SDriverIOPbuf*, int)
+    "08309c80",  # CScsiDriverBase::SetParamSyncCache(SDriverIOPbuf*)
+    "08309cd0",  # CScsiDriverBase::SetParamCloseSession(SDriverIOPbuf*)
+    "08309d20",  # CScsiDriverBase::SetParamBlank(SDriverIOPbuf*)
+    "08309d70",  # CScsiDriverBase::SetParamReadTocAtip(SDriverIOPbuf*)
+    "08309dd0",  # CScsiDriverBase::SetParamPlayAudio(SDriverIOPbuf*)
+    "08309e40",  # CScsiDriverBase::SetParamReadSub(SDriverIOPbuf*)
+    "08309e90",  # CScsiDriverBase::SetParamReadCD(SDriverIOPbuf*)
+    "08309f30",  # CScsiDriverBase::SetParamSetSpeed(SDriverIOPbuf*)
+    "08309f90",  # CScsiDriverBase::SetParamReadBufferCapacity(SDriverIOPbuf*)
+    "08309fe0",  # CScsiDriverBase::SetParamStartStop(SDriverIOPbuf*)
+    "0830a030",  # CScsiDriverBase::SetParamCheckWriteProtect(SDriverIOPbuf*)
+    "0830a080",  # CScsiDriverBase::SetParamSleep(SDriverIOPbuf*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
