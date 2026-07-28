@@ -104,6 +104,16 @@ among what's already done.
   `objdump`/`nm` cross-check before ever attempting it, don't trust the CSV
   addresses at face value for this specific prefix group.
 
+## UPDATE 2026-07-28 (later batch, commit `a599857`): this hierarchy is now ATTEMPTED
+
+See the new dedicated memory file
+`ckg_switch_family_diamond_inheritance_2026-07-28.md` for the full
+writeup, including 2 real errors THIS section's own evidence had that
+were caught and corrected before writing any C++ (`GetCCValue`'s real
+slot, and 2 previously-unidentified CKGController-level pure virtuals).
+`include/oa_ckg_switch_family.h` + `src/engine/ckg_switch_family.cpp`.
+107 methods, manifest 2883 -> 2990/21,689.
+
 ## Next target: CKGSwitch/CKGKnob/CKGPad widget hierarchy (investigated, NOT attempted)
 
 A real, genuine diamond-multiple-inheritance C++ class tree — same
