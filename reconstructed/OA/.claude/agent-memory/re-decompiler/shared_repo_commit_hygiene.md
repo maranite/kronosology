@@ -41,3 +41,30 @@ files before committing, don't just proceed. If a bad commit already
 happened and nothing has been pushed, `git reset --soft HEAD^` is the
 safe, non-destructive fix (never `--hard`, never on anything already
 pushed/shared beyond this repo).
+
+**Reverse-direction instance (2026-07-28, InitializegRTParmFunctionTable_GE
+batch)**: this can also happen to YOU as the victim, not just as the
+cause. Staged two of my own files (an agent-memory update) with
+`git add`, then made several more tool calls (reading status.md,
+checking manifest) before running `git commit` -- in that window, a
+DIFFERENT concurrent session ran its own `git commit` first, and their
+commit (`a5c7f0d`, an unrelated Eva batch) swept up my staged memory
+files too (their commit's own `--stat` showed my 2 files alongside their
+10). My real OA.ko reconstruction commit itself (`d12aec1`) was made
+immediately after staging with no gap, so it was unaffected -- the
+exposure window was specifically the SEPARATE, later `git add` for the
+memory-file follow-up, which had several tool calls between `add` and
+`commit`. Content wasn't lost or wrong, just attributed to a commit
+message that doesn't mention it. Did NOT `git reset --soft` the other
+session's already-existing commit to fix this -- resetting a commit
+another live concurrent session has already made and may be building on
+top of is a real risk (they could have already referenced that hash,
+pushed, or moved on), unlike resetting your OWN just-made commit which
+is always safe. **General rule: minimize the gap between `git add` and
+`git commit` to as few tool calls as possible (ideally back-to-back in
+one turn) for EVERY commit, not just ones bundling many files -- a
+single quiet `git add` followed by unrelated work before committing is
+exactly the exposure window this bites in, in either direction.** If it
+does happen to you, don't rewrite the other session's commit after the
+fact; just note the provenance mismatch (content present, message
+attribution imperfect) and move on.
