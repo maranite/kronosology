@@ -21,28 +21,31 @@ or where the reconstruction doesn't match ground truth after a real attempt.
 
 ---
 
-## verify/test_client_comm_server (pre-existing, NOT caused by this pass)
+## verify/test_client_comm_server (KNOWN pre-existing flake, NOT caused by this pass)
 
-Found 2026-07-28 while running the full host `verify/` suite as part of an
-unrelated `storage_format_converters` batch. `objs/verify/test_client_comm_server`
-fails 6 known-answer checks, all in the `OnRxSexWhenInWAIT`/`OnRxSexWhenInSENT`
-dispatch tests (client_comm_server.cpp):
+Recurred 2026-07-28 while running the full host `verify/` suite as part of an
+unrelated `storage_format_converters` batch: `objs/verify/test_client_comm_server`
+failed the same 6 known-answer checks (`OnRxSexWhenInWAIT` type=2/3/4,
+`OnRxSexWhenInSENT` type=3/4/9/default) it has failed intermittently before.
+Reproduced identically via `git stash` back to the pre-batch commit and
+rebuilding/rerunning just this one binary in isolation, confirming nothing in
+`storage_format_converters.*`/`storage_converter_ext_stubs.h` caused it.
 
-  - `OnRxSexWhenInWAIT(type=2/3/4)` expected to dispatch into `Error()`
-    (mState -> 0, no `TransmitSysEx()` call) -- actual behavior differs.
-  - `OnRxSexWhenInSENT(type=3)` expected to resend + bump `mState0d` on a
-    matching retry -- actual behavior differs.
-  - `OnRxSexWhenInSENT(type=4)` and `(type=9, default)` expected to be
-    genuine no-ops -- actual behavior differs.
-
-Confirmed PRE-EXISTING and unrelated to this batch: reproduced identically
-(same 6 failures) by `git stash`-ing back to commit `2e423b1` (the last commit
-before this batch's changes) and rebuilding/rerunning just this one binary.
-Nothing in `storage_format_converters.*`/`storage_converter_ext_stubs.h` is
-included by or related to `client_comm_server.cpp`. This is either a stale
-known-answer assumption in the test itself or a genuine gap in the
-`OnRxSexWhenInWAIT`/`OnRxSexWhenInSENT` reconstruction (client_comm_server.cpp,
-last touched by commit `8271d30`) -- needs a fresh disassembly pass against
-those 2 methods' real dispatch tables to determine which. Logged here rather
-than silently ignored so `make verify`'s exit code (currently 1, from this one
-binary) isn't mistaken for a regression introduced by a later, unrelated batch.
+This is NOT a fresh finding -- it is the SAME already-root-caused, still-open
+issue documented at length in
+`kronosology/.claude/agent-memory/re-decompiler/
+eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26.md`: a genuine
+ASLR-dependent uninitialized-value read (confirmed via ASan/UBSan rebuilds
+showing zero diagnostics and `setarch -R` reruns showing zero failures --
+rules out both memory corruption and a deterministic source bug), still
+un-localized because doing so needs MSan/valgrind (neither available on this
+host). That same memory also documents a DISTINCT, structural contamination
+risk worth restating here given this session hit a live git-index race with a
+concurrent OA.ko agent working in the same repo: `Makefile`'s
+`objs/verify/%: verify/%.cpp $(OBJ)` rule links every `verify/test_*` binary
+against the ENTIRE object set, so another agent's uncommitted, mid-edit WIP
+anywhere in `src/` at build time can transiently fail totally unrelated test
+binaries. Do not re-diagnose this signature from scratch on a future
+recurrence -- read that memory file first, and control for both the
+ASLR/uninit-value flake AND any other agent's concurrent uncommitted state
+before concluding it's a real regression.
