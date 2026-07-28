@@ -117,15 +117,6 @@ extern "C" void KGOutGate_StopSendingToMIDIPort(bool stop) __attribute__((regpar
 extern "C" void SPRMain_SetAllKARMAAndDrumTrack(bool enable) __attribute__((regparm(3)));
 
 /*
- * CSKSpecialMsgHandler -- only its one static flag byte is needed here
- * (every CKGUIMsgSender ParameterChangeMessage-shape method tests it as
- * part of the shared send-gate). Own class layout out of scope.
- */
-struct CSKSpecialMsgHandler {
-	static bool m_NowHandlingSamplingPerformanceChange;
-};
-
-/*
  * CKGRTCHandler -- real-time-controller (KARMA RTC) singleton, discovered
  * via CKGControlMsgHandler::RestoreRTCBackupValue()/ResetAllRTCValue()'s
  * own `this IS the singleton` call shape (same idiom as CKGBankManager/
@@ -161,6 +152,15 @@ struct CKGRTCHandler {
 	void ResetCurrentScene();
 	void ResetCurrentControlBuffer();
 	void ResetChordAssignSwitch();
+
+	/*
+	 * 2 more real instance methods, discovered while reconstructing
+	 * CSKSpecialMsgHandler::ProcessProgramChangeMessage() (oa_ckg_midi_
+	 * msg_handler.h) -- same cast-through-`ms_poInstance` idiom as every
+	 * other method above.
+	 */
+	void FlashBufferdValue();
+	void StartBuffering();
 };
 
 /*
@@ -171,9 +171,35 @@ struct CKGRTCHandler {
  * `_ZN19CSKMIDIMsgProcessor13ms_poInstanceE`). Own class layout out of
  * scope.
  */
+struct CMIDIMessage;
 struct CKGMIDIMsgProcessor {
 	static unsigned char *ms_poInstance;
 	void ResetKarmaGeneratedCCValue();
+
+	/*
+	 * KillAllDyingNotes() -- real instance method, discovered while
+	 * reconstructing CSKSpecialMsgHandler::
+	 * ProcessResetAllControllerMessage() (oa_ckg_midi_msg_handler.h),
+	 * same cast-through-`ms_poInstance` idiom as above. Own body out of
+	 * scope.
+	 */
+	void KillAllDyingNotes();
+
+	/*
+	 * StoreCCMessage(CMIDIMessage*) -- real 1-arg instance method,
+	 * discovered while reconstructing CSKMIDIMsgHandler::
+	 * SendChannelMessageToSTG() (oa_ckg_midi_msg_handler.h). Real caller
+	 * passes its own `this+4` (the raw 4-byte MIDI event field)
+	 * reinterpreted directly as a `CMIDIMessage*` -- same "reinterpret a
+	 * raw buffer as a different class's `this`" idiom as
+	 * CSKParameterChangeMessage elsewhere in that header.
+	 * `CMIDIMessage` here is intentionally left forward-declared/
+	 * incomplete -- only ever passed through as a pointer, never
+	 * dereferenced by this batch's own code (its one already-declared
+	 * member, `EStatus`, lives in oa_ckg_switch_family.h and is out of
+	 * scope here).
+	 */
+	void StoreCCMessage(CMIDIMessage *msg);
 };
 
 /*
@@ -200,6 +226,26 @@ struct CSKMIDIMsgProcessor {
 	 */
 	void ProcessKarmaControllerGeneratedChannelMessage(int status, unsigned char channel, char ccNumber, char ccValue)
 		asm("_ZN19CSKMIDIMsgProcessor45ProcessKarmaControllerGeneratedChannelMessageEN12CMIDIMessage7EStatusEhcc");
+
+	/*
+	 * 2 more real instance methods, discovered while reconstructing
+	 * CSKSpecialMsgHandler::ProcessResetAllControllerMessage()
+	 * (oa_ckg_midi_msg_handler.h) -- same cast-through-`ms_poInstance`
+	 * idiom as above. Own bodies out of scope.
+	 */
+	void KillAllDyingNotes();
+	void LeaveDownloadMode();
+
+	/*
+	 * 2 more real 1-arg overloads, discovered while reconstructing
+	 * CSKMIDIMsgHandler::StoreDyingNoteInfoFor{MIDPort,STG}()
+	 * (oa_ckg_midi_msg_handler.h). Real callers pass their own `this+4`
+	 * (the raw 4-byte MIDI event field) reinterpreted directly as a
+	 * `CMIDIMessage*` -- same idiom as CKGMIDIMsgProcessor::
+	 * StoreCCMessage() above.
+	 */
+	void StoreDyingNoteInfoForMIDPort(CMIDIMessage *msg);
+	void StoreDyingNoteInfoForSTG(CMIDIMessage *msg);
 };
 
 /*
@@ -219,7 +265,32 @@ struct CSKMIDIInMsgHandler {
 struct CMIDIFlowParamHolder {
 	static unsigned char *ms_poThis;
 	void Start();
+
+	/*
+	 * 2 more real instance methods, discovered while reconstructing
+	 * CSKSpecialMsgHandler::ProcessProgramChangeMessage()/
+	 * ProcessResetAllControllerMessage() (oa_ckg_midi_msg_handler.h) --
+	 * same cast-through-`ms_poThis` idiom as Start() above. Own bodies
+	 * out of scope.
+	 */
+	void SetCurrentVoiceMode();
+	void ChangePerformance();
 };
+
+/*
+ * CSKSpecialMsgHandler/CSKMIDIMsgHandler/CSKSysExMsgHandler -- the real,
+ * full MIDI-message dispatch classes (previously only CSKSpecialMsgHandler
+ * existed here as a 1-field opaque stand-in). Declared in their own header
+ * because CKGUIMsgSender below needs CSKSpecialMsgHandler's static gate
+ * flag; that header is included here (rather than the other way around)
+ * specifically so it can see CKGRTCHandler/CKGMIDIMsgProcessor/
+ * CSKMIDIMsgProcessor/CMIDIFlowParamHolder/CKGEngine/CKGBankManager/
+ * CSPREngine, all already declared above at this point in the file --
+ * oa_ckg_midi_msg_handler.h's own #include of this header is a no-op
+ * (include-guard skip) when reached from here, standard two-header mutual
+ * reference resolved by processing order, not a real circular dependency.
+ */
+#include "oa_ckg_midi_msg_handler.h"
 
 /*
  * === CKGControlMsgHandler ===

@@ -461,6 +461,23 @@ struct CKGEngine {
 	void ResetKRTCSwitch(int ccNumber);
 	void ResetKRTCSlider(int id);
 	int GetNumOfModule();
+
+	/*
+	 * 6 more real instance methods, discovered while reconstructing the
+	 * CSKMIDIMsgHandler/CSKSpecialMsgHandler/CSKSysExMsgHandler MIDI
+	 * dispatch family (oa_ckg_midi_msg_handler.h) -- same
+	 * cast-through-`ms_poInstance` idiom as every other method above.
+	 * `+0x14` (CSKSpecialMsgHandler::ProcessResetAllControllerMessage's
+	 * own raw dword write, 2 or 3 depending on case) is a real field
+	 * accessed directly as a raw offset rather than through a method,
+	 * same convention as `+0xb0` above.
+	 */
+	bool ShouldKeepKarmaPerformance();
+	void ClearScheduler();
+	void KarmaTurnOnWhenFinishDump();
+	void KarmaTurnOffWhenStartDump();
+	void SendCCOffsetBack();
+	void SetBendRange(int range, unsigned int arg2, unsigned int arg3);
 };
 
 /*
@@ -537,8 +554,18 @@ struct CSPRMIDIMsgProcessor {
  * byte read from `CKGBankManager::ms_poInstance[0x97c747]`, ..., `5`,
  * `&local`) -- see SysExShadowWriteIsNeeded()'s own body in the .cpp.
  */
+struct CSKParameterChangeMessage;
 struct CSPRSysExBufManager {
 	char GetValue(int a, int b, int c, int d, int e, int f, int g, long *out);
+
+	/*
+	 * SetValue(CSKParameterChangeMessage*) -- real 1-arg overload,
+	 * discovered while reconstructing CSKSysExMsgHandler::
+	 * Store{KG,SPR,STG}ParamChange() (oa_ckg_midi_msg_handler.h) -- all
+	 * three call it identically (own body out of scope, generic SysEx
+	 * record-buffer write infrastructure, sibling of GetValue() above).
+	 */
+	void SetValue(CSKParameterChangeMessage *msg);
 };
 
 #endif /* OA_CKG_MODULE_PARAM_MSG_HANDLER_H */

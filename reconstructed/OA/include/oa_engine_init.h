@@ -2379,6 +2379,20 @@ struct CKGBankManager {
 	void ChangeMode(eSTGMsgPerfType type);
 	void FinishLoadingGEsAndTemplates(int a, int b);
 	void SetupTemplateAfterLoading(int index);
+
+	/*
+	 * 3 more real instance methods, discovered while reconstructing
+	 * CSKSpecialMsgHandler::ProcessProgramChangeMessage() (oa_ckg_midi_
+	 * msg_handler.h) -- same "this IS the singleton" call shape as the
+	 * others above. Real mangled param types match the Combi/Program
+	 * bank-id placeholders already declared just above; the Seq variant
+	 * takes no bank-id at all (confirmed via its own distinct mangled
+	 * name, `Ej` vs the other two's `E15eSTGCombiBankIdj`/
+	 * `E17eSTGProgramBankIdj`).
+	 */
+	void ChangeKarmaPerfForProgram(eSTGProgramBankId bankId, unsigned int index);
+	void ChangeKarmaPerfForCombi(eSTGCombiBankId bankId, unsigned int index);
+	void ChangeKarmaPerfForSeq(unsigned int index);
 };
 
 /*
@@ -2396,6 +2410,20 @@ struct CKGBankManager {
  */
 struct CSPREngine {
 	static unsigned char *ms_poInstance;
+
+	/*
+	 * ChangePerformance(eSTGMsgPerfType) -- real 1-arg instance method,
+	 * discovered while reconstructing CSKSpecialMsgHandler::
+	 * ProcessProgramChangeMessage() (oa_ckg_midi_msg_handler.h), same
+	 * "this IS the singleton" call shape as CKGEngine's own 2-arg
+	 * ChangePerformance(eSTGMsgPerfType,bool) -- confirmed a genuinely
+	 * different overload (distinct mangled name, no `bool` param). Own
+	 * body out of scope. `*ms_poInstance < 7` (a raw byte compare, real
+	 * meaning unconfirmed beyond the literal 7) is read directly as a
+	 * raw offset-0 byte by several CSKSysExMsgHandler callers rather
+	 * than through a method, same convention as CKGEngine's `+0xb0`.
+	 */
+	void ChangePerformance(eSTGMsgPerfType type);
 };
 
 /* Also declared in oa_global.h (sec 10.98) -- same real, non-`extern
