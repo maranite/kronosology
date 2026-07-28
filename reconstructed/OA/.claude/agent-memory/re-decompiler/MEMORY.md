@@ -7,3 +7,4 @@
 - [STG value-getter family (~2300 methods, ~180 classes)](stg_value_getter_family.md) — huge codebase-wide Get*(ctx)->STGConvertedParam& pattern; 38 classes done (1000 methods), manifest 2445/21689, NEVER hand-compute KAT constants — script them, ~131 classes pending
 - [Shared-repo commit hygiene](shared_repo_commit_hygiene.md) — always `git diff --cached --stat` immediately before committing; concurrent sessions on /home/share can stage files between your `add` and `commit`
 - [Eva CVFATEntry class facts](eva_vfat_entry_class_facts.md) — real field offsets, VFAT checksum algorithm, slot-array/named-field overlap gotcha; GetSlotIndex needs CFATEntry modeled first
+- [Eva CBitMaskL facts + CVFATEntry closure](eva_bitmaskl_facts_and_vfatentry_closure.md) — CVFATEntry's ~28 remaining methods confirmed exhausted (2 new vtable findings); CBitMaskL (13 methods) done as follow-up, oracle technique refinement for functions w/ 1 excludable unsafe branch

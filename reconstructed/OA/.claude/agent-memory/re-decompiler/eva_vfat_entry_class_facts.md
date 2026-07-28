@@ -63,3 +63,11 @@ See [[x86-direct-execution-oracle-technique]] for the verification method used o
 branchy methods (`GetAliasChecksum()` own-field form, both `IsLongNameBitArrayEmpty()`
 overloads) — 60000 randomized trials + 3 exact spot-checks, 0 mismatches, extending that
 technique's confirmed-applicable set beyond `EquationPolyline`.
+
+**CLOSED, 2026-07-28** — re-verified all 28 remaining methods via direct disassembly
+before moving to a different class; no new tractable ground (2 previously-unenumerated
+methods, `GetNumByteToSerialize()`/`GetNumSlotToSerialize()`, also turned out to be
+vtable-dispatch-blocked, same as `GetSlotIndex()`). See
+[[eva-bitmaskl-facts-and-vfatentry-closure]] for details and the follow-up class
+(`CBitMaskL`) this pass moved to instead. Don't re-attempt this class without first
+modeling `CFATEntry` as a real base/member.
