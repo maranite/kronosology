@@ -623,7 +623,7 @@ not just `.cpp` files, regardless of how declaration-heavy the header
 looks -- a single trigger word anywhere before the struct's own `{` is
 enough.
 
-**Eighth batch (2026-07-28, commit `TBD`): `CSTGAMSMixerBase` (17/19) +
+**Eighth batch (2026-07-28, commit `f7f7e5f`): `CSTGAMSMixerBase` (17/19) +
 `CSTGStepSeq` (14/14) + `CSTGPitchMod` (12/12) done**, manifest
 2263 -> 2306, 43 methods. Same ground truth binary
 (`/home/share/Decomp/OA.ko_Decomp/OA.ko`). First act this batch: FINALLY
