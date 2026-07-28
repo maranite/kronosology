@@ -1191,34 +1191,53 @@ public:
  */
 class CKGMIDIOutMsgHandler : public CSKMIDIMsgHandler {
 public:
+	/*
+	 * Real ground-truth offset +0xc..+0x108c: 16 "primary" CDyingNoteInfo
+	 * slots (indexed by MIDI channel, +0xc) immediately followed by 16
+	 * "backup" slots (+0x84c) -- confirmed by CheckDyingNoteForMIDIPort()'s
+	 * own index math (NoteOn always touches the backup slot; NoteOff reads
+	 * the primary slot first, falling back to the backup) and by
+	 * KillAllDyingNotes()'s own restore-then-reinit sweep over both
+	 * arrays. This project's own CSKMIDIMsgHandler base models 4 bytes
+	 * fewer than ground truth's own +0xc alignment (same already-known,
+	 * non-blocking gap as CSKMIDIInMsgHandler's own m_noteDownCount
+	 * comment) -- harmless here since every access below is symbolic
+	 * (via these members), never through a raw absolute offset that
+	 * would need to match ground truth's own byte address.
+	 */
+	CDyingNoteInfo m_dyingNoteInfo[16];
+	CDyingNoteInfo m_dyingNoteInfoBackup[16];
+
 	CKGMIDIOutMsgHandler() {}
 
 	void Process();
 
-	/* Out-of-scope virtual slots -- minimal in-class stubs only (see
-	 * class comment above). Declared in the EXACT real vtable order
-	 * (rodata 0x48-0x78), since slot ORDER (not name) is what keeps
-	 * the leaves' own genuinely-reconstructed overrides dispatching
-	 * correctly. */
-	virtual void SendChannelMessageToMIDIPort() {}
-	virtual bool ShouldSendChannelMessageToMIDIPort() { return false; }
+	/* Declared in the EXACT real vtable order (rodata 0x48-0x78), since
+	 * slot ORDER (not name) is what keeps the leaves' own genuinely-
+	 * reconstructed overrides dispatching correctly. 11 of the 13 now
+	 * have real bodies (out-of-line, src/engine/ckg_midi_msg_handler.cpp);
+	 * SendExecToMIDIPortInCombi/InSong stay inline no-op stubs -- both
+	 * are real, substantial, previously-uncatalogued dispatch bodies
+	 * (~140/~300 instructions of per-timbre MIDI-flow-holder scanning)
+	 * deferred to a future batch, see re-decompiler agent memory. */
+	virtual void SendChannelMessageToMIDIPort();
+	virtual bool ShouldSendChannelMessageToMIDIPort();
 	virtual bool ShouldSendChannelMessageToMIDIPortInEachMode() { return false; }
-	virtual bool ShouldSendChannelMessageToSTG() { return false; }
-	virtual bool ShouldRecChannelMessageToSequencer() { return false; }
-	virtual void SendChannelMessageOfActiveTimbreToMIDIPort() {}
-	virtual void SendExecToMIDIPortInProgram() {}
+	virtual bool ShouldSendChannelMessageToSTG();
+	virtual bool ShouldRecChannelMessageToSequencer();
+	virtual void SendChannelMessageOfActiveTimbreToMIDIPort();
+	virtual void SendExecToMIDIPortInProgram();
 	virtual void SendExecToMIDIPortInCombi() {}
 	virtual void SendExecToMIDIPortInSong() {}
-	virtual bool CheckZoneOfNoteOn(int, int, int, int) { return false; }
-	virtual bool CheckZoneOfNoteOff(int, int) { return false; }
-	virtual bool CheckDyingNoteForMIDIPort() { return false; }
-	virtual void ProcessForDyingNote() {}
+	virtual bool CheckZoneOfNoteOn(int hiNote, int loNote, int hiVel, int loVel);
+	virtual bool CheckZoneOfNoteOff(int hiNote, int loNote);
+	virtual bool CheckDyingNoteForMIDIPort();
+	virtual void ProcessForDyingNote();
 
 	/* Non-virtual, called DIRECTLY (not through the vtable, confirmed
 	 * via a plain R_386_PC32 relocation) by
-	 * CKGMIDIMsgProcessor::KillAllDyingNotes() below. Own real body
-	 * (621 bytes) not modeled, out of scope. */
-	void KillAllDyingNotes() {}
+	 * CKGMIDIMsgProcessor::KillAllDyingNotes() below. */
+	void KillAllDyingNotes();
 };
 
 /* .text+0x3bb630 region (ctor 33 bytes; ShouldSendChannelMessageToMIDIPortInEachMode
@@ -1288,18 +1307,23 @@ public:
 	/* .text+0x3baf90, 76 bytes. */
 	virtual void Initialize();
 
-	/* Out-of-scope virtual slots, real vtable order (rodata 0xc-0x34). */
-	virtual void InitializeControllerMembers() {}
-	virtual void InitializeValue() {}
-	virtual void StoreValue(CMIDIMessage *) {}
-	virtual void ResetKarmaGeneratedValue() {}
-	virtual void HandleccidResetAllController() {}
-	virtual void HandleNRPNMessage() {}
-	virtual void ProcessNRPN(int) {}
-	virtual void ProcessNRPNIncDec(int) {}
-	virtual void ConvertToneModifyToCC(int) {}
-	virtual void AdjustNRPN(int, int) {}
-	virtual void SendResetValue(int) {}
+	/* Real vtable order (rodata 0xc-0x34), all 10 now real bodies
+	 * (src/engine/ckg_midi_msg_handler.cpp). ConvertToneModifyToCC/
+	 * ProcessNRPN/ProcessNRPNIncDec/AdjustNRPN return `int`, NOT `void`
+	 * as the prior stub declared -- confirmed by their own callers
+	 * checking/using the EAX return value (e.g. ProcessNRPN's `cmp
+	 * eax,0xff` against ConvertToneModifyToCC's result). */
+	virtual void InitializeControllerMembers();
+	virtual void InitializeValue();
+	virtual void StoreValue(CMIDIMessage *msg);
+	virtual void ResetKarmaGeneratedValue();
+	virtual void HandleccidResetAllController();
+	virtual void HandleNRPNMessage();
+	virtual int ProcessNRPN(int val);
+	virtual int ProcessNRPNIncDec(int delta);
+	virtual int ConvertToneModifyToCC(int val);
+	virtual int AdjustNRPN(int which, int val);
+	virtual void SendResetValue(int ccIndex);
 };
 
 /*

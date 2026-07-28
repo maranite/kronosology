@@ -51,7 +51,10 @@ static unsigned char g_bankBuf[BANKSZ];
 unsigned char *CKGBankManager::ms_poInstance = g_bankBuf;
 
 unsigned char *CKGEngine::ms_poInstance;
-static unsigned char g_engineBuf[0x40];
+/* 0x200: large enough for every touched offset in this file, including
+ * CKGCCResetHandler::ResetKarmaGeneratedValue()'s own +0xa0 pointer read
+ * (was 0x40, too small once that method got a real body). */
+static unsigned char g_engineBuf[0x200];
 unsigned char *CDrumTrackBankManager::ms_poInstance;
 unsigned char *CSPREngine::ms_poInstance;
 unsigned char *CMIDIFlowParamHolder::ms_poThis;

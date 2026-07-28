@@ -2796,6 +2796,261 @@ void CKGMIDIOutMsgHandler::Process()
 	SendChannelMessageToSTG();
 }
 
+/* .text+0x3bb7a0, regparm(3). Saves/restores m_data1/m_data2 around the
+ * dispatch; recomputes m_data2 via the base class's own
+ * CheckAndGetCorrectCCValue(). When CKGBankManager::ms_poInstance[+0x97c74c]
+ * (an int flag) == 1 AND the message is NoteOn/NoteOff, applies an
+ * octave-wrap transpose (+/-0xc) to m_data1 sourced from
+ * CKGBankManager::ms_poInstance[+0x97c744] (a signed byte) before the
+ * dispatch either way -- own field semantics on CKGBankManager's giant
+ * opaque aggregate out of scope, transcribed as raw byte offsets matching
+ * the established convention elsewhere in this file. */
+void CKGMIDIOutMsgHandler::SendChannelMessageToMIDIPort()
+{
+	unsigned char savedData1 = m_data1;
+	unsigned char savedData2 = m_data2;
+	m_data2 = (unsigned char)CheckAndGetCorrectCCValue();
+
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	if (*(int *)(bm + 0x97c74c) == 1 &&
+	    ((m_status & 0xf0) == 0x90 || (m_status & 0xf0) == 0x80)) {
+		int t = (signed char)savedData1 - (signed char)bm[0x97c744];
+		if (t > 0x7f)
+			t -= 0xc;
+		else if (t < 0)
+			t += 0xc;
+		m_data1 = (unsigned char)t;
+	}
+	SendChannelMessageOfActiveTimbreToMIDIPort();
+	m_data1 = savedData1;
+	m_data2 = savedData2;
+}
+
+/* .text+0x3bbb80, regparm(3). Gate chain: channel!=0, then
+ * CKGBankManager::ms_poInstance[+0x97c749]!=0, then base
+ * CheckGlobalFilter(). If (status&0xf) == CMIDIFlowParamHolder's
+ * GetLocalControlChannel(), additionally requires
+ * ShouldSendChannelMessageToMIDIPortInEachMode(); either way then folds
+ * into the shared tail: default true unless
+ * CKGBankManager::ms_poInstance[+0x97c7bf]==0 (forces false), or the
+ * message is CC with m_data1>=0x78 (also forces false). */
+bool CKGMIDIOutMsgHandler::ShouldSendChannelMessageToMIDIPort()
+{
+	if ((m_flags & 0xf) == 0)
+		return false;
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	if (bm[0x97c749] == 0)
+		return false;
+	if (!CheckGlobalFilter())
+		return false;
+
+	unsigned channel = m_status & 0xf;
+	int localCh = ((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetLocalControlChannel();
+	if ((unsigned)localCh == channel) {
+		if (!ShouldSendChannelMessageToMIDIPortInEachMode())
+			return false;
+	}
+	bool result = (bm[0x97c7bf] != 0);
+	if ((m_status & 0xf0) == 0xb0 && (signed char)m_data1 >= 0x78)
+		result = false;
+	return result;
+}
+
+/* .text+0x3bba70, regparm(3). CC/PitchBend-shaped gate over
+ * CKGBankManager::ms_poInstance's giant opaque aggregate (bits 0x10/0x1
+ * of +0x97c748 for the channel==0 cases, +0x97c7b9 for PitchBend
+ * channel==4) plus a CMIDIFlowParamHolder::GetLocalControlChannel()
+ * comparison for the channel==4 CC/PitchBend cases; every other status
+ * type defaults to true. */
+bool CKGMIDIOutMsgHandler::ShouldSendChannelMessageToSTG()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	unsigned char statusHi = m_status & 0xf0;
+
+	if (statusHi == 0xb0) {
+		unsigned char cc = m_data1;
+		bool result = true;
+		if (cc == 0 || cc == 0x20)
+			result = (bm[0x97c748] >> 1) & 1;
+
+		unsigned char channel = m_flags & 0xf;
+		if (channel == 0) {
+			if (!(bm[0x97c748] & 0x10))
+				result = false;
+			return result;
+		}
+		if (channel != 4)
+			return true;
+		int localCh = ((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetLocalControlChannel();
+		return channel != (unsigned)localCh;
+	}
+	if (statusHi == 0xe0) {
+		unsigned char channel = m_flags & 0xf;
+		if (channel == 0)
+			return (bm[0x97c748] >> 4) & 1;
+		if (channel != 4)
+			return true;
+		return bm[0x97c7b9] != 0;
+	}
+	return true;
+}
+
+/* .text+0x3bb980, regparm(3). Same CC/PitchBend gate shape as
+ * ShouldSendChannelMessageToSTG() above but against
+ * SKSTGGate_CheckVJSCCToMIDIPortFilter() for CC and different
+ * CKGBankManager bit offsets/positions for PitchBend -- verified
+ * independently, not assumed to mirror the sibling method. */
+bool CKGMIDIOutMsgHandler::ShouldRecChannelMessageToSequencer()
+{
+	unsigned char *bm = CKGBankManager::ms_poInstance;
+	unsigned char statusHi = m_status & 0xf0;
+
+	if (statusHi == 0xb0) {
+		unsigned char cc = m_data1;
+		bool result = (cc == 0 || cc == 0x20) ? (bool)((bm[0x97c748] >> 1) & 1) : true;
+
+		unsigned char channel = m_flags & 0xf;
+		if (channel == 0 && !(bm[0x97c748] & 0x10))
+			result = false;
+		if (!SKSTGGate_CheckVJSCCToMIDIPortFilter((signed char)cc, channel))
+			result = false;
+		return result;
+	}
+	if (statusHi == 0xe0) {
+		unsigned char channel = m_flags & 0xf;
+		if (channel == 0)
+			return (bm[0x97c748] >> 4) & 1;
+		if (channel == 4)
+			return bm[0x97c7b9] != 0;
+		return true;
+	}
+	return true;
+}
+
+/* .text+0x3bbc20, regparm(3). Fully self-contained dispatcher --
+ * CMIDIFlowParamHolder::GetVoiceMode() selects between the 3 own
+ * sibling virtuals (mode 1=Program, 2=Song, 0=Combi; confirmed by
+ * cross-checking each branch's own vtable-slot call target, NOT
+ * assumed from the mode-number/method-name ordering). */
+void CKGMIDIOutMsgHandler::SendChannelMessageOfActiveTimbreToMIDIPort()
+{
+	int mode = ((CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis)->GetVoiceMode();
+	if (mode == 1)
+		SendExecToMIDIPortInProgram();
+	else if (mode == 2)
+		SendExecToMIDIPortInSong();
+	else if (mode == 0)
+		SendExecToMIDIPortInCombi();
+}
+
+/* .text+0x3bb730, 15 bytes. Trivial forward to the base class's own
+ * SendChannelMessageToMIDIPortWithCorrectLength(). */
+void CKGMIDIOutMsgHandler::SendExecToMIDIPortInProgram()
+{
+	SendChannelMessageToMIDIPortWithCorrectLength();
+}
+
+/* .text+0x3bb740, regparm(3): this=EAX, hiNote=EDX, loNote=ECX,
+ * hiVel=stack0, loVel=stack4 (confirmed by the comparison directions,
+ * not assumed from the declared parameter names). */
+bool CKGMIDIOutMsgHandler::CheckZoneOfNoteOn(int hiNote, int loNote, int hiVel, int loVel)
+{
+	if (m_flags & 0x40)
+		return true;
+	signed char note = (signed char)m_data1;
+	if (loNote > note || note > hiNote)
+		return false;
+	signed char vel = (signed char)m_data2;
+	return (loVel <= vel) && (vel <= hiVel);
+}
+
+/* .text+0x3bb780, regparm(3): this=EAX, hiNote=EDX, loNote=ECX. Same
+ * zone shape as CheckZoneOfNoteOn() above, minus the velocity check. */
+bool CKGMIDIOutMsgHandler::CheckZoneOfNoteOff(int hiNote, int loNote)
+{
+	if (m_flags & 0x40)
+		return true;
+	signed char note = (signed char)m_data1;
+	return (loNote <= note) && (note <= hiNote);
+}
+
+/* .text+0x3bb840, regparm(3). NoteOn always marks the BACKUP array
+ * (m_dyingNoteInfoBackup[channel]) and unconditionally reports true.
+ * NoteOff checks the PRIMARY array first: if already on there, fires
+ * ProcessForDyingNote() (self, using the message currently in
+ * m_status/m_data1) and clears it, reporting false; otherwise falls
+ * back to the backup array, clearing it and reporting true only if it
+ * was set there. Any other status type reports true (default). */
+bool CKGMIDIOutMsgHandler::CheckDyingNoteForMIDIPort()
+{
+	int note = (signed char)m_data1;
+	unsigned char statusHi = m_status & 0xf0;
+	unsigned channel = m_status & 0xf;
+
+	if (statusHi == 0x90) {
+		m_dyingNoteInfoBackup[channel].TurnOn(note);
+		return true;
+	}
+	if (statusHi == 0x80) {
+		CDyingNoteInfo *primary = &m_dyingNoteInfo[channel];
+		if (primary->IsNoteOn(note)) {
+			ProcessForDyingNote();
+			primary->TurnOff(note);
+			return false;
+		}
+		CDyingNoteInfo *backup = &m_dyingNoteInfoBackup[channel];
+		if (!backup->IsNoteOn(note))
+			return false;
+		backup->TurnOff(note);
+		return true;
+	}
+	return true;
+}
+
+/* .text+0x3bb930, regparm(3). Brackets the dispatch with
+ * CMIDIFlowParamHolder::SetStatus(1)/SetStatus(0) -- confirmed via the
+ * literal 1/0 EStatus arguments, real enumerator names beyond that
+ * unconfirmed (see CMIDIFlowParamHolder's own class comment). */
+void CKGMIDIOutMsgHandler::ProcessForDyingNote()
+{
+	CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+	mf->SetStatus(CMIDIFlowParamHolder::eStatus_1);
+	if (ShouldSendChannelMessageToMIDIPort())
+		SendChannelMessageToMIDIPort();
+	mf->SetStatus(CMIDIFlowParamHolder::eStatus_0);
+}
+
+/* .text+0x3bc320, 621 bytes, regparm(3). Outer loop over the 16
+ * per-channel CDyingNoteInfo::IsAnyNotesOn() slots; inner loop over all
+ * 128 notes draining each one still-on note via
+ * ProcessForDyingNote()+TurnOff() (compiled as a do-while re-check --
+ * functionally a plain "while (IsNoteOn(note))" per note). Once every
+ * channel is drained, restores the primary array from the backup array
+ * and re-Initialize()s the backup (compiler software-pipelined this
+ * pair of loops across iterations in the real binary -- see
+ * re-decompiler agent memory for the raw scheduling trace -- but the
+ * observable effect is exactly the 2 straight-line loops below). */
+void CKGMIDIOutMsgHandler::KillAllDyingNotes()
+{
+	for (unsigned objIdx = 0; objIdx < 16; objIdx++) {
+		CDyingNoteInfo *dying = &m_dyingNoteInfo[objIdx];
+		if (!dying->IsAnyNotesOn())
+			continue;
+		m_status = (unsigned char)((m_status & 0xf0) | (objIdx & 0xf));
+		for (int note = 0; note < 128; note++) {
+			while (dying->IsNoteOn(note)) {
+				m_data1 = (unsigned char)note;
+				ProcessForDyingNote();
+				dying->TurnOff(note);
+			}
+		}
+	}
+	for (unsigned i = 0; i < 16; i++) {
+		m_dyingNoteInfo[i] = m_dyingNoteInfoBackup[i];
+		m_dyingNoteInfoBackup[i].Initialize();
+	}
+}
+
 /* ==================== CKGCCResetHandler ==================== */
 
 /* .text+0x3baf90, 76 bytes. Calls its own InitializeControllerMembers()
@@ -2810,6 +3065,284 @@ void CKGCCResetHandler::Initialize()
 	m_raw[0xc - 4] = 0xff;
 	m_raw[0x2c - 4] = 0xff;
 	__builtin_memcpy(m_raw + (0x72 - 4), m_raw + (0xc - 4), 0x66);
+}
+
+/* .text+0x3bafe0, 128 bytes. Two zero-fill runs (ground truth offset
+ * [0xd,0x2b) and [0x2d,0x71), deliberately skipping indices 0xc and
+ * 0x2c -- both are the 2 bytes Initialize() itself pokes to 0xff right
+ * after calling this, so the skip is real, not an oversight) followed
+ * by ~20 individual literal byte pokes, all transcribed at their exact
+ * real offsets. */
+void CKGCCResetHandler::InitializeControllerMembers()
+{
+	for (unsigned d = 1; d != 0x20; d++)
+		m_raw[(0xc + d) - 4] = 0;
+	for (unsigned d = 0x21; d != 0x66; d++)
+		m_raw[(0xc + d) - 4] = 0;
+
+	m_raw[0x16 - 4] = 0x40;
+	m_raw[0x14 - 4] = 0x40;
+	m_raw[0x1c - 4] = 0x40;
+	m_raw[0x1d - 4] = 0xff;
+	m_raw[0x1f - 4] = 0xff;
+	m_raw[0x20 - 4] = 0xff;
+	m_raw[0x21 - 4] = 0xff;
+	m_raw[0x52 - 4] = 0x40;
+	m_raw[0x53 - 4] = 0x40;
+	m_raw[0x54 - 4] = 0x40;
+	m_raw[0x55 - 4] = 0x40;
+	m_raw[0x56 - 4] = 0x40;
+	m_raw[0x57 - 4] = 0x40;
+	m_raw[0x58 - 4] = 0x40;
+	m_raw[0x59 - 4] = 0x40;
+	m_raw[0x5a - 4] = 0x40;
+	m_raw[0x5b - 4] = 0x40;
+	m_raw[0x13 - 4] = 0x7f;
+	m_raw[0x17 - 4] = 0x7f;
+	m_raw[0x4d - 4] = 0xff;
+	m_raw[0x11 - 4] = 0xff;
+	m_raw[0xd8 - 4] = 0;
+}
+
+/* .text+0x3bb070, 83 bytes. Same InitializeControllerMembers() call +
+ * 0x66-byte [+0xc,+0x72)->[+0x72,+0xd8) copy as Initialize() above, but
+ * WITHOUT Initialize()'s own 2 extra 0xff pokes. */
+void CKGCCResetHandler::InitializeValue()
+{
+	InitializeControllerMembers();
+	__builtin_memcpy(m_raw + (0x72 - 4), m_raw + (0xc - 4), 0x66);
+}
+
+/* .text+0x3bb0c0, 96 bytes, regparm(3): this=EAX, msg=EDX.
+ * CMIDIMessage's own raw layout is a packed status/data1/data2/flags
+ * dword at msg+0 (a genuinely different convention from this project's
+ * usual +4..+7 CSKMIDIMsgHandler fields -- see CKGMIDIMsgProcessor::
+ * StoreCCMessage()'s own comment for the same real quirk), copied
+ * whole into this object's own +4..+7 fields. For CC messages
+ * (data1<=0x65) additionally records the value into 2 parallel
+ * 0x66-byte tables (+0xc and, unless channel==5, +0x72), then fires the
+ * NRPN/reset-all-controllers handlers unconditionally. */
+void CKGCCResetHandler::StoreValue(CMIDIMessage *msg)
+{
+	*(unsigned int *)m_raw = *(unsigned int *)msg;
+
+	if ((m_raw[0] & 0xf0) == 0xb0) {
+		unsigned char data1 = m_raw[1];
+		if ((signed char)data1 <= 0x65) {
+			unsigned char channel = m_raw[3] & 0xf;
+			unsigned char data2 = m_raw[2];
+			m_raw[(0xc + data1) - 4] = data2;
+			if (channel != 5)
+				m_raw[(0x72 + data1) - 4] = data2;
+		}
+		HandleNRPNMessage();
+		HandleccidResetAllController();
+	}
+}
+
+/* .text+0x3bb4e0, 297 bytes, regparm(3). Resets this handler's own
+ * KARMA-generated CC value on STG (data1=0x79 "Reset All Controllers"),
+ * then re-sends every one of the ~0x66 tracked CC indices via
+ * SendResetValue() EXCEPT index 5 -- 3 individually-unrolled skips
+ * (7/8/9, 0xb..0x1f, 0x21..0x40, 0x42..0x5a, 0x5c/0x5e/0x5f) matching
+ * the real disassembly's own literal sequence exactly, including index
+ * 7 only being sent when CKGEngine::ms_poInstance[+0xa0] (an opaque
+ * pointer, own semantics out of scope) is NULL. */
+void CKGCCResetHandler::ResetKarmaGeneratedValue()
+{
+	unsigned char ch = m_raw[0xdc - 4];
+	((CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance)->
+		ProcessKarmaGeneratedChannelMessage(0xb0, ch, 0x79, 0, false);
+
+	if (*(void **)(CKGEngine::ms_poInstance + 0xa0) == 0)
+		SendResetValue(7);
+
+	SendResetValue(8);
+	SendResetValue(9);
+	for (int i = 0xb; i != 0x20; i++)
+		SendResetValue(i);
+	for (int i = 0x21; i != 0x41; i++)
+		SendResetValue(i);
+	for (int i = 0x42; i != 0x5b; i++)
+		SendResetValue(i);
+	SendResetValue(0x5c);
+	SendResetValue(0x5e);
+	SendResetValue(0x5f);
+}
+
+/* .text+0x3bb120, 37 bytes, regparm(3). Own m_data1==0x79 ("Reset All
+ * Controllers") gate, skipped entirely on channel 5, otherwise
+ * forwards into InitializeValue() (rodata 0x10). */
+void CKGCCResetHandler::HandleccidResetAllController()
+{
+	if (m_raw[1] != 0x79)
+		return;
+	if ((m_raw[3] & 0xf) == 5)
+		return;
+	InitializeValue();
+}
+
+/* .text+0x3bb150, 381 bytes, regparm(3). Switches on this object's own
+ * m_data1 (own last-stored CC number, +5): a handful of literal NRPN
+ * sub-opcodes (0x06/0x26/0x60/0x61/0x63/0x64/0x65) each gate on/mutate
+ * a flags byte at +0xd8 and, for 3 of them, forward into
+ * ProcessNRPN()/ProcessNRPNIncDec(); every other CC number is a no-op.
+ * The 4 "OR mask then re-mask on a bit test" cases (0x62/0x63/0x64/0x65)
+ * share a real jump into a common `&= ~0x30` tail in ground truth --
+ * modeled here as identical inline logic per case rather than a
+ * literal goto, same observable effect. */
+void CKGCCResetHandler::HandleNRPNMessage()
+{
+	unsigned char dl = m_raw[0x5 - 4];
+
+	switch (dl) {
+	case 0x60:
+		if ((m_raw[0xd8 - 4] & 0x8c) == 0x8c)
+			ProcessNRPNIncDec(1);
+		break;
+	case 0x61:
+		if ((m_raw[0xd8 - 4] & 0x8c) == 0x8c)
+			ProcessNRPNIncDec(-1);
+		break;
+	case 0x26:
+		if ((m_raw[0xd8 - 4] & 0x43) == 0x43)
+			m_raw[0xd8 - 4] |= 0x20;
+		break;
+	case 0x06: {
+		unsigned char v = m_raw[0xd8 - 4];
+		if ((v & 0x43) == 0x43)
+			m_raw[0xd8 - 4] = v | 0x10;
+		else if ((v & 0x8c) == 0x8c)
+			ProcessNRPN((signed char)m_raw[0x6 - 4]);
+		break;
+	}
+	case 0x63: {
+		unsigned char v = (unsigned char)((m_raw[0xd8 - 4] & ~0x40) | 0x84);
+		m_raw[0xd8 - 4] = v;
+		if (v & 0x8)
+			m_raw[0xd8 - 4] = v & ~0x30;
+		break;
+	}
+	case 0x64: {
+		unsigned char v = (unsigned char)((m_raw[0xd8 - 4] & 0x7f) | 0x42);
+		m_raw[0xd8 - 4] = v;
+		if (v & 0x1)
+			m_raw[0xd8 - 4] = v & ~0x30;
+		break;
+	}
+	case 0x65: {
+		unsigned char v = (unsigned char)((m_raw[0xd8 - 4] & 0x7f) | 0x41);
+		m_raw[0xd8 - 4] = v;
+		if (v & 0x2)
+			m_raw[0xd8 - 4] = v & ~0x30;
+		break;
+	}
+	case 0x62: {
+		unsigned char v = (unsigned char)((m_raw[0xd8 - 4] & ~0x40) | 0x88);
+		m_raw[0xd8 - 4] = v;
+		if (v & 0x4)
+			m_raw[0xd8 - 4] = v & ~0x30;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+/* .text+0x3bb3a0, 114 bytes, regparm(3): this=EAX, val=EDX. Gated on
+ * +0x6f==1 (own flag, semantics out of scope); maps this object's own
+ * +0x6e byte through ConvertToneModifyToCC(), then AdjustNRPN()s `val`
+ * against that mapped CC number and stores the result into both
+ * parallel CC tables (+0xc and +0x72, unconditionally -- unlike
+ * StoreValue() there is no channel==5 skip here). Real ground truth
+ * leaves EAX = a stale `this`-derived value on the early-exit path;
+ * every real caller of this method ignores its return value, so
+ * returning 0 there is a faithful-enough substitute. */
+int CKGCCResetHandler::ProcessNRPN(int val)
+{
+	if (m_raw[0x6f - 4] != 1)
+		return 0;
+	int cc = ConvertToneModifyToCC(m_raw[0x6e - 4]);
+	if (cc == 0xff)
+		return 0;
+	int adjusted = AdjustNRPN(cc, val);
+	m_raw[(0xc + cc) - 4] = (unsigned char)adjusted;
+	m_raw[(0x72 + cc) - 4] = (unsigned char)adjusted;
+	return adjusted;
+}
+
+/* .text+0x3bb420, 108 bytes, regparm(3): this=EAX, delta=EDX. Same
+ * +0x6f/+0x6e/ConvertToneModifyToCC() gate as ProcessNRPN() above, but
+ * adds `delta` to the CC table's CURRENT value (clamped to [0,0x7f])
+ * instead of computing a fresh value via AdjustNRPN(). */
+int CKGCCResetHandler::ProcessNRPNIncDec(int delta)
+{
+	if (m_raw[0x6f - 4] != 1)
+		return 0;
+	int cc = ConvertToneModifyToCC(m_raw[0x6e - 4]);
+	if (cc == 0xff)
+		return 0;
+	int cur = m_raw[(0xc + cc) - 4];
+	int sum = delta + cur;
+	int clamped = (sum <= 0x7f) ? sum : 0x7f;
+	if (clamped < 0)
+		clamped = 0;
+	m_raw[(0xc + cc) - 4] = (unsigned char)clamped;
+	m_raw[(0x72 + cc) - 4] = (unsigned char)clamped;
+	return clamped;
+}
+
+/* .text+0x3bb2f0, 92 bytes, regparm(3): this unused (pure function of
+ * `val`). Fixed literal NRPN-number -> CC-number map; 0xff sentinel for
+ * anything unmapped. */
+int CKGCCResetHandler::ConvertToneModifyToCC(int val)
+{
+	switch (val) {
+	case 0x63: return 0x49;
+	case 0x64: return 0x4b;
+	case 0x66: return 0x48;
+	case 0x20: return 0x4a;
+	case 0x09: return 0x4d;
+	case 0x0a: return 0x4e;
+	case 0x08: return 0x4c;
+	case 0x21: return 0x47;
+	default: return 0xff;
+	}
+}
+
+/* .text+0x3bb350, 80 bytes, regparm(3): this unused, which=EDX,
+ * val=ECX. Fixed per-CC-number rescale formulas for 3 CC numbers
+ * (0x4d/0x4e/0x47); everything else passes `val` through unchanged. */
+int CKGCCResetHandler::AdjustNRPN(int which, int val)
+{
+	switch (which) {
+	case 0x4d:
+		if (val <= 0x40)
+			return val;
+		return (((3 * val) - 0xc0) >> 2) + 0x40;
+	case 0x4e:
+		return ((((5 * val) - 0x140) * 2) >> 4) + 0x40;
+	case 0x47:
+		return (val >> 1) + 0x20;
+	default:
+		return val;
+	}
+}
+
+/* .text+0x3bb490, 66 bytes, regparm(3): this=EAX, ccIndex=EDX. No-op if
+ * the 2 parallel CC tables already agree at this index; otherwise
+ * forwards a KARMA-reset-CC channel message via
+ * CKGMIDIMsgProcessor::ms_poInstance, tagged with this handler's own
+ * channel/index (+0xdc, set by the ctor). */
+void CKGCCResetHandler::SendResetValue(int ccIndex)
+{
+	unsigned char secondary = m_raw[(0x72 + ccIndex) - 4];
+	if (secondary == m_raw[(0xc + ccIndex) - 4])
+		return;
+	unsigned char ownChannel = m_raw[0xdc - 4];
+	((CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance)->
+		ProcessKarmaResetCCChannelMessage(0xb0, ownChannel,
+						   (char)ccIndex, (char)secondary);
 }
 
 /* ==================== CKGMIDIMsgProcessor ====================
