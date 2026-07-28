@@ -222,50 +222,20 @@ struct CKGMIDIMsgProcessor {
 };
 
 /*
- * CSKMIDIMsgProcessor -- MIDI local-control-channel message processor
- * singleton (distinct from CKGMIDIMsgProcessor above). Own class layout
- * out of scope; declared only for the one method
- * UpdateSoftPedalStatus()/HandleMessage's own local-pedal case call.
+ * CSKMIDIMsgProcessor -- previously a 6-method opaque stand-in here (the
+ * whole owning-and-pumping class for CSKMIDIPortMsgHandler/
+ * CSKMIDILocalCtrlMsgHandler/CSKSpecialMsgHandler/CSKMIDIKarmaCtrlMsgHandler/
+ * CSKPadNoteByMIDIPortMsgHandler/CSKPadNoteByLocalCtrlMsgHandler). Now a
+ * full real class in oa_ckg_midi_msg_handler.h (included below), reached
+ * once those 6 dependencies became real classes themselves -- see that
+ * header's own "=== CSKMIDIMsgProcessor ===" section. All of THIS file's
+ * own call sites (ProcessLocalControlChannelMessage/
+ * ProcessKarmaControllerGeneratedChannelMessage/KillAllDyingNotes/
+ * LeaveDownloadMode/StoreDyingNoteInfoFor{MIDPort,STG}) still resolve
+ * correctly since the real class is visible by the time this file's own
+ * `#include "oa_ckg_midi_msg_handler.h"` line (below) is reached, same as
+ * every other type declared past that point.
  */
-struct CSKMIDIMsgProcessor {
-	static unsigned char *ms_poInstance;
-	void ProcessLocalControlChannelMessage(int status, unsigned char channel, char a, char b);
-
-	/*
-	 * One more real overload, discovered while reconstructing the
-	 * CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
-	 * widget hierarchy (oa_ckg_switch_family.h) --
-	 * CKGController::SendCC()/CKGChordTrigger::SendNoteOrCC()'s own
-	 * KARMA-controller-generated-MIDI dispatch. Real 1st parameter is
-	 * `CMIDIMessage::EStatus`, a type declared in the (transitively
-	 * including) `oa_ckg_switch_family.h` -- an `asm()` linkage-name
-	 * override avoids the circular #include, same technique used for
-	 * CKGParamEdit::SendChordMemory (oa_ckg_param_edit_send_decls.inc).
-	 * Real mangled name read directly off the ground-truth binary.
-	 */
-	void ProcessKarmaControllerGeneratedChannelMessage(int status, unsigned char channel, char ccNumber, char ccValue)
-		asm("_ZN19CSKMIDIMsgProcessor45ProcessKarmaControllerGeneratedChannelMessageEN12CMIDIMessage7EStatusEhcc");
-
-	/*
-	 * 2 more real instance methods, discovered while reconstructing
-	 * CSKSpecialMsgHandler::ProcessResetAllControllerMessage()
-	 * (oa_ckg_midi_msg_handler.h) -- same cast-through-`ms_poInstance`
-	 * idiom as above. Own bodies out of scope.
-	 */
-	void KillAllDyingNotes();
-	void LeaveDownloadMode();
-
-	/*
-	 * 2 more real 1-arg overloads, discovered while reconstructing
-	 * CSKMIDIMsgHandler::StoreDyingNoteInfoFor{MIDPort,STG}()
-	 * (oa_ckg_midi_msg_handler.h). Real callers pass their own `this+4`
-	 * (the raw 4-byte MIDI event field) reinterpreted directly as a
-	 * `CMIDIMessage*` -- same idiom as CKGMIDIMsgProcessor::
-	 * StoreCCMessage() above.
-	 */
-	void StoreDyingNoteInfoForMIDPort(CMIDIMessage *msg);
-	void StoreDyingNoteInfoForSTG(CMIDIMessage *msg);
-};
 
 /*
  * CSKMIDIInMsgHandler -- forward-declared only here; the real class (with

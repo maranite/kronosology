@@ -2054,3 +2054,480 @@ bool CSKPadNoteByLocalCtrlMsgHandler::CheckNoteMessageAndTriggerPad()
 {
 	return false;
 }
+
+/* ==================== CSKParameterChangeMessage ====================
+ * Found while sweeping the CKG/CSK cluster for a next tractable slice
+ * after CSKMIDIInMsgHandler's own family (2026-07-28 continuation). See
+ * this class's own header comment (oa_ckg_midi_msg_handler.h) for the
+ * full 14-byte SysEx-shaped layout derivation.
+ */
+
+/* .text+0x341760, 142 bytes, regparm(3). */
+void CSKParameterChangeMessage::SetParameters(unsigned char param1, unsigned char param2, unsigned char param3,
+					       unsigned char param4, unsigned char param5, int value)
+{
+	m_bytes[0x2] = (unsigned char)(SPROutGate_GetGlobalChannel() | 0x30);
+	m_bytes[0x4] = param1;
+	m_bytes[0x5] = param2;
+	m_bytes[0x6] = param3;
+	m_bytes[0x8] = param4;
+	m_bytes[0x9] = param5;
+	m_bytes[0xa] = (unsigned char)((value >> 14) & 0x7f);
+	m_bytes[0xb] = (unsigned char)((value >> 7) & 0x7f);
+	m_bytes[0xc] = (unsigned char)(value & 0x7f);
+}
+
+/* .text+0x3417f0, 126 bytes, regparm(3). Same shape as the 5-byte
+ * overload above, but the extra explicit param (param4) lands at +0x7
+ * (left as a fixed 0 by the other overload). */
+void CSKParameterChangeMessage::SetParameters(int param1, int param2, int param3, int param4, int param5,
+					       int param6, long value)
+{
+	m_bytes[0x2] = (unsigned char)(SPROutGate_GetGlobalChannel() | 0x30);
+	m_bytes[0x4] = (unsigned char)param1;
+	m_bytes[0x5] = (unsigned char)param2;
+	m_bytes[0x6] = (unsigned char)param3;
+	m_bytes[0x7] = (unsigned char)param4;
+	m_bytes[0x8] = (unsigned char)param5;
+	m_bytes[0x9] = (unsigned char)param6;
+	m_bytes[0xa] = (unsigned char)((value >> 14) & 0x7f);
+	m_bytes[0xb] = (unsigned char)((value >> 7) & 0x7f);
+	m_bytes[0xc] = (unsigned char)(value & 0x7f);
+}
+
+/* .text+0x341890, 81 bytes. Real body: false unless +0x1==0x42 AND
+ * +0x2 == (sign-extended CKGBankManager::ms_poInstance[0x97c747] | 0x30)
+ * AND +0x3==0x68 AND the +0x4 kind byte is 'm'/'C'/'n'/'A'. The
+ * sign-extend-then-compare-to-a-zero-extended-byte shape means this can
+ * only ever match when the global-channel byte is non-negative -- a
+ * real, confirmed quirk, transcribed as observed rather than simplified
+ * away. */
+bool CSKParameterChangeMessage::IsThisParamChage()
+{
+	signed char globalChanByte = *(signed char *)(CKGBankManager::ms_poInstance + 0x97c747);
+	int expected = (int)globalChanByte | 0x30;
+
+	if (m_bytes[0x1] != 0x42)
+		return false;
+	if ((int)(unsigned int)m_bytes[0x2] != expected)
+		return false;
+	if (m_bytes[0x3] != 0x68)
+		return false;
+
+	unsigned char kind = m_bytes[0x4];
+	return kind == 'm' || kind == 'C' || kind == 'n' || kind == 'A';
+}
+
+/* .text+0x3418f0, 47 bytes. Real body: reassembles the 3-byte value
+ * split into a single int, sign-extending the upper bits based on bit 6
+ * of the MSB byte (the 21-bit combined value's own sign bit). */
+unsigned int CSKParameterChangeMessage::GetValue()
+{
+	unsigned char msb = m_bytes[0xa];
+	unsigned char mid = m_bytes[0xb];
+	unsigned char lsb = m_bytes[0xc];
+	unsigned int value = ((unsigned int)msb << 14) | ((unsigned int)mid << 7) | lsb;
+
+	if (msb & 0x40)
+		value |= 0xffe00000u;
+	return value;
+}
+
+/* .text+0x341920, 100 bytes, regparm(3). Real body: builds a whole new
+ * message directly from a CSeqEvent's own raw bytes -- fixed SOX/EOX
+ * like the ctor, everything else copied verbatim from seqEvent+9..+15
+ * and seqEvent+0x11..+0x15 (CSeqEvent's own field names/layout beyond
+ * these fixed byte offsets are out of scope). */
+void CSKParameterChangeMessage::SetValue(CSeqEvent *seqEvent)
+{
+	const unsigned char *src = reinterpret_cast<const unsigned char *>(seqEvent);
+
+	m_bytes[0x0] = 0xf0;
+	m_bytes[0x1] = src[0x9];
+	m_bytes[0x2] = src[0xa];
+	m_bytes[0x3] = src[0xb];
+	m_bytes[0x4] = src[0xc];
+	m_bytes[0x5] = src[0xd];
+	m_bytes[0x6] = src[0xe];
+	m_bytes[0x7] = src[0xf];
+	m_bytes[0x8] = src[0x11];
+	m_bytes[0x9] = src[0x12];
+	m_bytes[0xa] = src[0x13];
+	m_bytes[0xb] = src[0x14];
+	m_bytes[0xc] = src[0x15];
+	m_bytes[0xd] = 0xf7;
+}
+
+/* ==================== CSKMIDIMsgProcessor ====================
+ * See oa_ckg_midi_msg_handler.h's own class comment for the full field
+ * layout derivation (ctor's own AllocAligned()+placement-ctor sequence,
+ * cross-checked via objdump -r) and the vtable call_off -> real slot
+ * name table this whole file's dispatch bodies below were derived from.
+ */
+
+/* .text+0x340e70, 217 bytes. */
+CSKMIDIMsgProcessor::CSKMIDIMsgProcessor()
+	: m_lastMsgKind(0), m_activeRawEvent(0), m_lastMsgSentinel(0)
+{
+	ms_poInstance = (unsigned char *)this;
+
+	m_port = new (CSTGBankMemory::AllocAligned(0x142c, 0x10)) CSKMIDIPortMsgHandler();
+	m_localCtrl = new (CSTGBankMemory::AllocAligned(0x34ac, 0x10)) CSKMIDILocalCtrlMsgHandler();
+	m_special = new (CSTGBankMemory::AllocAligned(0xc, 0x10)) CSKSpecialMsgHandler();
+	m_karmaCtrl = new (CSTGBankMemory::AllocAligned(0x34ac, 0x10)) CSKMIDIKarmaCtrlMsgHandler();
+	/* Real ground truth constructs these 2 via their own PARENT ctor
+	 * (same-sized allocation) then overwrites the vptr slot in place to
+	 * "reclassify" the object -- placement-new through the derived type
+	 * directly produces the identical end state. */
+	m_padByPort = new (CSTGBankMemory::AllocAligned(0x142c, 0x10)) CSKPadNoteByMIDIPortMsgHandler();
+	m_padByLocal = new (CSTGBankMemory::AllocAligned(0x34ac, 0x10)) CSKPadNoteByLocalCtrlMsgHandler();
+
+	/* CMIDIFlowParamHolder is a pure opaque cast-through-`ms_poThis`
+	 * singleton everywhere else it's used in this project (every one of
+	 * its own methods has its body out of scope) -- just allocate
+	 * storage and point the singleton at it, matching that convention,
+	 * rather than modeling a ctor body this batch has no other evidence
+	 * for. */
+	CMIDIFlowParamHolder::ms_poThis = (unsigned char *)operator new(0x10);
+	SKSTGGate_ResistReadQueus();
+}
+
+/* .text+0x340f50, 117 bytes. */
+CSKMIDIMsgProcessor::~CSKMIDIMsgProcessor()
+{
+	if (CMIDIFlowParamHolder::ms_poThis) {
+		operator delete(CMIDIFlowParamHolder::ms_poThis);
+		CMIDIFlowParamHolder::ms_poThis = 0;
+	}
+
+	delete m_padByLocal;
+	delete m_padByPort;
+	delete m_karmaCtrl;
+	delete m_localCtrl;
+	delete m_port;
+	/* m_special (+0x8) is deliberately never deleted -- see class
+	 * comment in the header. */
+
+	ms_poInstance = 0;
+}
+
+/* .text+0x340fd0, 209 bytes. Real body: dequeue loop over
+ * SKSTGGate_ReceiveFromLocalControlQueus(). Each received message is
+ * first offered to m_special->AnalizeAndProcess() (which, as a side
+ * effect, copies the 4 raw bytes into m_special's own m_status/m_data1/
+ * m_data2/m_flags fields regardless of whether it recognizes the
+ * status); if m_special reports "handled" (a real ProgramChange/
+ * PitchBend/ResetAllControllers status), the message is fully consumed
+ * and the loop just fetches the next one. Otherwise the channel nibble
+ * is re-read from m_special's own (just-populated) m_flags byte, and
+ * dispatch continues via CKGEngine::ms_poInstance[+0x14]'s own "mode"
+ * word: mode==2 routes to AnalizeAndProcessNoteOffWhilePerformanceChange()
+ * (a "we are mid-performance-change, treat this specially" path);
+ * anything else is the normal AnalizeAndProcess() dispatch, additionally
+ * forwarded to KGMain_ReceiveControllerMessage()/
+ * SPRMain_ReceiveControllerMessage(). A received length of exactly 5
+ * bytes additionally stashes the message's own 5th byte into
+ * m_lastMsgSentinel before the same mode check -- transcribed as
+ * observed, exact semantic meaning of that 5-byte case not independently
+ * confirmed beyond the literal byte offset. */
+void CSKMIDIMsgProcessor::ReadMIDILocalControlQueue()
+{
+	unsigned char buf[0x20];
+	int gotLen;
+
+	while (SKSTGGate_ReceiveFromLocalControlQueus(buf, 0x20, &gotLen)) {
+		SKMain_CheckAndProcessPreemption();
+
+		if (m_special->AnalizeAndProcess(buf))
+			continue;
+
+		int channel = m_special->m_flags & 0xf;
+		m_lastMsgKind = channel;
+		if (gotLen == 5)
+			m_lastMsgSentinel = buf[4];
+
+		bool inPerfChangeMode = (*(int *)(CKGEngine::ms_poInstance + 0x14) == 2);
+
+		m_activeRawEvent = m_localCtrl ? (unsigned char *)m_localCtrl + 4 : 0;
+		if (inPerfChangeMode) {
+			m_localCtrl->AnalizeAndProcessNoteOffWhilePerformanceChange(buf, gotLen);
+		} else {
+			m_localCtrl->AnalizeAndProcess(buf, gotLen);
+		}
+		m_activeRawEvent = 0;
+
+		if (!inPerfChangeMode) {
+			KGMain_ReceiveControllerMessage(buf);
+			SPRMain_ReceiveControllerMessage(buf);
+		}
+	}
+}
+
+/* .text+0x3410c0, 184 bytes. Real body: preemption check, then (unless
+ * QueuesFilteredDuringPerfChange() is true) a pad-note drain loop that
+ * only runs while CKGEngine::ms_poInstance[+0x14]'s own mode word is 4,
+ * followed unconditionally by the same MIDI-port dequeue loop
+ * ReadMIDIPortQueue() implements on its own (this class's own ground
+ * truth duplicates that loop's body inline here rather than calling
+ * ReadMIDIPortQueue() -- reproduced the same way, not refactored). */
+void CSKMIDIMsgProcessor::Process()
+{
+	SKMain_CheckAndProcessPreemption();
+
+	if (!QueuesFilteredDuringPerfChange()) {
+		if (*(int *)(CKGEngine::ms_poInstance + 0x14) == 4) {
+			unsigned char padBuf[0x20];
+			while (SKSTGGate_ReceivePads(padBuf)) {
+				do {
+					SKMain_CheckAndProcessPreemption();
+					m_lastMsgKind = 1;
+					m_lastMsgSentinel = -2;
+					KGMain_ReceiveControllerMessage(padBuf);
+				} while (SKSTGGate_ReceivePads(padBuf));
+			}
+		}
+	}
+
+	unsigned char buf[0x20];
+	int gotLen;
+	while (SKSTGGate_ReceiveFromMIDIPortQueus(buf, 0x20, &gotLen)) {
+		m_lastMsgKind = 0;
+		m_activeRawEvent = m_port ? (unsigned char *)m_port + 4 : 0;
+		m_port->AnalizeAndProcess(buf, gotLen);
+		m_activeRawEvent = 0;
+	}
+}
+
+/* .text+0x341180, 63 bytes. */
+void CSKMIDIMsgProcessor::ReadMIDIPads()
+{
+	unsigned char padBuf[0x20];
+
+	while (SKSTGGate_ReceivePads(padBuf)) {
+		SKMain_CheckAndProcessPreemption();
+		m_lastMsgKind = 1;
+		m_lastMsgSentinel = -2;
+		KGMain_ReceiveControllerMessage(padBuf);
+	}
+}
+
+/* .text+0x3411c0, 100 bytes. */
+void CSKMIDIMsgProcessor::ReadMIDIPortQueue()
+{
+	unsigned char buf[0x20];
+	int gotLen;
+
+	while (SKSTGGate_ReceiveFromMIDIPortQueus(buf, 0x20, &gotLen)) {
+		SKMain_CheckAndProcessPreemption();
+		m_lastMsgKind = 0;
+		m_activeRawEvent = m_port ? (unsigned char *)m_port + 4 : 0;
+		m_port->AnalizeAndProcess(buf, gotLen);
+		m_activeRawEvent = 0;
+	}
+}
+
+/* .text+0x341230, 34 bytes, regparm(3). Real body: m_lastMsgKind=0, then
+ * forwards straight through to m_port->AnalizeAndProcess(buf,len). */
+void CSKMIDIMsgProcessor::ProcessMessageForDebug(unsigned char *buf, int len)
+{
+	m_lastMsgKind = 0;
+	m_port->AnalizeAndProcess(buf, len);
+}
+
+/* .text+0x341260, 44 bytes. */
+void CSKMIDIMsgProcessor::InitializeExtNoteOnChecker()
+{
+	m_localCtrl->InitializeExtNoteOnChecker();
+	m_padByLocal->InitializeExtNoteOnChecker();
+}
+
+/* .text+0x341290, 233 bytes. Real body: snapshots m_localCtrl's own
+ * note-on status via CopyNoteOnStatus() into a 128-byte local buffer,
+ * then for every set note builds a synthetic Note-Off and dispatches it
+ * -- ALWAYS through m_localCtrl (confirmed: both the first pass, keyed
+ * off m_localCtrl's own snapshot, AND the second pass, keyed off
+ * m_padByLocal's own snapshot, write the synthetic event into
+ * m_localCtrl and call m_localCtrl->Process() -- a real, confirmed
+ * asymmetry, not a copy-paste bug in this reconstruction). */
+void CSKMIDIMsgProcessor::TrunAllNotesFromKeyboardOff()
+{
+	unsigned char buf[0x80];
+
+	m_localCtrl->CopyNoteOnStatus(buf);
+	for (int note = 0; note < 0x80; note++) {
+		if (!buf[note])
+			continue;
+		/* TODO: verify -- GetLocalControllerChannel()'s return value
+		 * minus 0x80, transcribed byte-exact from the observed
+		 * `add eax,0xffffff80` / `mov [edx+4],al` sequence; the
+		 * exact status-byte encoding this produces was not
+		 * independently re-derived from a live channel capture. */
+		int status = ((CKGEngine *)CKGEngine::ms_poInstance)->GetLocalControllerChannel() - 0x80;
+		m_lastMsgKind = 1;
+		m_lastMsgSentinel = -1;
+		m_localCtrl->m_status = (unsigned char)status;
+		m_localCtrl->m_data1 = (unsigned char)note;
+		m_localCtrl->m_data2 = 0x40;
+		m_localCtrl->m_flags = 0x01;
+		m_localCtrl->Process();
+	}
+
+	m_padByLocal->CopyNoteOnStatus(buf);
+	for (int note = 0; note < 0x80; note++) {
+		if (!buf[note])
+			continue;
+		int status = ((CKGEngine *)CKGEngine::ms_poInstance)->GetLocalControllerChannel() - 0x80;
+		m_lastMsgKind = 1;
+		m_lastMsgSentinel = -1;
+		m_localCtrl->m_status = (unsigned char)status;
+		m_localCtrl->m_data1 = (unsigned char)note;
+		m_localCtrl->m_data2 = 0x40;
+		m_localCtrl->m_flags = 0x01;
+		m_localCtrl->Process();
+	}
+}
+
+/* .text+0x341380, 93 bytes. Real body: false unless m_localCtrl AND
+ * m_padByLocal both report IsKeyboardAllOff(), m_localCtrl's own
+ * IsDamperOn() is false, and returns !m_localCtrl->IsSostenutoOn(). */
+bool CSKMIDIMsgProcessor::IsKeyboardAllOff()
+{
+	if (!m_localCtrl->IsKeyboardAllOff())
+		return false;
+	if (!m_padByLocal->IsKeyboardAllOff())
+		return false;
+	if (m_localCtrl->IsDamperOn())
+		return false;
+	return !m_localCtrl->IsSostenutoOn();
+}
+
+/* .text+0x3413f0, 21 bytes. */
+void CSKMIDIMsgProcessor::LeaveDownloadMode()
+{
+	m_localCtrl->ClearNoteStatus();
+}
+
+/* .text+0x341410, 18 bytes. */
+bool CSKMIDIMsgProcessor::IsDamperOn()
+{
+	return m_localCtrl->IsDamperOn();
+}
+
+/*
+ * All 5 Process*ChannelMessage() overloads below share an identical
+ * prologue in ground truth: `lea edx,[ecx+edx*1]` -- i.e. `status` and
+ * `channel` are ADDED together (truncated to a byte) into the stored
+ * m_status field, not `status` stored alone. This combines a bare status
+ * nibble (e.g. 0x80/0x90/0xb0) with a 0-15 channel into the complete
+ * MIDI status byte, confirmed identically at the start of all 5
+ * functions' own raw disassembly.
+ */
+
+/* .text+0x341430, 89 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::ProcessLocalControlChannelMessage(int status, unsigned char channel, char data1, char data2)
+{
+	m_lastMsgKind = 1;
+	m_lastMsgSentinel = -1;
+	m_localCtrl->m_status = (unsigned char)(status + channel);
+	m_localCtrl->m_data1 = (unsigned char)data1;
+	m_localCtrl->m_data2 = (unsigned char)data2;
+	m_localCtrl->m_flags = 0x01;
+	m_localCtrl->Process();
+}
+
+/* .text+0x341490, 80 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::ProcessMIDIPortChannelMessage(int status, unsigned char channel, char data1, char data2)
+{
+	m_lastMsgKind = 0;
+	m_port->m_status = (unsigned char)(status + channel);
+	m_port->m_data1 = (unsigned char)data1;
+	m_port->m_data2 = (unsigned char)data2;
+	m_port->m_flags = 0x00;
+	m_port->Process();
+}
+
+/* .text+0x3414e0, 89 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::ProcessKarmaControllerGeneratedChannelMessage(int status, unsigned char channel, char data1, char data2)
+{
+	m_lastMsgKind = 1;
+	m_lastMsgSentinel = -2;
+	m_karmaCtrl->m_status = (unsigned char)(status + channel);
+	m_karmaCtrl->m_data1 = (unsigned char)data1;
+	m_karmaCtrl->m_data2 = (unsigned char)data2;
+	m_karmaCtrl->m_flags = 0x01;
+	m_karmaCtrl->Process();
+}
+
+/* .text+0x341540, 89 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::ProcessPadNoteByLocalControlMessage(int status, unsigned char channel, char data1, char data2)
+{
+	m_lastMsgKind = 1;
+	m_lastMsgSentinel = -2;
+	m_padByLocal->m_status = (unsigned char)(status + channel);
+	m_padByLocal->m_data1 = (unsigned char)data1;
+	m_padByLocal->m_data2 = (unsigned char)data2;
+	m_padByLocal->m_flags = 0x01;
+	m_padByLocal->Process();
+}
+
+/* .text+0x3415a0, 82 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::ProcessPadNoteByMIDIPortMessage(int status, unsigned char channel, char data1, char data2)
+{
+	m_lastMsgKind = 0;
+	m_padByPort->m_status = (unsigned char)(status + channel);
+	m_padByPort->m_data1 = (unsigned char)data1;
+	m_padByPort->m_data2 = (unsigned char)data2;
+	m_padByPort->m_flags = 0x00;
+	m_padByPort->Process();
+}
+
+/* .text+0x341600, 83 bytes. */
+void CSKMIDIMsgProcessor::KillAllDyingNotes()
+{
+	m_localCtrl->CheckDyingDamper();
+
+	m_localCtrl->m_status = 0x80;
+	m_localCtrl->m_data1 = 0x00;
+	m_localCtrl->m_data2 = 0x40;
+	m_localCtrl->m_flags = 0x01;
+	m_localCtrl->CSKMIDIInMsgHandler::KillAllDyingNotes();
+
+	m_localCtrl->m_status = 0x80;
+	m_localCtrl->m_data1 = 0x00;
+	m_localCtrl->m_data2 = 0x40;
+	m_localCtrl->m_flags = 0x00;
+	m_port->CSKMIDIInMsgHandler::KillAllDyingNotes();
+}
+
+/* .text+0x341660, 51 bytes, regparm(3). Both owned non-virtual overloads
+ * are called with the same msg pointer -- m_localCtrl's own, then
+ * m_port's own. */
+void CSKMIDIMsgProcessor::StoreDyingNoteInfoForSTG(CMIDIMessage *msg)
+{
+	m_localCtrl->CSKMIDIInMsgHandler::StoreDyingNoteInfoForSTG(msg);
+	m_port->CSKMIDIInMsgHandler::StoreDyingNoteInfoForSTG(msg);
+}
+
+/* .text+0x3416a0, 51 bytes, regparm(3). */
+void CSKMIDIMsgProcessor::StoreDyingNoteInfoForMIDPort(CMIDIMessage *msg)
+{
+	m_localCtrl->CSKMIDIInMsgHandler::StoreDyingNoteInfoForMIDPort(msg);
+	m_port->CSKMIDIInMsgHandler::StoreDyingNoteInfoForMIDPort(msg);
+}
+
+/* .text+0x3416e0, 35 bytes, regparm(3). */
+bool CSKMIDIMsgProcessor::GetNowProcessingNoteOffVelocity(int *out)
+{
+	unsigned char *ev = m_activeRawEvent;
+
+	if (ev && (ev[0] & 0xf0) == 0x80)
+		*out = (signed char)ev[2];
+	return true;
+}
+
+/* .text+0x341710, 38 bytes. */
+void CSKMIDIMsgProcessor::ResetNotesAfterStopSequencer()
+{
+	m_padByLocal->ClearKeyboardStatus();
+	m_localCtrl->ClearKeyboardStatus();
+}

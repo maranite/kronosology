@@ -103,12 +103,11 @@ void CMIDIFlowParamHolder::SetCurrentVoiceMode() {}
 void CMIDIFlowParamHolder::ChangePerformance() {}
 void CKGRTCHandler::FlashBufferdValue() {}
 void CKGRTCHandler::StartBuffering() {}
-void CSKMIDIMsgProcessor::KillAllDyingNotes() {}
-void CSKMIDIMsgProcessor::LeaveDownloadMode() {}
-void CSKMIDIMsgProcessor::StoreDyingNoteInfoForMIDPort(CMIDIMessage *) {}
-void CSKMIDIMsgProcessor::StoreDyingNoteInfoForSTG(CMIDIMessage *) {}
-void CSKMIDIMsgProcessor::ProcessLocalControlChannelMessage(int, unsigned char, char, char) {}
-void CSKMIDIMsgProcessor::ProcessKarmaControllerGeneratedChannelMessage(int, unsigned char, char, char) {}
+/* CSKMIDIMsgProcessor::KillAllDyingNotes/LeaveDownloadMode/
+ * StoreDyingNoteInfoFor{MIDPort,STG}/ProcessLocalControlChannelMessage/
+ * ProcessKarmaControllerGeneratedChannelMessage are now REAL (this
+ * batch) -- mocks removed, real bodies linked in from
+ * ckg_midi_msg_handler.cpp itself. */
 void CKGMIDIMsgProcessor::KillAllDyingNotes() {}
 void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue() {}
 static CMIDIMessage *g_lastStoreCCMessageArg;
@@ -121,10 +120,20 @@ void CSPRClockHandler::GetCurrentLocation(int *a, int *b, int *c, int *d)
 void CSPRClockHandler::GetPrecountLocation(int *a, int *b, int *c, int *d)
 { g_curLocLastCallKind = 2; *a = g_locBar; *b = g_locBeat; *c = g_locC; *d = g_locD; }
 
-static unsigned char g_paramMsgBackingIsThis = 1;
-static unsigned int g_paramMsgBackingValue = 0x55;
-bool CSKParameterChangeMessage::IsThisParamChage() { return g_paramMsgBackingIsThis != 0; }
-unsigned int CSKParameterChangeMessage::GetValue() { return g_paramMsgBackingValue; }
+/* CSKParameterChangeMessage::IsThisParamChage()/GetValue() are now REAL
+ * (this batch) -- mocks removed. Real IsThisParamChage() requires
+ * m_buf[1]==0x42 && m_buf[2]==(sign-extended-global-channel|0x30) &&
+ * m_buf[3]==0x68 && m_buf[4] in {'m','C','n','A'} -- any test exercising
+ * a code path gated on it must set those real bytes up first (see
+ * OA_SetupRealParamChangeHeader() below), not just a boolean flag. */
+static void OA_SetupRealParamChangeHeader(unsigned char *buf, unsigned char kind)
+{
+	signed char globalChanByte = *(signed char *)(CKGBankManager::ms_poInstance + 0x97c747);
+	buf[0x1] = 0x42;
+	buf[0x2] = (unsigned char)((int)globalChanByte | 0x30);
+	buf[0x3] = 0x68;
+	buf[0x4] = kind;
+}
 
 static CSKParameterChangeMessage *g_lastSetValueArg;
 void CSPRSysExBufManager::SetValue(CSKParameterChangeMessage *msg) { g_lastSetValueArg = msg; }
@@ -161,6 +170,61 @@ static int g_recInternalCalls;
 extern "C" void SPRMain_RecInternalSysExMessage(unsigned char) { g_recInternalCalls++; }
 extern "C" void SPRMain_RecSysExMessageOnAutomationTrack(int, int, int) {}
 extern "C" void SPRMain_RecSysExMessageFromMIDIPort(unsigned char) {}
+
+/* CSKMIDIMsgProcessor's own free-function dependencies -- all plain
+ * (non-`extern "C"`) global functions, real natural-mangling match (see
+ * oa_ckg_midi_msg_handler.h's own comment). */
+static int g_globalChannel;
+int SPROutGate_GetGlobalChannel() { return g_globalChannel; }
+static int g_preemptionCalls;
+void SKMain_CheckAndProcessPreemption() { g_preemptionCalls++; }
+static int g_resistReadQueusCalls;
+void SKSTGGate_ResistReadQueus() { g_resistReadQueusCalls++; }
+static bool g_queuesFilteredDuringPerfChange;
+bool QueuesFilteredDuringPerfChange() { return g_queuesFilteredDuringPerfChange; }
+static int g_kgReceiveControllerCalls;
+static unsigned char g_lastKGReceiveControllerBuf[0x20];
+void KGMain_ReceiveControllerMessage(unsigned char *buf)
+{ g_kgReceiveControllerCalls++; memcpy(g_lastKGReceiveControllerBuf, buf, sizeof(g_lastKGReceiveControllerBuf)); }
+static int g_sprReceiveControllerCalls;
+void SPRMain_ReceiveControllerMessage(unsigned char *) { g_sprReceiveControllerCalls++; }
+/* Both queue-receive mocks below serve a single canned message once
+ * (via the matching g_*QueueHasMsg flag), then report empty -- enough to
+ * drive one iteration of each dequeue loop under test. */
+static bool g_localCtrlQueueHasMsg;
+static unsigned char g_localCtrlQueueMsg[0x20];
+static int g_localCtrlQueueMsgLen;
+bool SKSTGGate_ReceiveFromLocalControlQueus(unsigned char *buf, unsigned int, int *outLen)
+{
+	if (!g_localCtrlQueueHasMsg)
+		return false;
+	g_localCtrlQueueHasMsg = false;
+	memcpy(buf, g_localCtrlQueueMsg, sizeof(g_localCtrlQueueMsg));
+	*outLen = g_localCtrlQueueMsgLen;
+	return true;
+}
+static bool g_portQueueHasMsg;
+static unsigned char g_portQueueMsg[0x20];
+static int g_portQueueMsgLen;
+bool SKSTGGate_ReceiveFromMIDIPortQueus(unsigned char *buf, unsigned int, int *outLen)
+{
+	if (!g_portQueueHasMsg)
+		return false;
+	g_portQueueHasMsg = false;
+	memcpy(buf, g_portQueueMsg, sizeof(g_portQueueMsg));
+	*outLen = g_portQueueMsgLen;
+	return true;
+}
+static bool g_padsQueueHasMsg;
+bool SKSTGGate_ReceivePads(unsigned char *)
+{
+	if (!g_padsQueueHasMsg)
+		return false;
+	g_padsQueueHasMsg = false;
+	return true;
+}
+static int g_localControllerChannel;
+int CKGEngine::GetLocalControllerChannel() { return g_localControllerChannel; }
 
 /* ==================== CSKMIDIInMsgHandler-family mocks ==================== */
 
@@ -267,6 +331,50 @@ static int g_lastMidiTrackStatus = -1, g_lastMidiTrackData1 = -1, g_lastMidiTrac
 extern "C" void SPRMain_RecMIDITrackMessage(int statusType, int data1, int data2, int channel)
 { g_lastMidiTrackStatus = statusType; g_lastMidiTrackData1 = data1; g_lastMidiTrackData2 = data2; g_lastMidiTrackChannel = channel; }
 
+/*
+ * CSKMIDIMsgProcessor::ms_poInstance singleton test double -- REAL bug
+ * found while verifying this batch's own additions: several
+ * ALREADY-COMMITTED methods from a prior batch (CSKMIDIMsgHandler::
+ * StoreDyingNoteInfoForSTG()/StoreDyingNoteInfoForMIDPort(), reached via
+ * SendChannelMessageToSTG()/SendChannelMessageToMIDIPortWithCorrectLength()
+ * from CheckBypassKARMANoteOnEvent() and others) cast
+ * CSKMIDIMsgProcessor::ms_poInstance and call through it unconditionally.
+ * Before this batch, CSKMIDIMsgProcessor::StoreDyingNoteInfoForSTG/
+ * MIDPort were empty test mocks, so calling them on a null `this` was
+ * harmless (no member dereferenced). Now that they're REAL (this batch)
+ * and dereference m_localCtrl/m_port, the same pre-existing null
+ * `ms_poInstance` SIGSEGVs. Fix: wire up a real (not mocked) singleton,
+ * matching what the real ctor always does in ground truth -- construct
+ * once (function-local static, never reset across tests, matching this
+ * as a "real held singleton" not per-test state).
+ */
+static CSKMIDIMsgProcessor *OA_TestSKMIDIMsgProcessorSingleton()
+{
+	static CSKMIDIPortMsgHandler s_port;
+	static CSKMIDILocalCtrlMsgHandler s_localCtrl;
+	static CSKSpecialMsgHandler s_special;
+	static CSKMIDIKarmaCtrlMsgHandler s_karmaCtrl;
+	static CSKPadNoteByMIDIPortMsgHandler s_padByPort;
+	static CSKPadNoteByLocalCtrlMsgHandler s_padByLocal;
+	static unsigned char s_raw[sizeof(CSKMIDIMsgProcessor)];
+	static bool s_wired;
+	CSKMIDIMsgProcessor *proc = reinterpret_cast<CSKMIDIMsgProcessor *>(s_raw);
+
+	if (!s_wired) {
+		proc->m_port = &s_port;
+		proc->m_localCtrl = &s_localCtrl;
+		proc->m_special = &s_special;
+		proc->m_karmaCtrl = &s_karmaCtrl;
+		proc->m_padByPort = &s_padByPort;
+		proc->m_padByLocal = &s_padByLocal;
+		proc->m_lastMsgKind = 0;
+		proc->m_activeRawEvent = 0;
+		proc->m_lastMsgSentinel = 0;
+		s_wired = true;
+	}
+	return proc;
+}
+
 static void reset_all_mocks()
 {
 	memset(g_bankBuf, 0, sizeof(g_bankBuf));
@@ -274,6 +382,7 @@ static void reset_all_mocks()
 	memset(g_stgMsgProcBuf, 0, sizeof(g_stgMsgProcBuf));
 	CKGEngine::ms_poInstance = g_engineBuf;
 	CSTGMessageProcessor::sInstance = (CSTGMessageProcessor *)g_stgMsgProcBuf;
+	CSKMIDIMsgProcessor::ms_poInstance = (unsigned char *)OA_TestSKMIDIMsgProcessorSingleton();
 	g_changePerformanceCalls = 0;
 	g_shouldKeepKarma = true;
 	g_clearSchedulerCalls = g_karmaOnCalls = g_karmaOffCalls = g_resetLocalCtrlCalls = 0;
@@ -292,8 +401,18 @@ static void reset_all_mocks()
 	g_lastNoteOnUI = g_lastNoteOffUI = -1;
 	/* CKGBankManager::ms_poInstance[+8] is itself a pointer (see
 	 * NotifyNoteEventToUI()'s own header comment) -- point it at a
-	 * scratch note-display buffer, distinct from g_uiMsgProcBuf. */
-	static unsigned char noteDisplayBuf[0x200];
+	 * scratch note-display buffer, distinct from g_uiMsgProcBuf.
+	 * PRE-EXISTING BUG, found+fixed while verifying this batch's own
+	 * additions: real ground-truth offsets written through this pointer
+	 * go up to 0x147a7 (NotifyNoteEventToUI()/NotifyNoteCountToUI()/
+	 * NotifyDamperStatusToUI()/NotifySostenutoStatusToUI(), all already
+	 * committed before this batch) -- a 0x200-byte buffer here was a
+	 * ~400x undersized out-of-bounds write that happened to silently
+	 * corrupt unrelated static memory rather than crash, until this
+	 * batch's own new static globals shifted the layout enough to hit
+	 * something load-bearing (SIGSEGV inside NotifyNoteCountToUI(),
+	 * confirmed via ASan pointing at this exact write). */
+	static unsigned char noteDisplayBuf[0x14800];
 	memset(noteDisplayBuf, 0, sizeof(noteDisplayBuf));
 	*(unsigned char **)(g_bankBuf + 8) = noteDisplayBuf;
 
@@ -775,6 +894,143 @@ int main(void)
 		pat = h.GetKarmaControlledChannelPat(true);
 		check("unconditional pattern: both modules contribute bits 5 and 6",
 		      (long)pat, (1L << 5) | (1L << 6));
+	}
+
+	printf("-- CSKParameterChangeMessage round-trip (real SetParameters/GetValue/SetValue/IsThisParamChage) --\n");
+	{
+		reset_all_mocks();
+		g_globalChannel = 0x05;
+		CSKParameterChangeMessage msg;
+
+		msg.SetParameters((unsigned char)0x11, (unsigned char)0x22, (unsigned char)0x33,
+				   (unsigned char)0x44, (unsigned char)0x55, 12345);
+		OA_SetupRealParamChangeHeader(msg.m_bytes, 'C');
+		check("fixed SOX byte", msg.m_bytes[0x0], 0xf0);
+		check("fixed manufacturer-ID byte", msg.m_bytes[0x1], 0x42);
+		check("param1 stored at +0x4", msg.m_bytes[0x4], 'C');
+		check("param2 stored at +0x5", msg.m_bytes[0x5], 0x22);
+		check("param3 stored at +0x6", msg.m_bytes[0x6], 0x33);
+		check("param4 stored at +0x8 (5-byte overload)", msg.m_bytes[0x8], 0x44);
+		check("param5 stored at +0x9 (5-byte overload)", msg.m_bytes[0x9], 0x55);
+		check("+0x7 left 0 by the 5-byte overload", msg.m_bytes[0x7], 0x00);
+		check("fixed EOX byte", msg.m_bytes[0xd], 0xf7);
+		check("GetValue() round-trips the 3-byte split exactly", (long)msg.GetValue(), 12345);
+		check("IsThisParamChage() true for a real 'C' kind header", msg.IsThisParamChage(), 1);
+
+		msg.m_bytes[0x4] = 'X';
+		check("IsThisParamChage() false for an unrecognized kind byte", msg.IsThisParamChage(), 0);
+
+		/* Negative value: real ground truth sign-extends bit 20 back out
+		 * on GetValue() (see this class's own header comment). */
+		msg.SetValue(-1000);
+		check("GetValue() sign-extends a negative round-trip", (long)(int)msg.GetValue(), -1000);
+
+		/* 7-int-param overload's own +0x7 slot, distinct from the
+		 * 5-byte overload above. */
+		msg.SetParameters(1, 2, 3, 4, 5, 6, 999);
+		check("7-param overload: param4 lands at +0x7 (not left 0)", msg.m_bytes[0x7], 4);
+		check("7-param overload: param5 at +0x8", msg.m_bytes[0x8], 5);
+		check("7-param overload: param6 at +0x9", msg.m_bytes[0x9], 6);
+		check("7-param overload: GetValue() round-trip", (long)msg.GetValue(), 999);
+
+		/* m_bytes[0x2] is currently (g_globalChannel|0x30) == 0x35 from
+		 * the 7-param SetParameters() call just above; SetSourceSeq()
+		 * etc. only ever rewrite its high nibble, preserving the low
+		 * (channel) nibble. */
+		msg.SetSourceSeq();
+		check("SetSourceSeq(): high nibble 0x80, channel nibble preserved", msg.m_bytes[0x2], 0x85);
+		msg.SetSourceSeqRestore();
+		check("SetSourceSeqRestore(): high nibble 0x90", msg.m_bytes[0x2], 0x95);
+		msg.ResetSourceSeq();
+		check("ResetSourceSeq(): high nibble 0x30", msg.m_bytes[0x2], 0x35);
+	}
+
+	printf("-- CSKMIDIMsgProcessor::GetNowProcessingNoteOffVelocity() --\n");
+	{
+		unsigned char rawProc[sizeof(CSKMIDIMsgProcessor)];
+		CSKMIDIMsgProcessor *proc = reinterpret_cast<CSKMIDIMsgProcessor *>(rawProc);
+
+		int out = -999;
+		proc->m_activeRawEvent = 0;
+		check("null active event -> true, *out untouched", proc->GetNowProcessingNoteOffVelocity(&out), 1);
+		check("*out really untouched when null", out, -999);
+
+		unsigned char noteOnEvent[4] = {0x90, 60, 100, 0};
+		proc->m_activeRawEvent = noteOnEvent;
+		out = -999;
+		check("NoteOn active event -> true, *out still untouched", proc->GetNowProcessingNoteOffVelocity(&out), 1);
+		check("*out untouched for a non-NoteOff status", out, -999);
+
+		unsigned char noteOffEvent[4] = {0x83, 60, (unsigned char)-5, 0};
+		proc->m_activeRawEvent = noteOffEvent;
+		out = -999;
+		check("NoteOff active event -> true, *out written", proc->GetNowProcessingNoteOffVelocity(&out), 1);
+		check("*out == the signed data2 byte", out, -5);
+	}
+
+	printf("-- CSKMIDIMsgProcessor field-routing dispatch (Process*ChannelMessage / IsKeyboardAllOff) --\n");
+	{
+		unsigned char rawProc[sizeof(CSKMIDIMsgProcessor)];
+		CSKMIDIMsgProcessor *proc = reinterpret_cast<CSKMIDIMsgProcessor *>(rawProc);
+		CSKMIDIPortMsgHandler port;
+		CSKMIDILocalCtrlMsgHandler localCtrl;
+		CSKMIDIKarmaCtrlMsgHandler karmaCtrl;
+		CSKPadNoteByMIDIPortMsgHandler padByPort;
+		CSKPadNoteByLocalCtrlMsgHandler padByLocal;
+		proc->m_port = &port;
+		proc->m_localCtrl = &localCtrl;
+		proc->m_karmaCtrl = &karmaCtrl;
+		proc->m_padByPort = &padByPort;
+		proc->m_padByLocal = &padByLocal;
+
+		reset_all_mocks();
+		proc->ProcessLocalControlChannelMessage(0x80, 3, (char)60, (char)0);
+		check("ProcessLocalControlChannelMessage: status = status_arg + channel_arg (0x80+3)",
+		      localCtrl.m_status, 0x83);
+		check("ProcessLocalControlChannelMessage: data1", localCtrl.m_data1, 60);
+		check("ProcessLocalControlChannelMessage: m_flags fixed 0x01", localCtrl.m_flags, 0x01);
+		check("ProcessLocalControlChannelMessage: m_lastMsgKind==1", proc->m_lastMsgKind, 1);
+		check("ProcessLocalControlChannelMessage: m_lastMsgSentinel==-1", proc->m_lastMsgSentinel, -1);
+
+		reset_all_mocks();
+		proc->ProcessMIDIPortChannelMessage(0x90, 2, (char)61, (char)100);
+		check("ProcessMIDIPortChannelMessage: status = status_arg + channel_arg (0x90+2)",
+		      port.m_status, 0x92);
+		check("ProcessMIDIPortChannelMessage: m_flags fixed 0x00", port.m_flags, 0x00);
+		check("ProcessMIDIPortChannelMessage: m_lastMsgKind==0", proc->m_lastMsgKind, 0);
+
+		reset_all_mocks();
+		g_bankBuf[0x97c747] = 0x7f;	/* IsEnableViaRPPR-family gate, unrelated -- just kept
+						 * deterministic; the real KARMA-controller-generated
+						 * dispatch below doesn't read it directly. */
+		proc->ProcessKarmaControllerGeneratedChannelMessage(0xb0, 5, (char)0x40, (char)0x7f);
+		check("ProcessKarmaControllerGeneratedChannelMessage: status = 0xb0+5",
+		      karmaCtrl.m_status, 0xb5);
+		check("ProcessKarmaControllerGeneratedChannelMessage: m_lastMsgSentinel==-2",
+		      proc->m_lastMsgSentinel, -2);
+
+		reset_all_mocks();
+		localCtrl.m_bDamperOn = false;
+		localCtrl.m_bSostenutoOn = false;
+		check("IsKeyboardAllOff(): both sub-handlers empty, no damper/sostenuto -> true",
+		      proc->IsKeyboardAllOff(), 1);
+
+		localCtrl.m_noteOnCount = 1;
+		localCtrl.m_noteDownCount[10] = 1;
+		check("IsKeyboardAllOff(): a held note on m_localCtrl -> false",
+		      proc->IsKeyboardAllOff(), 0);
+		localCtrl.m_noteOnCount = 0;
+		localCtrl.m_noteDownCount[10] = 0;
+
+		localCtrl.m_bDamperOn = true;
+		check("IsKeyboardAllOff(): damper held -> false even with no notes",
+		      proc->IsKeyboardAllOff(), 0);
+		localCtrl.m_bDamperOn = false;
+
+		localCtrl.m_bSostenutoOn = true;
+		check("IsKeyboardAllOff(): sostenuto held -> false (via !IsSostenutoOn())",
+		      proc->IsKeyboardAllOff(), 0);
+		localCtrl.m_bSostenutoOn = false;
 	}
 
 	printf("\n%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");
