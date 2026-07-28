@@ -2637,16 +2637,75 @@ struct STGLFOSubRateParamsSlice;
  * UpdateStartPhase/CalculateFreq/GetRandomFlagsForWaveform added
  * batch (CSTGLFO cluster, see oa_lfo.h): 3 further confirmed-real,
  * small, self-contained CSTGLFOBase methods CSTGLFO's own in-scope
- * methods call into. Bodies in src/engine/lfo_component.cpp. The
- * class's 3 LARGE methods (SetupSubrateLFO/UpdateRandomValue/Restart)
- * stay undeclared -- see oa_lfo.h's file header "not modeled" list. */
+ * methods call into. Bodies in src/engine/lfo_component.cpp.
+ *
+ * SetupSubrateLFO/Restart/UpdateRandomValue/SetSubRateParamsOnRestart
+ * added (CSTGLFO deferred-methods follow-up pass, see oa_lfo.h):
+ * confirmed-real calls from CSTGLFO::InitVoice/ProcessSubRate/
+ * SetSubRateParamsOnRestart, declared here (matching this project's
+ * established "confirmed real call, callee body out of scope"
+ * precedent, e.g. CSTGVoice::GetAMSSourceAddress in oa_engine.h) but
+ * deliberately NOT given a body -- their own real bodies are large and
+ * genuinely out of this cluster's scope. A kernel module `.ko` is a
+ * relocatable object, not a final link, so referencing these
+ * undefined symbols does not block `make ko` (same precedent already
+ * relied on for GetAMSSourceAddress). Unlike the 4 siblings above,
+ * these are declared as genuine non-static member functions (real
+ * ground truth confirmed passing `this+0xc`, the CSTGLFOBase
+ * sub-object, in the implicit `this` ABI slot at every real call
+ * site, not as an explicit leading parameter) -- callers reach them
+ * via `reinterpret_cast<CSTGLFOBase*>(reinterpret_cast<char*>(this)+0xc)
+ * ->SetupSubrateLFO(...)`, matching oa_lfo.h's own multiple-inheritance
+ * note. */
 struct CSTGLFOBase {
 	static void InitializeQuad(STGLFOSubRateParams *quad);
 	static void UpdateStartPhase(STGLFOSubRateParamsSlice *slice, STGConvertedParam &newVal);
 	static float CalculateFreq(const STGLFOSubRateParamsSlice *slice, unsigned char note);
 	static int GetRandomFlagsForWaveform(int waveform);
+	void SetupSubrateLFO(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, int waveform, unsigned int flags);
+	void Restart(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, bool keySync);
+	void UpdateRandomValue(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice);
+	void SetSubRateParamsOnRestart(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, bool arg);
 };
 struct CSTGStepSeqBase { static void InitializeQuad(STGStepSeqSubRateParams *quad); };
+
+/*
+ * Minimal real template + free function CSTGLFO::ProcessSubRate (see
+ * oa_lfo.h) needs. TListLinkLite<CSTGQuad> confirmed real via
+ * ProcessSubRate's own mangled name AND its 2 real callers
+ * (CSTGPCMModel::ProcessSubRate/CSTGAnalogSyncModel::ProcessSubRate,
+ * both out of scope) -- both pass a raw CSTGQuadList bucket entry
+ * (`quadBuckets[index]`, oa_types.h) directly as this type, confirming
+ * it, not CSTGQuad itself, is the real linked-list NODE type (CSTGQuad
+ * objects are presumably embedded inside/pointed at by each node).
+ * Only the 2 fields ProcessSubRate's own body touches are named; real
+ * size/full layout unconfirmed.
+ *
+ * RunLFOSubRate is a plain C-linkage free function (real ground truth:
+ * NOT a mangled C++ symbol) confirmed via ProcessSubRate's own
+ * relocation. Callers pass (list, byteOffset) in eax/edx per
+ * regparm(3) with NO third argument live at the call site --
+ * ProcessSubRate itself is real evidence this project's very first
+ * genuinely STATIC-shaped CSTGLFO member (no implicit `this`
+ * reference anywhere in its own body OR at either real call site,
+ * where eax carries the list pointer directly rather than a CSTGLFO
+ * instance) -- so RunLFOSubRate is declared to match: 2 params, no
+ * CSTGLFO context. */
+struct CSTGQuad;	/* forward decl, real definition in oa_quad.h -- not
+			 * included here to avoid a header-order dependency;
+			 * only ever used as a template argument (never
+			 * dereferenced) in this header. */
+template <class T>
+struct TListLinkLite {
+	TListLinkLite<T> *next;		/* +0x00, confirmed: ProcessSubRate's own list-walk */
+	unsigned char _unrecovered[0x10];	/* +0x04..+0x13, unconfirmed (includes a field at
+						 * +0x10 ProcessSubRate adds to its own `byteOffset`
+						 * arg to form a per-note component-slot address --
+						 * not independently named, raw-offset access only) */
+	unsigned char noteIndex;		/* +0x14, confirmed: ProcessSubRate's own
+						 * CSTGVoiceAllocator::sInstance index byte */
+};
+extern "C" void RunLFOSubRate(TListLinkLite<CSTGQuad> *list, unsigned long byteOffset) __attribute__((regparm(3)));
 
 /*
  * CSTGPlaybackEvent::CSTGPlaybackEvent() (`.text+0xd6c90`, C1Ev/C2Ev

@@ -17,52 +17,61 @@
  * `OA.ko` object directly (not the Ghidra decompiler), same as
  * CSTGADSRBase.
  *
- * === Scope of THIS pass (64 of CSTGLFO's 83 real methods) ===
+ * === Scope: 86 of CSTGLFO's 87 real methods (2 passes) ===
  *
- * CSTGLFO is genuinely larger and more heterogeneous than
- * CSTGADSRBase: on top of the same Get* /Update* /AMS-propagation
- * shape, it owns waveform selection, MIDI-tempo-sync, and a fade/
- * delay envelope, several of which recompute a discrete "knob index"
- * via a shared x87 idiom (fucomip-based branch senses very similar in
- * shape to the one a native-execution harness caught being backwards
- * on the FIRST hand-derivation of CSTGADSRBase's own
- * ApplyIntensityBlend -- see oa_adsr_base.h's file header). Rather
- * than risk shipping an unverified guess at THAT idiom's branch
- * senses for this cluster too, this pass deliberately reconstructs
- * only the methods whose control flow is either straight-line or
- * gated on plain integer/pointer comparisons (no float branch-sense
- * risk) -- 64 of 83 methods, all independently confirmed safe by a
- * full instruction-level read of each one (documented per-function
- * below). The remaining 19 are DELIBERATELY DEFERRED to a follow-up
- * pass that should use the same mmap-and-execute-the-real-bytes
- * native harness CSTGADSRBase's own PrecomputeAttackTimePlusCC pass
- * used, rather than hand-derive x87 branch senses a second time:
+ * PASS 1 (64 methods) reconstructed the Get*, Update*, and
+ * AMS-propagation shape shared with CSTGADSRBase, plus waveform
+ * selection and stop/key-sync/MIDI-tempo-sync flag handling --
+ * everything whose control
+ * flow is either straight-line or gated on plain integer/pointer
+ * comparisons (no float branch-sense risk). It deliberately deferred
+ * 19 methods sharing a "knob-index blend" x87 idiom (fucomip-based
+ * branch senses similar in shape to the one a native-execution
+ * harness caught being backwards on the FIRST hand-derivation of
+ * CSTGADSRBase's own ApplyIntensityBlend, oa_adsr_base.h) rather than
+ * risk an unverified guess.
  *
- *   - 6 share one "knob-index blend" x87 idiom (near-identical
- *     instruction sequence, offsets differ): UpdateFrequency,
- *     UpdateFrequencyFine, UpdateFade, UpdateDelay,
- *     HandleUpdateFrequency, HandleUpdateTempoPeriod.
- *   - PrecomputeData, HandleCC (the two big per-tick/per-CC dispatch
- *     bodies -- also depend on the knob-index idiom above).
- *   - The 6-method ToneAdjust* family (ToneAdjustFreqRelative,
- *     ToneAdjustFadeRelative, ToneAdjustDelayRelative,
- *     ToneAdjustStop, ToneAdjustWaveform, ToneAdjustShape).
- *   - GetKeySyncMasterLFO, ProcessSubRate, InitVoice,
- *     SetSubRateParamsOnRestart (CSTGLFO's own override).
- *   - PrecomputeFreqPlusCC, PrecomputeBaseNoteAndTempo,
- *     PrecomputeDelayTicks, PrecomputeFade.
+ * PASS 2 (this pass, 22 methods) used exactly that harness technique
+ * (mmaps CSTGLFO::UpdateFade's real bytes from OA.ko, patches its 3
+ * .rodata relocations, executes it directly against ~135 (fade, V)
+ * sample pairs -- 133/135 exact matches, 2 known x87-vs-SSE-precision
+ * boundary mismatches, not logic bugs) to pin down the shared
+ * BlendKnobIndex(v, knob, maxKnob=99) primitive (see
+ * lfo_component.cpp's own file comment for the confirmed formula and
+ * harness methodology), then implemented all 19 originally-deferred
+ * methods plus GetKeySyncMasterLFO/ShouldDelayCompensateRestart/
+ * InitVoice/SetSubRateParamsOnRestart (bundled into the original
+ * deferred list as GetKeySyncMasterLFO dependents, not for float risk
+ * of their own) PLUS UpdateStop (a genuine gap in BOTH the original
+ * 64-method pass and the 19-method deferred list -- discovered during
+ * this pass's own manifest audit, zero float risk, same shape as the
+ * already-reconstructed UpdateKeySync).
  *
- * Also NOT modeled (real, but out of THIS class's own scope): the
- * three large CSTGLFOBase methods this cluster's DEFERRED methods
- * would call into (SetupSubrateLFO, UpdateRandomValue, Restart) --
- * none of the 64 methods reconstructed here call them, so no extern
- * dependency is introduced. The `_ZThn12_*` this-adjusting thunks
- * (CSTGLFO genuinely multiply-inherits CSTGParamsOwner at offset 0
- * and CSTGLFOBase at offset +0xc, confirmed via the real dtor's own
- * two vtable-pointer writes -- see below) are pure calling-convention
- * plumbing (`sub eax,0xc; jmp <primary entry>`), not reconstructed
- * as distinct symbols, same "install vs dispatch" treatment as
- * CSTGADSRBase's own placeholder vtable.
+ * ONE method remains genuinely deferred: ProcessSubRate. Unlike every
+ * other method in this pass, its real calling convention could NOT be
+ * pinned down with matching confidence (it is genuinely STATIC in
+ * ground truth -- both real callers, CSTGPCMModel::ProcessSubRate and
+ * CSTGAnalogSyncModel::ProcessSubRate, pass the list pointer directly
+ * in EAX with no CSTGLFO instance ever live -- but its own 4 real
+ * calls into CSTGLFOBase::UpdateRandomValue/RunLFOSubRate leave at
+ * least one argument register ambiguous even after 2 independent
+ * objdump reads); left for a genuinely separate follow-up rather than
+ * ship a low-confidence guess, same policy this pass applied to the
+ * float idiom in the first place.
+ *
+ * The three large CSTGLFOBase methods (SetupSubrateLFO, Restart,
+ * SetSubRateParamsOnRestart -- confirmed real calls from InitVoice/
+ * SetSubRateParamsOnRestart above, UpdateRandomValue confirmed real
+ * but never called by anything reconstructed) are declared (not
+ * defined) in oa_engine_init.h, same "confirmed real call, callee out
+ * of scope" precedent as CSTGVoice::GetAMSSourceAddress. The
+ * `_ZThn12_*` this-adjusting thunks (CSTGLFO genuinely
+ * multiply-inherits CSTGParamsOwner at offset 0 and CSTGLFOBase at
+ * offset +0xc, confirmed via the real dtor's own two vtable-pointer
+ * writes -- see below) are pure calling-convention plumbing (`sub
+ * eax,0xc; jmp <primary entry>`), not reconstructed as distinct
+ * symbols, same "install vs dispatch" treatment as CSTGADSRBase's own
+ * placeholder vtable.
  *
  * === Real per-instance field layout (confirmed via every Get* and
  * Update* /HandleWaveformChanged/HandleStopChanged access in the 64
@@ -146,15 +155,63 @@
  * pass's methods read/write are named.
  */
 struct STGLFOPrecomputed {
-	unsigned char _unrecovered_head[0x2c];	/* +0x00..+0x2b, unconfirmed --
-						 * populated by the deferred
-						 * PrecomputeData/Precompute* family. */
+	float freqResult;		/* +0x00, confirmed: UpdateFrequency/UpdateFrequencyFine/
+					 * HandleUpdateFrequency/PrecomputeFreqPlusCC/HandleCC's
+					 * own CalculateFreq() result, broadcast to every active
+					 * voice's slice->freq (+0x110). */
+	int delayTicks;			/* +0x04, confirmed: UpdateDelay/PrecomputeDelayTicks/
+					 * HandleCC's own truncated tick-count result (NOT
+					 * broadcast to any slice by this pass's own methods --
+					 * ground truth's delay path never propagates). */
+	float tempoPeriod;		/* +0x08, confirmed: PrecomputeBaseNoteAndTempo/
+					 * HandleUpdateTempoPeriod's own tempo-period result
+					 * (2 confirmed-different formulas -- see .cpp),
+					 * broadcast to every active voice's slice->tempoRate
+					 * (+0x130). */
+	float tempoReciprocal;		/* +0x0c, confirmed: 1/tempoPeriod (2 confirmed-different
+					 * formulas, see .cpp), broadcast AS RAW BITS (not
+					 * converted) to every active voice's slice->tempoDenom
+					 * (+0x140) -- matches that field's own `int` typing. */
+	float fadeSeconds;		/* +0x10, confirmed: UpdateFade/PrecomputeFade/
+					 * ToneAdjustFadeRelative/PrecomputeData's own fade
+					 * envelope-time result (NOT broadcast to any slice --
+					 * ground truth's fade path never propagates either). */
+	float fadeIsZeroFlag;		/* +0x14, confirmed: 1.0f when the blended fade index
+					 * is exactly 0 (paired with fadeSeconds=0.0f in that
+					 * case), 0.0f otherwise -- real ground truth semantics
+					 * beyond "sentinel pair" not independently confirmed. */
+	int baseNoteBlendIndex;		/* +0x18, confirmed: PrecomputeBaseNoteAndTempo/
+					 * HandleUpdateTempoPeriod's own blended
+					 * midiTempoSyncBaseNote index (0..8), raw store. */
+	float freqV;			/* +0x1c, confirmed: frequency's own "CC-mod source"
+					 * raw value -- PrecomputeData resets to 0.0f; read
+					 * (never written) by UpdateFrequency/UpdateFrequencyFine/
+					 * HandleUpdateFrequency/PrecomputeFreqPlusCC/HandleCC's
+					 * frequency branch AND (negated) by
+					 * PrecomputeBaseNoteAndTempo/HandleUpdateTempoPeriod's
+					 * own base-note blend -- genuinely the SAME field
+					 * shared by both the frequency and tempo-period
+					 * recompute paths. */
+	float delayV;			/* +0x20, confirmed: delay's own "CC-mod source" raw
+					 * value, same reset/read pattern as freqV. */
+	float fadeV;			/* +0x24, confirmed: fade's own "CC-mod source" raw
+					 * value -- reset by PrecomputeData, WRITTEN directly
+					 * (not just read) by ToneAdjustFadeRelative. */
+	int waveform;			/* +0x28, confirmed: PrecomputeData/ToneAdjustWaveform's
+					 * own mirror of `this->waveform` (or the ToneAdjust
+					 * override), read by SetupSubrateLFO's own 3rd
+					 * argument (InitVoice, out of this pass's scope
+					 * beyond the call site itself). */
 	int shapeRaw;				/* +0x2c, confirmed: UpdateShape's own
-						 * mirror write, read by nothing in
-						 * this pass (consumed by deferred
-						 * PrecomputeData/HandleCC). */
-	unsigned char flags;			/* +0x30, confirmed: bit1 = "wants CC
-						 * modulation" (SetWantsCCMod). */
+						 * mirror write, also written by
+						 * PrecomputeData/ToneAdjustShape. */
+	unsigned char flags;			/* +0x30, confirmed: bit0 = per-note "stop"
+						 * override (UpdateStop/ToneAdjustStop/
+						 * PrecomputeData, broadcast to slice->stop
+						 * +0x100), bit1 = "wants CC modulation"
+						 * (SetWantsCCMod) -- gates whether the
+						 * knob-index blend's 2nd stage reads a real
+						 * AMS-intensity constant or a hardcoded 0.0f. */
 	unsigned char _unrecovered_tail[3];	/* +0x31..+0x33, unconfirmed. */
 };
 
@@ -297,6 +354,12 @@ extern "C" unsigned char _ZTV7CSTGLFO[0xf0];
  * NOT redeclared/redefined here to avoid a duplicate-symbol link
  * error). */
 
+/* Forward decl only -- real definition never needed: CSTGLFO::InitVoice's
+ * own real body never dereferences this parameter (see .cpp), matching
+ * CSTGADSRBase::InitVoice's own precedent (oa_adsr_base.h) of never
+ * having had a real CSTGVoiceInitialState type either. */
+struct CSTGVoiceInitialState;
+
 class CSTGLFO {
 public:
 	/* No ground-truth CSTGLFO::CSTGLFO() symbol was found in
@@ -336,10 +399,15 @@ public:
 	/* ---- Virtual-slot overrides ---- */
 	bool HandlesCC(unsigned char cc) const;
 	void InitAMSSourceAddresses(CSTGVoice &voice);
-	/* SetSubRateParamsOnRestart(STGLFOSubRateParamsSlice*, CSTGVoice*,
-	 * bool) deliberately NOT declared here -- deferred, see file
-	 * header (shares no risk with the knob-index idiom, but was not
-	 * read in this pass; left for the same follow-up). */
+	void SetSubRateParamsOnRestart(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, bool arg);
+	/* ShouldDelayCompensateRestart(CSTGVoice*) -- real body is a single
+	 * call, `GetKeySyncMasterLFO(voice) == nullptr` (confirmed via
+	 * objdump: `call GetKeySyncMasterLFO; test eax,eax; sete al`, no
+	 * float instructions at all -- was bundled into this pass's
+	 * deferred set only because it depends on GetKeySyncMasterLFO,
+	 * not because of any branch-sense risk of its own). */
+	bool ShouldDelayCompensateRestart(CSTGVoice *voice);
+	void InitVoice(CSTGVoice &voice, CSTGVoiceInitialState &initialState);
 	static void InitializeQuad(void *unused, STGLFOSubRateParams *quad);
 
 	/* Registration accessors, all trivial constant/table-pointer
@@ -357,6 +425,18 @@ public:
 	void UpdateOutput(STGLFOSubRateParamsSlice *slice, float in, bool active);
 	void AdvanceFadeEnv(STGLFOSubRateParamsSlice *slice, unsigned int ticks);
 	void PrepareSubRateAddressFixupTable(CSTGSubRateAddressFixupTable &table, unsigned long note);
+	/* GetKeySyncMasterLFO -- follow-up-pass addition, see .cpp for full
+	 * derivation. ProcessSubRate (this cluster's other still-pending
+	 * Quad/sub-rate method) is deliberately NOT declared/implemented in
+	 * this pass either -- real ground truth calls
+	 * CSTGLFOBase::UpdateRandomValue with an ambiguous, not confidently
+	 * resolved 2nd/3rd-argument register setup (unlike every other
+	 * deferred method in this pass, none of ProcessSubRate's own
+	 * 4 call sites -- RunLFOSubRate + 3x UpdateRandomValue -- could be
+	 * pinned down with the same confidence as the knob-index blend
+	 * idiom this pass's harness targeted); left for a genuinely
+	 * separate follow-up rather than ship a low-confidence guess. */
+	STGLFOSubRateParamsSlice *GetKeySyncMasterLFO(CSTGVoice *voice);
 
 	/* ---- Update* family (field store [+ display-predicate gate] +
 	 * per-active-voice propagation) ---- */
@@ -364,6 +444,7 @@ public:
 	void UpdateShapeAMSIntensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateOffset(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateKeySync(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateStop(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateMIDITempoSync(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateMIDITempoSyncTimes(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateMIDITempoSyncBaseNote(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
@@ -371,16 +452,32 @@ public:
 	void UpdateWaveform(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void SetWantsCCMod(CSTGPatchMessageContext &ctx, bool wantsIt);
 
-	/* HandleUpdateTempoPeriod(CSTGPatchMessageContext&) -- confirmed
-	 * real, called unconditionally by both UpdateMIDITempoSyncTimes
-	 * and UpdateMIDITempoSyncBaseNote above after their own field
-	 * store. DELIBERATELY DEFERRED (shares the risky knob-index x87
-	 * idiom, see file header) -- declared but not defined in this
-	 * pass, same "confirmed real call, callee out of scope" treatment
-	 * as e.g. CSTGVoice::GetAMSSourceAddress (oa_engine.h). Neither
-	 * caller is exercised by this pass's own verify test, so no link
-	 * dependency is introduced there. */
+	/* ---- The "knob-index blend" family (follow-up pass; see .cpp for
+	 * the confirmed BlendKnobIndex() primitive, pinned down with the
+	 * native-execution harness this pass was created for). ---- */
+	void UpdateFrequency(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateFrequencyFine(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateFade(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateDelay(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void HandleUpdateFrequency(CSTGPatchMessageContext &ctx);
 	void HandleUpdateTempoPeriod(CSTGPatchMessageContext &ctx);
+	void PrecomputeData(CSTGPatchMessageContext &ctx);
+	void HandleCC(CSTGPatchMessageContext &ctx, unsigned char cc, const CSTGControllerValue &ccVal);
+	void PrecomputeFreqPlusCC(STGLFOPrecomputed *pc, float ccValue);
+	void PrecomputeBaseNoteAndTempo(STGLFOPrecomputed *pc);
+	void PrecomputeDelayTicks(STGLFOPrecomputed *pc, float ccValue);
+	void PrecomputeFade(STGLFOPrecomputed *pc);
+
+	/* ---- ToneAdjust* family: per-note override (writes the
+	 * PRECOMPUTED "V"/raw slot directly rather than the persistent
+	 * instance knob) + immediate recompute, no persistent field store.
+	 * Follow-up pass. ---- */
+	void ToneAdjustFreqRelative(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void ToneAdjustFadeRelative(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void ToneAdjustDelayRelative(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void ToneAdjustStop(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void ToneAdjustWaveform(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void ToneAdjustShape(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 
 	void UpdateFrequencyAMS1Intensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateFrequencyAMS2Intensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
