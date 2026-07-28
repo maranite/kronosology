@@ -3320,6 +3320,7 @@ RECONSTRUCTED = {
     "08306050",  # COversamplingFilterCoeffs::COversamplingFilterCoeffs()
     "08304460",  # CFsConverterNormal::SetFilterCoeffs(int)
     "083044f0",  # CFsConverterNormal::SetFilterCoeffs(int,int,float,int,int) -- real 1-byte "return;" base stub
+    "08304cd0",  # CFsConverterNormal::SetFilterCoeffs(int,int,int,int,int) (BuildFilterCoeffTable, virtual slot 5)
     "08304ab0",  # CFsConverterNormal::GetDelayOffsetSamples()
     "08304ad0",  # CFsConverterNormal::GetDelayOffsetSeconds()
     "08304af0",  # CFsConverterNormal::GetDelayOffset()
@@ -3332,6 +3333,7 @@ RECONSTRUCTED = {
     "08305aa0",  # CFsCwInterpolation::~CFsCwInterpolation() (D1)
     "08305ad0",  # CFsCwInterpolation::~CFsCwInterpolation() (D0)
     "08305b00",  # CFsCwInterpolation::CFsCwInterpolation(int)
+    "083059f0",  # CFsCwInterpolation::SetFilterCoeffs(int,int,float,int,int)
     "08306080",  # CPcmFilter::~CPcmFilter() (D1)
     "08306090",  # CPcmFilter::SetBitsPerSample(int)
     "083060e0",  # CPcmFilter::IntToFloat(long**, float**, unsigned long, int)

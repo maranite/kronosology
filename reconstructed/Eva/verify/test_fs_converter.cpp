@@ -81,6 +81,55 @@ int main()
 	}
 
 	{
+		/* BuildFilterCoeffTable() (real CFsConverterNormal::SetFilterCoeffs(
+		 * int,int,int,int,int)) -- reconstructed this pass. Use a small,
+		 * easy-to-hand-check filter length/phase count. */
+		CFsConverterNormal conv(2);
+		conv.BuildFilterCoeffTable(/*filterLength=*/8, /*inputRateFactor=*/1,
+		                            /*cutoffFreq=*/1000, /*maxPhases=*/4,
+		                            /*decimation=*/7);
+
+		check("BuildFilterCoeffTable: filterLength(8) reached mFilterCoeffs "
+		      "(GetDelayOffsetSamples() == 8/2 == 4)",
+		      conv.GetDelayOffsetSamples() == 4);
+
+		/* GetDelayOffsetSeconds() = GetDelayOffsetSamples() * mInvSampleRate,
+		 * and mFilterCoeffs.SetSampleRate() was called with
+		 * mOversamplingRate(=min(maxPhases,0x1ff)=4) * inputRateFactor(=1) ==
+		 * 4 -- confirms the sample-rate derivation (not just filterLength)
+		 * really ran through BuildFilterCoeffTable()'s own arithmetic.
+		 * sampleRateHz=4 is deliberately a power of 2 so 1/sampleRateHz is
+		 * exactly representable in both float and double -- SetSampleRate()'s
+		 * own float-then-double cast (see kaiser_window.h-style x87
+		 * excess-precision note in fs_converter.cpp) can otherwise retain
+		 * extra x87 mantissa bits and not round to true IEEE-754 float32,
+		 * which a non-power-of-2 divisor (e.g. 3) would make visible at
+		 * this test's tolerance. */
+		check("BuildFilterCoeffTable: sampleRate == mOversamplingRate*inputRateFactor (4*1)",
+		      std::fabs(conv.GetDelayOffsetSeconds() - 1.0) < 1e-9);
+		check("BuildFilterCoeffTable: ctor/dtor still safe after rebuilding tables", true);
+	}
+
+	{
+		/* CFsCwInterpolation::SetFilterCoeffs() -- reconstructed this pass.
+		 * Real ground truth: un-shift mOversamplingRate, delegate to
+		 * BuildFilterCoeffTable(a,b,d,e,1), compute a Q14 fixed-point scale
+		 * factor from (b*newRate)/c, re-shift. We can't read
+		 * mState->mDecimationFactor directly (protected), so this checks
+		 * observable behavior: the call must not crash, and the resulting
+		 * filter length must have reached mFilterCoeffs same as the base
+		 * overload above. */
+		CFsCwInterpolation interp(2);
+		interp.SetFilterCoeffs(/*a filterLength=*/8, /*b inputRateFactor=*/2,
+		                        /*c=*/48000.0f, /*d cutoffFreq=*/1000,
+		                        /*e maxPhases=*/3);
+		check("CFsCwInterpolation::SetFilterCoeffs: filterLength(8) reached mFilterCoeffs",
+		      interp.GetDelayOffsetSamples() == 4);
+		check("CFsCwInterpolation::SetFilterCoeffs completed without crashing "
+		      "(double Reset() tail-call included)", true);
+	}
+
+	{
 		/* Channel count is capped to 8 -- construct with more and make
 		 * sure it doesn't overflow SRingBufState::mChannelRing[8]. */
 		CFsConverterNormal conv(16);

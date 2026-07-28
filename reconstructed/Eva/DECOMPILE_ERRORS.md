@@ -178,48 +178,70 @@ What would unblock it: a dedicated follow-up pass with this session's own
 confidence (positionally identified during this survey but not yet
 cross-checked against a reference UDF/ECMA-167 descriptor header), and the
 same kind of `fmtparms`-shaped local-buffer field naming `CFileIoDos::
+format()`'s own still-open item needs.
 
-## CFsConverterNormal::Process()/CFsCwInterpolation::Process()/
-## CFsConverterNormal::BuildFilterCoeffTable()/CFsCwInterpolation::SetFilterCoeffs()
-## (deferred, not a compile/link failure)
+## CFsConverterNormal::Process()/CFsCwInterpolation::Process() (deferred,
+## not a compile/link failure -- CFsConverterNormal::SetFilterCoeffs(int,int,
+## int,int,int)/CFsCwInterpolation::SetFilterCoeffs(int,int,float,int,int),
+## originally deferred alongside these, were RECONSTRUCTED 2026-07-28, see
+## below)
 
-`.text+0x08304500` (1446 bytes), `.text+0x08305380` (1643 bytes),
-`.text+0x08304cd0` (549 bytes), `.text+0x083059f0` (171 bytes) -- see
-`include/fs_converter.h`'s own header comment for full detail. These 4
-methods are the real polyphase-FIR ring-buffer sample-rate-conversion core
-of the `CFsConverterNormal`/`CFsCwInterpolation` cluster (kaiser_window.h/
-fs_converter.h/pcm_filter.h, found+reconstructed 2026-07-28). Every other
-method in the cluster (58 addresses total, `CKaiserWindowCoeffs`/
-`CDecimationFilterCoeffs`/`COversamplingFilterCoeffs` fully, plus
-`CFsConverterNormal`'s/`CFsCwInterpolation`'s own ctor/dtor/`Reset()`/
-delay-offset/bessel-length/sidelobe-attenuation/1-arg-`SetFilterCoeffs`
-dispatcher methods) IS reconstructed and passes its own known-answer test
+`.text+0x08304500` (1446 bytes) / `.text+0x08305380` (1643 bytes) -- see
+`include/fs_converter.h`'s own header comment for full detail. These 2
+methods are the real polyphase-FIR ring-buffer convolution core of the
+`CFsConverterNormal`/`CFsCwInterpolation` cluster (kaiser_window.h/
+fs_converter.h/pcm_filter.h, found 2026-07-28). Every other method in the
+cluster (46 addresses total, verified via `grep -c` against
+`manifest/eva_functions.csv` -- corrects the original pass's own "58"
+estimate, `CKaiserWindowCoeffs`/`CDecimationFilterCoeffs`/
+`COversamplingFilterCoeffs` fully, plus `CFsConverterNormal`'s/
+`CFsCwInterpolation`'s own ctor/dtor/`Reset()`/delay-offset/bessel-length/
+sidelobe-attenuation/`SetFilterCoeffs` (both the 1-arg dispatcher AND, as of
+this same-day follow-up pass, the real 5-arg int-only and float-arg
+overloads) methods) IS reconstructed and passes its own known-answer test
 (`verify/test_fs_converter.cpp`).
 
-Why deferred: the ring-buffer field layout (`SRingBufState`, fs_converter.h)
-WAS fully recovered from the ctor/dtor/`Reset()` bodies (which ARE real and
-exercise every field by name), but the actual convolution/ring-index
-arithmetic inside `Process()` is a real, GCC 8-way-Duff's-device-unrolled
-AND partially SSE-auto-vectorized per-channel circular-buffer FIR filter --
-high risk of a subtle off-by-one or ring-wrap transcription error, and a
-large enough chunk of novel DSP logic to warrant its own dedicated pass
-rather than rushing it into this batch. `BuildFilterCoeffTable()`/
-`CFsCwInterpolation::SetFilterCoeffs()` are deferred alongside it since they
-only matter once `Process()` itself is real (they populate the coefficient
-tables `Process()` consumes).
+Follow-up pass, same day: `CFsConverterNormal::SetFilterCoeffs(int,int,int,
+int,int)` (0x08304cd0, internally named `BuildFilterCoeffTable`) and
+`CFsCwInterpolation::SetFilterCoeffs(int,int,float,int,int)` (0x083059f0)
+turned out fully tractable once decoded end to end via `objdump -dr -M
+intel` -- both are now real (see fs_converter.cpp) and marked
+`reconstructed` in `manifest/eva_functions.csv`. That same pass also
+corrected the header: `BuildFilterCoeffTable()` is actually VIRTUAL (vtable
+slot 5, confirmed via a direct `.rodata` dump of both classes' vtables,
+`.rodata+0x08f31280`/`.rodata+0x08f312e0`) rather than the plain method
+first assumed, and both `SetSideLobeAttenuation(double)`/
+`SetBesselFunctionLength(int)` on `CFsConverterNormal` and `Reset()` are
+likewise virtual thin wrappers, not compiler-inlined convenience calls --
+see the header's own updated comment for the full 9-slot vtable layout.
 
-Stub bodies: `Process()` (both overrides) always reports 0 samples produced
-(never fabricates output); `BuildFilterCoeffTable()` is a true no-op;
-`CFsCwInterpolation::SetFilterCoeffs()` preserves the real
-`mOversamplingRate` shift/un-shift bookkeeping (needed for
-`CFsConverterNormal`'s own destructor to free the right number of
-`mPhaseCoeffs[]` entries) without building the coefficient table itself.
-None of these 4 addresses are marked `reconstructed` in
-`manifest/eva_functions.csv` -- they stay `pending`.
+Why `Process()` itself is STILL deferred: the ring-buffer field layout
+(`SRingBufState`, fs_converter.h) was fully recovered from the ctor/dtor/
+`Reset()`/(now also) `SetFilterCoeffs()` bodies, and this follow-up pass
+traced `Process()`'s outer structure precisely (per-channel outer loop;
+per-channel ring-fill inner loop bounded by `mState->mCarry`, 8-way-Duff's-
+device-unrolled; a second per-output-sample FIR-sum inner loop doing
+`mPhaseCoeffs[phase][tap] * mChannelRing[ch][(idx-tap)&mRingMask]` via
+chained x87 `fmul`/`faddp` -- NOT SSE-vectorized on closer inspection,
+correcting an earlier overstatement; `mCarry`/`mRingWritePos` written back
+once at the end for all channels; a real, separate `mNumChannels==0`
+early-out). See `include/fs_converter.h`'s own header comment for the full
+outline. But the exact tap-index/ring-wraparound arithmetic across those 3
+nested loops is still high-risk to transcribe -- a single off-by-one
+produces plausible-sounding but wrong audio, and this project has no golden
+reference PCM stream to check against, unlike the `SetFilterCoeffs()` pair
+above whose correctness was verifiable purely from already-tested
+`mFilterCoeffs`/field-layout state. Stays out of scope for a single pass.
 
-What would unblock it: a dedicated follow-up pass tracing `Process()`'s
-real ring-buffer write/read-and-convolve loop against the already-recovered
-`SRingBufState` field layout (this pass's own `objdump -d -C` output for
-both `Process()` overrides is a good starting point), plus
-`BuildFilterCoeffTable()`'s per-phase coefficient-array allocation loop.
-format()`'s own still-open item needs.
+Stub bodies: `Process()` (both overrides) still always reports 0 samples
+produced (never fabricates output) -- these 2 addresses (0x08304500,
+0x08305380) stay `pending` in `manifest/eva_functions.csv`.
+
+What would unblock it: a dedicated follow-up with a synthesized
+known-answer input (e.g. an impulse or a single sinusoid at a known
+frequency) run through both `Process()` and a from-scratch reference
+polyphase resampler implementation and compared numerically -- not just
+re-deriving the assembly by inspection, which is how every other method in
+this cluster (including the now-real `SetFilterCoeffs()` pair) was
+verified, but isn't sufficient on its own for a stateful per-sample DSP
+inner loop this dense.
