@@ -225,6 +225,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_effect_rack_valuegetters.o \
            src/engine/stg_metronome_settings_valuegetters.o \
            src/engine/stg_tone_adjust_valuegetters.o \
+           src/engine/stg_hdr_track_valuegetters.o \
+           src/engine/stg_wave_sequence_valuegetters.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -523,6 +525,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_effect_rack_valuegetters.cpp \
        src/engine/stg_metronome_settings_valuegetters.cpp \
        src/engine/stg_tone_adjust_valuegetters.cpp \
+       src/engine/stg_hdr_track_valuegetters.cpp \
+       src/engine/stg_wave_sequence_valuegetters.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -779,7 +783,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_effect_balance_valuegetters \
          verify/test_stg_effect_rack_valuegetters \
          verify/test_stg_metronome_settings_valuegetters \
-         verify/test_stg_tone_adjust_valuegetters
+         verify/test_stg_tone_adjust_valuegetters \
+         verify/test_stg_hdr_track_valuegetters \
+         verify/test_stg_wave_sequence_valuegetters
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -1127,6 +1133,12 @@ verify/test_stg_metronome_settings_valuegetters: verify/test_stg_metronome_setti
 
 verify/test_stg_tone_adjust_valuegetters: verify/test_stg_tone_adjust_valuegetters.cpp src/engine/stg_tone_adjust_valuegetters.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_tone_adjust_valuegetters.cpp src/engine/stg_tone_adjust_valuegetters.cpp -o $@
+
+verify/test_stg_hdr_track_valuegetters: verify/test_stg_hdr_track_valuegetters.cpp src/engine/stg_hdr_track_valuegetters.cpp include/oa_stg_hdr_track.h include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_hdr_track_valuegetters.cpp src/engine/stg_hdr_track_valuegetters.cpp -o $@
+
+verify/test_stg_wave_sequence_valuegetters: verify/test_stg_wave_sequence_valuegetters.cpp src/engine/stg_wave_sequence_valuegetters.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_wave_sequence_valuegetters.cpp src/engine/stg_wave_sequence_valuegetters.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@

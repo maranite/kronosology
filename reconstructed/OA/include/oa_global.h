@@ -2164,7 +2164,126 @@ public:
  * placeholder, since the true size is independently known here.
  */
 extern "C" unsigned char _ZTV16CSTGWaveSequence[96];
-struct CSTGWaveSequence { CSTGWaveSequence(); };
+/*
+ * CSTGWaveSeqDataMessageContext -- the family's own context type for
+ * CSTGWaveSequence's value-getter family below. Minimal struct, only the
+ * shared `index` field this cluster's own methods read (confirmed via
+ * a real `imul edx,[ctx+0x4],0x34` premultiply on every one of the
+ * ctx-indexed candidates below) -- same "only confirmed fields" treatment
+ * as every sibling context type in this family (CSTGPatchMessageContext,
+ * CSTGMessageContext, CSTGToneAdjustMessageContext, ...).
+ */
+struct CSTGWaveSeqDataMessageContext {
+	unsigned char _unrecovered_head[4];	/* +0x00..+0x03, unconfirmed */
+	unsigned int index;			/* +0x04, confirmed -- step
+						 * index into this
+						 * CSTGWaveSequence's own
+						 * per-step record array,
+						 * stride 0x34 */
+};
+/*
+ * CSTGWaveSequence's value-getter family (broader-discovery-method sweep,
+ * re-run against the whole sValueGetterTemp relocation cross-reference --
+ * see stg_value_getter_family.md's batch 18 recipe): all 34 real
+ * Getter*(CSTGWaveSeqDataMessageContext&) candidates reconstructed, zero
+ * outliers -- see src/engine/stg_wave_sequence_valuegetters.cpp for the
+ * full per-method derivation. This class was already known (its own ctor
+ * is real, see waveseq_setlist_init.cpp above) but its Get* family was
+ * never previously investigated -- the struct itself carries no named
+ * data fields at all before this batch (only the ctor's own vtable-install
+ * effect was confirmed), so every field offset below is a genuinely new
+ * fact, not a re-derivation of something already declared.
+ *
+ * Two groups, split cleanly by whether `ctx.index` is dereferenced:
+ *
+ *   - 17 methods (StepType, BankSelect, BankSelectUUID, MultisampleSelect,
+ *     Level, Tune, Transpose, Reverse, StartOffset, AMS1Output,
+ *     AMS2Output, Duration, TempoBaseNote, TempoMultiplier, CrossfadeTime,
+ *     FadeOutShape, FadeInShape) index into a per-step record array whose
+ *     element 0 begins at `this` itself -- `this + ctx.index*0x34 + K`,
+ *     confirmed via the real `imul edx,[edx+0x4],0x34` instruction (a
+ *     direct 3-operand immediate multiply, a NEW instruction FORM for
+ *     this family's ctx-index premultiply -- every prior class used a
+ *     `lea`-chain or an SIB scale factor, never a bare `imul` immediate;
+ *     the resulting effective stride, 0x34, is not otherwise new).
+ *     Several of these fields' own K offsets (up to 0x47) exceed the
+ *     0x34-byte nominal stride between two adjacent step records --
+ *     i.e. one step's own confirmed field set genuinely overlaps into
+ *     the next step's own leading bytes. This is the SAME class of real,
+ *     confirmed compiled-loop stride quirk already established for
+ *     `CSTGDrumKitData` above (see that class's own header comment) --
+ *     reproduced verbatim via raw per-method address arithmetic, not
+ *     "fixed" into a padded record type.
+ *
+ *   - BankSelect/BankSelectUUID are BYTE-IDENTICAL bodies (confirmed via
+ *     two independent isolated re-dumps, not a copy-paste mixup) and are
+ *     a genuinely NEW shape for the family: instead of writing
+ *     sValueGetterTemp's usual .value(+0x0)/.displayValue(+0x18) slots,
+ *     each copies a 16-byte UUID (4 sequential dwords, record offsets
+ *     0x14/0x18/0x1c/0x20) directly into sValueGetterTemp's own
+ *     +0x0/+0x4/+0x8/+0xc bytes -- exactly the still-`_unrecovered_a`
+ *     gap STGConvertedParam already declares (see that struct's own
+ *     header comment), so no struct change was needed, only a raw
+ *     4-dword copy in place of the usual named-field write.
+ *
+ *   - 17 methods (RunSequence, NoteOnAdvance, TimeTempoMode,
+ *     SwingResolution, StartStep, EndStep, SoloStep,
+ *     StartStepAMSSource, StartStepAMSIntensity, DurationAMSSource,
+ *     DurationAMSIntensity, PositionAMSSource, PositionAMSIntensity,
+ *     LoopStart, LoopEnd, LoopRepeat, LoopDirection) never touch `ctx`
+ *     at all -- plain fixed-K fields directly off `this`, offsets
+ *     0x4..0x13, matching the family's simplest dialect. RunSequence/
+ *     NoteOnAdvance/TimeTempoMode pack three independent single-bit
+ *     booleans into byte 0x4 (bits 0/1/2), the by-now-established
+ *     shift-then-mask bitfield shape. DurationAMSIntensity is this
+ *     batch's first confirmed UNSIGNED 16-bit plain field (word +0xc,
+ *     `movzx`, no shift/mask) -- Duration/CrossfadeTime (both ctx-indexed,
+ *     signed words) were already-generic width/sign combinations for the
+ *     shared decoder, not new shapes, just new confirmed data points.
+ *     `this`'s own confirmed-zeroed ctor bytes at +0x5/+0x13 (see the
+ *     ctor's own header comment above) line up exactly with
+ *     SwingResolution/LoopDirection here -- an independent cross-check,
+ *     not a contradiction (the ctor comment predates this batch's own
+ *     field-offset discovery and only calls out the two bytes its own
+ *     narrower investigation directly observed).
+ */
+struct CSTGWaveSequence {
+	CSTGWaveSequence();
+	STGConvertedParam &GetterAMS1Output(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterAMS2Output(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterBankSelect(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterBankSelectUUID(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterCrossfadeTime(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterDuration(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterDurationAMSIntensity(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterDurationAMSSource(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterEndStep(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterFadeInShape(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterFadeOutShape(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterLevel(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterLoopDirection(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterLoopEnd(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterLoopRepeat(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterLoopStart(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterMultisampleSelect(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterNoteOnAdvance(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterPositionAMSIntensity(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterPositionAMSSource(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterReverse(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterRunSequence(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterSoloStep(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterStartOffset(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterStartStep(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterStartStepAMSIntensity(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterStartStepAMSSource(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterStepType(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterSwingResolution(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterTempoBaseNote(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterTempoMultiplier(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterTimeTempoMode(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterTranspose(CSTGWaveSeqDataMessageContext &ctx);
+	STGConvertedParam &GetterTune(CSTGWaveSeqDataMessageContext &ctx);
+};
 
 /*
  * CIFXEffectSlot::CIFXEffectSlot() (batch 44, `.text+0x8d0e0`, 77 bytes)
