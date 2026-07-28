@@ -2671,6 +2671,26 @@ RECONSTRUCTED = {
     "08142530",  # CVFATEntry::OnLongExtChanged()
     "081437c0",  # CVFATEntry::IsLongNameBitArrayEmpty() const
     "081438c0",  # CVFATEntry::IsLongNameBitArrayEmpty(unsigned int) const
+
+    # --- CBitMaskL (2026-07-28, fresh nm -C class-inventory sweep after CVFATEntry's
+    # remaining ~28 methods were re-confirmed genuinely out of scope -- see
+    # vfat_entry.h's header comment). All 13 unique methods, header-only
+    # (include/bit_mask_l.h), zero external calls except is_set()'s single omitted
+    # Api+0x94 soft-assert (behaviorally inert, see header comment). All 13 verified
+    # via the direct-execution oracle, ~50000 randomized trials, 0 mismatches.
+    "0838e350",  # CBitMaskL::ProcessEndian()
+    "0838e3a0",  # CBitMaskL::CBitMaskL(short)
+    "0838e3c0",  # CBitMaskL::is_set(unsigned long) const
+    "0838e440",  # CBitMaskL::is_clear(unsigned long) const
+    "0838e460",  # CBitMaskL::set(unsigned long)
+    "0838e480",  # CBitMaskL::clear(unsigned long)
+    "0838e4a0",  # CBitMaskL::GetMask()
+    "0838e4c0",  # CBitMaskL::operator=(unsigned long)
+    "0838e4e0",  # CBitMaskL::operator|=(unsigned long)
+    "0838e500",  # CBitMaskL::init()
+    "0838e510",  # CBitMaskL::init(unsigned long)
+    "0838e530",  # CBitMaskL::GetNumOfSetBit()
+    "0838e6c0",  # CBitMaskL::getbit(unsigned long&)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
