@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 11 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch), 668 methods reconstructed, manifest 1441->2113
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 14 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch), 757 methods reconstructed, manifest 1441->2202
 type: project
 ---
 
@@ -425,11 +425,123 @@ fresh), `CSTGControllerInfo` (31), `CSTGVectorMotion` (29),
 weak-linkage + ctx-only-suffix `nm` filter BEFORE running the decoder on
 any of these, per the by-now-standard checklist.
 
+**Sixth batch (2026-07-28, commit `8c97b38`): `CSTGPolysixModelPatch`
+(48/48) + `CWaveMotionOsc` (23/23) + `CSTGPianoModelPatch` (16/18, plus
+2 real accessor helpers) done**, manifest 2113 -> 2202. Same ground
+truth binary (`/home/share/Decomp/OA.ko_Decomp/OA.ko`). All three picked
+from the fifth batch's own backlog by size after the standard checklist.
+`CSTGControllerInfo`/`CSTGVectorMotion` were also on that backlog by raw
+pending-method count but correctly SKIPPED this batch too -- both
+already have real structs/ctors in `oa_global.h`/`program_ctor.cpp`
+respectively, same `CSTGProgramSlot`/`CSTGProgram` already-modeled
+precedent, confirmed via the standard word-boundary grep before
+starting rather than trusting the raw count alone.
+
+`CSTGPolysixModelPatch` and `CWaveMotionOsc`: zero-outlier, all-fixed-K
+dialects, no ctx-dynamic-index methods in either. `CSTGPolysixModelPatch`'s
+`GetArpeggiator*` group packs FOUR independent single-bit booleans into
+one byte at `+0x4ac` -- Enable bit 0 no shift, KeySync bit 1, MIDITempoSync
+bit 2, Latch bit 3, all via `shr al,N` + `and eax,1` -- one more packed
+bit than any prior class's own bitfield shape (CSTGVPMOsc/CSTGMS20ModelPatch
+each had at most 2 bits in one byte).
+
+`CSTGPianoModelPatch` is this batch's new-shape class -- NOT the same
+class as `CPianoOsc`, confirmed distinct via grep, this is the
+higher-level acoustic-piano PATCH component that owns a `CPianoOsc`.
+Its 8-method SustainPedalDown-/SustainPedalUp-prefixed ctx-indexed group
+derives its base pointer NOT from `this` directly but from a
+virtual-dispatch call through `this`'s own vtable, ground truth slots
+`0x170`/`0x174`. Decompiling both vtable targets directly --
+`AccessSustainPedalDownVelocityZones`/`AccessSustainPedalUpVelocityZones`,
+both real weak pending 4-byte symbols in the manifest -- showed they are
+trivial constant-offset accessors: `lea eax,[eax+0x14]; ret` and
+`lea eax,[eax+0x78]; ret`. Both were reconstructed as real member
+functions and called directly from the Get* bodies, rather than treating
+the whole ctx-indexed group as an outlier. This is a genuinely NEW shape
+for the family: a virtual-call-mediated sub-object base pointer whose
+target turns out to be mechanically trivial once decompiled --
+distinguish this from CPianoOsc's own BankSelect outlier, where the
+delegate target (`CSTGMultisampleBankUUIDAndStereoFlag::GetBankIdAndStereoFlag`,
+348 bytes) is genuinely non-trivial and remains unreconstructed. This
+batch's own 2 excluded outliers, `GetSustainPedalDownMultisampleBank`/
+`GetSustainPedalUpMultisampleBank`, hit that exact same still-open
+dependency via the same ctx-index arithmetic. `this+0x78 - this+0x14 =
+0x64 = 4 * stride(25)` confirmed each velocity-zone array holds exactly
+4 records -- a useful independent cross-check when a virtual-call base
+pointer is involved: diff the two known base offsets and check it's a
+whole multiple of the ctx-index stride.
+
+**Rule of thumb going forward for THIS shape**: when a ctx-indexed
+Get*/Set* candidate's disassembly shows `mov edx,[eax]` (loading `this`'s
+OWN vtable pointer, not a param) immediately followed by a `call
+[edx+K]` BEFORE the usual stride-multiply-and-field-load sequence, don't
+default to treating it as an outlier -- first decompile the vtable
+target directly (`nm`/`objdump` on the class's own weak symbol list will
+usually name it `AccessXxx`/`GetXxxPtr`-shaped). If it's a plain `lea
+eax,[eax+K]; ret` or equivalently trivial, inline it as a real,
+separately-reconstructed accessor method and proceed with the normal
+ctx-index decode against ITS return value as the new base pointer. Only
+fall back to excluding the whole group as a genuine outlier if the
+vtable target turns out to be non-trivial once actually decompiled --
+don't guess from the call site alone.
+
+**New ctx-index field-width variant**: `CSTGPianoModelPatch`'s own
+ctx-index field is read as a BYTE -- `movzx ebx, BYTE [ctx+0x4]` --
+not the family's usual DWORD read (`mov edx,[edx+0x4]`). Same
+conceptual "ctx's own dynamic index" field at the same `+0x4` offset,
+just a narrower load -- modeled via a new `CtxIndexByte(ctx, off,
+stride)` helper alongside the existing `CtxIndex`, same stride-25
+arithmetic as CPianoOsc's own chained-double-`lea` case, just the
+initial field read narrowed to `unsigned char` instead of `int`. KAT
+convention unaffected -- still set the whole `int` at `ctx+0x4` to 3,
+since only the low byte is read.
+
+**New DEF_RE gotcha variant, genuinely NEW class of case**: found a
+parenthesis-swallow bug in a `.h` file this batch, previously believed
+largely immune since declarations end in `;`. The trigger was a plain
+in-comment mention like `` `GetNumSustainPedalVelocityZones()` `` with
+nothing meaningful following it in the same sentence -- the runaway
+match crossed the `*/` comment-close boundary and reached the file's
+own real, immediately-following INLINE FUNCTION DEFINITION
+(`CtxIndexByte`, a `static inline` helper with a real `{...}` body right
+in the header), whose own `{` closed the match and mis-attributed its
+captured name to the comment mention instead of `CtxIndexByte`. Lesson:
+`.h`-file immunity from this bug only holds when EVERY real construct
+after the trigger paren is a plain `;`-terminated declaration -- it does
+NOT hold once a real inline function definition with a `{...}` body
+follows, which is common in this family's headers now that `CtxIndex`/
+`CtxIndexByte` helper functions live there. Also hit 2 more of the
+already-well-known `.cpp`-leading-comment variant this batch (one
+DEF_RE-parenthesis, one literal-`*/`), same fixes as always -- see the
+running gotcha list above. Fixed all 3 by rewriting to zero literal `(`
+characters in the affected spans, the by-now-standard convention;
+verified via the same 2-check discipline -- `/*`/`*/` count balance AND
+an exact DEF_RE captured-name-set diff, run on every new file before
+ever attempting to build.
+
+**Next targets** (same technique, not yet done): ~154 more classes
+remain. Re-run the survey query -- next largest fresh candidates as of
+this batch: `CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
+`CKGGlobalParamMsgHandler` (130/71/25, still UNCONFIRMED whether part of
+this family or a different CKG message-handler convention -- check
+the `ER23CSTGPatchMessageContext` mangled-suffix filter and a sample
+disassembly before assuming, carried over unconfirmed from the fifth
+batch), `CSTGDrumKitData` (44), `CSTGWaveSequence` (39), `CSTGMultisampleBank`
+(33 -- SKIP, already modeled, same precedent as CSTGProgramSlot/CSTGProgram/
+CSTGControllerInfo/CSTGVectorMotion), `CSTGVPMModelPatch` (29, confirmed
+fresh via grep this batch's own survey), `CSTGMultiFilter2Pole` (29,
+confirmed fresh), `CMOSSAlgorithm` (29), `CSTGProgramModeDrumTrackSlot`
+(28, check for already-modeled status first, same family as
+CSTGProgramSlot), `CSTGPolysixMG` (28), `CSPRSeqDataManager` (28),
+`CSTGMS20EG` (27). Always do the word-boundary grep + weak-linkage +
+ctx-only-suffix `nm` filter BEFORE running the decoder on any of these.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
 "CSTGOrganModelPatch + CSTGMS20 value-getter families",
 "CSTGAnalog4PoleBase + CSTGPolysix + CSTGAnalogSyncOsc value-getter
-families", "CPianoOsc + CSTGEPModelPatch value-getter families" and
+families", "CPianoOsc + CSTGEPModelPatch value-getter families",
 "CSTGOrganOsc + CSTGVPMOsc + CSTGMS20ModelPatch value-getter families"
-entries for the full per-batch derivation notes.
+and "CSTGPolysixModelPatch + CWaveMotionOsc + CSTGPianoModelPatch
+value-getter families" entries for the full per-batch derivation notes.
