@@ -68,11 +68,16 @@ public:
 // ---- CGlobal: 2 sub-block initializers called by CGlobalConverter::
 // Ext0000toInt0002 (storage_format_converters.cpp) after zeroing a handful
 // of migration-time flag/gap fields. Real bodies not modeled.
-class CGlobal {
-public:
-	void InitializeSetListParams() {}
-	void InitializeDrumTrackParams() {}
-};
+//
+// UPDATE (2026-07-28, special_func_cc_map.h/cglobal.h batch): CGlobal is no longer
+// a pure stub -- a real embedded CSpecialFuncCCMap sub-object at +0x602c was traced
+// and reconstructed (a completely independent decompile that, as a nice cross-check,
+// agrees to the byte with this file's own long-standing "+0x607b" migration-field
+// offset: 0x602c + CSpecialFuncCCMap::kSize(0x4f) == 0x607b). The full `class CGlobal`
+// definition -- including these same 2 no-op stub methods, kept identical -- now lives
+// in cglobal.h; only ONE definition may exist per C++ ODR, so it is included here
+// rather than redeclared.
+#include "cglobal.h"
 
 // ---- CSongControl: called by CSongControlConverter::Int0000toExt0000's
 // variant-flag branch (storage_format_converters.cpp). Real bodies not
