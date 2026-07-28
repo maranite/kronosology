@@ -1938,6 +1938,69 @@ RECONSTRUCTED = {
     "08dea8c0",  # CStorageConverterBase::Ext000DtoInt000F(CConvertStorageParam const&) const
     "08dea8d0",  # CStorageConverterBase::Ext000EtoInt000F(CConvertStorageParam const&) const
     "08dea8e0",  # CStorageConverterBase::Ext000FtoInt000F(CConvertStorageParam const&) const
+
+    # --- 2026-07-28 follow-up batch: traced CStorageConverterBase::Open()'s 2 real
+    # external callers to CProgConverter::Open() (NOT CFilesys/CDiskUtil as the prior
+    # batch's own lead note guessed), which surfaced a whole ~32-class, ~246-method
+    # concrete file-format-converter family (storage_format_converters.h). This batch:
+    # CStorageConverterBase's own 16 ValidateExtXXXX + Close() (deferred by the prior
+    # batch, small enough to finish here), 32 "safe" (no `this` dependency) sibling
+    # ValidateExtXXXX across 18 of those classes, and CProgConverter's dtor pair +
+    # Close(). CProgConverter's Open()/Load()/Save() and 11 CPCMProgConverter/
+    # CMOSSProgConverter ValidateExtXXXX stay deferred -- see storage_converter_base.h/
+    # prog_converter.h/storage_format_converters.h for exactly why each.
+    "08e07bb0",  # CStorageConverterBase::ValidateExt0000(CConvertStorageParam const&) const
+    "08e07bc0",  # CStorageConverterBase::ValidateExt0001(CConvertStorageParam const&) const
+    "08e07bd0",  # CStorageConverterBase::ValidateExt0002(CConvertStorageParam const&) const
+    "08e07be0",  # CStorageConverterBase::ValidateExt0003(CConvertStorageParam const&) const
+    "08e07bf0",  # CStorageConverterBase::ValidateExt0004(CConvertStorageParam const&) const
+    "08e07c00",  # CStorageConverterBase::ValidateExt0005(CConvertStorageParam const&) const
+    "08e07c10",  # CStorageConverterBase::ValidateExt0006(CConvertStorageParam const&) const
+    "08e07c20",  # CStorageConverterBase::ValidateExt0007(CConvertStorageParam const&) const
+    "08e07c30",  # CStorageConverterBase::ValidateExt0008(CConvertStorageParam const&) const
+    "08e07c40",  # CStorageConverterBase::ValidateExt0009(CConvertStorageParam const&) const
+    "08e07c50",  # CStorageConverterBase::ValidateExt000A(CConvertStorageParam const&) const
+    "08e07c60",  # CStorageConverterBase::ValidateExt000B(CConvertStorageParam const&) const
+    "08e07c70",  # CStorageConverterBase::ValidateExt000C(CConvertStorageParam const&) const
+    "08e07c80",  # CStorageConverterBase::ValidateExt000D(CConvertStorageParam const&) const
+    "08e07c90",  # CStorageConverterBase::ValidateExt000E(CConvertStorageParam const&) const
+    "08e07ca0",  # CStorageConverterBase::ValidateExt000F(CConvertStorageParam const&) const
+    "08e07ba0",  # CStorageConverterBase::Close()
+    "08df78c0",  # CCombiConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08df78d0",  # CCombiConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08df78f0",  # CCombiConverter::ValidateExt0002(CConvertStorageParam const&) const
+    "08df7920",  # CCombiConverter::ValidateExt0003(CConvertStorageParam const&) const
+    "08dfc700",  # CDrumKitConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfc710",  # CDrumKitConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08dfc720",  # CDrumKitConverter::ValidateExt0002(CConvertStorageParam const&) const
+    "08dfc730",  # CDrumKitConverter::ValidateExt0003(CConvertStorageParam const&) const
+    "08dfcf80",  # CWaveSeqConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfcf90",  # CWaveSeqConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08dfd150",  # CGlobalConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd160",  # CGlobalConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08dfd170",  # CGlobalConverter::ValidateExt0002(CConvertStorageParam const&) const
+    "08dfd2d0",  # CGEConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd390",  # CGETemplateConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd440",  # CSongDescConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd450",  # CPatternDescConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd460",  # CCueListConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd470",  # CRegionConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd480",  # CRegionConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08dfd630",  # CSongControlConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd6b0",  # CMidiEventConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd6c0",  # CMasterEventConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd6d0",  # CAudioEventConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08dfd6e0",  # CAutomationEventConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08e02dc0",  # CPatternEventConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08e02dd0",  # CSetListConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08e09f30",  # CSongConverter::ValidateExt0000(CConvertStorageParam const&) const
+    "08e09f40",  # CSongConverter::ValidateExt0001(CConvertStorageParam const&) const
+    "08e09f50",  # CSongConverter::ValidateExt0002(CConvertStorageParam const&) const
+    "08e031f0",  # CSongConverter::ValidateExt0003(CConvertStorageParam const&) const
+    "08e07d30",  # CMOSSProgConverter::ValidateExt0004(CConvertStorageParam const&) const
+    "08e07d90",  # CProgConverter::~CProgConverter() (D1, complete object)
+    "08e07db0",  # CProgConverter::~CProgConverter() (D0, deleting)
+    "08df7590",  # CProgConverter::Close()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

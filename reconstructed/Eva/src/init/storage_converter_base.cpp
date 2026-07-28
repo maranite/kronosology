@@ -2452,3 +2452,55 @@ void CStorageConverterBase::Ext000EtoInt000F(const CConvertStorageParam &) const
 void CStorageConverterBase::Ext000FtoInt000F(const CConvertStorageParam &) const
 {
 }
+
+/* ---- 2026-07-28 follow-up batch: ValidateExtXXXX + Close() ----
+ * Found via a fresh objdump -dr -M intel trace while chasing Open()'s 2 real
+ * external callers (CProgConverter::Open(), prog_converter.h/.cpp): these 16
+ * methods turned out to be small enough to reconstruct directly rather than
+ * stay deferred. See storage_converter_base.h's own header comment.
+ */
+
+/* .text+0x08e07bb0, 14B. Real: return param.m_extFormatId ==
+ * (unsigned long)param.m_externalBuf -- a literal transcription. This only
+ * makes sense as a "never really meant to be called generically" base-class
+ * default (comparing a format tag against the raw bit pattern of a buffer
+ * pointer); consistent with this whole method family having no confirmed
+ * caller of its own (only the still-deferred ValidateExt() dispatcher might
+ * reach it, and even that is unconfirmed).
+ */
+bool CStorageConverterBase::ValidateExt0000(const CConvertStorageParam &param) const
+{
+	return param.m_extFormatId == reinterpret_cast<unsigned long>(param.m_externalBuf);
+}
+
+/* .text+0x08e07bc0..0x08e07ca0, 3B each (bare `xor eax,eax; ret`). Real:
+ * unconditional `return false` -- every non-0000 format version is simply
+ * unimplemented at the base-class level (every concrete subclass that
+ * supports a given ExtXXXX format overrides the corresponding
+ * ValidateExtXXXX itself; see storage_format_converters.h).
+ */
+bool CStorageConverterBase::ValidateExt0001(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0002(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0003(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0004(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0005(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0006(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0007(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0008(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt0009(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000A(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000B(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000C(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000D(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000E(const CConvertStorageParam &) const { return false; }
+bool CStorageConverterBase::ValidateExt000F(const CConvertStorageParam &) const { return false; }
+
+/* .text+0x08e07ba0, 1B (bare `ret`). Real: unconditional no-op at the base-class
+ * level. CProgConverter::Close() (prog_converter.h/.cpp) genuinely dispatches
+ * through this exact vtable slot on whatever object its own m_pFormatConverter
+ * points at -- reconstructed as a real (if trivial) method rather than folded
+ * away, so that call has a real target.
+ */
+void CStorageConverterBase::Close()
+{
+}

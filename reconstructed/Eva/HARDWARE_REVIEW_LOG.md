@@ -1150,3 +1150,73 @@ should know they exist and are untested/unmodeled, not silently absent.
   existing host `make verify` suite (0 failures across 51 binaries). Not
   tested on real hardware -- no reconstructed caller anywhere in this project
   yet. Eva manifest 778 -> 1034/37,795.
+
+- **`CStorageConverterBase::Open()`'s 2 real external callers, traced + a whole
+  new ~32-class converter-family discovery** (2026-07-28, follow-up to the
+  entry above) -- both callers (`.text+0x08df76b9`/`0x08df778d`) are inside
+  `CProgConverter::Open()` (`prog_converter.h`), NOT `CFilesys`/`CDiskUtil` as
+  the entry above guessed. Tracing that one caller surfaced a whole
+  previously-unknown family: ~32 concrete `CStorageConverterBase`-derived
+  per-file-format converter classes (`CProgConverter`/`CCombiConverter`/
+  `CSongConverter`/`CDrumKitConverter`/`CGEConverter`/`CKontaktXxxConverter`/
+  `CAKAIConverter`/`CSoundFontConverter`/... -- Prog/Combi/Song/DrumKit/
+  SetList/GE-global/Kontakt-import/AKAI-import/SoundFont-import format
+  version-migration), ~246 methods total (`storage_format_converters.h`'s own
+  header comment has the full per-class count breakdown) -- this project's
+  real file-format-version-migration toolbox, genuinely reachable (unlike the
+  base class's own 256-method matrix, which stays confirmed dead).
+  THIS BATCH reconstructed: `CStorageConverterBase`'s own remaining
+  `ValidateExt0000..000F`/`Close()` (17 methods, closes out that class's
+  deferred list except `CheckVersion`/`ValidateExt`/`Save`/`Load`/`Open`/
+  `ExttoIntXXXX` below), 32 "safe" (no `this`-dependency) sibling
+  `ValidateExtXXXX` overrides across 18 of the ~32 concrete classes (found via
+  the same scripted `objdump -dr` -> Python classifier technique as the
+  matrix above, splitting all 59 `ValidateExtXXXX` symbols in the whole binary
+  cleanly into 48 safe vs 11 deferred with zero ambiguous cases), and
+  `CProgConverter`'s dtor pair + `Close()`. A genuine dual-use finding on
+  `CConvertStorageParam::m_size` (+0x0c): the base class's own `Ext0000toInt0000`
+  reads it as a plain memcpy byte count (unchanged), but every
+  `CPCMProgConverter`/`CMOSSProgConverter` `ValidateExtXXXX` instead
+  dereferences it as a pointer to an unidentified ~0xa00+-byte session/context
+  object -- both confirmed independently via direct disassembly, not
+  reconciled (documented in `storage_converter_base.h`, not guessed at).
+  DEFERRED, precisely documented, real leads for a future batch:
+  - `CProgConverter::Open()` (766B) -- the actual entry point that picks
+    PCM-vs-MOSS format and drives the whole cluster; large/intricate, not
+    rushed.
+  - `CProgConverter::Load()`/`Save()` (50B each) -- fully understood (forward
+    to `m_pFormatConverter`'s own `Load`/`Save`, using the object's OWN
+    internal `m_storedParam` copy, NOT the caller's argument -- a genuine,
+    confirmed "ignores its own parameter" behavior) but their real target,
+    `CStorageConverterBase::Load()`/`Save()`, is itself a version-dispatch
+    jump table into the still-unreconstructed `ExttoInt0000..000F` real
+    per-version conversion bodies (343-379B each) -- implementing the
+    forwards without those would mean fabricating or stubbing them, which
+    this project doesn't do.
+  - The 11 `CPCMProgConverter`/`CMOSSProgConverter` `ValidateExtXXXX` that
+    need the `m_size`-as-context-pointer interpretation above.
+  - The other ~214 methods across the ~32-class family not touched this
+    batch: every real `ExtXXXXtoIntYYYY` field-by-field format-migration body
+    (the actual payload of this whole cluster), every class's own ctor/dtor
+    beside `CProgConverter`'s. A genuinely large future-batch target, same
+    "size is not depth, but do check for a tractable sub-piece first" lens
+    already validated elsewhere in this log.
+  New `include/storage_format_converters.h`/`src/init/storage_format_converters.cpp`,
+  `include/prog_converter.h`/`src/init/prog_converter.cpp`. Extended
+  `CConvertStorageParam` with 3 more real confirmed fields (`m_extFormatId`
+  +0x10, `m_skipValidate` +0x19, `m_variantFlag` +0x1a). 75 new KAT checks
+  (`verify/test_storage_format_converters.cpp`); full host `make verify`
+  green (25/25 binaries, 0 failures) and a real Lenny target-ABI link OK.
+  Along the way, `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` (real
+  mangled C++ free functions, confirmed via `c++filt` on their ground-truth
+  symbols) needed their first-ever real (no-op) linkable definitions in this
+  project -- every earlier reference to them was comment-only. Also
+  independently re-confirmed (via `git stash` isolation) that the
+  intermittent `test_client_comm_server` 6-fail signature documented in
+  `eva_client_comm_server_6fail_closed_not_a_bug_2026-07-26`/
+  `eva_client_comm_server_heisenbug_root_cause_fixed_2026-07-26` (re-decompiler
+  agent memory) is STILL genuinely present as an ASLR-dependent flake (not
+  caused by anything in this batch, and not the same already-fixed
+  struct-undersize root cause -- passes clean under both a plain rebuild with
+  ASLR disabled and an `-fsanitize=address,undefined` build) -- see that
+  memory file's own updated note. Eva manifest 1034 -> 1086/37,795 (2.873%).

@@ -54,17 +54,20 @@
  *   void Save(const CConvertStorageParam&) const;           // .text+0x08de8f20, 320B
  *   void Load(const CConvertStorageParam&) const;           // .text+0x08dec670, 318B
  *   int  Open(const CConvertStorageParam&) const;            // .text+0x08deab30, 103B -- HAS real external callers (.text+0x08df76b9, 0x08df778d), calls ValidateExt; genuinely reachable, unlike the matrix above
- *   void Close();                                            // .text+0x08e07ba0, 1B
+ *   void Close();                                            // .text+0x08e07ba0, 1B -- NOW RECONSTRUCTED, see below
  *   void ExttoInt0000(...)..ExttoInt000F(...);               // .text+0x08deaba0..0x08dec4c0, 16 methods, 343-379B each -- real per-version conversion bodies, NOT the same symbols as the Ext{X}toInt{Y} matrix (no X digits in the name) and NOT called by anything in the matrix either; a second, parallel, apparently-independent real implementation family
- *   ValidateExt0000(...)..ValidateExt000F(...);              // .text+0x08e07bb0..0x08e07ca0, 16 methods, 3-14B each
+ *   ValidateExt0000(...)..ValidateExt000F(...);              // .text+0x08e07bb0..0x08e07ca0, 16 methods, 3-14B each -- NOW RECONSTRUCTED, see below
  *   ctor/dtor (2 dtor overloads found; no plain ctor symbol in this export --
  *     likely elided/inline, or only ever constructed via a derived class not
  *     yet identified)
- * `Open()`'s two real external callers (0x08df76b9/0x08df778d, both in the
- * 0x08df7xxx region -- NOT yet identified, a lead for whichever future batch
- * picks up CFilesys/CDiskUtil) are the only evidence anything in this class is
- * genuinely live on a real boot path; nothing reconstructed THIS pass is on
- * that path (the matrix's own callers are 100% internal to itself).
+ * `Open()`'s two real external callers (0x08df76b9/0x08df778d) are now traced
+ * (2026-07-28 follow-up batch): both are inside `CProgConverter::Open()`
+ * (prog_converter.h/.cpp) -- CFilesys/CDiskUtil are NOT involved. `CProgConverter`
+ * turned out to be the first of a whole discovered family of ~32 concrete
+ * `CStorageConverterBase`-derived per-file-format converter classes (CProgConverter/
+ * CCombiConverter/CSongConverter/CDrumKitConverter/CGEConverter/... --
+ * storage_format_converters.h), confirming this cluster IS genuinely live, just not
+ * through CFilesys directly.
  *
  * CStorageConverterBase is NOT declared with C++ `virtual`/a vtable-swap install
  * here, deliberately, even though ground truth's own vtable is real (294 slots,
@@ -72,23 +75,27 @@
  * recurring "vtable-dispatch-stub-gap" bug-class lesson (see
  * HARDWARE_REVIEW_LOG.md), declaring a fresh reconstruction `virtual` without an
  * accompanying ground-truth vtable install risks silently colliding with
- * whatever install convention a LATER batch picks for this class. Since nothing
- * reconstructed anywhere in this project currently holds a `CStorageConverterBase*`
- * or dispatches through it dynamically, plain non-virtual methods are 100%
- * behavior-faithful for every call this pass's own code makes (direct,
- * compile-time-resolved sibling calls, matching the real `jmp`-thunk's own
- * effective target exactly) while leaving zero risk of a future vtable
- * numbering collision. Revisit if/when Open()'s two real external callers are
- * traced back to a class that actually holds this polymorphically.
+ * whatever install convention a LATER batch picks for this class. UPDATE
+ * (2026-07-28): `CProgConverter` now DOES hold a real `CStorageConverterBase*`
+ * member (`m_pFormatConverter`, prog_converter.h) and ground truth genuinely
+ * dispatches Load/Save/Close through it via its vtable (confirmed via a direct
+ * `.rodata` dump of `vtable for CStorageConverterBase`: slot @ vptr+0xc = Load,
+ * vptr+0x10 = Save, vptr+0x14 = Close, byte-exact against the addresses declared
+ * here). Rather than retrofitting `virtual` onto this class (still a real collision
+ * risk given the matrix's own 294-slot numbering, per the lesson above),
+ * `CProgConverter`'s forwarding methods call these slots' current, only-known
+ * target directly (a compile-time-resolved, non-virtual call) -- behavior-identical
+ * to the real indirect call as long as no currently-reconstructed sibling class
+ * overrides Load/Save/Close (none does; every sibling found this batch only
+ * overrides Open/ValidateExtXXXX/the Ext{X}toInt{Y} matrix). Flagged explicitly in
+ * prog_converter.h; revisit together if a future batch finds a real override.
  *
- * CConvertStorageParam: only the 6 fields actually touched by this pass's own
- * code (the (0,0) memcpy trio at +0x00/+0x04/+0x0c) plus the 4 further fields
- * CheckVersion touches (+0x08/+0x0a/+0x14/+0x16, not used by any method THIS
- * pass implements, kept here anyway since they're already confirmed and a
- * future CheckVersion batch would need the exact same struct) are named;
- * everything else is explicit reserved padding, sized to the highest confirmed
- * offset (0x16) rounded up to 0x18 -- same "declare uncertain fields clearly"
- * convention as scsi_driver_base.h's SDriverIOPbuf.
+ * CConvertStorageParam: extended 2026-07-28 with 3 more real confirmed fields
+ * (`m_extFormatId` +0x10, `m_skipValidate` +0x19, `m_variantFlag` +0x1a -- see the
+ * struct's own per-field comments for how each was confirmed, including a genuine
+ * unresolved dual-use finding on `m_size` +0x0c). Struct now sized to 0x20
+ * (highest confirmed-live offset +0x1a, rounded up) -- same "declare uncertain
+ * fields clearly" convention as scsi_driver_base.h's SDriverIOPbuf.
  */
 
 #ifndef STORAGE_CONVERTER_BASE_H
@@ -102,11 +109,39 @@ struct CConvertStorageParam {
 	unsigned short m_internalVersion; // +0x08, confirmed: CheckVersion's `cx` compare target (not used this pass)
 	unsigned char  m_unknown_0a;      // +0x0a, confirmed touched by CheckVersion, meaning not recovered
 	unsigned char  m_pad_0b;          // +0x0b, unconfirmed padding
-	unsigned long  m_size;            // +0x0c, confirmed: memcpy count in Ext0000toInt0000
-	unsigned char  m_reserved_10[4];  // +0x10..0x13, unconfirmed, never touched by anything this pass reads
+	unsigned long  m_size;            // +0x0c, DUAL-USE (2026-07-28 finding): CStorageConverterBase's own
+	                                   // Ext0000toInt0000 reads this as a plain memcpy byte count (confirmed,
+	                                   // unchanged from before), but EVERY concrete-subclass ValidateExtXXXX
+	                                   // in CPCMProgConverter/CMOSSProgConverter instead dereferences it as a
+	                                   // `void*` to a large (~0xa00+ byte) owning/session context object and
+	                                   // reads a 3-bit mode flag at that object's own +0x9f2/+0x9fe. Both uses
+	                                   // are independently confirmed via direct disassembly; NOT reconciled --
+	                                   // most likely this field is genuinely reused for different purposes by
+	                                   // different converter subclasses/call sites (the base class's own
+	                                   // Ext0000toInt0000 is itself confirmed dead code on the real boot path,
+	                                   // so its "size" reading never has to coexist with a live "pointer"
+	                                   // reading in practice). Left as unsigned long; the pointer-shaped uses
+	                                   // reinterpret_cast it locally rather than retyping this field.
+	unsigned long  m_extFormatId;     // +0x10, confirmed 2026-07-28: the format/subtype magic number checked
+	                                   // by essentially every concrete converter subclass's ValidateExtXXXX()
+	                                   // (48 methods across ~20 classes, storage_format_converters.h) -- was
+	                                   // previously `m_reserved_10[4]`/"unconfirmed, never touched"; that was
+	                                   // simply because nothing reconstructed yet read it.
 	unsigned short m_externalVersion; // +0x14, confirmed: CheckVersion's own version field
 	unsigned char  m_unknown_16;      // +0x16, confirmed touched by CheckVersion, meaning not recovered
 	unsigned char  m_pad_17;          // +0x17, unconfirmed padding
+	unsigned char  m_skipValidate;    // +0x19, confirmed 2026-07-28: CStorageConverterBase::Open() (still
+	                                   // deferred) returns success immediately without calling ValidateExt()
+	                                   // when this is non-zero; also written by CProgConverter::Open() (also
+	                                   // deferred) when building its own persistent param copy.
+	unsigned char  m_variantFlag;     // +0x1a, confirmed 2026-07-28: a 0/1 selector read by several concrete
+	                                   // converters' ValidateExtXXXX() to pick between two candidate magic
+	                                   // values/branches (CCombiConverter, CGEConverter, CPCMProgConverter,
+	                                   // CMOSSProgConverter) -- real per-class meaning (platform? byte order?
+	                                   // old-vs-new file revision?) not recovered.
+	unsigned char  m_pad_1b[5];       // +0x1b..0x1f, unconfirmed padding, rounds struct to 0x20; highest
+	                                   // confirmed-live offset remains +0x1a (CProgConverter::Open() itself
+	                                   // writes up to here into its own copy, still deferred).
 };
 
 class CStorageConverterBase {
@@ -383,6 +418,28 @@ public:
 	void Ext000DtoInt000F(const CConvertStorageParam &) const;  // no-op stub, .text+0x08dea8c0, 1B
 	void Ext000EtoInt000F(const CConvertStorageParam &) const;  // no-op stub, .text+0x08dea8d0, 1B
 	void Ext000FtoInt000F(const CConvertStorageParam &) const;  // no-op stub, .text+0x08dea8e0, 1B
+
+	// -- 2026-07-28 follow-up batch: ValidateExtXXXX + Close(), see header comment --
+	bool ValidateExt0000(const CConvertStorageParam &param) const;  // .text+0x08e07bb0, 14B
+	bool ValidateExt0001(const CConvertStorageParam &) const;  // .text+0x08e07bc0, 3B, always false
+	bool ValidateExt0002(const CConvertStorageParam &) const;  // .text+0x08e07bd0, 3B, always false
+	bool ValidateExt0003(const CConvertStorageParam &) const;  // .text+0x08e07be0, 3B, always false
+	bool ValidateExt0004(const CConvertStorageParam &) const;  // .text+0x08e07bf0, 3B, always false
+	bool ValidateExt0005(const CConvertStorageParam &) const;  // .text+0x08e07c00, 3B, always false
+	bool ValidateExt0006(const CConvertStorageParam &) const;  // .text+0x08e07c10, 3B, always false
+	bool ValidateExt0007(const CConvertStorageParam &) const;  // .text+0x08e07c20, 3B, always false
+	bool ValidateExt0008(const CConvertStorageParam &) const;  // .text+0x08e07c30, 3B, always false
+	bool ValidateExt0009(const CConvertStorageParam &) const;  // .text+0x08e07c40, 3B, always false
+	bool ValidateExt000A(const CConvertStorageParam &) const;  // .text+0x08e07c50, 3B, always false
+	bool ValidateExt000B(const CConvertStorageParam &) const;  // .text+0x08e07c60, 3B, always false
+	bool ValidateExt000C(const CConvertStorageParam &) const;  // .text+0x08e07c70, 3B, always false
+	bool ValidateExt000D(const CConvertStorageParam &) const;  // .text+0x08e07c80, 3B, always false
+	bool ValidateExt000E(const CConvertStorageParam &) const;  // .text+0x08e07c90, 3B, always false
+	bool ValidateExt000F(const CConvertStorageParam &) const;  // .text+0x08e07ca0, 3B, always false
+	void Close();  // .text+0x08e07ba0, 1B -- real no-op body (ground truth: bare `ret`); kept as its own
+	               // method (not folded into a no-op inline) since CProgConverter::Close() (prog_converter.h)
+	               // genuinely calls through this exact vtable slot on whatever concrete object its own
+	               // m_pFormatConverter member points at.
 };
 
 #endif // STORAGE_CONVERTER_BASE_H
