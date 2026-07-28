@@ -5,6 +5,7 @@
  * separately purely to keep the struct body in the main header short. */
 
 	void SendSolo(unsigned char, unsigned char);	/* SetSolo(), the one no-check method */
+	void SendAssignableSwitch(int, int, int, bool, bool);	/* Sw1-8Value */
 	void SendCCSource(unsigned char, unsigned char, char);
 	void SendCCValue(unsigned char, unsigned char, char);
 	void SendClkAdvMode(unsigned char, unsigned char);
@@ -37,6 +38,8 @@
 	void SendKeyTop(unsigned char, unsigned char);
 	void SendKeyboardIn(unsigned char, unsigned char);
 	void SendKeyboardOut(unsigned char, unsigned char);
+	void SendKnob(int, int, int, int, bool);	/* Knob1-8Value */
+	void SendLinkedSceneID(unsigned char, unsigned char, unsigned char);	/* SetLinkedSceneId */
 	void SendLinkToDT(unsigned char, unsigned char);
 	void SendModCutOff(unsigned char, unsigned char, unsigned char);
 	void SendNoteLatchMode(unsigned char, unsigned char);
@@ -59,6 +62,7 @@
 	void SendRxJSYP(unsigned char, unsigned char);
 	void SendRxOther(unsigned char, unsigned char);
 	void SendRxRibbon(unsigned char, unsigned char);
+	void SendScene(int, unsigned char, bool);	/* SetScene */
 	void SendSceneIsLinked(unsigned char, unsigned char);
 	void SendSeedCluster(unsigned char, unsigned char);
 	void SendSeedDrum(unsigned char, unsigned char);
@@ -83,4 +87,4 @@
 	void SendUpdateOnRelease(unsigned char, unsigned char);
 	void SendUseGChAlso(unsigned char, unsigned char);
 
-	unsigned int GetRTParmBufferSelectId(int deviceIndex);  /* used by the excluded Shape-C/D Knob/Sw families, declared here for forward-compat */
+	unsigned int GetRTParmBufferSelectId(int deviceIndex);  /* used by the Shape-C/D Knob/Sw/Scene families */

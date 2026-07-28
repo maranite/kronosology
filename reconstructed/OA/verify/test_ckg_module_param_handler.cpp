@@ -120,6 +120,16 @@ unsigned char *CKGBankManager::GetSeqDefaultKarmaPerfCommon() { return 0; }
 unsigned char *CKGBankManager::GetCombiKarmaPerfModule(eSTGCombiBankId, unsigned int idx) { return (unsigned char *)(unsigned long)(0x2000 + idx); }
 unsigned char *CKGBankManager::GetProgKarmaPerfModule(eSTGProgramBankId, unsigned int idx) { return (unsigned char *)(unsigned long)(0x3000 + idx); }
 
+/* batch 2 (2026-07-28): Shape C/D Knob/Sw value group + SetScene/
+ * SetLinkedSceneId mocks. */
+static int g_selectIdArg = -1, g_indexArg = -1, g_boolArg = -1, g_lastValueArg = 0;
+void CKGParamEdit::SendKnob(int selectId, int index, int, int value, bool) { g_sendCalls++; g_selectIdArg = selectId; g_indexArg = index; g_lastValueArg = value; }
+void CKGParamEdit::SendAssignableSwitch(int selectId, int index, int, bool onOff, bool) { g_sendCalls++; g_selectIdArg = selectId; g_indexArg = index; g_boolArg = onOff; }
+void CKGParamEdit::SendScene(int selectId, unsigned char value, bool) { g_sendCalls++; g_selectIdArg = selectId; g_lastValueArg = value; }
+void CKGParamEdit::SendLinkedSceneID(unsigned char deviceIndex, unsigned char index, unsigned char value) { g_sendCalls++; g_selectIdArg = deviceIndex; g_indexArg = index; g_lastValueArg = value; }
+static int g_notifySliderCalls;
+void SKSTGGate_NotifyKarmaSliderPosition(int) { g_notifySliderCalls++; }
+
 static int g_fail;
 static void check_eq(const char *label, long got, long want)
 {
@@ -140,6 +150,12 @@ int main(void)
 	CKGEngine::ms_poInstance = new unsigned char[0x100](); CKGEngine::ms_poInstance[0xb0] = 1; /* suppressed */
 	CKGUIMsgProcessor::ms_poInstance = new unsigned char[0x100]();
 	CKGBankManager::ms_poInstance = new unsigned char[0x1000000]();
+	/* SetScene's own curSceneIdx read is a genuine double indirection
+	 * (*(byte*)(*(byte**)CKGBankManager::ms_poInstance + 0x135)) -- give
+	 * the mock a real inner buffer at offset 0 so that dereference doesn't
+	 * chase a null pointer. */
+	static unsigned char g_bankInner[0x200];
+	*(unsigned char **)CKGBankManager::ms_poInstance = g_bankInner;
 
 	CKGModuleParamMsgHandler h;
 	memset(&h, 0, sizeof(h));
@@ -594,11 +610,58 @@ int main(void)
 	msg.m_value = 305441741;
 	h.SetValueForModuleControl(&msg);
 	check_eq("SetValueForModuleControl", (short)*(short*)(g_live+0x1b2), (short)(unsigned short)((unsigned int)305441741));
+
+	/* batch 2 (2026-07-28): Shape C/D Knob/Sw value group primary writes,
+	 * idx still fixed at 3. Expected bytes computed independently in
+	 * Python (value&0xff=0xcd; RMW fields computed against g_live's own
+	 * deterministic pre-fill formula), not by re-using the source's own
+	 * C expressions. */
+	msg.m_value = 305441741;
+	h.SetKnob1Value(&msg); check_eq("SetKnob1Value", g_live[0x164], 0xcd);
+	h.SetKnob2Value(&msg); check_eq("SetKnob2Value", g_live[0x165], 0xcd);
+	h.SetKnob3Value(&msg); check_eq("SetKnob3Value", g_live[0x166], 0xcd);
+	h.SetKnob4Value(&msg); check_eq("SetKnob4Value", g_live[0x167], 0xcd);
+	h.SetKnob5Value(&msg); check_eq("SetKnob5Value", g_live[0x168], 0xcd);
+	h.SetKnob6Value(&msg); check_eq("SetKnob6Value", g_live[0x169], 0xcd);
+	h.SetKnob7Value(&msg); check_eq("SetKnob7Value", g_live[0x16a], 0xcd);
+	h.SetKnob8Value(&msg); check_eq("SetKnob8Value", g_live[0x16b], 0xcd);
+	/* Sw base byte at 0x163 (idx*9+0x148), pre-fill value 0x9a */
+	h.SetSw1Value(&msg); check_eq("SetSw1Value", g_live[0x163], 0xdf); g_live[0x163] = 0x9a;
+	h.SetSw2Value(&msg); check_eq("SetSw2Value", g_live[0x163], 0x9a); g_live[0x163] = 0x9a;
+	h.SetSw3Value(&msg); check_eq("SetSw3Value", g_live[0x163], 0xbe); g_live[0x163] = 0x9a;
+	h.SetSw4Value(&msg); check_eq("SetSw4Value", g_live[0x163], 0xfa); g_live[0x163] = 0x9a;
+	h.SetSw5Value(&msg); check_eq("SetSw5Value", g_live[0x163], 0xda); g_live[0x163] = 0x9a;
+	h.SetSw6Value(&msg); check_eq("SetSw6Value", g_live[0x163], 0xba); g_live[0x163] = 0x9a;
+	h.SetSw7Value(&msg); check_eq("SetSw7Value", g_live[0x163], 0xda); g_live[0x163] = 0x9a;
+	h.SetSw8Value(&msg); check_eq("SetSw8Value", g_live[0x163], 0x9a); g_live[0x163] = 0x9a;
+
+	/* SetScene: primary 0x127 write is unconditional even suppressed;
+	 * the LinkedSceneId-style nibble sync is gated on suppression (still
+	 * suppressed here, Part 1), so it must NOT fire */
+	g_live[0x2e5] = 0xc0;	/* re-seed to the deterministic pre-fill value */
+	*(unsigned char *)(*(unsigned char **)CKGBankManager::ms_poInstance + 0x135) = 3; /* curSceneIdx=3, matches idx used for the pre-fill math above */
+	h.SetScene(&msg);
+	check_eq("SetScene primary 0x127", g_live[0x127], 0xcd);
+	check_eq("SetScene nibble untouched (suppressed)", g_live[0x2e5], 0xc0);
+
+	/* SetLinkedSceneId: inverted -- nibble write unconditional even
+	 * suppressed, the 0x127 mirror is gated on suppression and must NOT
+	 * fire here */
+	g_live[0x127] = 0x26;	/* re-seed to the deterministic pre-fill value */
+	h.SetLinkedSceneId(&msg);
+	check_eq("SetLinkedSceneId nibble (unconditional)", g_live[0x2e5], 0xd0);
+	check_eq("SetLinkedSceneId 0x127 untouched (suppressed)", g_live[0x127], 0x26);
+
 	printf("--- Part 2: gate + shadow-write + Send/Notify skeleton, representative subset ---\n");
 
 	/* re-open the CSPREngine gate and give the handler both shadow-record
-	 * pointers + a UI mode inside the {8,9,10} SysEx-override range, so
-	 * ShouldAttemptSysExShadowWrite() takes the fallback branch */
+	 * pointers + a UI mode OUTSIDE the {8,9,10} range (and != 4), so
+	 * ShouldAttemptSysExShadowWrite() takes the fallback branch. Mode
+	 * value flipped 2026-07-28 after a ground-truth re-check (3
+	 * independent disassemblies: SetValue/SetKnob1Value/SetGenCC) found
+	 * the shadow-attempt is taken when mode is NOT in {8,9,10}, the
+	 * opposite of this test's original mode=9 -- see the bug-fix comment
+	 * on ShouldAttemptSysExShadowWrite()'s own body. */
 	CSPREngine::ms_poInstance[0xa] = 1;
 	static unsigned char defaultA[BUFSZ], defaultB[BUFSZ];
 	memset(defaultA, 0x55, BUFSZ);
@@ -606,7 +669,7 @@ int main(void)
 	h.m_defaultRecordA = defaultA;
 	h.m_defaultRecordB = defaultB;
 	h.m_moduleIndex = 7;
-	*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) = 9;	/* in {8,9,10} */
+	*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) = 20;	/* NOT in {8,9,10}, != 4 */
 	CKGEngine::ms_poInstance[0xb0] = 0;			/* edits NOT suppressed */
 
 	/* sub-case A: SysEx lookup MISSES (returns 0) -> shadow write happens,
@@ -678,6 +741,91 @@ int main(void)
 	CSPREngine::ms_poInstance[0xa] = 0;
 	check_eq("ShouldStoreToBackup false, gate closed", h.ShouldStoreToBackup(&msg), 0);
 	CSPREngine::ms_poInstance[0xa] = 1;
+
+	/* sub-case G (batch 2): SetKnob1Value -- RTParm-indirected Send +
+	 * dual-shadow + conditional SKSTGGate_NotifyKarmaSliderPosition()
+	 * tail call gated on UI mode != 1 */
+	g_sysexGetValueReturn = 0;
+	g_sendCalls = 0; g_notifyCalls = 0; g_notifySliderCalls = 0;
+	msg.m_index = 4; msg.m_value = 0x2c;
+	h.SetKnob1Value(&msg);
+	unsigned int knob1Addr = 4*9 + 0x149;
+	check_eq("SetKnob1Value shadowA written", defaultA[knob1Addr], 0x2c);
+	check_eq("SetKnob1Value shadowB written", defaultB[knob1Addr], 0x2c);
+	check_eq("SetKnob1Value Send called", g_sendCalls, 1);
+	check_eq("SetKnob1Value Notify called", g_notifyCalls, 1);
+	check_eq("SetKnob1Value index arg", g_indexArg, 4);
+	check_eq("SetKnob1Value slider-notify fires (mode!=1)", g_notifySliderCalls, 1);
+
+	*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) = 1;	/* mode==1 -> slider-notify suppressed */
+	g_notifySliderCalls = 0;
+	h.SetKnob1Value(&msg);
+	check_eq("SetKnob1Value slider-notify suppressed (mode==1)", g_notifySliderCalls, 0);
+	*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) = 20;	/* restore */
+
+	/* sub-case H (batch 2): SetSw1Value -- RTParm-indirected Send (bool
+	 * arg = value!=0) + dual-shadow, no slider-notify tail call */
+	g_sysexGetValueReturn = 0;
+	unsigned int sw1Addr = 4*9 + 0x148;
+	g_sendCalls = 0; g_notifyCalls = 0;
+	msg.m_value = 1;
+	h.SetSw1Value(&msg);
+	check_eq("SetSw1Value shadowA bit0 set", defaultA[sw1Addr] & 1, 1);
+	check_eq("SetSw1Value shadowB bit0 set", defaultB[sw1Addr] & 1, 1);
+	check_eq("SetSw1Value bool arg true", g_boolArg, 1);
+	check_eq("SetSw1Value Send called", g_sendCalls, 1);
+
+	/* sub-case I (batch 2): SetScene -- primary+dual-shadow write, its
+	 * own LinkedSceneId-style nibble sync (curSceneIdx sourced from
+	 * CKGBankManager, NOT msg->m_index), and the SetScene-only +0x14
+	 * Send-suppression guard */
+	g_sysexGetValueReturn = 0;
+	*(unsigned char *)(*(unsigned char **)CKGBankManager::ms_poInstance + 0x135) = 5;	/* curSceneIdx=5, odd -> high nibble */
+	g_sendCalls = 0; g_notifyCalls = 0;
+	msg.m_value = 0x03;
+	h.m_pendingSceneSendGuard = 0;
+	h.SetScene(&msg);
+	check_eq("SetScene primary 0x127", g_live[0x127], 0x03);
+	check_eq("SetScene shadowA 0x127", defaultA[0x127], 0x03);
+	check_eq("SetScene shadowB 0x127", defaultB[0x127], 0x03);
+	unsigned int sceneNibbleAddr = 0x2e4 + (5 >> 1);
+	check_eq("SetScene nibble high (odd curSceneIdx)", (g_live[sceneNibbleAddr] >> 4) & 0x7, 3);
+	check_eq("SetScene Send called (guard NULL)", g_sendCalls, 1);
+
+	g_sendCalls = 0;
+	h.m_pendingSceneSendGuard = (void *)1;
+	h.SetScene(&msg);
+	check_eq("SetScene Send suppressed by +0x14 guard", g_sendCalls, 0);
+	h.m_pendingSceneSendGuard = 0;
+
+	/* sub-case J (batch 2): SetLinkedSceneId -- unconditional nibble
+	 * write (own idx-derived byteIdx/nibble, independent of SetScene's
+	 * curSceneIdx), suppression-gated 0x127 mirror + deviceIndex-direct
+	 * Send (no GetRTParmBufferSelectId indirection here) */
+	g_sysexGetValueReturn = 0;
+	msg.m_index = 5;	/* odd -> high nibble, byteIdx = 5/2 = 2 */
+	msg.m_value = 0x06;
+	g_sendCalls = 0; g_notifyCalls = 0;
+	h.SetLinkedSceneId(&msg);
+	unsigned int lsNibbleAddr = 0x2e4 + (5 / 2);
+	check_eq("SetLinkedSceneId nibble high", (g_live[lsNibbleAddr] >> 4) & 0x7, 6);
+	check_eq("SetLinkedSceneId shadowA nibble", (defaultA[lsNibbleAddr] >> 4) & 0x7, 6);
+	check_eq("SetLinkedSceneId shadowB nibble", (defaultB[lsNibbleAddr] >> 4) & 0x7, 6);
+	check_eq("SetLinkedSceneId 0x127 mirror", g_live[0x127], 0x06);
+	check_eq("SetLinkedSceneId Send deviceIndex-direct arg", g_selectIdArg, msg.m_deviceIndex);
+	check_eq("SetLinkedSceneId Send called", g_sendCalls, 1);
+	check_eq("SetLinkedSceneId Notify called", g_notifyCalls, 1);
+
+	/* suppressed: nibble write must still fire, 0x127 mirror + Send must not */
+	CKGEngine::ms_poInstance[0xb0] = 1;
+	g_live[0x127] = 0x00;
+	g_sendCalls = 0;
+	msg.m_value = 0x07;
+	h.SetLinkedSceneId(&msg);
+	check_eq("SetLinkedSceneId nibble still unconditional when suppressed", (g_live[lsNibbleAddr] >> 4) & 0x7, 7);
+	check_eq("SetLinkedSceneId 0x127 mirror suppressed", g_live[0x127], 0x00);
+	check_eq("SetLinkedSceneId Send suppressed", g_sendCalls, 0);
+	CKGEngine::ms_poInstance[0xb0] = 0;
 
 	printf("--- Part 3: GetKarmaModule / GetKarmaPerfModuleForSeqBackup ---\n");
 	/* mocks return predictable fake addresses: Seq=0x1000+idx,

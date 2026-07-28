@@ -165,27 +165,91 @@ struct CKGModuleParamMsg {
  * CKGSeqBackupModuleParam's own SetModified* read-side siblings exactly
  * (same stride-10 array, same 0x294/0x295/0x296.. offsets).
  *
- * === Deliberately excluded this batch (documented, not reconstructed) ===
- * SetKnob1Value..SetKnob8Value / SetSw1Value..SetSw8Value (Shape
- * C/D: same Shape-B skeleton PLUS a `CKGParamEdit::GetRTParmBufferSelectId()`
- * indirection and, for Knob, a conditional `SKSTGGate_
- * NotifyKarmaSliderPosition()` tail call -- fully traced, not yet written
- * up, good next-batch target). SetScene/SetLinkedSceneId (real
- * idx-dependent packed-nibble/multi-branch logic, ~0x2c1/0x24d bytes,
- * same complexity class as the STG family's own SetLinkedSceneId-style
- * outliers -- SetLinkedSceneId's read-side semantics ARE already known
- * via CKGSeqBackupModuleParam::SetLinkedSceneId's own hand-reconstructed
- * body, only the write-side's own dual-branch shadow copy needs tracing).
+ * === Shape C/D: SetKnob1Value..SetKnob8Value / SetSw1Value..SetSw8Value
+ * (batch 2, 2026-07-28) ===
+ * Same Shape-B skeleton (reuses ShouldAttemptSysExShadowWrite()/
+ * SysExShadowWriteIsNeeded(), same dual-shadow rule -- both ctx-indexed via
+ * `idx*9` AND m_default-based on the read side, confirmed against
+ * CKGSeqBackupModuleParam::SetKnob1Value..8Value/SetSw1Value..8Value, so
+ * every one of these 16 gets a defaultRecordB write too), but with the
+ * Send call preceded by a `CKGParamEdit::GetRTParmBufferSelectId(msg->
+ * m_deviceIndex)` indirection whose result feeds the Send call's own first
+ * argument INSTEAD of the raw device index. Field: byte at
+ * `m_liveRecord + msg->m_index*9 + (0x149..0x150)` for KnobN (N=1..8,
+ * plain byte, no bitfield); `m_liveRecord + msg->m_index*9 + 0x148`,
+ * bit(N-1), for SwN (N=1..8) -- ground truth ORs the msg->m_value byte
+ * SHIFTED left by (N-1) directly into the cleared bit position without
+ * masking to a single bit first (`(*p & ~(1<<(N-1))) | (value<<(N-1))`,
+ * truncated to a byte by the store) -- preserved verbatim, not "cleaned up"
+ * to `(value&1)<<(N-1)`, since ground truth genuinely doesn't mask.
+ * SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false) for Knob;
+ * SendAssignableSwitch(selectId, (int)msg->m_index, 0,
+ * (bool)(msg->m_value != 0), false) for Sw -- confirmed via 2 independent
+ * disassemblies each (Knob1Value+Knob2's own identical shape by symbol
+ * size; Sw1Value/Sw2Value/Sw8Value cross-checked for the shift amount).
+ * Knob-only: after NotifyAfterEdit(), a tail call to
+ * `SKSTGGate_NotifyKarmaSliderPosition(0)` UNLESS
+ * `CKGUIMsgProcessor::ms_poInstance`'s own `+0x6c` mode is exactly 1 (Sw
+ * has no such tail call at all).
+ *
+ * === SetScene / SetLinkedSceneId (batch 2, 2026-07-28) ===
+ * Both deviate from the Shape-B skeleton's usual ordering. Full
+ * disassembly: SetScene @.text+0x3ceaf0 (0x2c1 bytes), SetLinkedSceneId
+ * @.text+0x3ce0d0 (0x24d bytes).
+ *
+ * SetScene: primary write (m_liveRecord[0x127] = msg->m_value, dual-shadow
+ * on a SysEx miss, matching CKGSeqBackupModuleParam::SetScene's own fixed
+ * 0x127 offset) happens FIRST, unconditionally, same as every Shape-B
+ * field. Then CKGEngine::ms_poInstance[0xb0] (suppressed) gates EVERYTHING
+ * else -- if suppressed, returns immediately (no LinkedSceneId-array sync,
+ * no Send, no Notify; every other Shape-B method still calls Send+Notify
+ * unconditionally, gated only on suppression, but never skips a shadow/
+ * array-sync step this way). If not suppressed: updates the SAME packed-
+ * nibble array SetLinkedSceneId itself owns (offset 0x2e4, low/high nibble
+ * by odd/even index, 3-bit `& 0x7` value) but keyed off a DIFFERENT index
+ * than msg->m_index -- a "current scene" byte read via a double
+ * indirection through CKGBankManager (`*(byte*)(*(byte**)
+ * CKGBankManager::ms_poInstance + 0x135)`), written to m_liveRecord always
+ * and to both shadow records too when the primary write's own SysEx
+ * lookup missed. Then a genuinely NEW field at `this+0x14` (not touched by
+ * any other method in this family) is tested: if non-NULL, returns without
+ * ever calling Send/Notify at all -- semantics unconfirmed beyond "acts as
+ * a Send-suppression guard", modelled as `void *m_pendingSceneSendGuard`.
+ * If NULL: `SendScene(GetRTParmBufferSelectId(msg->m_deviceIndex),
+ * (unsigned char)msg->m_value, false)` + `NotifyAfterEdit()`.
+ *
+ * SetLinkedSceneId: inverted relative to SetScene -- the packed-nibble
+ * array write (0x2e4, keyed off msg->m_index this time, matching
+ * CKGSeqBackupModuleParam::SetLinkedSceneId's own read-side formula
+ * exactly: byte index `msg->m_index/2` -- real signed-division-by-2
+ * idiom in ground truth, safe for msg->m_index's real range -- nibble
+ * selected by `msg->m_index & 1`) is the UNCONDITIONAL primary write here
+ * (to m_liveRecord always, to both shadow records when this method's own
+ * SysEx lookup missed), done BEFORE the suppression check. The simple
+ * `m_liveRecord[0x127]` field (SAME offset SetScene owns, presumably a
+ * "last linked/current" mirror) is instead the one gated behind
+ * CKGEngine::ms_poInstance[0xb0]==0, alongside
+ * `SendLinkedSceneID((unsigned char)msg->m_deviceIndex, (unsigned char)
+ * msg->m_index, (unsigned char)msg->m_value)` + NotifyAfterEdit() -- no
+ * GetRTParmBufferSelectId() indirection for this one, deviceIndex passed
+ * raw. No `this+0x14` guard here (that field is SetScene-only).
+ *
  * `HandleMessage()`/ctor/dtor: real dispatcher/plumbing, same
  * "confirmed real, deliberately deferred" treatment as every other
  * *MsgHandler class in this project (see oa_control_msg_handler.h).
  */
+void SKSTGGate_NotifyKarmaSliderPosition(int deviceIndex) __attribute__((regparm(3)));
+
 struct CKGModuleParamMsgHandler {
 	void *_vtablePtr;		/* +0x0, install-only, see comment above */
 	unsigned char *m_liveRecord;	/* +0x4 */
 	unsigned char *m_defaultRecordA;/* +0x8 */
 	unsigned char *m_defaultRecordB;/* +0xc */
 	int m_moduleIndex;		/* +0x10 */
+	/* +0x14, SetScene-only real field -- non-NULL suppresses SendScene()/
+	 * NotifyAfterEdit() entirely. Own purpose unconfirmed beyond that,
+	 * see SetScene's own header comment above. */
+	void *m_pendingSceneSendGuard;
 
 	void SetGE(const CKGModuleParamMsg *msg);
 	void SetSolo(const CKGModuleParamMsg *msg);
@@ -274,6 +338,29 @@ struct CKGModuleParamMsgHandler {
 	void SetSwName(const CKGModuleParamMsg *msg);
 	void SetKnobName(const CKGModuleParamMsg *msg);
 
+	/* Shape C/D: RTParm-indirected Knob/Sw value group, see header comment */
+	void SetKnob1Value(const CKGModuleParamMsg *msg);
+	void SetKnob2Value(const CKGModuleParamMsg *msg);
+	void SetKnob3Value(const CKGModuleParamMsg *msg);
+	void SetKnob4Value(const CKGModuleParamMsg *msg);
+	void SetKnob5Value(const CKGModuleParamMsg *msg);
+	void SetKnob6Value(const CKGModuleParamMsg *msg);
+	void SetKnob7Value(const CKGModuleParamMsg *msg);
+	void SetKnob8Value(const CKGModuleParamMsg *msg);
+	void SetSw1Value(const CKGModuleParamMsg *msg);
+	void SetSw2Value(const CKGModuleParamMsg *msg);
+	void SetSw3Value(const CKGModuleParamMsg *msg);
+	void SetSw4Value(const CKGModuleParamMsg *msg);
+	void SetSw5Value(const CKGModuleParamMsg *msg);
+	void SetSw6Value(const CKGModuleParamMsg *msg);
+	void SetSw7Value(const CKGModuleParamMsg *msg);
+	void SetSw8Value(const CKGModuleParamMsg *msg);
+
+	/* real idx-dependent packed-nibble/multi-branch outliers, see header
+	 * comment */
+	void SetScene(const CKGModuleParamMsg *msg);
+	void SetLinkedSceneId(const CKGModuleParamMsg *msg);
+
 	void SetModifiedKnob1(const CKGModuleParamMsg *msg);
 	void SetModifiedKnob2(const CKGModuleParamMsg *msg);
 	void SetModifiedKnob3(const CKGModuleParamMsg *msg);
@@ -337,7 +424,10 @@ struct CKGParamEdit {
 /*
  * CKGUIMsgProcessor -- the UI-notification singleton. `+0x6c` (a real
  * dword "current record-buffer UI mode" value, tested against the
- * literal 4 and the {8,9,10} range) and `+0x74` (a real byte flag, set
+ * literal 4 and the {8,9,10} range -- shadow write is attempted when mode
+ * is OUTSIDE {8,9,10} and skipped when mode is inside it, see the bug-fix
+ * comment on ShouldAttemptSysExShadowWrite()'s own body in the .cpp for how
+ * this was confirmed) and `+0x74` (a real byte flag, set
  * when a SysEx-shadow write actually happens) are read/written directly
  * as raw offsets, same "unsigned char *ms_poInstance" idiom as
  * CSPREngine/CKGBankManager; `NotifyAfterEdit()` is a real instance

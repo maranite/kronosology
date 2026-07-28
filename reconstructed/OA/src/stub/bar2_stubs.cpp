@@ -1099,3 +1099,13 @@ void CSTGMidiOutPortSerial::TransmitHardwareByte(unsigned char) { }
  * No-op: an incoming USB-MIDI-class packet is silently dropped rather
  * than dispatched, matching this file's own established convention. */
 void CSTGMidiInPortUSB::ReceivePacket(USBMidiPacket) { }
+
+/* SKSTGGate_NotifyKarmaSliderPosition(int) -- called from
+ * CKGModuleParamMsgHandler::SetKnob1-8Value (oa_ckg_module_param_msg_
+ * handler.h) as an unconditional-argument (0) tail call gated on the
+ * caller's own UI mode. Confirmed real in ground truth (`.text` symbol,
+ * own body a genuinely separate KARMA-slider-UI subsystem, not part of
+ * the checked-write dispatch family this batch reconstructs) -- link-
+ * satisfying no-op stub only, same convention as every other
+ * confirmed-real-but-out-of-scope dependency in this file. */
+void SKSTGGate_NotifyKarmaSliderPosition(int) { }

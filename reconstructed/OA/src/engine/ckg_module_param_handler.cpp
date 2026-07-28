@@ -27,6 +27,22 @@ CSPRSysExBufManager *CSPRMIDIMsgProcessor::ms_poSysExPlayBuf;
  * ground-truth functions of their own; ground truth inlines both into
  * every one of the 85 Shape-B methods separately. Factored here purely to
  * avoid 85x textual duplication -- semantically identical either way.
+ *
+ * BUG FIX (2026-07-28, found while tracing the deferred 18 methods'
+ * SetKnob1Value/SetSw1Value): the range-check sense here was INVERTED from
+ * ground truth in the original 113-method batch. Re-derived independently
+ * from 3 separate real disassemblies (SetValue @.text+0x3cd650, SetKnob1Value
+ * @.text+0x3cf930, SetGenCC @.text+0x3cb1a0) -- all three share the byte-
+ * identical `lea eax,[eax-0x8]; cmp eax,0x2; ja <shadow-lookup-block>` shape,
+ * and in EVERY case the `ja` (taken when (mode-8) is unsigned > 2, i.e. mode
+ * NOT in {8,9,10}) is what jumps INTO the CSPRSysExBufManager::GetValue
+ * lookup/shadow-write block; the fall-through case (mode WITHIN {8,9,10})
+ * skips straight past the shadow attempt to the CKGEngine suppression check
+ * (step 3). The original code had this backwards (`<= 2u`, "mode in
+ * {8,9,10}") -- was self-consistent with its own KAT test (which set
+ * mode=9 expecting the shadow branch) but not with ground truth. Fixed by
+ * flipping the comparison; the KAT test's mode value was updated to match
+ * (see verify/test_ckg_module_param_handler.cpp).
  */
 bool CKGModuleParamMsgHandler::ShouldAttemptSysExShadowWrite() const
 {
@@ -37,7 +53,7 @@ bool CKGModuleParamMsgHandler::ShouldAttemptSysExShadowWrite() const
 	int mode = *(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c);
 	if (mode == 4)
 		return false;
-	return (unsigned int)(mode - 8) <= 2u;	/* mode in {8,9,10} */
+	return (unsigned int)(mode - 8) > 2u;	/* mode NOT in {8,9,10} */
 }
 
 bool CKGModuleParamMsgHandler::SysExShadowWriteIsNeeded(const CKGModuleParamMsg *msg) const
@@ -2184,4 +2200,487 @@ void *CKGModuleParamMsgHandler::GetKarmaPerfModuleForSeqBackup(const CKGModulePa
 	if (!base)
 		return 0;
 	return base + (unsigned int)msg->m_deviceIndex * 0x2e8;
+}
+
+/* ================= Shape C/D: RTParm-indirected Knob/Sw value group
+ * (batch 2, 2026-07-28). See header comment for the full trace. ================= */
+
+void CKGModuleParamMsgHandler::SetKnob1Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x149) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x149) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x149) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob2Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14a) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14a) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14a) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob3Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14b) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14b) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14b) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob4Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14c) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14c) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14c) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob5Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14d) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14d) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14d) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob6Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14e) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14e) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14e) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob7Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x14f) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x14f) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x14f) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetKnob8Value(const CKGModuleParamMsg *msg)
+{
+	*(unsigned char *)(m_liveRecord + msg->m_index * 9 + 0x150) = (unsigned char)msg->m_value;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_defaultRecordA + msg->m_index * 9 + 0x150) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + msg->m_index * 9 + 0x150) = (unsigned char)msg->m_value;
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendKnob(selectId, (int)msg->m_index, 0, msg->m_value, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+		if (*(int *)(CKGUIMsgProcessor::ms_poInstance + 0x6c) != 1)
+			SKSTGGate_NotifyKarmaSliderPosition(0);
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw1Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 0)) | (unsigned char)(msg->m_value << 0));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 0)) | (unsigned char)(msg->m_value << 0));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 0)) | (unsigned char)(msg->m_value << 0));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw2Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 1)) | (unsigned char)(msg->m_value << 1));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 1)) | (unsigned char)(msg->m_value << 1));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 1)) | (unsigned char)(msg->m_value << 1));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw3Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 2)) | (unsigned char)(msg->m_value << 2));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 2)) | (unsigned char)(msg->m_value << 2));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 2)) | (unsigned char)(msg->m_value << 2));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw4Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 3)) | (unsigned char)(msg->m_value << 3));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 3)) | (unsigned char)(msg->m_value << 3));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 3)) | (unsigned char)(msg->m_value << 3));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw5Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 4)) | (unsigned char)(msg->m_value << 4));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 4)) | (unsigned char)(msg->m_value << 4));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 4)) | (unsigned char)(msg->m_value << 4));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw6Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 5)) | (unsigned char)(msg->m_value << 5));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 5)) | (unsigned char)(msg->m_value << 5));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 5)) | (unsigned char)(msg->m_value << 5));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw7Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 6)) | (unsigned char)(msg->m_value << 6));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 6)) | (unsigned char)(msg->m_value << 6));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 6)) | (unsigned char)(msg->m_value << 6));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+void CKGModuleParamMsgHandler::SetSw8Value(const CKGModuleParamMsg *msg)
+{
+	{
+		unsigned char *p = m_liveRecord + msg->m_index * 9 + 0x148;
+		*p = (unsigned char)((*p & ~(1u << 7)) | (unsigned char)(msg->m_value << 7));
+	}
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			unsigned char *pA = m_defaultRecordA + msg->m_index * 9 + 0x148;
+			*pA = (unsigned char)((*pA & ~(1u << 7)) | (unsigned char)(msg->m_value << 7));
+			unsigned char *pB = m_defaultRecordB + msg->m_index * 9 + 0x148;
+			*pB = (unsigned char)((*pB & ~(1u << 7)) | (unsigned char)(msg->m_value << 7));
+		}
+	}
+
+	if (CKGEngine::ms_poInstance[0xb0] == 0) {
+		int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+		CKGEngine::ms_poKGParamEdit->SendAssignableSwitch(selectId, (int)msg->m_index, 0, msg->m_value != 0, false);
+		((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+	}
+}
+
+/* ================= Real idx-dependent outliers: SetScene / SetLinkedSceneId
+ * (batch 2, 2026-07-28). See header comment for the full trace -- both
+ * deviate from the Shape-B skeleton's usual step ordering. ================= */
+
+void CKGModuleParamMsgHandler::SetScene(const CKGModuleParamMsg *msg)
+{
+	bool shadowWriteHappened = false;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			shadowWriteHappened = true;
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+			*(unsigned char *)(m_liveRecord + 0x127) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordA + 0x127) = (unsigned char)msg->m_value;
+			*(unsigned char *)(m_defaultRecordB + 0x127) = (unsigned char)msg->m_value;
+		}
+	}
+	if (!shadowWriteHappened)
+		*(unsigned char *)(m_liveRecord + 0x127) = (unsigned char)msg->m_value;
+
+	/* unlike every Shape-B method, suppression gates EVERYTHING past the
+	 * primary write above -- no LinkedSceneId-array sync, no Send, no
+	 * Notify when suppressed */
+	if (CKGEngine::ms_poInstance[0xb0] != 0)
+		return;
+
+	{
+		unsigned char curSceneIdx = *(unsigned char *)(*(unsigned char **)CKGBankManager::ms_poInstance + 0x135);
+		unsigned char value7 = (unsigned char)msg->m_value & 0x7;
+		unsigned char *p = m_liveRecord + 0x2e4 + (curSceneIdx >> 1);
+		if (!(curSceneIdx & 1))
+			*p = (unsigned char)((*p & 0xf8) | value7);
+		else
+			*p = (unsigned char)((*p & 0x8f) | (value7 << 4));
+	}
+
+	if (shadowWriteHappened) {
+		unsigned char curSceneIdx = *(unsigned char *)(*(unsigned char **)CKGBankManager::ms_poInstance + 0x135);
+		unsigned char value7 = (unsigned char)msg->m_value & 0x7;
+
+		unsigned char *pA = m_defaultRecordA + 0x2e4 + (curSceneIdx >> 1);
+		if (!(curSceneIdx & 1))
+			*pA = (unsigned char)((*pA & 0xf8) | value7);
+		else
+			*pA = (unsigned char)((*pA & 0x8f) | (value7 << 4));
+
+		unsigned char *pB = m_defaultRecordB + 0x2e4 + (curSceneIdx >> 1);
+		if (!(curSceneIdx & 1))
+			*pB = (unsigned char)((*pB & 0xf8) | value7);
+		else
+			*pB = (unsigned char)((*pB & 0x8f) | (value7 << 4));
+	}
+
+	if (m_pendingSceneSendGuard != 0)
+		return;
+
+	int selectId = CKGEngine::ms_poKGParamEdit->GetRTParmBufferSelectId(msg->m_deviceIndex);
+	CKGEngine::ms_poKGParamEdit->SendScene(selectId, (unsigned char)msg->m_value, false);
+	((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
+}
+
+void CKGModuleParamMsgHandler::SetLinkedSceneId(const CKGModuleParamMsg *msg)
+{
+	bool shadowWriteHappened = false;
+
+	if (ShouldAttemptSysExShadowWrite()) {
+		if (SysExShadowWriteIsNeeded(msg)) {
+			shadowWriteHappened = true;
+			*(unsigned char *)(CKGUIMsgProcessor::ms_poInstance + 0x74) = 1;
+		}
+	}
+
+	/* real per-scene packed-nibble write (matches CKGSeqBackupModuleParam::
+	 * SetLinkedSceneId's own read-side formula exactly) -- unconditional
+	 * against m_liveRecord regardless of suppression below; mirrored to
+	 * both shadow records only when the SysEx lookup above missed */
+	{
+		int idx = (int)msg->m_index;
+		int byteIdx = idx / 2;	/* real signed-division-by-2 idiom in ground truth */
+		unsigned char value7 = (unsigned char)msg->m_value & 0x7;
+
+		unsigned char *p = m_liveRecord + 0x2e4 + byteIdx;
+		if (!(idx & 1))
+			*p = (unsigned char)((*p & 0xf8) | value7);
+		else
+			*p = (unsigned char)((*p & 0x8f) | (value7 << 4));
+
+		if (shadowWriteHappened) {
+			unsigned char *pA = m_defaultRecordA + 0x2e4 + byteIdx;
+			if (!(idx & 1))
+				*pA = (unsigned char)((*pA & 0xf8) | value7);
+			else
+				*pA = (unsigned char)((*pA & 0x8f) | (value7 << 4));
+
+			unsigned char *pB = m_defaultRecordB + 0x2e4 + byteIdx;
+			if (!(idx & 1))
+				*pB = (unsigned char)((*pB & 0xf8) | value7);
+			else
+				*pB = (unsigned char)((*pB & 0x8f) | (value7 << 4));
+		}
+	}
+
+	/* unlike the packed-nibble write above, the simple 0x127 mirror field
+	 * (same offset SetScene owns) and the Send/Notify pair ARE gated on
+	 * suppression, same as every Shape-B method */
+	if (CKGEngine::ms_poInstance[0xb0] != 0)
+		return;
+
+	*(unsigned char *)(m_liveRecord + 0x127) = (unsigned char)msg->m_value;
+	if (shadowWriteHappened) {
+		*(unsigned char *)(m_defaultRecordA + 0x127) = (unsigned char)msg->m_value;
+		*(unsigned char *)(m_defaultRecordB + 0x127) = (unsigned char)msg->m_value;
+	}
+
+	CKGEngine::ms_poKGParamEdit->SendLinkedSceneID((unsigned char)msg->m_deviceIndex,
+							(unsigned char)msg->m_index,
+							(unsigned char)msg->m_value);
+	((CKGUIMsgProcessor *)CKGUIMsgProcessor::ms_poInstance)->NotifyAfterEdit();
 }
