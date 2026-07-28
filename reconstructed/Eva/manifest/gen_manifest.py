@@ -3281,6 +3281,73 @@ RECONSTRUCTED = {
     "08096fb0",  # CNoteTracer::ClearEntries()
     "080970d0",  # CNoteTracer::RefreshEntries()
     "08183f60",  # CNoteTracer::RendundantInsertion(CNoteTracer::CBufferedNote&, CNoteTracer::CBufferedNote) (weak, base vtable slot)
+
+    # --- fs_converter.h/pcm_filter.h/kaiser_window.h, PCM/sample-rate conversion
+    # utility cluster (2026-07-28) -- see fs_converter.h's own header comment for
+    # the 2 larger candidates (CRTRouter/CRTRouterApiInstance, the CFileBase file-
+    # format-loader family) traced and REJECTED first. CFsConverterNormal's own
+    # Process()/BuildFilterCoeffTable() and CFsCwInterpolation's own Process()/
+    # SetFilterCoeffs() overrides are DEFERRED (real, substantial polyphase-FIR
+    # ring-buffer resampler core, out of scope this pass) -- their addresses are
+    # deliberately NOT included below, see fs_converter.h for the full list.
+    "08305b50",  # CKaiserWindowCoeffs::~CKaiserWindowCoeffs() (D1)
+    "08305b60",  # CKaiserWindowCoeffs::SetWindowLength(int)
+    "08305ba0",  # CKaiserWindowCoeffs::SetSideLobeAttenuation(double)
+    "08305bd0",  # CKaiserWindowCoeffs::SetBesselFunctionLength(int)
+    "08305c00",  # CKaiserWindowCoeffs::CalcDenomAlpha()
+    "08305c30",  # CKaiserWindowCoeffs::GetWindowCoeff(int)
+    "08305cb0",  # CKaiserWindowCoeffs::BesselFunction(double)
+    "08305ea0",  # CKaiserWindowCoeffs::CalcCoeffAlpha()
+    "08305f30",  # CKaiserWindowCoeffs::~CKaiserWindowCoeffs() (D0)
+    "08305f50",  # CKaiserWindowCoeffs::CKaiserWindowCoeffs()
+    "08304160",  # CDecimationFilterCoeffs::SetSampleRate(int)
+    "083041a0",  # CDecimationFilterCoeffs::SetCutoffFreq(int)
+    "083041d0",  # CDecimationFilterCoeffs::CalcFreqCoeffs()
+    "08304200",  # CDecimationFilterCoeffs::GetDelayOffsetSamples()
+    "08304210",  # CDecimationFilterCoeffs::GetDelayOffsetSeconds()
+    "08304240",  # CDecimationFilterCoeffs::GetDelayOffset()
+    "08304260",  # CDecimationFilterCoeffs::GetFilterCoeff(int)
+    "08304300",  # CDecimationFilterCoeffs::SetBesselFunctionLength(int)
+    "08304320",  # CDecimationFilterCoeffs::SetSideLobeAttenuation(double)
+    "08304340",  # CDecimationFilterCoeffs::SetFilterLength(int)
+    "08304380",  # CDecimationFilterCoeffs::~CDecimationFilterCoeffs() (D1)
+    "083043a0",  # CDecimationFilterCoeffs::~CDecimationFilterCoeffs() (D0)
+    "083043d0",  # CDecimationFilterCoeffs::CDecimationFilterCoeffs()
+    "08305fb0",  # COversamplingFilterCoeffs::SetOversamplingRate(int)
+    "08305fd0",  # COversamplingFilterCoeffs::GetFilterCoeff(int)
+    "08306000",  # COversamplingFilterCoeffs::~COversamplingFilterCoeffs() (D1)
+    "08306020",  # COversamplingFilterCoeffs::~COversamplingFilterCoeffs() (D0)
+    "08306050",  # COversamplingFilterCoeffs::COversamplingFilterCoeffs()
+    "08304460",  # CFsConverterNormal::SetFilterCoeffs(int)
+    "083044f0",  # CFsConverterNormal::SetFilterCoeffs(int,int,float,int,int) -- real 1-byte "return;" base stub
+    "08304ab0",  # CFsConverterNormal::GetDelayOffsetSamples()
+    "08304ad0",  # CFsConverterNormal::GetDelayOffsetSeconds()
+    "08304af0",  # CFsConverterNormal::GetDelayOffset()
+    "08304b10",  # CFsConverterNormal::Reset()
+    "08304f00",  # CFsConverterNormal::SetBesselFunctionLength(int)
+    "08304f20",  # CFsConverterNormal::SetSideLobeAttenuation(double)
+    "08304f40",  # CFsConverterNormal::~CFsConverterNormal() (D1)
+    "08304fd0",  # CFsConverterNormal::~CFsConverterNormal() (D0)
+    "08305060",  # CFsConverterNormal::CFsConverterNormal(int)
+    "08305aa0",  # CFsCwInterpolation::~CFsCwInterpolation() (D1)
+    "08305ad0",  # CFsCwInterpolation::~CFsCwInterpolation() (D0)
+    "08305b00",  # CFsCwInterpolation::CFsCwInterpolation(int)
+    "08306080",  # CPcmFilter::~CPcmFilter() (D1)
+    "08306090",  # CPcmFilter::SetBitsPerSample(int)
+    "083060e0",  # CPcmFilter::IntToFloat(long**, float**, unsigned long, int)
+    "08306300",  # CPcmFilter::FloatToInt(float**, long**, unsigned long, int)
+    "083064c0",  # CPcmFilter::~CPcmFilter() (D0)
+    "083064e0",  # CPcmFilter::CPcmFilter(int)
+    "08306530",  # CPcmFilter::BitShift(long**, long**, unsigned long, int, int)
+    "08306c60",  # CPcmFilter::Copy(float**, float**, unsigned long, int)
+    "08306e90",  # CPcmFilter::Reverse(float**, float**, unsigned long, int)
+    "083070f0",  # CPcmFilter::Fade(float**, float**, unsigned long, int, int)
+    "08307560",  # CPcmFilter::IsAlwaysBelow(float**, unsigned long, int, float)
+    "08307790",  # CPcmFilter::IsSilent(float**, unsigned long, int)
+    "08307a50",  # CPcmFilter::GetMaximumAbsValue(float**, unsigned long, int)
+    "08307cb0",  # CPcmFilter::ClipAndGetPeakLevels(float**, float**, float*, unsigned long, int)
+    "08307fe0",  # CPcmFilter::GetPeakLevels(float**, float*, unsigned long, int)
+    "08308270",  # CPcmFilter::Mute(float**, unsigned long, unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
