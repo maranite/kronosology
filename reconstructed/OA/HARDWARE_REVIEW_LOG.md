@@ -1844,3 +1844,50 @@ false-positive grep hit on the pre-existing "MP-BIOS bug: 8254 timer"
 printk). VM instance torn down cleanly. Full derivation in
 `kronosology/.claude/agent-memory/re-decompiler/`
 (`oa_broader_vtable_sweep_6_more_instances_2026-07-27.md`).
+
+---
+
+## CKGSeqBackupCommonParam / CKGSeqBackupModuleParam — Karma sequencer param-backup cluster, 201 methods (batch, 2026-07-28)
+
+Two genuinely new classes (first appearance in this project), discovered
+as a dense, previously-untouched cluster while surveying pending manifest
+entries by class: `CKGSeqBackupCommonParam` (72 real methods,
+`.text+0x3d1200`..`.text+0x3d2070`) and `CKGSeqBackupModuleParam` (131
+real methods, `.text+0x3d2070`..`.text+0x3d3830`), laid out back-to-back
+in the real binary. Both classes read one live/default KARMA-perf record
+field into a scratch `m_value` slot per call -- see
+`include/oa_karma_seq_backup.h` for the full struct-layout derivation.
+
+201 of the 203 real methods (both ctors, both `GetKarmaPerf{Common,
+Module}ForSeqBackup()` helpers, and 197 of 197 `Set*` accessors) are
+reconstructed and KAT-verified (`verify/test_ckg_seq_backup.cpp`, 204
+checks, all passing) via a scripted instruction-pattern decoder run
+against the real disassembly (not hand-transcribed one at a time).
+
+Deliberately deferred, same "don't declare what isn't verified yet"
+convention as CSTGLFO's `ProcessSubRate`:
+
+1. **`GetValue(int paramIndex, int subIndex, long *out)`** on both
+   classes (CommonParam: `.text+0x3d1240`, 1555 bytes, 69-case jump
+   table; ModuleParam: `.text+0x3d20d0`, 2893 bytes, 128-case table).
+   Confirmed to be a real, fully self-contained function whose case
+   bodies duplicate (not call) the same field offset/width/shift/mask
+   logic as the correspondingly-named `Set*` method -- reconstructing it
+   faithfully needs the exact case-index -> field mapping pinned down,
+   which is real additional verification work (case order need not equal
+   `Set*` declaration order, and a wrong mapping would be a silent
+   behavioural bug, not a compile error) beyond what this pass's KAT
+   covers.
+2. **The real caller** that iterates these backup objects (the actual
+   Karma step-record/undo path) was not traced -- out of scope for this
+   pass, which only reconstructs the two classes' own methods.
+3. **`CKGBankManager::GetSeqKarmaPerfCommon`/`GetSeqKarmaPerfModule`/
+   `GetSeqDefaultKarmaPerfCommon`** and **`CSPREngine`**'s broader
+   surface are declared (real mangled names) but not defined --
+   `CKGBankManager`'s own body was already out of scope before this
+   batch (see oa_engine_init.h), and `CSPREngine` is a brand-new opaque
+   stand-in discovered by this batch, same convention.
+
+Real-HW test that would help: none identified -- this is pure control-
+plane bookkeeping (no audio/DSP output, no front-panel I/O) with no
+obvious externally-observable effect to probe against a live unit.

@@ -164,6 +164,7 @@ OA-objs := src/auth/klm_manager.o \
            src/stub/bar2_stubs_c.o \
            src/engine/front_panel_handlers.o \
            src/engine/karma_chord_trigger.o \
+           src/engine/karma_seq_backup.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -401,6 +402,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/sk_stg_gate.cpp \
        src/engine/midi_clock_sync.cpp \
        src/engine/effect_manager_run_effects.cpp \
+       src/engine/karma_seq_backup.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -596,7 +598,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_seq_led \
          verify/test_param_convertor \
          verify/test_adsr_base \
-         verify/test_lfo_component
+         verify/test_lfo_component \
+         verify/test_ckg_seq_backup
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -761,6 +764,9 @@ verify/test_adsr_base: verify/test_adsr_base.cpp src/engine/adsr_base.cpp includ
 
 verify/test_lfo_component: verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp include/oa_lfo.h include/oa_adsr_base.h include/oa_global.h include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp -o $@
+
+verify/test_ckg_seq_backup: verify/test_ckg_seq_backup.cpp src/engine/karma_seq_backup.cpp include/oa_karma_seq_backup.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_seq_backup.cpp src/engine/karma_seq_backup.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@

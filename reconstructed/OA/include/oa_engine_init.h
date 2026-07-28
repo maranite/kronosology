@@ -2288,6 +2288,44 @@ struct CTimerManager {
  */
 struct CKGBankManager {
 	static unsigned char *ms_poInstance;
+
+	/*
+	 * Three more real methods, discovered while reconstructing the
+	 * CKGSeqBackupCommonParam/CKGSeqBackupModuleParam cluster
+	 * (src/engine/karma_seq_backup.cpp): both classes' own
+	 * GetKarmaPerf{Common,Module}ForSeqBackup() helpers and their
+	 * GetValue() dispatchers call these through `ms_poInstance` as
+	 * `this` (confirmed via each call site's own
+	 * `mov eax,CKGBankManager::ms_poInstance` immediately before the
+	 * call, same "this IS the singleton" shape as this struct's other
+	 * consumers). Declared here (real mangled names, `Ej`/`Ev` per
+	 * their real 1-arg/0-arg signatures) so the caller-side code
+	 * compiles and links against the real symbol names -- their OWN
+	 * bodies are CKGBankManager's, not this batch's, and stay
+	 * genuinely unresolved here (same "expected Unknown symbol"
+	 * convention as CKGBankManager's other not-yet-reconstructed
+	 * surface; see Makefile's own comment on `make ko`).
+	 */
+	unsigned char *GetSeqKarmaPerfCommon(unsigned int index);
+	unsigned char *GetSeqKarmaPerfModule(unsigned int index);
+	unsigned char *GetSeqDefaultKarmaPerfCommon();
+};
+
+/*
+ * CSPREngine -- another genuinely new, entirely separate class,
+ * discovered the same way as CKGBankManager/CTimerManager above: both
+ * CKGSeqBackupCommonParam::GetKarmaPerfCommonForSeqBackup() and
+ * CKGSeqBackupModuleParam::GetKarmaPerfModuleForSeqBackup() start by
+ * reloading `CSPREngine::ms_poInstance` (real relocation
+ * `_ZN10CSPREngine13ms_poInstanceE`) and testing a single flag byte at
+ * +0xa before doing anything else -- a "sequencer running / backup
+ * armed" gate, guessed from the class name (Sequencer/Performance
+ * Record engine) and behaviour, not confirmed beyond the byte offset
+ * itself. Declared as a minimal opaque stand-in, same convention as
+ * CKGBankManager -- its own layout is otherwise out of scope here.
+ */
+struct CSPREngine {
+	static unsigned char *ms_poInstance;
 };
 
 /* Also declared in oa_global.h (sec 10.98) -- same real, non-`extern
