@@ -23,6 +23,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include "oa_ckg_midi_msg_handler.h"
 
 static int g_fail;
@@ -107,11 +108,10 @@ void CKGRTCHandler::StartBuffering() {}
  * StoreDyingNoteInfoFor{MIDPort,STG}/ProcessLocalControlChannelMessage/
  * ProcessKarmaControllerGeneratedChannelMessage are now REAL (this
  * batch) -- mocks removed, real bodies linked in from
- * ckg_midi_msg_handler.cpp itself. */
-void CKGMIDIMsgProcessor::KillAllDyingNotes() {}
-void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue() {}
-static CMIDIMessage *g_lastStoreCCMessageArg;
-void CKGMIDIMsgProcessor::StoreCCMessage(CMIDIMessage *msg) { g_lastStoreCCMessageArg = msg; }
+ * ckg_midi_msg_handler.cpp itself. CKGMIDIMsgProcessor::KillAllDyingNotes/
+ * ResetKarmaGeneratedCCValue/StoreCCMessage are ALSO now REAL (a LATER
+ * batch, full 13/13 class) -- their own mocks removed too, same reason.
+ */
 
 static int g_curLocLastCallKind; /* 0=none,1=current,2=precount */
 static int g_locBar = 5, g_locBeat = 10, g_locC = 4, g_locD = 0;
@@ -241,10 +241,13 @@ static int g_softPedalCalls;
 void CKGUIMsgSender::UpdateSoftPedalStatus(bool on) { g_lastSoftPedalOn = on; g_softPedalCalls++; }
 
 unsigned char *CKGEngine::ms_poKGEventDisplayManager;
-static unsigned char g_eventDisplayBuf[0x10];
-static int g_lastNoteOnUI = -1, g_lastNoteOffUI = -1;
-void CKGEventDisplayManager::NoteOn(int note) { g_lastNoteOnUI = note; }
-void CKGEventDisplayManager::NoteOff(int note) { g_lastNoteOffUI = note; }
+/* CKGEventDisplayManager::NoteOn(int)/NoteOff(int) are now REAL (a LATER
+ * batch, full 15/15 class) -- mocks removed, real bodies linked in from
+ * ckg_midi_msg_handler.cpp itself. The old 16-byte g_eventDisplayBuf mock
+ * is replaced by a real instance, wired up (and Initialize()'d) further
+ * down in reset_all_mocks(), after CKGBankManager::ms_poInstance[+8]'s
+ * own sub-buffer is wired -- Initialize() dereferences it. */
+static CKGEventDisplayManager g_eventDisplayObj;
 
 /* CDyingNoteInfo -- own real layout out of scope (opaque 0x84-byte blob),
  * mocked here as a simple per-note bitset + "any notes on" counter so the
@@ -313,6 +316,13 @@ void CKGEngine::SendChannelMessage(unsigned char statusType, unsigned char chann
 { g_lastSentStatusType = statusType; g_lastSentChannel = channel; g_lastSentData1 = data1; g_lastSentData2 = data2; }
 static bool g_forceTimbreZoneBypass;
 bool CKGEngine::ShouldForceTimbreZoneBypass(int, int) { return g_forceTimbreZoneBypass; }
+static bool g_karmaOn;
+bool CKGEngine::IsKarmaOn() { return g_karmaOn; }
+static int g_numModules;
+int CKGEngine::GetNumOfModule() { return g_numModules; }
+static int g_realOutputChannel[4] = { -1, -1, -1, -1 };
+int CKGEngine::GetRealOutputChannel(int module)
+{ return (module >= 0 && module < 4) ? g_realOutputChannel[module] : -1; }
 
 static bool g_lastKeyboardOnOnOff, g_keyboardOnResult;
 static int g_lastKeyboardOnNote = -1, g_lastKeyboardOnChannel = -1, g_lastKeyboardOnVelocity = -1;
@@ -375,6 +385,46 @@ static CSKMIDIMsgProcessor *OA_TestSKMIDIMsgProcessorSingleton()
 	return proc;
 }
 
+/*
+ * Same rationale as OA_TestSKMIDIMsgProcessorSingleton() above --
+ * CKGMIDIMsgProcessor::ms_poInstance is dereferenced unconditionally by
+ * CSKMIDIMsgHandler::SendChannelMessageToSTG() (a base-class virtual
+ * exercised from many already-existing tests) and by
+ * CSKSpecialMsgHandler::ProcessResetAllControllerMessage()'s own case 3.
+ * Both were harmless while CKGMIDIMsgProcessor::StoreCCMessage/
+ * KillAllDyingNotes were empty test mocks; now that they're REAL and
+ * dereference m_ccReset[]/m_timbreThru, a null ms_poInstance SIGSEGVs.
+ * Wired via manual field assignment (NOT the real ctor) to avoid
+ * CSTGBankMemory::AllocAligned()'s own mock below, which always returns
+ * the SAME fixed buffer regardless of requested size -- calling the real
+ * ctor here would alias all 20 owned sub-objects onto one buffer.
+ */
+static CKGMIDIMsgProcessor *OA_TestKGMIDIMsgProcessorSingleton()
+{
+	static CKGMIDIKarmaGeneratedMsgHandler s_karmaGen;
+	static CKGMIDITimbreThruMsgHandler s_timbreThru;
+	static CKGMIDIKarmaResetCCMsgHandler s_karmaResetCC;
+	static CKGBendRangeHandler s_bendRange;
+	static unsigned char s_ccResetBuf[16][sizeof(CKGCCResetHandler)];
+	static unsigned char s_raw[sizeof(CKGMIDIMsgProcessor)];
+	static bool s_wired;
+	CKGMIDIMsgProcessor *proc = reinterpret_cast<CKGMIDIMsgProcessor *>(s_raw);
+
+	if (!s_wired) {
+		proc->m_karmaGen = &s_karmaGen;
+		proc->m_timbreThru = &s_timbreThru;
+		proc->m_karmaResetCC = &s_karmaResetCC;
+		proc->m_bendRange = &s_bendRange;
+		for (int i = 0; i < 16; i++) {
+			proc->m_ccReset[i] = new (s_ccResetBuf[i]) CKGCCResetHandler(i);
+			proc->m_ccReset[i]->Initialize();
+		}
+		proc->m_bSuspended = 0;
+		s_wired = true;
+	}
+	return proc;
+}
+
 static void reset_all_mocks()
 {
 	memset(g_bankBuf, 0, sizeof(g_bankBuf));
@@ -383,6 +433,7 @@ static void reset_all_mocks()
 	CKGEngine::ms_poInstance = g_engineBuf;
 	CSTGMessageProcessor::sInstance = (CSTGMessageProcessor *)g_stgMsgProcBuf;
 	CSKMIDIMsgProcessor::ms_poInstance = (unsigned char *)OA_TestSKMIDIMsgProcessorSingleton();
+	CKGMIDIMsgProcessor::ms_poInstance = (unsigned char *)OA_TestKGMIDIMsgProcessorSingleton();
 	g_changePerformanceCalls = 0;
 	g_shouldKeepKarma = true;
 	g_clearSchedulerCalls = g_karmaOnCalls = g_karmaOffCalls = g_resetLocalCtrlCalls = 0;
@@ -396,9 +447,6 @@ static void reset_all_mocks()
 	CKGUIMsgProcessor::ms_poInstance = g_uiMsgProcBuf;
 	CKGControlMsgHandler::ms_bIsNowProcessingSoftPedalMessage = false;
 	g_softPedalCalls = 0;
-	memset(g_eventDisplayBuf, 0, sizeof(g_eventDisplayBuf));
-	CKGEngine::ms_poKGEventDisplayManager = g_eventDisplayBuf;
-	g_lastNoteOnUI = g_lastNoteOffUI = -1;
 	/* CKGBankManager::ms_poInstance[+8] is itself a pointer (see
 	 * NotifyNoteEventToUI()'s own header comment) -- point it at a
 	 * scratch note-display buffer, distinct from g_uiMsgProcBuf.
@@ -415,6 +463,12 @@ static void reset_all_mocks()
 	static unsigned char noteDisplayBuf[0x14800];
 	memset(noteDisplayBuf, 0, sizeof(noteDisplayBuf));
 	*(unsigned char **)(g_bankBuf + 8) = noteDisplayBuf;
+
+	/* CKGEventDisplayManager::Initialize() itself dereferences
+	 * CKGBankManager::ms_poInstance[+8] (just wired above), so this must
+	 * come after it. */
+	CKGEngine::ms_poKGEventDisplayManager = (unsigned char *)&g_eventDisplayObj;
+	g_eventDisplayObj.Initialize();
 
 	g_mf_voiceMode = 0;
 	g_mf_numKarmaModules = 0;
@@ -443,6 +497,9 @@ static void reset_all_mocks()
 	g_lastSentStatusType = g_lastSentChannel = 0;
 	g_lastSentData1 = g_lastSentData2 = 0;
 	g_forceTimbreZoneBypass = false;
+	g_karmaOn = false;
+	g_numModules = 0;
+	g_realOutputChannel[0] = g_realOutputChannel[1] = g_realOutputChannel[2] = g_realOutputChannel[3] = -1;
 	g_lastKeyboardOnOnOff = false;
 	g_keyboardOnResult = true;
 	g_lastKeyboardOnNote = g_lastKeyboardOnChannel = g_lastKeyboardOnVelocity = -1;
@@ -1031,6 +1088,129 @@ int main(void)
 		check("IsKeyboardAllOff(): sostenuto held -> false (via !IsSostenutoOn())",
 		      proc->IsKeyboardAllOff(), 0);
 		localCtrl.m_bSostenutoOn = false;
+	}
+
+	/*
+	 * CKGEventDisplayManager -- expected values independently re-derived
+	 * from the raw disassembly formulas by a standalone Python oracle
+	 * (scratchpad oracle_ckg_midi_msg_proc_evtdisp.py), NOT copy-pasted
+	 * from the .cpp under test.
+	 */
+	{
+		printf("-- CKGEventDisplayManager --\n");
+		reset_all_mocks();
+
+		check("GetNoteObjectIndex(0)", CKGEventDisplayManager::GetNoteObjectIndex(0), 1);
+		check("GetNoteObjectIndex(3)", CKGEventDisplayManager::GetNoteObjectIndex(3), 4);
+		check("GetNoteObjectIndex(4) out-of-range -> default 1", CKGEventDisplayManager::GetNoteObjectIndex(4), 1);
+		check("GetNoteObjectIndex(-1) out-of-range -> default 1", CKGEventDisplayManager::GetNoteObjectIndex(-1), 1);
+
+		unsigned char *sub = *(unsigned char **)(g_bankBuf + 8);
+		unsigned int *onMask = (unsigned int *)(sub + 0x723c);
+
+		g_eventDisplayObj.NoteOn(60);
+		g_eventDisplayObj.NoteOn(60);
+		g_eventDisplayObj.NoteOnByKarma(1, 60);	/* module 1 -> objectIndex 2 */
+		check("NoteOn(60) x2 -> m_flat[objectIndex0*128+60] == 2",
+		      g_eventDisplayObj.m_flat[0 * 128 + 60], 2);
+		check("NoteOnByKarma(module=1,60) -> m_flat[objectIndex2*128+60] == 1",
+		      g_eventDisplayObj.m_flat[2 * 128 + 60], 1);
+		check("NoteOn(60): foreign sub-object on-bitmask bit set (objectIndex 0)",
+		      (onMask[0 * 4 + (60 >> 5)] >> (60 & 0x1f)) & 1, 1);
+		check("NoteOnByKarma(1,60): foreign sub-object on-bitmask bit set (objectIndex 2)",
+		      (onMask[2 * 4 + (60 >> 5)] >> (60 & 0x1f)) & 1, 1);
+
+		/* First NoteOff(60): ring bit not yet set this write-window ->
+		 * marks the ring bit only, count is UNCHANGED (decrement
+		 * deferred to CheckAndProcessNoteStatus()'s aging pass). */
+		g_eventDisplayObj.NoteOff(60);
+		check("NoteOff(60) 1st call: count deferred, still 2",
+		      g_eventDisplayObj.m_flat[0 * 128 + 60], 2);
+		/* Second NoteOff(60): ring bit ALREADY set -> decrements directly. */
+		g_eventDisplayObj.NoteOff(60);
+		check("NoteOff(60) 2nd call: decrements directly to 1",
+		      g_eventDisplayObj.m_flat[0 * 128 + 60], 1);
+
+		reset_all_mocks();
+		int cc = 42;	/* 42/8 = 5 */
+		g_eventDisplayObj.CCOnByKarma(1, cc);
+		g_eventDisplayObj.CCOnByKarma(1, cc);	/* same window -> ring-gate cancels back */
+		check("CCOnByKarma(module=1,cc=42) x2 same window -> count nets to 1",
+		      g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_CC_DATA + 1 * 16 + 5], 1);
+
+		reset_all_mocks();
+		int bend = 9000;	/* 9000/1024 = 8 */
+		g_eventDisplayObj.BendOnByKarma(2, bend);
+		check("BendOnByKarma(module=2,bend=9000) -> groupIndex 8 count == 1",
+		      g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_CC_DATA + 2 * 16 + 8], 1);
+
+		reset_all_mocks();
+		g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_TICK_NOW] = 45;
+		g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_NOTE_CHECKPOINT] = 0;
+		g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_CC_CHECKPOINT] = 45;
+		g_eventDisplayObj.NoteOn(10);
+		g_eventDisplayObj.Idle();	/* diff=45 > 0x13 twice (45,25) -> 2 note-aging passes; CC diff=0 -> none */
+		check("Idle(): note count survives 2 aging passes when no matching write-window bit set",
+		      g_eventDisplayObj.m_flat[0 * 128 + 10], 1);
+		check("Idle(): note checkpoint advances to now - remainder (45-2*20=5 -> 45-5=40)",
+		      g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_NOTE_CHECKPOINT], 40);
+		check("Idle(): CC checkpoint untouched (diff was 0)",
+		      g_eventDisplayObj.m_flat[CKGEventDisplayManager::OA_KGEVTDISP_CC_CHECKPOINT], 45);
+	}
+
+	/*
+	 * CKGMIDIMsgProcessor -- expected values independently re-derived by
+	 * the same standalone oracle script.
+	 */
+	{
+		printf("-- CKGMIDIMsgProcessor --\n");
+		reset_all_mocks();
+		CKGMIDIMsgProcessor *kgproc = (CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance;
+
+		g_karmaOn = true;
+		kgproc->ProcessKarmaGeneratedChannelMessage(0x90, 3, (char)60, (char)100, true);
+		check("ProcessKarmaGeneratedChannelMessage: status = channel+statusType (3+0x90)",
+		      kgproc->m_karmaGen->m_status, 0x93);
+		check("ProcessKarmaGeneratedChannelMessage: data1/data2", kgproc->m_karmaGen->m_data1, 60);
+		check("ProcessKarmaGeneratedChannelMessage: flags karma-on|changeSource = 0x05|0x20|0x40",
+		      kgproc->m_karmaGen->m_flags, 0x5 | 0x20 | 0x40);
+
+		reset_all_mocks();
+		g_karmaOn = false;
+		kgproc->ProcessKarmaGeneratedChannelMessage(0x90, 3, (char)60, (char)100, false);
+		check("ProcessKarmaGeneratedChannelMessage: flags karma-off|no-changeSource = 0x05",
+		      kgproc->m_karmaGen->m_flags, 0x5);
+
+		reset_all_mocks();
+		g_karmaOn = true;
+		kgproc->ProcessKarmaResetCCChannelMessage(0xb0, 5, (char)0x40, (char)0x7f);
+		check("ProcessKarmaResetCCChannelMessage: status = channel+statusType (5+0xb0)",
+		      kgproc->m_karmaResetCC->m_status, 0xb5);
+		check("ProcessKarmaResetCCChannelMessage: flags karma-on, no changeSource bit at all = 0x25",
+		      kgproc->m_karmaResetCC->m_flags, 0x5 | 0x20);
+
+		reset_all_mocks();
+		kgproc->ProcessKarmaGeneratedBendRangeChannelMessage(0x30, (char)10);
+		check("ProcessKarmaGeneratedBendRangeChannelMessage: status = channel-0x20 (0x30-0x20)",
+		      kgproc->m_bendRange->m_status, 0x10);
+		check("ProcessKarmaGeneratedBendRangeChannelMessage: flags = 0x05|0x10 unconditionally",
+		      kgproc->m_bendRange->m_flags, 0x5 | 0x10);
+
+		reset_all_mocks();
+		g_numModules = 2;
+		g_realOutputChannel[0] = 3;
+		g_realOutputChannel[1] = 7;
+		kgproc->ResetKarmaGeneratedCCValue();	/* out-of-scope CKGCCResetHandler::
+							 * ResetKarmaGeneratedValue() body is a
+							 * no-op stub -- this just proves the
+							 * dispatch/module-search itself doesn't
+							 * crash across all 16 channels. */
+		check("ResetKarmaGeneratedCCValue(): completes without crashing (16-channel search)", 1, 1);
+
+		reset_all_mocks();
+		unsigned char msg[1] = { 0x37 };	/* low nibble 7 -> channel 7 */
+		kgproc->StoreCCMessage((CMIDIMessage *)msg);
+		check("StoreCCMessage(): completes without crashing (routes to m_ccReset[7])", 1, 1);
 	}
 
 	printf("\n%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");

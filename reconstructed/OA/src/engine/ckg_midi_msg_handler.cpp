@@ -2531,3 +2531,501 @@ void CSKMIDIMsgProcessor::ResetNotesAfterStopSequencer()
 	m_padByLocal->ClearKeyboardStatus();
 	m_localCtrl->ClearKeyboardStatus();
 }
+
+/* ==================== CKGEventDisplayManager ====================
+ * See oa_ckg_midi_msg_handler.h's own class comment for the full flat
+ * dword-index layout derivation.
+ */
+
+/* .text+0x3b40b0, 3408 bytes. Real body: zero the whole [0,0xedc) byte
+ * range except the 2 read-cursor dwords (seeded to 1), then zero a
+ * 96-byte range on the FOREIGN CKGBankManager::ms_poInstance[+8]
+ * sub-object (the note/CC "visibly on" bitmasks). */
+void CKGEventDisplayManager::Initialize()
+{
+	__builtin_memset(m_flat, 0, sizeof(m_flat));
+	m_flat[OA_KGEVTDISP_NOTE_RCURSOR] = 1;
+	m_flat[OA_KGEVTDISP_CC_RCURSOR] = 1;
+
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	__builtin_memset(sub + 0x723c, 0, 0x729c - 0x723c);
+}
+
+/* Shared helper -- real ground truth duplicates this across NoteOn()/
+ * NoteOnByKarma()/NoteOn(int,int) verbatim (confirmed identical from this
+ * step onward in all 3). Always increments the live count, then
+ * unconditionally ORs the ring bit (no gating -- that's NoteOff's own
+ * shape, see MarkNoteOff below). */
+void CKGEventDisplayManager::MarkNoteOn(int objectIndex, int note)
+{
+	m_flat[objectIndex * 128 + note]++;
+
+	if (objectIndex > 4 || (unsigned int)note > 0x7f)
+		return;
+
+	unsigned int *onMask = (unsigned int *)(*(unsigned char **)(CKGBankManager::ms_poInstance + 8) + 0x723c);
+	onMask[objectIndex * 4 + (note >> 5)] |= 1u << (note & 0x1f);
+}
+
+/* Shared helper -- real ground truth duplicates this across NoteOff()/
+ * NoteOffByKarma()/NoteOff(int,int) verbatim. Ring-gated: the FIRST
+ * NoteOff for a given note within the current write-window just marks
+ * the ring bit (the count is decremented later, once, when
+ * CheckAndProcessNoteStatus() ages that ring slot out); any FURTHER
+ * (redundant) NoteOff for the SAME note within the same window decrements
+ * the live count directly instead. */
+void CKGEventDisplayManager::MarkNoteOff(int objectIndex, int note)
+{
+	int V = m_flat[OA_KGEVTDISP_NOTE_WCURSOR];
+	unsigned int *ring = (unsigned int *)&m_flat[OA_KGEVTDISP_NOTE_RING + V * 20 + objectIndex * 4];
+	unsigned int bit = 1u << (note & 0x1f);
+
+	if (!(ring[note >> 5] & bit)) {
+		ring[note >> 5] |= bit;
+		return;
+	}
+
+	int idx = objectIndex * 128 + note;
+	if (m_flat[idx] > 0)
+		m_flat[idx]--;
+}
+
+/* Shared helper -- real ground truth duplicates this across
+ * CCOnByKarma()/CCOn()/BendOnByKarma() verbatim (confirmed byte-identical
+ * from this step onward in all 3 -- only the caller-side divisor differs,
+ * 8 for CC, 1024 for pitch bend). Always increments the live count; if
+ * this exact (module,groupIndex) bit was ALREADY marked in the current
+ * write-window's ring slot, immediately decrements back (net effect: the
+ * count only grows once per NEW window, repeated marks within the same
+ * window cancel out). */
+void CKGEventDisplayManager::MarkCCOrBendOn(int module, int groupIndex)
+{
+	int idx = OA_KGEVTDISP_CC_DATA + module * 16 + groupIndex;
+	m_flat[idx]++;
+
+	if (groupIndex > 0xf || module > 3)
+		return;
+
+	int V = m_flat[OA_KGEVTDISP_CC_WCURSOR];
+	unsigned int *ring = (unsigned int *)&m_flat[OA_KGEVTDISP_CC_RING + V * 4];
+	unsigned int bit = 1u << groupIndex;
+
+	if (!(ring[module] & bit)) {
+		ring[module] |= bit;
+		return;
+	}
+
+	if (m_flat[idx] > 0)
+		m_flat[idx]--;
+}
+
+/* .text+0x3b4e00, 64 bytes. */
+void CKGEventDisplayManager::NoteOn(int note)
+{
+	MarkNoteOn(0, note);
+}
+
+/* .text+0x3b4e40, 92 bytes. */
+void CKGEventDisplayManager::NoteOnByKarma(int module, int note)
+{
+	MarkNoteOn(GetNoteObjectIndex(module), note);
+}
+
+/* .text+0x3b4ea0, 110 bytes. */
+void CKGEventDisplayManager::NoteOff(int note)
+{
+	MarkNoteOff(0, note);
+}
+
+/* .text+0x3b4f20, 147 bytes. */
+void CKGEventDisplayManager::NoteOffByKarma(int module, int note)
+{
+	MarkNoteOff(GetNoteObjectIndex(module), note);
+}
+
+/* .text+0x3b4fc0, 59 bytes. Direct-objectIndex overload -- no lookup
+ * table, the caller already supplies the object index. */
+void CKGEventDisplayManager::NoteOn(int objectIndex, int note)
+{
+	MarkNoteOn(objectIndex, note);
+}
+
+/* .text+0x3b5000, 120 bytes. */
+void CKGEventDisplayManager::NoteOff(int objectIndex, int note)
+{
+	MarkNoteOff(objectIndex, note);
+}
+
+/* .text+0x3b5080, 148 bytes. groupIndex = cc/8 (real assembly's
+ * negative-rounding fixup before the arithmetic shift is exactly C's own
+ * truncating `/`, so plain integer division reproduces it exactly). */
+void CKGEventDisplayManager::CCOnByKarma(int module, int cc)
+{
+	MarkCCOrBendOn(module, cc / 8);
+}
+
+/* .text+0x3b5120, 151 bytes. groupIndex = bendValue/1024 -- confirmed via
+ * disasm to feed the exact SAME storage as CC events (own array, ring,
+ * and sub-bitmask all shared with CCOnByKarma/CCOn). */
+void CKGEventDisplayManager::BendOnByKarma(int module, int bendValue)
+{
+	MarkCCOrBendOn(module, bendValue / 1024);
+}
+
+/* .text+0x3b51c0, 148 bytes. Byte-identical body to CCOnByKarma() -- 2
+ * distinct real functions (via-Karma vs local source), same underlying
+ * storage. */
+void CKGEventDisplayManager::CCOn(int module, int cc)
+{
+	MarkCCOrBendOn(module, cc / 8);
+}
+
+/* .text+0x3b5260, 347 bytes. Ages out ring slot V0 = m_flat[NOTE_RCURSOR]:
+ * for every note bit still set in that ring slot (across all 5
+ * objectIndex rows), decrements the matching live count, and once a
+ * count reaches 0 also clears the UI-facing "note visibly on" bit on the
+ * foreign sub-object. Both the note-ring READ cursor (+0xed0) and WRITE
+ * cursor (+0xecc) advance by 1 (mod 10) once per call, independently. */
+void CKGEventDisplayManager::CheckAndProcessNoteStatus()
+{
+	int V0 = m_flat[OA_KGEVTDISP_NOTE_RCURSOR];
+	unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+	unsigned int *onMask = (unsigned int *)(sub + 0x723c);
+
+	for (int block = 0; block < 5; block++) {
+		unsigned int *ring = (unsigned int *)&m_flat[OA_KGEVTDISP_NOTE_RING + V0 * 20 + block * 4];
+
+		for (int group = 0; group < 4; group++) {
+			for (int bit = 0; bit < 32; bit++) {
+				if (!(ring[group] & (1u << bit)))
+					continue;
+
+				int note = group * 32 + bit;
+				int idx = block * 128 + note;
+
+				if (m_flat[idx] > 0)
+					m_flat[idx]--;
+				if (m_flat[idx] == 0)
+					onMask[block * 4 + group] &= ~(1u << bit);
+
+				ring[group] &= ~(1u << bit);
+			}
+		}
+	}
+
+	m_flat[OA_KGEVTDISP_NOTE_RCURSOR] = (V0 + 1) % 10;
+	m_flat[OA_KGEVTDISP_NOTE_WCURSOR] = (m_flat[OA_KGEVTDISP_NOTE_WCURSOR] + 1) % 10;
+}
+
+/* .text+0x3b53d0, 289 bytes. Same ring-aging shape as
+ * CheckAndProcessNoteStatus() above, over the CC/bend ring instead (V0 =
+ * m_flat[CC_RCURSOR], one dword per module holding 16 group bits). */
+void CKGEventDisplayManager::CheckAndProcessCCStatus()
+{
+	int V0 = m_flat[OA_KGEVTDISP_CC_RCURSOR];
+	unsigned int *ring = (unsigned int *)&m_flat[OA_KGEVTDISP_CC_RING + V0 * 4];
+
+	for (int module = 0; module < 4; module++) {
+		for (int cc = 0; cc < 16; cc++) {
+			if (!(ring[module] & (1u << cc)))
+				continue;
+
+			int idx = OA_KGEVTDISP_CC_DATA + module * 16 + cc;
+
+			if (m_flat[idx] > 0)
+				m_flat[idx]--;
+			if (m_flat[idx] == 0) {
+				unsigned char *sub = *(unsigned char **)(CKGBankManager::ms_poInstance + 8);
+				unsigned int *onMask = (unsigned int *)(sub + 0x728c);
+				onMask[module] &= ~(1u << cc);
+			}
+
+			ring[module] &= ~(1u << cc);
+		}
+	}
+
+	m_flat[OA_KGEVTDISP_CC_RCURSOR] = (V0 + 1) % 10;
+	m_flat[OA_KGEVTDISP_CC_WCURSOR] = (m_flat[OA_KGEVTDISP_CC_WCURSOR] + 1) % 10;
+}
+
+/* .text+0x3b5500, 91 bytes. Spreads note/CC aging across calls using a
+ * "now" tick counter (+0xec0, written elsewhere, out of scope) against 2
+ * separate checkpoints -- calls CheckAndProcessNoteStatus()/
+ * CheckAndProcessCCStatus() once per 0x14 (20) ticks of backlog. */
+void CKGEventDisplayManager::Idle()
+{
+	int now = m_flat[OA_KGEVTDISP_TICK_NOW];
+
+	int noteDiff = now - m_flat[OA_KGEVTDISP_NOTE_CHECKPOINT];
+	while (noteDiff > 0x13) {
+		noteDiff -= 0x14;
+		CheckAndProcessNoteStatus();
+	}
+	m_flat[OA_KGEVTDISP_NOTE_CHECKPOINT] = now - noteDiff;
+
+	int ccDiff = now - m_flat[OA_KGEVTDISP_CC_CHECKPOINT];
+	while (ccDiff > 0x13) {
+		ccDiff -= 0x14;
+		CheckAndProcessCCStatus();
+	}
+	m_flat[OA_KGEVTDISP_CC_CHECKPOINT] = now - ccDiff;
+}
+
+/* ==================== CKGMIDIOutMsgHandler ==================== */
+
+/* .text+0x3bb6a0, 117 bytes. Fully self-contained -- every call here
+ * targets an already-declared sibling virtual (own or inherited from
+ * CSKMIDIMsgHandler); real semantics recovered directly from the
+ * disassembly's own call/branch structure, not guessed from naming. */
+void CKGMIDIOutMsgHandler::Process()
+{
+	if ((unsigned char)m_status > 0xef)
+		return;
+
+	if (CheckDyingNoteForMIDIPort()) {
+		if (ShouldSendChannelMessageToMIDIPort())
+			SendChannelMessageToMIDIPort();
+	}
+	if (ShouldRecChannelMessageToSequencer())
+		RecChannelMessageToSequencer();
+	if (!ShouldSendChannelMessageToSTG())
+		return;
+
+	ConvertPostMIDIAfterTouch();
+	ConvertPostMIDIVelocity();
+	SendChannelMessageToSTG();
+}
+
+/* ==================== CKGCCResetHandler ==================== */
+
+/* .text+0x3baf90, 76 bytes. Calls its own InitializeControllerMembers()
+ * (rodata 0xc, out of scope), forces raw offsets +0xc/+0x2c to 0xff, then
+ * duplicates a 0x66-byte chunk [+0xc,+0x72) to [+0x72,+0xd8) -- real
+ * per-byte field meaning not modeled, transcribed as a raw byte-level
+ * memcpy matching the exact real length/offsets. */
+void CKGCCResetHandler::Initialize()
+{
+	InitializeControllerMembers();
+
+	m_raw[0xc - 4] = 0xff;
+	m_raw[0x2c - 4] = 0xff;
+	__builtin_memcpy(m_raw + (0x72 - 4), m_raw + (0xc - 4), 0x66);
+}
+
+/* ==================== CKGMIDIMsgProcessor ====================
+ * See oa_ckg_midi_msg_handler.h's own class comment for the full field
+ * layout derivation.
+ */
+
+/* .text+0x3ba740, 705 bytes. */
+CKGMIDIMsgProcessor::CKGMIDIMsgProcessor()
+{
+	ms_poInstance = (unsigned char *)this;
+
+	m_karmaGen = new (CSTGBankMemory::AllocAligned(0x3090, 0x10)) CKGMIDIKarmaGeneratedMsgHandler();
+	m_timbreThru = new (CSTGBankMemory::AllocAligned(0x3090, 0x10)) CKGMIDITimbreThruMsgHandler();
+	m_karmaResetCC = new (CSTGBankMemory::AllocAligned(0x3090, 0x10)) CKGMIDIKarmaResetCCMsgHandler();
+	m_bendRange = new (CSTGBankMemory::AllocAligned(0xc, 0x10)) CKGBendRangeHandler();
+
+	for (int i = 0; i < 16; i++) {
+		m_ccReset[i] = new (CSTGBankMemory::AllocAligned(0xe0, 0x10)) CKGCCResetHandler(i);
+		m_ccReset[i]->Initialize();
+	}
+
+	m_bSuspended = 0;
+}
+
+/* .text+0x3baa20, 207 bytes, regparm(3). */
+void CKGMIDIMsgProcessor::ProcessKarmaGeneratedChannelMessage(int statusType, unsigned char channel,
+								char data1, char data2, bool changeSource)
+{
+	if (m_bSuspended)
+		return;
+
+	unsigned char combined = (unsigned char)(channel + statusType);
+	m_karmaGen->m_status = combined;
+	m_karmaGen->m_data1 = (unsigned char)data1;
+	m_karmaGen->m_data2 = (unsigned char)data2;
+	m_karmaGen->m_flags = (unsigned char)((m_karmaGen->m_flags & 0xf0) | 0x5);
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)->IsKarmaOn()) {
+		m_karmaGen->m_flags |= 0x20;
+		m_karmaGen->m_flags = (unsigned char)((m_karmaGen->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	} else {
+		m_karmaGen->m_flags &= 0xdf;
+		m_karmaGen->m_flags = (unsigned char)((m_karmaGen->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	}
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)
+		    ->ShouldForceTimbreZoneBypass(channel, ((CSKMIDIMsgProcessor *)CSKMIDIMsgProcessor::ms_poInstance)->m_lastMsgKind))
+		m_karmaGen->m_flags |= 0x40;
+
+	m_karmaGen->Process();
+}
+
+/* .text+0x3bab00, 138 bytes, regparm(3). No changeSource bit -- only the
+ * IsKarmaOn() gate on m_flags bit 0x20. */
+void CKGMIDIMsgProcessor::ProcessKarmaResetCCChannelMessage(int statusType, unsigned char channel,
+							      char data1, char data2)
+{
+	if (m_bSuspended)
+		return;
+
+	unsigned char combined = (unsigned char)(channel + statusType);
+	m_karmaResetCC->m_status = combined;
+	m_karmaResetCC->m_data1 = (unsigned char)data1;
+	m_karmaResetCC->m_data2 = (unsigned char)data2;
+	m_karmaResetCC->m_flags = (unsigned char)((m_karmaResetCC->m_flags & 0xf0) | 0x5);
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)->IsKarmaOn())
+		m_karmaResetCC->m_flags |= 0x20;
+	else
+		m_karmaResetCC->m_flags &= 0xdf;
+
+	m_karmaResetCC->Process();
+}
+
+/* .text+0x3bab90, 220 bytes, regparm(3). Same shape as
+ * ProcessKarmaGeneratedChannelMessage() above, via m_timbreThru -- but
+ * the flags low nibble comes from CSKMIDIMsgProcessor::ms_poInstance's
+ * own raw +0x18 byte (m_lastMsgKind's low byte) instead of the literal 5
+ * the other 3 Process*ChannelMessage() overloads use. Confirmed via
+ * disasm (`or al,0x18(ecx)`), not assumed from the name. */
+void CKGMIDIMsgProcessor::ProcessTimbreThruChannelMessage(int statusType, unsigned char channel,
+							    char data1, char data2, bool changeSource)
+{
+	if (m_bSuspended)
+		return;
+
+	unsigned char combined = (unsigned char)(channel + statusType);
+	m_timbreThru->m_status = combined;
+	m_timbreThru->m_data1 = (unsigned char)data1;
+	m_timbreThru->m_data2 = (unsigned char)data2;
+
+	unsigned char kindByte = ((unsigned char *)CSKMIDIMsgProcessor::ms_poInstance)[0x18];
+	m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & 0xf0) | kindByte);
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)->IsKarmaOn()) {
+		m_timbreThru->m_flags |= 0x20;
+		m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	} else {
+		m_timbreThru->m_flags &= 0xdf;
+		m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	}
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)
+		    ->ShouldForceTimbreZoneBypass(channel, ((CSKMIDIMsgProcessor *)CSKMIDIMsgProcessor::ms_poInstance)->m_lastMsgKind))
+		m_timbreThru->m_flags |= 0x40;
+
+	m_timbreThru->Process();
+}
+
+/* .text+0x3bac80, 214 bytes, regparm(3). Reuses m_timbreThru (same
+ * sub-object as ProcessTimbreThruChannelMessage above), tagged with a
+ * fixed low-flags-nibble of 1 -- confirmed via disasm, not assumed from
+ * the name. */
+void CKGMIDIMsgProcessor::ProcessResetControllerChannelMessage(int statusType, unsigned char channel,
+								 char data1, char data2, bool changeSource)
+{
+	if (m_bSuspended)
+		return;
+
+	unsigned char combined = (unsigned char)(channel + statusType);
+	m_timbreThru->m_status = combined;
+	m_timbreThru->m_data1 = (unsigned char)data1;
+	m_timbreThru->m_data2 = (unsigned char)data2;
+	m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & 0xf0) | 0x1);
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)->IsKarmaOn()) {
+		m_timbreThru->m_flags |= 0x20;
+		m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	} else {
+		m_timbreThru->m_flags &= 0xdf;
+		m_timbreThru->m_flags = (unsigned char)((m_timbreThru->m_flags & ~0x40) | (changeSource ? 0x40 : 0));
+	}
+
+	if (((CKGEngine *)CKGEngine::ms_poInstance)
+		    ->ShouldForceTimbreZoneBypass(channel, ((CSKMIDIMsgProcessor *)CSKMIDIMsgProcessor::ms_poInstance)->m_lastMsgKind))
+		m_timbreThru->m_flags |= 0x40;
+
+	m_timbreThru->Process();
+}
+
+/* .text+0x3bad60, 67 bytes, regparm(3). No IsKarmaOn()/changeSource
+ * gating -- unconditionally sets flags bit 0x10 and calls Process().
+ * m_status = channel-0x20 (NOT channel directly), confirmed via
+ * `lea edx,[edx-0x20]` on the raw register. */
+void CKGMIDIMsgProcessor::ProcessKarmaGeneratedBendRangeChannelMessage(unsigned char channel, char data1)
+{
+	m_bendRange->m_status = (unsigned char)(channel - 0x20);
+	m_bendRange->m_data1 = (unsigned char)data1;
+	m_bendRange->m_data2 = 0;
+	m_bendRange->m_flags = (unsigned char)((m_bendRange->m_flags & 0xf0) | 0x5);
+	m_bendRange->m_flags |= 0x10;
+	m_bendRange->Process();
+}
+
+/* .text+0x3badb0, 25 bytes, regparm(3). msg's own raw byte 0's low
+ * nibble selects which of the 16 m_ccReset[] to forward to -- reads
+ * msg's FIRST byte directly (no +4 offset, unlike CSKMIDIMsgHandler's
+ * own m_status/m_data1/m_data2/m_flags convention elsewhere in this
+ * file), matching CMIDIMessage's own distinct raw-byte-0-is-status
+ * layout. */
+void CKGMIDIMsgProcessor::StoreCCMessage(CMIDIMessage *msg)
+{
+	int channel = *(unsigned char *)msg & 0xf;
+	m_ccReset[channel]->StoreValue(msg);
+}
+
+/* .text+0x3badd0, 104 bytes. For every MIDI channel 0-15 that is
+ * currently some KARMA module's real output channel (per
+ * CKGEngine::GetRealOutputChannel()), calls that channel's own
+ * m_ccReset[]->ResetKarmaGeneratedValue(). */
+void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue()
+{
+	CKGEngine *engine = (CKGEngine *)CKGEngine::ms_poInstance;
+
+	for (int channel = 0; channel < 16; channel++) {
+		int numModules = engine->GetNumOfModule();
+		for (int module = 0; module < numModules; module++) {
+			if (engine->GetRealOutputChannel(module) == channel) {
+				m_ccReset[channel]->ResetKarmaGeneratedValue();
+				break;
+			}
+		}
+	}
+}
+
+/* .text+0x3bae40, 19 bytes. Direct 1-channel overload -- no module
+ * search. */
+void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue(int channel)
+{
+	m_ccReset[channel]->ResetKarmaGeneratedValue();
+}
+
+/* .text+0x3bae60, 150 bytes. Real body is 16 unrolled calls; identical
+ * observable effect as this loop. */
+void CKGMIDIMsgProcessor::InitializeCCValue()
+{
+	for (int channel = 0; channel < 16; channel++)
+		m_ccReset[channel]->InitializeValue();
+}
+
+/* .text+0x3baf00, 19 bytes. */
+void CKGMIDIMsgProcessor::InitializeCCValue(int channel)
+{
+	m_ccReset[channel]->InitializeValue();
+}
+
+/* .text+0x3baf20, 37 bytes. Forces m_timbreThru's raw event to a fixed
+ * NoteOff-shaped quad THEN calls its own (non-virtual)
+ * CKGMIDIOutMsgHandler::KillAllDyingNotes() -- not a vtable call,
+ * confirmed via a direct R_386_PC32 relocation. */
+void CKGMIDIMsgProcessor::KillAllDyingNotes()
+{
+	m_timbreThru->m_status = 0x80;
+	m_timbreThru->m_data1 = 0x00;
+	m_timbreThru->m_data2 = 0x40;
+	m_timbreThru->m_flags = 0x01;
+	m_timbreThru->CKGMIDIOutMsgHandler::KillAllDyingNotes();
+}

@@ -289,13 +289,118 @@ extern "C" void SPRMain_RecMIDITrackMessage(int statusType, int data1, int data2
 extern bool SPRMain_KeyboardOn(bool onOff, int note, int channel, int velocity) __attribute__((regparm(3)));
 
 /*
- * CKGEventDisplayManager -- UI note-event notifier, reached via
+ * CKGEventDisplayManager -- UI note/CC/bend-event notifier, reached via
  * CKGEngine::ms_poKGEventDisplayManager (own real static, see
- * oa_ckg_module_param_msg_handler.h). Own class layout out of scope.
+ * oa_ckg_module_param_msg_handler.h). Previously a 2-method opaque
+ * stand-in here; now fully reconstructed (15/15 methods) from all real
+ * `objdump -dr` bodies, own class region starting at `.text+0x3b40a0`
+ * (own real ctor's address; see this class's own last real method,
+ * Idle() at `.text+0x3b5500`, for the other end -- deliberately NOT
+ * citing "one past the end" here, since that address belongs to an
+ * unrelated real function, KGMain_Initialize, not this class -- see
+ * gen_oa_manifest.py's own documented gotcha about exactly this). No
+ * vtable (plain class, confirmed: every consumer calls it as a direct,
+ * non-virtual member function).
+ *
+ * The real struct's own field names are not recoverable from
+ * disassembly alone (every access is raw dword-indexed arithmetic, no
+ * symbol table for member offsets), so the whole object is represented
+ * as one flat `int m_flat[]` array; every method below transcribes the
+ * exact real index formula, not an invented "clean" reshaping.
+ *
+ * Real layout (DWORD indices, i.e. byte offset / 4):
+ *   [0x000,0x280) m_flat[objectIndex*128+note]  -- live note-on
+ *     reference count. 5 objectIndex rows: 0 = direct/local source,
+ *     1-4 = GetNoteObjectIndex(module) for the 4 KARMA modules.
+ *   [0x280,0x2c0) m_flat[module*16+groupIndex]  -- live CC/bend
+ *     reference count (16-dword stride rows, only module 0-3 used).
+ *     groupIndex = cc/8 for CC events, bendValue/1024 for pitch bend --
+ *     confirmed via disasm both feed this SAME array.
+ *   [0x2c0,0x388) m_flat[0x2c0+ring*20+objectIndex*4+(note>>5)] --
+ *     10-slot (ring 0-9) ring buffer of 128-bit "note touched this
+ *     write-window" bitmasks, one 4-dword bitmask per objectIndex.
+ *   [0x388,~0x3b0) m_flat[0x388+ring*4+module] -- 10-slot ring buffer
+ *     of 16-bit "CC/bend group touched this write-window" bitmasks,
+ *     one dword per module (only the low 16 bits used).
+ *   0x3b0 (+0xec0) "now" tick counter, written elsewhere (out of
+ *     scope) -- Idle() only ever reads it.
+ *   0x3b1 (+0xec4) last-serviced tick checkpoint for note aging.
+ *   0x3b2 (+0xec8) last-serviced tick checkpoint for CC/bend aging.
+ *   0x3b3 (+0xecc) NOTE ring WRITE cursor (which ring slot NoteOn/
+ *     NoteOff currently mark into).
+ *   0x3b4 (+0xed0) NOTE ring READ cursor (which ring slot
+ *     CheckAndProcessNoteStatus ages out next); Initialize() seeds
+ *     this to 1, every other dword to 0.
+ *   0x3b5 (+0xed4) CC ring WRITE cursor.
+ *   0x3b6 (+0xed8) CC ring READ cursor; also seeded to 1.
+ * Everything Initialize() zeroes spans [0,0xedc) bytes = 0x3b7 dwords;
+ * sized generously to 0x3c0 here.
+ *
+ * Also touches a FOREIGN object -- `CKGBankManager::ms_poInstance[+8]`,
+ * the same "note-display sub-object" pointer already established in
+ * CSKMIDIInMsgHandler::NotifyNoteEventToUI() above (own layout out of
+ * scope):
+ *   sub+0x723c  unsigned int[5][4]  -- UI-facing "note visibly on"
+ *     bitmask, [objectIndex][note>>5], cleared bit-by-bit only once the
+ *     matching m_flat[] reference count above reaches 0.
+ *   sub+0x728c  unsigned int[4]     -- UI-facing "CC/bend group visibly
+ *     on" bitmask, [module], same clear-on-zero-refcount idiom.
  */
 struct CKGEventDisplayManager {
+	enum {
+		OA_KGEVTDISP_NOTE_DATA       = 0x000,
+		OA_KGEVTDISP_CC_DATA         = 0x280,
+		OA_KGEVTDISP_NOTE_RING       = 0x2c0,
+		OA_KGEVTDISP_CC_RING         = 0x388,
+		OA_KGEVTDISP_TICK_NOW        = 0x3b0,	/* +0xec0 */
+		OA_KGEVTDISP_NOTE_CHECKPOINT = 0x3b1,	/* +0xec4 */
+		OA_KGEVTDISP_CC_CHECKPOINT   = 0x3b2,	/* +0xec8 */
+		OA_KGEVTDISP_NOTE_WCURSOR    = 0x3b3,	/* +0xecc */
+		OA_KGEVTDISP_NOTE_RCURSOR    = 0x3b4,	/* +0xed0 */
+		OA_KGEVTDISP_CC_WCURSOR      = 0x3b5,	/* +0xed4 */
+		OA_KGEVTDISP_CC_RCURSOR      = 0x3b6,	/* +0xed8 */
+		OA_KGEVTDISP_STATE_DWORDS    = 0x3c0,
+	};
+	int m_flat[OA_KGEVTDISP_STATE_DWORDS];
+
+	/* real ctor is a bare `ret` -- no member init at all (matches
+	 * placement into raw AllocAligned() storage; real callers always
+	 * invoke Initialize() next). */
+	CKGEventDisplayManager() {}
+
+	/* Real, self-contained pure formula -- also independently confirmed
+	 * INLINED verbatim into NoteOnByKarma/NoteOffByKarma below (same
+	 * table load + same default), not just called through. */
+	static int GetNoteObjectIndex(int module)
+	{ return (unsigned int)module <= 3 ? module + 1 : 1; }
+
+	void Initialize();
 	void NoteOn(int note);
+	void NoteOnByKarma(int module, int note);
 	void NoteOff(int note);
+	void NoteOffByKarma(int module, int note);
+	/* direct-objectIndex overloads -- same bodies as the pair above,
+	 * just with an explicit objectIndex parameter instead of an
+	 * implicit 0 or a GetNoteObjectIndex(module) lookup. */
+	void NoteOn(int objectIndex, int note);
+	void NoteOff(int objectIndex, int note);
+	void CCOnByKarma(int module, int cc);
+	void BendOnByKarma(int module, int bendValue);
+	void CCOn(int module, int cc);
+	void CheckAndProcessNoteStatus();
+	void CheckAndProcessCCStatus();
+	void Idle();
+
+private:
+	/* Shared helpers -- ground truth duplicates this logic verbatim
+	 * across 3 (Note) + 3 (CC/bend) near-identical real functions;
+	 * factored here since all instances were confirmed byte-identical
+	 * from this step onward, same "shared duplicate logic" convention
+	 * used elsewhere in this project. Not real ground-truth symbols of
+	 * their own -- no .text address. */
+	void MarkNoteOn(int objectIndex, int note);
+	void MarkNoteOff(int objectIndex, int note);
+	void MarkCCOrBendOn(int module, int groupIndex);
 };
 
 /*
@@ -1048,6 +1153,247 @@ public:
 	bool GetNowProcessingNoteOffVelocity(int *out);
 	/* .text+0x341710, 38 bytes. */
 	void ResetNotesAfterStopSequencer();
+};
+
+/*
+ * === CKGMIDIOutMsgHandler family (dependency of CKGMIDIMsgProcessor) ===
+ * Discovered while reconstructing CKGMIDIMsgProcessor's own real 705-byte
+ * ctor (it placement-constructs 4 distinct sub-handler objects, each of a
+ * matching real type). Real inheritance/vtable confirmed via `objdump -r`
+ * against `.rodata._ZTV*`:
+ *   CKGMIDIOutMsgHandler            : public CSKMIDIMsgHandler  (adds 14
+ *     new virtual slots at rodata 0x44-0x78)
+ *   CKGMIDIKarmaGeneratedMsgHandler : public CKGMIDIOutMsgHandler
+ *   CKGMIDITimbreThruMsgHandler     : public CKGMIDIOutMsgHandler
+ *   CKGMIDIKarmaResetCCMsgHandler   : public CKGMIDIOutMsgHandler
+ *   CKGBendRangeHandler             : public CSKMIDIMsgHandler DIRECTLY
+ *     (own single new slot at rodata 0x44 only -- NOT a
+ *     CKGMIDIOutMsgHandler child despite the similar role, confirmed by
+ *     its own vtable being 16 slots total vs the other three's 30).
+ *
+ * CKGMIDIOutMsgHandler itself is not one of this batch's 2 assigned
+ * targets -- its own ctor (565 bytes) and most of its own virtuals stay
+ * genuinely out of scope (real internal state implied by e.g. the
+ * 621-byte KillAllDyingNotes() and 701-byte SendExecToMIDIPortInCombi(),
+ * not modeled here). Since every leaf class below must stay instantiable,
+ * every out-of-scope slot gets a minimal INLINE, in-class stub body --
+ * deliberately keeping it out of the manifest's name-based heuristic
+ * (`ClassName::Method(...) {` out-of-line text is what that heuristic
+ * matches; an in-class inline body never produces that shape, same
+ * technique documented in ckg_control_ui_msg_family.md's manifest-
+ * generator-gotcha section). Do not move these out-of-line.
+ *
+ * Process() (rodata 0x44) DOES get a real out-of-line body -- it's the
+ * actual function invoked by 3 of CKGMIDIMsgProcessor's own methods via
+ * `m_karmaGen/m_timbreThru/m_karmaResetCC->Process()`, and turned out
+ * fully self-contained (only calls its own already-declared sibling
+ * virtuals). `.text+0x3bb6a0`, 117 bytes.
+ */
+class CKGMIDIOutMsgHandler : public CSKMIDIMsgHandler {
+public:
+	CKGMIDIOutMsgHandler() {}
+
+	void Process();
+
+	/* Out-of-scope virtual slots -- minimal in-class stubs only (see
+	 * class comment above). Declared in the EXACT real vtable order
+	 * (rodata 0x48-0x78), since slot ORDER (not name) is what keeps
+	 * the leaves' own genuinely-reconstructed overrides dispatching
+	 * correctly. */
+	virtual void SendChannelMessageToMIDIPort() {}
+	virtual bool ShouldSendChannelMessageToMIDIPort() { return false; }
+	virtual bool ShouldSendChannelMessageToMIDIPortInEachMode() { return false; }
+	virtual bool ShouldSendChannelMessageToSTG() { return false; }
+	virtual bool ShouldRecChannelMessageToSequencer() { return false; }
+	virtual void SendChannelMessageOfActiveTimbreToMIDIPort() {}
+	virtual void SendExecToMIDIPortInProgram() {}
+	virtual void SendExecToMIDIPortInCombi() {}
+	virtual void SendExecToMIDIPortInSong() {}
+	virtual bool CheckZoneOfNoteOn(int, int, int, int) { return false; }
+	virtual bool CheckZoneOfNoteOff(int, int) { return false; }
+	virtual bool CheckDyingNoteForMIDIPort() { return false; }
+	virtual void ProcessForDyingNote() {}
+
+	/* Non-virtual, called DIRECTLY (not through the vtable, confirmed
+	 * via a plain R_386_PC32 relocation) by
+	 * CKGMIDIMsgProcessor::KillAllDyingNotes() below. Own real body
+	 * (621 bytes) not modeled, out of scope. */
+	void KillAllDyingNotes() {}
+};
+
+/* .text+0x3bb630 region (ctor 33 bytes; ShouldSendChannelMessageToMIDIPortInEachMode
+ * 6 bytes at .text+0x3bb620; CheckDyingNoteForMIDIPort 6 bytes, own COMDAT
+ * section). */
+class CKGMIDIKarmaGeneratedMsgHandler : public CKGMIDIOutMsgHandler {
+public:
+	CKGMIDIKarmaGeneratedMsgHandler() {}
+	virtual bool ShouldSendChannelMessageToMIDIPortInEachMode() { return true; }
+	virtual bool CheckDyingNoteForMIDIPort() { return true; }
+};
+
+/* .text+0x3bc5d0 region (ctor 33 bytes; ShouldSendChannelMessageToMIDIPortInEachMode
+ * .text+0x3bc5a0, 38 bytes). */
+class CKGMIDITimbreThruMsgHandler : public CKGMIDIOutMsgHandler {
+public:
+	CKGMIDITimbreThruMsgHandler() {}
+	virtual bool ShouldSendChannelMessageToMIDIPortInEachMode()
+	{
+		CMIDIFlowParamHolder *mf = (CMIDIFlowParamHolder *)CMIDIFlowParamHolder::ms_poThis;
+		if (!mf->GetVoiceMode())
+			return false;
+		return mf->IsKARMAOn();
+	}
+};
+
+/* .text+0x3bb670 region (ctor 33 bytes; ShouldSendChannelMessageToSTG
+ * .text+0x3bb660, 3 bytes). */
+class CKGMIDIKarmaResetCCMsgHandler : public CKGMIDIOutMsgHandler {
+public:
+	CKGMIDIKarmaResetCCMsgHandler() {}
+	virtual bool ShouldSendChannelMessageToSTG() { return false; }
+};
+
+/* .text+0x3baf60, 33 bytes (ctor); .text+0x3baf50, 15 bytes (Process,
+ * calls the already-real base SendChannelMessageToSTGWithCorrectLength()
+ * -- rodata slot 0xc, confirmed via `call *0x4(vptr)`). */
+class CKGBendRangeHandler : public CSKMIDIMsgHandler {
+public:
+	CKGBendRangeHandler() {}
+	void Process() { SendChannelMessageToSTGWithCorrectLength(); }
+};
+
+/*
+ * CKGCCResetHandler -- per-channel (0-15) KARMA-generated-CC tracker,
+ * owned 16x by CKGMIDIMsgProcessor below. Own root class, no base (own
+ * 12-slot vtable, `.rodata._ZTV17CKGCCResetHandler`). Only the ctor and
+ * Initialize() -- both directly exercised by CKGMIDIMsgProcessor's own
+ * real ctor -- are reconstructed here; the other 10 virtuals (e.g.
+ * HandleNRPNMessage's own 381 bytes) stay out-of-scope inline stubs, a
+ * separate not-yet-attempted class of their own.
+ */
+class CKGCCResetHandler {
+public:
+	/* AllocAligned(0xe0,0x10) sizes the WHOLE object including the
+	 * compiler-inserted 4-byte vptr -- this buffer covers the
+	 * remaining 0xe0-4 bytes, so real ground-truth offset X (X>=4,
+	 * true for every field touched below) maps to m_raw[X-4]. Real
+	 * field layout beyond what the ctor/Initialize() touch is out of
+	 * scope. */
+	unsigned char m_raw[0xe0 - 4];
+
+	/* .text+0x3bb610, 13 bytes. Stores `index` at ground-truth +0xdc;
+	 * rest of the real layout not modeled. */
+	CKGCCResetHandler(int index) { *(int *)(m_raw + (0xdc - 4)) = index; }
+
+	/* .text+0x3baf90, 76 bytes. */
+	virtual void Initialize();
+
+	/* Out-of-scope virtual slots, real vtable order (rodata 0xc-0x34). */
+	virtual void InitializeControllerMembers() {}
+	virtual void InitializeValue() {}
+	virtual void StoreValue(CMIDIMessage *) {}
+	virtual void ResetKarmaGeneratedValue() {}
+	virtual void HandleccidResetAllController() {}
+	virtual void HandleNRPNMessage() {}
+	virtual void ProcessNRPN(int) {}
+	virtual void ProcessNRPNIncDec(int) {}
+	virtual void ConvertToneModifyToCC(int) {}
+	virtual void AdjustNRPN(int, int) {}
+	virtual void SendResetValue(int) {}
+};
+
+/*
+ * === CKGMIDIMsgProcessor ===
+ * KARMA-generated-CC-value tracker + dispatcher -- a DIFFERENT class from
+ * CSKMIDIMsgProcessor above (own singleton, confirmed via a distinct
+ * relocation `_ZN19CKGMIDIMsgProcessor13ms_poInstanceE`). Previously a
+ * 3-method opaque stand-in in oa_ckg_control_ui_msg.h
+ * (ResetKarmaGeneratedCCValue/KillAllDyingNotes/StoreCCMessage, already
+ * reached through ms_poInstance by real, already-committed callers) --
+ * now the full 13/13 real class, reached once its 6 dependency classes
+ * above became real types themselves.
+ *
+ * Real field layout (from the 705-byte ctor's own AllocAligned()+
+ * placement-ctor sequence, objdump -r):
+ *   +0x00 CKGMIDIKarmaGeneratedMsgHandler *m_karmaGen    Alloc(0x3090,0x10)
+ *   +0x04 CKGMIDITimbreThruMsgHandler *m_timbreThru      Alloc(0x3090,0x10)
+ *   +0x08 CKGMIDIKarmaResetCCMsgHandler *m_karmaResetCC  Alloc(0x3090,0x10)
+ *   +0x0c CKGBendRangeHandler *m_bendRange               Alloc(0xc,0x10)
+ *   +0x10..+0x4c CKGCCResetHandler *m_ccReset[16]        Alloc(0xe0,0x10)
+ *     each, CKGCCResetHandler(i) i=0..15, immediately followed by a real
+ *     vtable-slot-0 call (->Initialize()) right after construction.
+ *   +0x50 unsigned char m_bSuspended  -- every Process*ChannelMessage()
+ *     below is a full no-op while this is nonzero; ctor sets it to 0
+ *     (enabled). No reconstructed method here ever sets it nonzero --
+ *     whatever toggles it back on is out of scope.
+ * Real dtor (.text+0x3baa10, 11 bytes) only clears ms_poInstance -- NONE
+ * of the 20 owned sub-objects are ever deleted (confirmed: no further
+ * instructions at all beyond the store+ret). A real, deliberate-looking
+ * leak, same idiom as CSKMIDIMsgHandler::m_special elsewhere in this
+ * file -- transcribed as-is, not "fixed".
+ */
+class CKGMIDIMsgProcessor {
+public:
+	CKGMIDIKarmaGeneratedMsgHandler *m_karmaGen;		/* +0x00 */
+	CKGMIDITimbreThruMsgHandler *m_timbreThru;		/* +0x04 */
+	CKGMIDIKarmaResetCCMsgHandler *m_karmaResetCC;		/* +0x08 */
+	CKGBendRangeHandler *m_bendRange;			/* +0x0c */
+	CKGCCResetHandler *m_ccReset[16];			/* +0x10..+0x4c */
+	unsigned char m_bSuspended;				/* +0x50 */
+
+	static unsigned char *ms_poInstance;
+
+	/* .text+0x3ba740, 705 bytes. */
+	CKGMIDIMsgProcessor();
+	/* .text+0x3baa10, 11 bytes -- only clears ms_poInstance, see class
+	 * comment above. */
+	~CKGMIDIMsgProcessor() { ms_poInstance = 0; }
+
+	/* .text+0x3baa20, 207 bytes, regparm(3). */
+	void ProcessKarmaGeneratedChannelMessage(int statusType, unsigned char channel,
+						  char data1, char data2, bool changeSource);
+	/* .text+0x3bab00, 138 bytes, regparm(3). */
+	void ProcessKarmaResetCCChannelMessage(int statusType, unsigned char channel,
+						char data1, char data2);
+	/* .text+0x3bab90, 220 bytes, regparm(3). */
+	void ProcessTimbreThruChannelMessage(int statusType, unsigned char channel,
+					      char data1, char data2, bool changeSource);
+	/* .text+0x3bac80, 214 bytes, regparm(3). Reuses m_timbreThru (same
+	 * sub-object as ProcessTimbreThruChannelMessage above), tagged
+	 * with a fixed low-flags-nibble of 1 instead of that method's own
+	 * CSKMIDIMsgProcessor::ms_poInstance[+0x18]-derived value --
+	 * confirmed via disasm, not assumed from the name. */
+	void ProcessResetControllerChannelMessage(int statusType, unsigned char channel,
+						   char data1, char data2, bool changeSource);
+	/* .text+0x3bad60, 67 bytes, regparm(3). No IsKarmaOn()/changeSource
+	 * gating at all (unlike the 3 above) -- unconditionally sets
+	 * m_bendRange's flags bit 0x10 and calls Process(). Real quirk:
+	 * m_status is stored as (channel-0x20), NOT channel directly --
+	 * confirmed via `lea edx,[edx-0x20]` on the raw register, not a
+	 * transcription guess. */
+	void ProcessKarmaGeneratedBendRangeChannelMessage(unsigned char channel, char data1);
+	/* .text+0x3badb0, 25 bytes, regparm(3). msg's own raw byte 0's low
+	 * nibble selects which of the 16 m_ccReset[] to forward to. */
+	void StoreCCMessage(CMIDIMessage *msg);
+	/* .text+0x3badd0, 104 bytes. For every MIDI channel 0-15 that is
+	 * currently some KARMA module's real output channel (per
+	 * CKGEngine::GetRealOutputChannel()), calls that channel's own
+	 * m_ccReset[]->ResetKarmaGeneratedValue(). */
+	void ResetKarmaGeneratedCCValue();
+	/* .text+0x3bae40, 19 bytes. Direct 1-channel overload -- no module
+	 * search. */
+	void ResetKarmaGeneratedCCValue(int channel);
+	/* .text+0x3bae60, 150 bytes. Unrolled real body -- all 16
+	 * m_ccReset[]->InitializeValue() calls, transcribed as a loop
+	 * (identical observable effect). */
+	void InitializeCCValue();
+	/* .text+0x3baf00, 19 bytes. */
+	void InitializeCCValue(int channel);
+	/* .text+0x3baf20, 37 bytes. Forces m_timbreThru's raw event to a
+	 * fixed NoteOff-shaped quad THEN calls its own (non-virtual)
+	 * CKGMIDIOutMsgHandler::KillAllDyingNotes() -- not a vtable call,
+	 * confirmed via a direct R_386_PC32 relocation. */
+	void KillAllDyingNotes();
 };
 
 #endif /* OA_CKG_MIDI_MSG_HANDLER_H */

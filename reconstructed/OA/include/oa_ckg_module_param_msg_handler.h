@@ -490,6 +490,14 @@ struct CKGEngine {
 	bool ShouldForceTimbreZoneBypass(int channel, int flagsChannel);
 
 	/*
+	 * 2 more real instance methods, discovered while reconstructing
+	 * CKGMIDIMsgProcessor (oa_ckg_midi_msg_handler.h) -- same
+	 * cast-through-`ms_poInstance` idiom. Own bodies out of scope.
+	 */
+	bool IsKarmaOn();
+	int GetRealOutputChannel(int module);
+
+	/*
 	 * A real, plain static pointer (own relocation
 	 * `_ZN9CKGEngine26ms_poKGEventDisplayManagerE`, same class-scope-
 	 * static idiom as `ms_poInstance` itself, NOT an offset field on

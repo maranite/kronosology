@@ -187,39 +187,18 @@ struct CKGRTCHandler {
  * class from the already-declared `CSKMIDIMsgProcessor` below (both real,
  * both singletons, confirmed via two distinct relocations --
  * `_ZN19CKGMIDIMsgProcessor13ms_poInstanceE` vs
- * `_ZN19CSKMIDIMsgProcessor13ms_poInstanceE`). Own class layout out of
- * scope.
+ * `_ZN19CSKMIDIMsgProcessor13ms_poInstanceE`). Previously a 3-method
+ * opaque stand-in here; now a full real class (13/13 methods) in
+ * oa_ckg_midi_msg_handler.h (included below), reached once its own 6
+ * dependency classes (CKGMIDIOutMsgHandler and its 5 children) became
+ * real types themselves -- see that header's own "=== CKGMIDIMsgProcessor
+ * ===" section. This file's own call sites (ResetKarmaGeneratedCCValue/
+ * KillAllDyingNotes/StoreCCMessage) still resolve correctly since the
+ * real class is visible by the time this file's own
+ * `#include "oa_ckg_midi_msg_handler.h"` line (below) is reached, same as
+ * every other type declared past that point.
  */
 struct CMIDIMessage;
-struct CKGMIDIMsgProcessor {
-	static unsigned char *ms_poInstance;
-	void ResetKarmaGeneratedCCValue();
-
-	/*
-	 * KillAllDyingNotes() -- real instance method, discovered while
-	 * reconstructing CSKSpecialMsgHandler::
-	 * ProcessResetAllControllerMessage() (oa_ckg_midi_msg_handler.h),
-	 * same cast-through-`ms_poInstance` idiom as above. Own body out of
-	 * scope.
-	 */
-	void KillAllDyingNotes();
-
-	/*
-	 * StoreCCMessage(CMIDIMessage*) -- real 1-arg instance method,
-	 * discovered while reconstructing CSKMIDIMsgHandler::
-	 * SendChannelMessageToSTG() (oa_ckg_midi_msg_handler.h). Real caller
-	 * passes its own `this+4` (the raw 4-byte MIDI event field)
-	 * reinterpreted directly as a `CMIDIMessage*` -- same "reinterpret a
-	 * raw buffer as a different class's `this`" idiom as
-	 * CSKParameterChangeMessage elsewhere in that header.
-	 * `CMIDIMessage` here is intentionally left forward-declared/
-	 * incomplete -- only ever passed through as a pointer, never
-	 * dereferenced by this batch's own code (its one already-declared
-	 * member, `EStatus`, lives in oa_ckg_switch_family.h and is out of
-	 * scope here).
-	 */
-	void StoreCCMessage(CMIDIMessage *msg);
-};
 
 /*
  * CSKMIDIMsgProcessor -- previously a 6-method opaque stand-in here (the
