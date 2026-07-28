@@ -2870,3 +2870,89 @@ project's shared-repo commit hygiene convention.
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+---
+
+## STG value-getter family batch 20 (2026-07-28): CSTGTG92OscBase partial (1/10), family growth confirmed exhausted
+
+Continuation of the STG value-getter family using batch 18's broader
+`sValueGetterTemp`-relocation discovery method. Re-ran the full recipe
+fresh against the same ground-truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`): 1462 unique enclosing
+functions, grouped into the identical 75-class list batches 18/19 already
+found, byte-for-byte the same class names and per-class hit counts.
+Cross-checked all 75 against this project's own done/excluded/
+already-modeled/deferred registry (accumulated across batches 1-19): 62
+done, 9 already-modeled elsewhere (skip), 2 harmless false positives
+(`CSTGParamsOwner` itself, the static-initializer stub), and exactly 2
+still-open items -- `CSTGTG92OscBase` (the batch-12 pure-virtual
+deferral) and `CSTGDrumKitData` (the batch-19 entangled-blob deferral).
+Also independently reconfirmed there is no NINTH `*MessageContext`
+sibling type anywhere in the binary (`nm -C $KO | grep -oE
+'[A-Za-z_][A-Za-z0-9_]*Context\b'` lists exactly the same 8 real context
+types batches 18-19 already found, plus 2 unrelated non-class hits) --
+the per-context-type discovery axis from batch 19 is confirmed exhausted
+too, not just the `sValueGetterTemp` sweep. **The family's two
+established discovery methods are both now provably exhausted against
+this ground-truth binary; no further classes can be found by re-running
+either one.**
+
+Given the task's own standing exclusion guidance for entangled
+opaque-blob classes, `CSTGDrumKitData` was deliberately NOT attempted
+this batch (left as the already-documented future target from batch 19's
+own entry, full 3-dimensional piecewise-index derivation already
+captured there).
+
+`CSTGTG92OscBase` was revisited instead. Re-confirmed the batch-12
+pure-virtual finding with fresh, independent evidence rather than trusting
+memory: `objdump -r -j .rodata._ZTV15CSTGTG92OscBase $KO` dumped every
+relocation in the class's own vtable directly, confirming raw offset 0xd4
+(the slot all 9 of the class's ctx-indexed candidates dispatch through
+before their own field read) resolves to `__cxa_pure_virtual`. Went
+further than batch 12 did: searched the WHOLE symbol table for each of
+the 9 pure-virtual candidates' own method names (`GetReverse`,
+`GetBankType`, `GetStartOffset`, `GetBankSelectUUID`, `GetBottomVelocity`,
+`GetCrossfadeCurve`, `GetCrossfadeRange`, `GetMultisampleNum`,
+`GetLevel`) across every OTHER class in the binary -- zero concrete
+overrides found anywhere. This binary genuinely never instantiates a
+concrete subclass of `CSTGTG92OscBase` through any symbol visible to
+static analysis; the 9 pure-virtual candidates remain correctly
+undecodable, not merely unattempted.
+
+The class's 10th candidate, `GetFreqOffset`, does NOT touch the vtable at
+all -- disassembly confirms a completely ordinary fixed-K signed dword
+field read directly off `this` (`this+0xc`, dual-write to both `value`
+and `displayValue`), the family's most common shape. Reconstructed as a
+deliberate 1-of-10 partial class (`include/oa_stg_tg92_osc_base.h`,
+`src/engine/stg_tg92_osc_base_valuegetters.cpp`), matching the family's
+established precedent for partial classes with a documented, evidence-backed
+exclusion for the rest (`CSTGEGBase` 5/19, `CSTGAmp` 7/10, `CPianoOsc`
+46/53, etc).
+
+`make verify`: exit 0, 0 FAIL lines, the 1 new KAT check passing.
+Real `make ko-clean && make ko KDIR=/home/build/linux-kronos` Kbuild
+build: clean link, `OA.ko` produced (530868 bytes, up from batch 19's
+530640), zero warnings/errors traceable to the new file (confirmed via a
+build-log grep scoped to the new filename). `DECOMPILE_ERRORS.md`
+unchanged -- no compile/link blocker hit, and the `CSTGTG92OscBase`
+pure-virtual finding is a reconfirmation of an already-logged Tier-B
+deferral, not a new one. `manifest/gen_oa_manifest.py` regenerated
+against the TRUE prior committed state via `git stash -u`/`git stash
+pop` (not trusting the on-disk CSV, which is untracked and can be stale):
+OA.ko manifest 2575 -> 2576/21,689 unique reconstructed names (11.978%
+raw-row convention: 2597 -> 2598), delta exactly +1, confirmed via a
+full reconstructed qualified-name-set diff -- 0 regressions.
+
+Re-decompiler agent memory updated with the confirmed-exhausted state of
+both discovery methods, the `CSTGTG92OscBase` partial-class precedent,
+and the manifest count. `CSTGDrumKitData` remains the only real,
+attemptable next target for this family; no other fresh candidates exist
+under either established discovery method as of this batch. A
+concurrent session's untracked `reconstructed/Eva/tools/
+build_gdbserver.sh` / `gdbserver-i386-musl` files were visible in `git
+status` throughout this batch's work and correctly left untouched, per
+this project's shared-repo commit hygiene convention.
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.
