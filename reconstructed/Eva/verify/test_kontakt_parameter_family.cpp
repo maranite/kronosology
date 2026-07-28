@@ -51,6 +51,13 @@ TESTABLE(CKontaktScriptParameter, CKontaktScript);
 TESTABLE(CKontaktOutputsParameter, CKontaktOutputs);
 TESTABLE(CKontaktContainerParameter, CKontaktContainer);
 TESTABLE(CKontaktSampleParameter, CKontaktSample);
+TESTABLE(CKontaktProgramParameter, CKontaktProgram);
+TESTABLE(CKontaktBankParameter, CKontaktBank);
+TESTABLE(CKontaktSendLevelsParameter, CKontaktSendLevels);
+TESTABLE(CKontaktIntModulatorParameter, CKontaktIntModulator);
+TESTABLE(CKontaktExtModulatorParameter, CKontaktExtModulator);
+TESTABLE(CKontaktVoiceGroupParameter, CKontaktVoiceGroup);
+TESTABLE(CKontaktTargetParameter, CKontaktTarget);
 
 int main(void)
 {
@@ -310,6 +317,136 @@ int main(void)
 		check("CKontaktOutputsParameters::MakeIndexedParameter() -> real CKontaktOutputsParameter(owner=&outs)",
 		      outs.physicalOutputMapping[2] == 9);
 		delete child5;
+
+		CKontaktBank b;
+		memset(&b, 0, sizeof(b));
+		CKontaktBankParameters bp(&b);
+		CKontaktIndexedParameter *child6 = bp.MakeIndexedParameter();
+		child6->AddIndexedParameter(1, 0, U"77");
+		check("CKontaktBankParameters::MakeIndexedParameter() -> real CKontaktBankParameter(owner=&b)", b.libraryID == 77);
+		delete child6;
+
+		CKontaktProgram pr;
+		memset(&pr, 0, sizeof(pr));
+		CKontaktProgramParameters prp(&pr);
+		CKontaktParameter *child7 = prp.MakeParameter();
+		child7->AddParameter(0, U"555");
+		check("CKontaktProgramParameters::MakeParameter() -> real CKontaktProgramParameter(owner=&pr)", pr.numBytesSamplesTotal == 555);
+		delete child7;
+	}
+
+	printf("[16] CKontaktProgramParameter (55-entry list, only 10 dispatched -- 2026-07-28 size-deferred follow-up)\n");
+	{
+		CKontaktProgram p;
+		memset(&p, 0, sizeof(p));
+		TCKontaktProgramParameter param(&p);
+		param.AddParameter(0, U"1000000");
+		check("case 0 (numBytesSamplesTotal) -> unsigned 1000000", p.numBytesSamplesTotal == 1000000);
+		param.AddParameter(2, U"0.5");
+		check("case 2 (volume) -> float 0.5", p.volume > 0.499f && p.volume < 0.501f);
+		param.AddParameter(9, U"ignored");
+		check("case 9 (defaultKeyKeySwitch) confirmed real no-op", true);
+		param.AddParameter(14, U"cc64_mode_sustain_plus_controller");
+		check("case 14 (cc64Mode) -> enum index 0 on exact match", p.cc64Mode == 0);
+		param.AddParameter(30, U"ignored");
+		check("case 30 (editorOpenMap, mid-range no-op run) confirmed real no-op", true);
+		param.AddParameter(51, U"@d007SubDir");
+		check("case 51 (wallpaperFile, last in-table case) -> UnpackPath -> SetWallpaperFile", p.wallpaperFile != 0 && strcmp(p.wallpaperFile, "SubDir/") == 0);
+		param.AddParameter(53, U"ignored");
+		check("case 53 (muted, past guard) falls straight to base no-op, no crash", true);
+		delete[] p.wallpaperFile; /* test-only cleanup, real allocator mismatch not reproduced here */
+	}
+
+	printf("[17] CKontaktBankParameter (13-entry indexed list, 5 real owner setters)\n");
+	{
+		CKontaktBank b;
+		memset(&b, 0, sizeof(b));
+		TCKontaktBankParameter p(&b);
+		p.AddIndexedParameter(0, 0, U"yes");
+		check("case 0 (loadPurged) -> bool true", b.loadPurged == true);
+		p.AddIndexedParameter(3, 2, U"5");
+		check("case 3 (midiChannel_slot) -> SetSlotMidiChannel(2, 5)", *(unsigned int *)((unsigned char *)&b + 2 * 0x20 + 0x3c) == 5);
+		p.AddIndexedParameter(5, 2, U"yes");
+		check("case 5 (mute_slot) -> SetSlotMute(2, true)", *((unsigned char *)&b + 2 * 0x20 + 0x41) == 1);
+		p.AddIndexedParameter(7, 2, U"3");
+		check("case 7 (auxSendLevel1_slot) -> SetSlotAuxSendLevel(2, 1, (float)3) shared jump-table target",
+		      *(float *)((unsigned char *)&b + 2 * 0x20 + 1 * 4 + 0x44) > 2.99f &&
+		      *(float *)((unsigned char *)&b + 2 * 0x20 + 1 * 4 + 0x44) < 3.01f);
+		p.AddIndexedParameter(10, 2, U"9");
+		check("case 10 (reorderIdx_) -> SetSlotReorderIndex(2, 9)", *(unsigned int *)((unsigned char *)&b + 2 * 0x20 + 0x54) == 9);
+		p.AddIndexedParameter(12, 0, U"yes");
+		check("case 12 (origAbsolutePaths, last field) -> bool true", b.origAbsolutePaths == true);
+	}
+
+	printf("[18] CKontaktSendLevelsParameter (1-entry indexed list, bounds-checked owner setter)\n");
+	{
+		CKontaktSendLevels sl;
+		memset(&sl, 0, sizeof(sl));
+		TCKontaktSendLevelsParameter p(&sl);
+		p.AddIndexedParameter(0, 3, U"0.25");
+		check("case 0 (level_N) -> SetLevel(3, 0.25)", sl.level[3] > 0.249f && sl.level[3] < 0.251f);
+		p.AddIndexedParameter(0, 99, U"1.0");
+		check("case 0 out-of-range suffix (>7) real bounds check, no crash, no write", sl.level[7] == 0.0f);
+	}
+
+	printf("[19] CKontaktIntModulatorParameter (10-entry list, name field contiguity-confirmed)\n");
+	{
+		CKontaktIntModulator im;
+		memset(&im, 0, sizeof(im));
+		TCKontaktIntModulatorParameter p(&im);
+		p.AddParameter(0, U"yes");
+		check("case 0 (routersOpen) -> bool true", im.routersOpen == true);
+		p.AddParameter(5, U"3");
+		check("case 5 (classID) -> unsigned 3", im.classID == 3);
+		p.AddParameter(6, U"LFO 1");
+		check("case 6 (name) -> SetName strncpy", strcmp(im.name, "LFO 1") == 0);
+		p.AddParameter(9, U"440.0");
+		check("case 9 (noteValue_Frequency, last field) -> float 440.0", im.noteValue_Frequency > 439.9f && im.noteValue_Frequency < 440.1f);
+	}
+
+	printf("[20] CKontaktExtModulatorParameter (11-entry list, 2 StringIndex enums + FPU round-trip case)\n");
+	{
+		CKontaktExtModulator em;
+		memset(&em, 0, sizeof(em));
+		TCKontaktExtModulatorParameter p(&em);
+		p.AddParameter(0, U"extMod");
+		check("case 0 (type) -> enum index 0", em.type == 0);
+		p.AddParameter(1, U"velocity");
+		check("case 1 (source) -> enum index 2", em.source == 2);
+		p.AddParameter(2, U"-7");
+		check("case 2 (delay, real FPU round-trip) -> signed -7", em.delay == -7);
+		p.AddParameter(8, U"Vel Mod");
+		check("case 8 (name) -> SetName strncpy", strcmp(em.name, "Vel Mod") == 0);
+		p.AddParameter(10, U"64");
+		check("case 10 (ccNumber, last field) -> unsigned 64", em.ccNumber == 64);
+	}
+
+	printf("[21] CKontaktVoiceGroupParameter (6-entry list, name at index 0)\n");
+	{
+		CKontaktVoiceGroup vg;
+		memset(&vg, 0, sizeof(vg));
+		TCKontaktVoiceGroupParameter p(&vg);
+		p.AddParameter(0, U"Group A");
+		check("case 0 (name) -> SetName strncpy", strcmp(vg.name, "Group A") == 0);
+		p.AddParameter(1, U"kill_oldest");
+		check("case 1 (mode) -> enum index 0", vg.mode == 0);
+		p.AddParameter(5, U"-1");
+		check("case 5 (exclusionGroup, last field) -> signed -1", vg.exclusionGroup == -1);
+	}
+
+	printf("[22] CKontaktTargetParameter (8-entry list, own separate 8-entry target enum)\n");
+	{
+		CKontaktTarget t;
+		memset(&t, 0, sizeof(t));
+		TCKontaktTargetParameter p(&t);
+		p.AddParameter(0, U"filterCutoff");
+		check("case 0 (target) -> enum index 3 (own separate list)", t.target == 3);
+		p.AddParameter(1, U"0.8");
+		check("case 1 (intensity) -> float 0.8", t.intensity > 0.799f && t.intensity < 0.801f);
+		p.AddParameter(5, U"Target 1");
+		check("case 5 (name) -> SetName strncpy", strcmp(t.name, "Target 1") == 0);
+		p.AddParameter(7, U"12");
+		check("case 7 (targetObjIdx, last field) -> unsigned 12", t.targetObjIdx == 12);
 	}
 
 	printf("\n%s\n", g_fail == 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED");

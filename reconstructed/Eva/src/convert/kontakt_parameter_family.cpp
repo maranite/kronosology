@@ -69,6 +69,70 @@ void CKontaktScript::SetSourceText(const char *text)
 	}
 }
 
+void CKontaktProgram::SetWallpaperFile(const char *text)
+{
+	if (wallpaperFile) {
+		delete wallpaperFile; /* real: scalar `operator delete`, not delete[] -- see header note */
+		wallpaperFile = 0;
+	}
+	if (text) {
+		unsigned int len = (unsigned int)strlen(text);
+		wallpaperFile = new char[len];
+		memcpy(wallpaperFile, text, len); /* real: does NOT write a trailing NUL -- see header note */
+	}
+}
+
+void CKontaktBank::SetSlotMidiChannel(unsigned int slotIndex, unsigned int value)
+{
+	*(unsigned int *)((unsigned char *)this + slotIndex * 0x20 + 0x3c) = value;
+}
+
+void CKontaktBank::SetSlotSolo(unsigned int slotIndex, bool value)
+{
+	*((unsigned char *)this + slotIndex * 0x20 + 0x40) = value;
+}
+
+void CKontaktBank::SetSlotMute(unsigned int slotIndex, bool value)
+{
+	*((unsigned char *)this + slotIndex * 0x20 + 0x41) = value;
+}
+
+void CKontaktBank::SetSlotAuxSendLevel(unsigned int slotIndex, unsigned int auxIndex, float value)
+{
+	*(float *)((unsigned char *)this + slotIndex * 0x20 + auxIndex * 4 + 0x44) = value;
+}
+
+void CKontaktBank::SetSlotReorderIndex(unsigned int slotIndex, unsigned int value)
+{
+	*(unsigned int *)((unsigned char *)this + slotIndex * 0x20 + 0x54) = value;
+}
+
+void CKontaktSendLevels::SetLevel(unsigned int index, float value)
+{
+	if (index <= 7) /* real bounds check, unlike most other owner setters in this file */
+		level[index] = value;
+}
+
+void CKontaktIntModulator::SetName(const char *text)
+{
+	strncpy(name, text, sizeof(name));
+}
+
+void CKontaktExtModulator::SetName(const char *text)
+{
+	strncpy(name, text, sizeof(name));
+}
+
+void CKontaktVoiceGroup::SetName(const char *text)
+{
+	strncpy(name, text, sizeof(name));
+}
+
+void CKontaktTarget::SetName(const char *text)
+{
+	strncpy(name, text, sizeof(name));
+}
+
 /* ================================ CKontaktGroupParameter =================== */
 
 static const char *kGroupParamList[] = {
@@ -286,6 +350,278 @@ void CKontaktSampleParameter::AddParameter(unsigned int index, const unsigned ch
 	case 14: mOwner->tuning = CKontaktXml::FloatValue(value); break;
 	case 15: mOwner->littleEndian = CKontaktXml::BooleanValue(value); break;
 	case 16: mOwner->expectedDataSize = CKontaktXml::UnsignedValue(value); break;
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktProgramParameter ================= */
+
+static const char *kProgramParamList[] = {
+	"numBytesSamplesTotal", "transpose", "volume", "pan", "tune",
+	"lowVelocity", "highVelocity", "lowKey", "highKey", "defaultKeyKeySwitch",
+	"dfdChannelPreloadSize", "libraryID", "loadingFlags", "autoLoadMode", "cc64Mode",
+	"useStdCC_7_10", "useStdCC_120_123", "cc7MaxVolume", "activeGroupIdx", "scriptIdxEdited",
+	"ifxBeingEdited", "idxIFXBeingEdited", "sfxBeingEdited", "mapEditListMode", "mapEditLocked",
+	"idxSFXBeingEdited", "routersOpenSource", "routersOpenAmp", "upDownMixOpenGroup", "groupSolo",
+	"editorOpenMap", "editorOpenSample", "editorOpenGroup", "editorOpenScript", "editorOpenProp",
+	"mapEditSelGroupsOnly", "ifxVisible", "sfxVisible", "modVisible", "masterZoneIdx",
+	"batteryNumRowsVisible", "batteryNumColumnsVisible", "batteryIRCVisible", "perfViewScriptIdx", "catIconIdx",
+	"instrumentCredits", "instrumentAuthor", "instrumentURL", "instrumentCat1", "instrumentCat2",
+	"instrumentCat3", "wallpaperFile", "batteryCellColor", "muted", "soloed", 0
+};
+
+static const char *kProgramCc64ModeList[] = { "cc64_mode_sustain_plus_controller", 0 };
+
+CKontaktProgramParameter::CKontaktProgramParameter(CKontaktProgram *owner)
+	: CKontaktParameter(kProgramParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktProgramParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: mOwner->numBytesSamplesTotal = CKontaktXml::UnsignedValue(value); break;
+	case 1: mOwner->transpose = CKontaktXml::SignedValue(value); break;
+	case 2: mOwner->volume = CKontaktXml::FloatValue(value); break;
+	case 3: mOwner->pan = CKontaktXml::FloatValue(value); break;
+	case 4: mOwner->tune = CKontaktXml::SignedValue(value); break;
+	case 5: mOwner->lowVelocity = CKontaktXml::UnsignedValue(value); break;
+	case 6: mOwner->highVelocity = CKontaktXml::UnsignedValue(value); break;
+	case 7: mOwner->lowKey = CKontaktXml::UnsignedValue(value); break;
+	case 8: mOwner->highKey = CKontaktXml::UnsignedValue(value); break;
+	/* 9-13 (defaultKeyKeySwitch/dfdChannelPreloadSize/libraryID/loadingFlags/
+	 * autoLoadMode): confirmed real no-ops -- see class header. */
+	case 9: case 10: case 11: case 12: case 13: break;
+	case 14: {
+		int m = CKontaktXml::StringIndex(kProgramCc64ModeList, value);
+		if (m >= 0)
+			mOwner->cc64Mode = m;
+		break;
+	}
+	/* 15-50 (useStdCC_7_10 .. instrumentCat3, 36 entries): confirmed real
+	 * no-ops -- see class header. */
+	case 15: case 16: case 17: case 18: case 19:
+	case 20: case 21: case 22: case 23: case 24:
+	case 25: case 26: case 27: case 28: case 29:
+	case 30: case 31: case 32: case 33: case 34:
+	case 35: case 36: case 37: case 38: case 39:
+	case 40: case 41: case 42: case 43: case 44:
+	case 45: case 46: case 47: case 48: case 49:
+	case 50:
+		break;
+	case 51: {
+		char buf[0x100];
+		CKontaktXml::UnpackPath(value, buf, sizeof(buf));
+		mOwner->SetWallpaperFile(buf);
+		break;
+	}
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktBankParameter ==================== */
+
+static const char *kBankParamList[] = {
+	"loadPurged", "libraryID", "loadingFlags", "midiChannel_slot", "solo_slot",
+	"mute_slot", "auxSendLevel0_slot", "auxSendLevel1_slot", "auxSendLevel2_slot",
+	"auxSendLevel3_slot", "reorderIdx_", "origSaveMode", "origAbsolutePaths", 0
+};
+
+CKontaktBankParameter::CKontaktBankParameter(CKontaktBank *owner)
+	: CKontaktIndexedParameter(kBankParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktBankParameter::AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value)
+{
+	switch (index) {
+	case 0:  mOwner->loadPurged = CKontaktXml::BooleanValue(value); break;
+	case 1:  mOwner->libraryID = CKontaktXml::UnsignedValue(value); break;
+	case 2:  mOwner->loadingFlags = CKontaktXml::UnsignedValue(value); break;
+	case 3:  mOwner->SetSlotMidiChannel(suffix, CKontaktXml::UnsignedValue(value)); break;
+	case 4:  mOwner->SetSlotSolo(suffix, CKontaktXml::BooleanValue(value)); break;
+	case 5:  mOwner->SetSlotMute(suffix, CKontaktXml::BooleanValue(value)); break;
+	/* 6-9 (auxSendLevel0_slot..auxSendLevel3_slot): one real shared jump-
+	 * table target computing auxIndex = index-6 -- see class header. */
+	case 6: case 7: case 8: case 9:
+		mOwner->SetSlotAuxSendLevel(suffix, index - 6, (float)CKontaktXml::UnsignedValue(value));
+		break;
+	case 10: mOwner->SetSlotReorderIndex(suffix, CKontaktXml::UnsignedValue(value)); break;
+	case 11: mOwner->origSaveMode = CKontaktXml::UnsignedValue(value); break;
+	case 12: mOwner->origAbsolutePaths = CKontaktXml::BooleanValue(value); break;
+	default: CKontaktIndexedParameter::AddIndexedParameter(index, suffix, value); break;
+	}
+}
+
+/* ================================ CKontaktSendLevelsParameter ============== */
+
+static const char *kSendLevelsParamList[] = { "level_", 0 };
+
+CKontaktSendLevelsParameter::CKontaktSendLevelsParameter(CKontaktSendLevels *owner)
+	: CKontaktIndexedParameter(kSendLevelsParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktSendLevelsParameter::AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value)
+{
+	switch (index) {
+	case 0: mOwner->SetLevel(suffix, CKontaktXml::FloatValue(value)); break;
+	default: CKontaktIndexedParameter::AddIndexedParameter(index, suffix, value); break;
+	}
+}
+
+/* ================================ CKontaktIntModulatorParameter ============ */
+
+static const char *kIntModulatorParamList[] = {
+	"routersOpen", "bypass", "retrigger", "simulateK2DFDVolModulation",
+	"legacyVolumeEnvBehaviour", "classID", "name", "frequency", "pulseWidth",
+	"noteValue_Frequency", 0
+};
+
+CKontaktIntModulatorParameter::CKontaktIntModulatorParameter(CKontaktIntModulator *owner)
+	: CKontaktParameter(kIntModulatorParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktIntModulatorParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: mOwner->routersOpen = CKontaktXml::BooleanValue(value); break;
+	case 1: mOwner->bypass = CKontaktXml::BooleanValue(value); break;
+	case 2: mOwner->retrigger = CKontaktXml::BooleanValue(value); break;
+	case 3: mOwner->simulateK2DFDVolModulation = CKontaktXml::BooleanValue(value); break;
+	case 4: mOwner->legacyVolumeEnvBehaviour = CKontaktXml::BooleanValue(value); break;
+	case 5: mOwner->classID = CKontaktXml::UnsignedValue(value); break;
+	case 6: mOwner->SetName((const char *)value); break;
+	case 7: mOwner->frequency = CKontaktXml::FloatValue(value); break;
+	case 8: mOwner->pulseWidth = CKontaktXml::FloatValue(value); break;
+	case 9: mOwner->noteValue_Frequency = CKontaktXml::FloatValue(value); break;
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktExtModulatorParameter ============ */
+
+static const char *kExtModulatorParamList[] = {
+	"type", "source", "delay", "initialValue", "bypass",
+	"simulateK2EnvTimeModulation", "legacyStatModBehaviour", "classID", "name",
+	"tableOpen", "ccNumber", 0
+};
+
+static const char *kExtModulatorTypeList[] = { "extMod", 0 };
+
+static const char *kExtModulatorSourceList[] = {
+	"", "keyPos", "velocity", "pitchBend", "rlsTrigCounter", "randomValBi",
+	"midiCC", "monoAfterTouch", "randomValUni", 0
+};
+
+CKontaktExtModulatorParameter::CKontaktExtModulatorParameter(CKontaktExtModulator *owner)
+	: CKontaktParameter(kExtModulatorParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktExtModulatorParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: {
+		int t = CKontaktXml::StringIndex(kExtModulatorTypeList, value);
+		if (t >= 0)
+			mOwner->type = t;
+		break;
+	}
+	case 1: {
+		int s = CKontaktXml::StringIndex(kExtModulatorSourceList, value);
+		if (s >= 0)
+			mOwner->source = s;
+		break;
+	}
+	/* real code round-trips through the FPU (SignedValue -> fild -> fisttp)
+	 * before this store; mathematically a no-op for any in-range 32-bit
+	 * int, reproduced as a plain assignment -- see class header. */
+	case 2: mOwner->delay = CKontaktXml::SignedValue(value); break;
+	case 3: mOwner->initialValue = CKontaktXml::SignedValue(value); break;
+	case 4: mOwner->bypass = CKontaktXml::BooleanValue(value); break;
+	case 5: mOwner->simulateK2EnvTimeModulation = CKontaktXml::BooleanValue(value); break;
+	case 6: mOwner->legacyStatModBehaviour = CKontaktXml::BooleanValue(value); break;
+	case 7: mOwner->classID = CKontaktXml::UnsignedValue(value); break;
+	case 8: mOwner->SetName((const char *)value); break;
+	case 9: mOwner->tableOpen = CKontaktXml::BooleanValue(value); break;
+	case 10: mOwner->ccNumber = CKontaktXml::UnsignedValue(value); break;
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktVoiceGroupParameter ============== */
+
+static const char *kVoiceGroupParamList[] = {
+	"name", "mode", "preferReleased", "maxNumVoices", "msFadeTime", "exclusionGroup", 0
+};
+
+static const char *kVoiceGroupModeList[] = { "kill_oldest", 0 };
+
+CKontaktVoiceGroupParameter::CKontaktVoiceGroupParameter(CKontaktVoiceGroup *owner)
+	: CKontaktParameter(kVoiceGroupParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktVoiceGroupParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: mOwner->SetName((const char *)value); break;
+	case 1: {
+		int m = CKontaktXml::StringIndex(kVoiceGroupModeList, value);
+		if (m >= 0)
+			mOwner->mode = m;
+		break;
+	}
+	case 2: mOwner->preferReleased = CKontaktXml::BooleanValue(value); break;
+	case 3: mOwner->maxNumVoices = CKontaktXml::UnsignedValue(value); break;
+	case 4: mOwner->msFadeTime = CKontaktXml::UnsignedValue(value); break;
+	case 5: mOwner->exclusionGroup = CKontaktXml::SignedValue(value); break;
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktTargetParameter =================== */
+
+static const char *kTargetParamList[] = {
+	"target", "intensity", "slotIdx", "flags", "smoothingCoef", "name",
+	"tableOpen", "targetObjIdx", 0
+};
+
+static const char *kTargetEnumList[] = {
+	"pitch", "volume", "pan", "filterCutoff", "filterQ", "intensity",
+	"intensity_upper", "ahdsr_attack", 0
+};
+
+CKontaktTargetParameter::CKontaktTargetParameter(CKontaktTarget *owner)
+	: CKontaktParameter(kTargetParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktTargetParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: {
+		int t = CKontaktXml::StringIndex(kTargetEnumList, value);
+		if (t >= 0)
+			mOwner->target = t;
+		break;
+	}
+	case 1: mOwner->intensity = CKontaktXml::FloatValue(value); break;
+	case 2: mOwner->slotIdx = CKontaktXml::SignedValue(value); break;
+	case 3: mOwner->flags = CKontaktXml::UnsignedValue(value); break;
+	case 4: mOwner->smoothingCoef = CKontaktXml::FloatValue(value); break;
+	case 5: mOwner->SetName((const char *)value); break;
+	case 6: mOwner->tableOpen = CKontaktXml::BooleanValue(value); break;
+	case 7: mOwner->targetObjIdx = CKontaktXml::UnsignedValue(value); break;
 	default: CKontaktParameter::AddParameter(index, value); break;
 	}
 }
@@ -622,4 +958,24 @@ CKontaktOutputsParameters::CKontaktOutputsParameters(CKontaktOutputs *owner)
 CKontaktIndexedParameter *CKontaktOutputsParameters::MakeIndexedParameter()
 {
 	return new CKontaktOutputsParameter(mOwner);
+}
+
+CKontaktBankParameters::CKontaktBankParameters(CKontaktBank *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktIndexedParameter *CKontaktBankParameters::MakeIndexedParameter()
+{
+	return new CKontaktBankParameter(mOwner);
+}
+
+CKontaktProgramParameters::CKontaktProgramParameters(CKontaktProgram *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktParameter *CKontaktProgramParameters::MakeParameter()
+{
+	return new CKontaktProgramParameter(mOwner);
 }

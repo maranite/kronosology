@@ -45,15 +45,18 @@
  * pass purely for size, not a blocker -- see its own TODO further down.
  * CKontaktOutputsParameter (needed just 1 tiny owner setter,
  * CKontaktOutputs::SetPhysicalOutputMapping -- a 1-line array store, no
- * bounds check) is also done this batch. Still not done, for the same
- * "needs 1-5 more tiny owner-class setters not yet reconstructed" reason as
- * before: CKontaktBankParameter (CKontaktBank::SetSlotMute/SetSlotSolo/
+ * bounds check) is also done this batch. At the time this paragraph was
+ * first written, still not done (for the same "needs 1-5 more tiny
+ * owner-class setters not yet reconstructed" reason as before) were:
+ * CKontaktBankParameter (CKontaktBank::SetSlotMute/SetSlotSolo/
  * SetSlotMidiChannel/SetSlotReorderIndex/SetSlotAuxSendLevel),
- * CKontaktSendLevelsParameter (CKontaktSendLevels::SetLevel),
+ * CKontaktSendLevelsParameter (CKontaktSendLevels::SetLevel), and
  * CKontaktIntModulatorParameter/CKontaktExtModulatorParameter/
  * CKontaktVoiceGroupParameter/CKontaktTargetParameter (4 plain
- * CKontaktXxx::SetName(const char*) strncpy setters) -- real, traced,
- * still flagged as a clean, low-risk follow-up batch.
+ * CKontaktXxx::SetName(const char*) strncpy setters, or so it looked from
+ * this pass's size estimate alone) -- all done in the SECOND follow-up
+ * batch below (2026-07-28), which also found each of those last 4 has
+ * several other real dispatched fields beyond just SetName.
  *
  * This same follow-up batch also resolved the sibling plural
  * "CKontaktXxxParameters" factory-wrapper family (see kontakt_parameter_
@@ -62,9 +65,39 @@
  * (or now declares): CKontaktGroupParameters, CKontaktOutputParameters,
  * CKontaktZoneParameters, CKontaktContainerParameters,
  * CKontaktOutputsParameters. CKontaktBankParameters and
- * CKontaktProgramParameters (the plural counterparts of the still-deferred
- * CKontaktBankParameter and the size-deferred CKontaktProgramParameter)
- * are left for the same follow-up.
+ * CKontaktProgramParameters (the plural counterparts of what were then the
+ * still-deferred CKontaktBankParameter and the size-deferred
+ * CKontaktProgramParameter) were left for a follow-up -- see the SECOND
+ * follow-up batch note below, both are now done too.
+ *
+ * SECOND SAME-DAY FOLLOW-UP BATCH (2026-07-28, dedicated size-deferred
+ * pass): CKontaktProgramParameter (55-entry list, the size-deferred lead
+ * target) done via a full byte-level jump-table dump rather than
+ * hand-tracing alone -- see its own class comment below for why a PRIOR
+ * draft of that class's own TODO note (a speculative guess about indices
+ * 52-54 sharing a fallback block) turned out to be wrong once the real
+ * table was actually read; corrected, not left in place. A scripted
+ * family-wide jump-table decoder (OA.ko-style) was considered first per
+ * this batch's own instructions and rejected: each class's jump table has
+ * its own distinct guard/shape and the total case count across all
+ * remaining classes was small enough that a short one-off Python
+ * objdump-parsing snippet per table (not a reusable decoder) was the more
+ * direct path, so no new tool was added to tools/. Also done this batch,
+ * closing out every other Kontakt-family sibling this project's deferred-
+ * item registry still listed: CKontaktBankParameter (+ its 5 CKontaktBank::
+ * SetSlotXxx owner setters), CKontaktBankParameters and
+ * CKontaktProgramParameters (the 2 still-missing plural wrappers,
+ * completing all 7 real concrete plural subclasses), CKontaktSendLevels
+ * Parameter (+ CKontaktSendLevels::SetLevel), and the 4 plain-SetName
+ * classes CKontaktIntModulatorParameter/CKontaktExtModulatorParameter/
+ * CKontaktVoiceGroupParameter/CKontaktTargetParameter (+ their owner
+ * classes' SetName setters) -- none of these 4 turned out to be "just" a
+ * SetName setter as the original deferred note guessed; each has several
+ * other real dispatched fields too (StringIndex-resolved enums, float/int/
+ * bool field writes), all traced via the same real-jump-table-dump
+ * discipline. This closes the "Parameters" factory-family investigation
+ * and every Kontakt-family item this project's deferred-item registry had
+ * open as of the first follow-up batch above.
  *
  * OWNER STRUCTS: every concrete class stores a raw pointer to its owning
  * "container" object (CKontaktGroup*, CKontaktZone*, ...) at offset +0x10
@@ -449,6 +482,234 @@ public:
 	void SetPhysicalOutputMapping(unsigned int outputIndex, unsigned int value);
 };
 
+/* CKontaktProgram -- the owner CKontaktProgramParameter.h's own TODO left
+ * for a dedicated follow-up (2026-07-28 SAME-DAY pass). Only 10 of the
+ * 55 listed field names are actually dispatched to a real field write in
+ * this build (see CKontaktProgramParameter's own class comment below for
+ * the full jump-table read that established this) -- every other listed
+ * name is a genuine real no-op (recognized so old/newer-format XML parses
+ * without an "unmatched name" penalty, silently dropped otherwise), same
+ * pattern already established for CKontaktZoneParameter's fadeLowVelo/
+ * fadeHighVelo/fadeLowKey/fadeHighKey. `wallpaperFile` is heap-allocated via
+ * SetWallpaperFile(), same "scalar delete, no NUL-terminator write" idiom
+ * already documented for CKontaktScript::SetSourceText above. */
+class CKontaktProgram {
+public:
+	unsigned char _unknown_prefix[0x30];
+
+	unsigned int numBytesSamplesTotal; /* +0x30 */
+	int transpose;                     /* +0x34 */
+	float volume;                      /* +0x38 */
+	float pan;                         /* +0x3c */
+	int tune;                          /* +0x40 */
+	unsigned int lowVelocity;          /* +0x44 */
+	unsigned int highVelocity;         /* +0x48 */
+	unsigned int lowKey;               /* +0x4c */
+	unsigned int highKey;              /* +0x50 */
+
+	unsigned char _pad_54[0x68 - 0x54]; /* real listed names here (defaultKeyKeySwitch,
+	                                      * dfdChannelPreloadSize, libraryID, loadingFlags,
+	                                      * autoLoadMode) are confirmed real no-ops -- no
+	                                      * field write to disturb */
+
+	int cc64Mode; /* +0x68 -- StringIndex()-resolved against a 1-entry list
+	               * ({"cc64_mode_sustain_plus_controller",0}); only ever
+	               * written the value 0 on a match, left unchanged
+	               * otherwise -- same idiom as CKontaktGroup::interpQuality */
+
+	unsigned char _pad_6c[0x160 - 0x6c]; /* remaining 40 listed names (useStdCC_7_10
+	                                       * through instrumentCat3) are all confirmed
+	                                       * real no-ops in this build */
+
+	char *wallpaperFile; /* +0x160, heap char*, see SetWallpaperFile() */
+
+	/* .text+0x089c1b40. NULL-guards the OLD pointer (scalar `delete`, not
+	 * delete[] -- same idiom as CKontaktScript::SetSourceText), then if
+	 * `text` is non-NULL: new char[strlen(text)] + memcpy WITHOUT writing
+	 * a trailing NUL (real code, reproduced as-is; every real caller passes
+	 * a `char[0x100]` UnpackPath() output which happens to already be
+	 * NUL-terminated by UnpackPath's own strncat/forced-0 tail, so this is
+	 * not believed reachable as a real overrun in practice). */
+	void SetWallpaperFile(const char *text);
+};
+
+/* CKontaktBank -- the owner CKontaktBankParameter wraps. Real per-slot
+ * layout (0x20/32-byte stride) established this pass by cross-checking all
+ * 5 CKontaktBank::SetSlotXxx() setters' own raw offset-arithmetic bodies
+ * against each other (each one independently confirms the same 32-byte
+ * stride and a common per-slot base of `this + 0x3c + slotIndex*0x20`):
+ *   SetSlotMidiChannel: this + slotIndex*0x20 + 0x3c            (unsigned)
+ *   SetSlotSolo:         this + slotIndex*0x20 + 0x40            (bool)
+ *   SetSlotMute:         this + slotIndex*0x20 + 0x41            (bool)
+ *   SetSlotAuxSendLevel: this + slotIndex*0x20 + auxIndex*4 + 0x44 (float,
+ *                        auxIndex 0-3 -- 4 real XML names "auxSendLevel0_
+ *                        slot".."auxSendLevel3_slot" in
+ *                        CKontaktBankParameter's own list share ONE real
+ *                        jump-table target that computes auxIndex = case
+ *                        index - 6, a real confirmed GCC case-folding, same
+ *                        pattern as CKontaktProgramParameter's list index 14
+ *                        finding)
+ *   SetSlotReorderIndex: this + (slotIndex+2)*0x20 + 0x14 == this +
+ *                        slotIndex*0x20 + 0x54                    (unsigned)
+ * The last 4 bytes of each 32-byte slot (+0x1c..+0x1f relative to the slot
+ * base) are not written by any real setter found this pass. Real slot COUNT
+ * not established -- every real setter takes an unbounded slotIndex with NO
+ * compiled bounds check (same "no bounds check at all" precedent as
+ * CKontaktOutputs::SetPhysicalOutputMapping) -- so no fixed-size array
+ * member is declared here, only the confirmed per-slot Slot layout as
+ * documentation; every real access in this pass goes through the 5 setter
+ * methods below, never direct field access on a `slot[]` member. */
+class CKontaktBank {
+public:
+	unsigned char _unknown_prefix[0x2c];
+
+	bool loadPurged;             /* +0x2c */
+	unsigned int libraryID;      /* +0x30 */
+	unsigned int loadingFlags;   /* +0x34 */
+
+	unsigned char _pad_38[0x3c - 0x38];
+
+	/* Per-slot layout, 0x20 bytes/slot, base = this + 0x3c + slotIndex*0x20.
+	 * Documentation only -- see class header note above for why no `slot[]`
+	 * member is declared. */
+	struct Slot {
+		unsigned int midiChannel; /* +0x00 */
+		bool solo;                /* +0x04 */
+		bool mute;                /* +0x05 */
+		unsigned char _pad0[2];
+		float auxSendLevel[4];    /* +0x08 */
+		unsigned int reorderIdx;  /* +0x18 */
+		unsigned char _pad1[4];   /* +0x1c, not written by any real setter found this pass */
+	};
+
+	unsigned char _pad_gap[0x838 - 0x3c]; /* the real per-slot array itself (count unknown) */
+
+	unsigned int origSaveMode;  /* +0x838 */
+	bool origAbsolutePaths;     /* +0x83c */
+
+	/* .text+0x089bafe0. this[slotIndex*0x20 + 0x3c] = value. */
+	void SetSlotMidiChannel(unsigned int slotIndex, unsigned int value);
+	/* .text+0x089bb000. this[slotIndex*0x20 + 0x40] = value. */
+	void SetSlotSolo(unsigned int slotIndex, bool value);
+	/* .text+0x089bb020. this[slotIndex*0x20 + 0x41] = value. */
+	void SetSlotMute(unsigned int slotIndex, bool value);
+	/* .text+0x089bb040. this[slotIndex*0x20 + auxIndex*4 + 0x44] = value. */
+	void SetSlotAuxSendLevel(unsigned int slotIndex, unsigned int auxIndex, float value);
+	/* .text+0x089bb060. this[slotIndex*0x20 + 0x54] = value. */
+	void SetSlotReorderIndex(unsigned int slotIndex, unsigned int value);
+};
+
+/* CKontaktSendLevels -- 8-entry float array, the ONE real setter
+ * (SetLevel) is bounds-checked (`if (index <= 7)`), unlike almost every
+ * other owner setter in this file -- reproduced faithfully, not added
+ * defensively. */
+class CKontaktSendLevels {
+public:
+	unsigned char _unknown_prefix[0xc];
+
+	float level[8]; /* +0xc */
+
+	/* .text+0x089c3940. Real bounds check: index>7 is silently ignored. */
+	void SetLevel(unsigned int index, float value);
+};
+
+/* CKontaktIntModulator -- owner CKontaktIntModulatorParameter wraps. */
+class CKontaktIntModulator {
+public:
+	unsigned char _unknown_prefix[0x10];
+
+	bool routersOpen;                       /* +0x10 */
+	bool bypass;                            /* +0x11 */
+	bool retrigger;                         /* +0x12 */
+	bool simulateK2DFDVolModulation;        /* +0x13 */
+	bool legacyVolumeEnvBehaviour;          /* +0x14 */
+
+	unsigned char _pad_15[0x18 - 0x15];
+
+	unsigned int classID;                   /* +0x18 */
+
+	char name[0x20];                        /* +0x1c, see SetName() -- exactly
+	                                          * fills the gap up to frequency,
+	                                          * contiguity-confirmed */
+
+	float frequency;                        /* +0x3c */
+	float pulseWidth;                       /* +0x40 */
+	float noteValue_Frequency;              /* +0x44 */
+
+	/* .text+0x089becf0. strncpy(this+0x1c, text, 0x20). */
+	void SetName(const char *text);
+};
+
+/* CKontaktExtModulator -- owner CKontaktExtModulatorParameter wraps. */
+class CKontaktExtModulator {
+public:
+	unsigned char _unknown_prefix[0x10];
+
+	int type;                               /* +0x10 -- StringIndex()-resolved */
+	int source;                             /* +0x14 -- StringIndex()-resolved */
+	int delay;                              /* +0x18 */
+	int initialValue;                       /* +0x1c */
+	bool bypass;                            /* +0x20 */
+	bool simulateK2EnvTimeModulation;       /* +0x21 */
+	bool legacyStatModBehaviour;            /* +0x22 */
+
+	unsigned char _pad_23[0x24 - 0x23];
+
+	unsigned int classID;                   /* +0x24 */
+
+	char name[0x20];                        /* +0x28, see SetName() -- exactly
+	                                          * fills the gap up to tableOpen,
+	                                          * contiguity-confirmed */
+
+	bool tableOpen;                         /* +0x48 */
+
+	unsigned char _pad_49[0x4c - 0x49];
+
+	unsigned int ccNumber;                  /* +0x4c */
+
+	/* .text+0x089bca00. strncpy(this+0x28, text, 0x20). */
+	void SetName(const char *text);
+};
+
+/* CKontaktVoiceGroup -- owner CKontaktVoiceGroupParameter wraps. */
+class CKontaktVoiceGroup {
+public:
+	unsigned char _unknown_prefix[0x10];
+
+	char name[0x20];              /* +0x10, see SetName() -- exactly fills
+	                                * the gap up to mode, contiguity-confirmed */
+
+	int mode;                    /* +0x30 -- StringIndex()-resolved, 1-entry list */
+	bool preferReleased;         /* +0x34 */
+	unsigned int maxNumVoices;   /* +0x38 */
+	unsigned int msFadeTime;     /* +0x3c */
+	int exclusionGroup;          /* +0x40 */
+
+	/* .text+0x089c49a0. strncpy(this+0x10, text, 0x20). */
+	void SetName(const char *text);
+};
+
+/* CKontaktTarget -- owner CKontaktTargetParameter wraps. */
+class CKontaktTarget {
+public:
+	unsigned char _unknown_prefix[0xc];
+
+	int target;                  /* +0xc -- StringIndex()-resolved, 8-entry enum */
+	float intensity;             /* +0x10 */
+	int slotIdx;                 /* +0x14 */
+	unsigned int flags;          /* +0x18 */
+	float smoothingCoef;         /* +0x1c */
+
+	char name[0x20];               /* +0x20, see SetName() -- exactly fills
+	                                 * the gap up to tableOpen, contiguity-confirmed */
+
+	bool tableOpen;               /* +0x40 */
+	unsigned int targetObjIdx;   /* +0x44 */
+
+	/* .text+0x089c4310. strncpy(this+0x20, text, 0x20). */
+	void SetName(const char *text);
+};
+
 /* ============================ concrete Parameter classes ================= */
 
 /* .text+0x089bdd80 (AddIndexedParameter) / +0x089be160 (ctor) /
@@ -529,29 +790,131 @@ protected:
 	CKontaktSample *mOwner;
 };
 
-/* TODO (deferred purely for size, NOT blocked -- see file header): the
- * remaining UnpackPath-dependent sibling, CKontaktProgramParameter, is not
- * declared in this file yet. Facts gathered this pass for whoever picks it
- * up next: AddParameter .text+0x089c1ec0 (311 bytes); ctor +0x089c2070
- * takes CKontaktProgram*; list of 55 entries @0x91fc120 (dumped, starts
- * "numBytesSamplesTotal","transpose","volume","pan","tune",...,"wallpaperFile",
- * "batteryCellColor","muted","soloed"); jump table @0x8f77030, but the real
+/* CKontaktProgramParameter -- the named lead target of this whole file's
+ * standing "deferred purely for size" TODO, done 2026-07-28 in a dedicated
+ * follow-up pass. AddParameter .text+0x089c1ec0 (311 bytes); list of 55
+ * entries @0x91fc120 (full dump in kontakt_parameter_family.cpp). Real
  * guard is `cmp eax,0x33; ja <fallback>` -- ONLY indices 0-0x33 (0-51) go
- * through the table. Confirmed one of those 52 in-table cases is a
- * UnpackPath()+CKontaktProgram::SetWallpaperFile(...) call (matching
- * "wallpaperFile" at list index 51 by name, but its real jump-table SLOT
- * was NOT independently dumped/cross-referenced this pass -- do NOT assume
- * table order matches list declaration order without doing that dump, see
- * CKontaktContainerParameter's own class comment for why that assumption
- * would be wrong here). Indices 52-54 ("batteryCellColor"/"muted"/"soloed",
- * past the `ja` guard) all fall through to ONE shared fallback block that
- * shared fallback block that ignores which of the 3 actually matched and
- * unconditionally does StringIndex(list@0x91fc100, value) -> owner[0x68]=
- * result (a real, confirmed ground-truth quirk -- almost certainly GCC
- * identical-case-body folding, not a translation artifact -- worth
- * confirming with a byte-level jump-table dump before committing to that
- * theory). CKontaktProgram itself is not declared as an owner struct here
- * yet either. */
+ * through the 52-entry jump table @0x8f77030 (byte-dumped and index-by-
+ * index cross-referenced against the list this pass, NOT assumed to match
+ * declaration order -- see CKontaktContainerParameter's own note for why
+ * that assumption would be unsafe). RESULT: only 10 of the 52 in-table
+ * indices (0-8 and 14) plus the very last in-table index (51,
+ * "wallpaperFile") reach real code; every other in-table index (9-13,
+ * 15-50 -- 36 entries) resolves to the SAME jump-table target as the
+ * function's own plain epilogue, i.e. a genuine real no-op (recognized
+ * name, silently dropped value) -- same "old field names kept for parser
+ * compatibility, no longer stored" pattern already seen in
+ * CKontaktZoneParameter's fade* fields, just far more of them here. List
+ * index 14 ("cc64Mode") is the interesting case: its own real target
+ * (.text+0x089c1ef8) does StringIndex() against a real 1-entry list
+ * ({"cc64_mode_sustain_plus_controller",0}) and writes owner->cc64Mode on
+ * a match -- this ADDRESS happens to also be what an earlier, less
+ * thorough pass speculated (in a prior draft of this same TODO) was a
+ * "shared fallback for indices 52-54"; the real jump-table dump this pass
+ * did disproves that guess outright -- indices 52-54 ("batteryCellColor"/
+ * "muted"/"soloed", past the `ja` guard) branch straight to the function's
+ * plain epilogue (.text+0x089c1f18) and touch NOTHING, confirmed by
+ * reading the `ja` target address directly, not the cc64Mode block's
+ * address. Index 51 ("wallpaperFile") UnpackPath()s the value into a
+ * 0x100-byte stack buffer then calls CKontaktProgram::SetWallpaperFile(). */
+class CKontaktProgramParameter : public CKontaktParameter {
+public:
+	CKontaktProgramParameter(CKontaktProgram *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktProgram *mOwner;
+};
+
+/* CKontaktBankParameter -- indexed family (suffix = bank slot index). 13
+ * in-table entries (guard `cmp ebx,0xc; jbe <table>`), list @0x91fba20
+ * (full dump in .cpp). Indices 6-9 ("auxSendLevel0_slot".."auxSendLevel3_
+ * slot") share ONE real jump-table target (`lea ebx,[ebx-6]` computing
+ * auxIndex = index-6 before calling CKontaktBank::SetSlotAuxSendLevel) --
+ * same real GCC case-folding pattern as CKontaktProgramParameter's list
+ * index 14 above, confirmed via the same byte-level jump-table dump
+ * discipline. The real unsigned-XML-value-to-float conversion for the aux
+ * cases goes through a real `movd`+`movq`+`fild` idiom (zero-extend the
+ * unsigned 32-bit value into a 64-bit slot, then FPU-load it as a signed
+ * 64-bit int) rather than a plain unsigned-to-float cast -- functionally
+ * identical to `(float)` for any value that actually fits in 32 bits
+ * unsigned, reproduced here as a plain cast since the wider round-trip
+ * changes nothing observable. */
+class CKontaktBankParameter : public CKontaktIndexedParameter {
+public:
+	CKontaktBankParameter(CKontaktBank *owner);
+	virtual void AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value);
+
+protected:
+	CKontaktBank *mOwner;
+};
+
+/* CKontaktSendLevelsParameter -- indexed family, 1-entry list ({"level_",0}).
+ * .text+0x089c3960 (AddIndexedParameter) / +0x089c3a20 (ctor) /
+ * +0x089c39d0,+0x089c39f0 (dtor D1/D0). */
+class CKontaktSendLevelsParameter : public CKontaktIndexedParameter {
+public:
+	CKontaktSendLevelsParameter(CKontaktSendLevels *owner);
+	virtual void AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value);
+
+protected:
+	CKontaktSendLevels *mOwner;
+};
+
+/* CKontaktIntModulatorParameter -- .text+0x089bed20 (AddParameter, 235
+ * bytes) / +0x089bee60 (ctor) / +0x089bee10,+0x089bee30 (dtor D1/D0). List:
+ * 10 entries @0x91fbee0 (full dump in .cpp). */
+class CKontaktIntModulatorParameter : public CKontaktParameter {
+public:
+	CKontaktIntModulatorParameter(CKontaktIntModulator *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktIntModulator *mOwner;
+};
+
+/* CKontaktExtModulatorParameter -- .text+0x089bca30 (AddParameter, 317
+ * bytes) / +0x089bcbc0 (ctor) / +0x089bcb70,+0x089bcb90 (dtor D1/D0). List:
+ * 11 entries @0x91fbc80 (full dump in .cpp). Case 2 ("delay") takes a real,
+ * pointless SignedValue()->fild->fisttp int round-trip through the FPU
+ * (mathematically a no-op for any in-range 32-bit int) before the field
+ * store -- reproduced as a plain assignment, see .cpp comment. */
+class CKontaktExtModulatorParameter : public CKontaktParameter {
+public:
+	CKontaktExtModulatorParameter(CKontaktExtModulator *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktExtModulator *mOwner;
+};
+
+/* CKontaktVoiceGroupParameter -- .text+0x089c49d0 (AddParameter, 204 bytes)
+ * / +0x089c4af0 (ctor) / +0x089c4aa0,+0x089c4ac0 (dtor D1/D0). List: 6
+ * entries @0x91fc3e8 (full dump in .cpp). */
+class CKontaktVoiceGroupParameter : public CKontaktParameter {
+public:
+	CKontaktVoiceGroupParameter(CKontaktVoiceGroup *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktVoiceGroup *mOwner;
+};
+
+/* CKontaktTargetParameter -- .text+0x089c4340 (AddParameter, 253 bytes) /
+ * +0x089c4490 (ctor) / +0x089c4440,+0x089c4460 (dtor D1/D0). List: 8
+ * entries @0x91fc3a0 (full dump in .cpp). Case 0 ("target") resolves
+ * through its OWN 8-entry enum list @0x91fc340 (pitch/volume/pan/
+ * filterCutoff/filterQ/intensity/intensity_upper/ahdsr_attack) -- a
+ * different list from the field-name list, not to be confused with it. */
+class CKontaktTargetParameter : public CKontaktParameter {
+public:
+	CKontaktTargetParameter(CKontaktTarget *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktTarget *mOwner;
+};
 
 /* .text+0x089bc2c0 / +0x089bc3e0 / +0x089bc390,+0x089bc3b0. List: 6 entries @0x91fbb68. */
 class CKontaktEffectParameter : public CKontaktParameter {
@@ -721,12 +1084,28 @@ protected:
 	CKontaktOutputs *mOwner;
 };
 
-/* TODO (deferred alongside their singular counterparts, see file header):
- * CKontaktBankParameters (ctor +0x089bb370 takes CKontaktBank*, MakeIndexed
- * Parameter +0x089bb2d0 -> new CKontaktBankParameter) and
- * CKontaktProgramParameters (ctor +0x089c2140 takes CKontaktProgram*,
- * MakeParameter +0x089c20a0 -> new CKontaktProgramParameter) are real, live,
- * confirmed call sites (same mechanical Make*() shape as the 5 above) but
- * not declared here since their singular counterparts aren't either. */
+/* .text+0x089bb370 (ctor) / +0x089bb320,+0x089bb340 (dtor D1/D0) /
+ * +0x089bb2d0 (MakeIndexedParameter). Done alongside CKontaktBankParameter
+ * above, 2026-07-28. */
+class CKontaktBankParameters : public CKontaktIndexedParameters {
+public:
+	CKontaktBankParameters(CKontaktBank *owner);
+	virtual CKontaktIndexedParameter *MakeIndexedParameter();
+
+protected:
+	CKontaktBank *mOwner;
+};
+
+/* .text+0x089c2140 (ctor) / +0x089c20f0,+0x089c2110 (dtor D1/D0) /
+ * +0x089c20a0 (MakeParameter). Done alongside CKontaktProgramParameter
+ * above, 2026-07-28. */
+class CKontaktProgramParameters : public CKontaktParameters {
+public:
+	CKontaktProgramParameters(CKontaktProgram *owner);
+	virtual CKontaktParameter *MakeParameter();
+
+protected:
+	CKontaktProgram *mOwner;
+};
 
 #endif /* KONTAKT_PARAMETER_FAMILY_H */
