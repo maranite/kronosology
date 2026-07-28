@@ -3080,3 +3080,122 @@ far).
 
 Real-HW test that would help: none identified -- pure UI-notification/
 message-dispatch plumbing with no direct front-panel/audio observable.
+
+## CKGEngine — KARMA performance-editing engine, 55/74 methods (batch, 2026-07-28)
+
+Fresh nm-based survey (per-class weak/global symbol counts, sorted by size)
+for the next major dense cluster now that the STG value-getter family and
+all three `CKG*ParamMsgHandler` classes were closed. `CKGEngine` was the
+obvious next target: `ms_poInstance`/`ms_poKGParamEdit` are already read
+by dozens of previously-reconstructed CKG*/CSK* methods across this
+project (the widget family, `CSKMIDIMsgHandler`, `CKGControlMsgHandler`,
+etc.), but the class itself was still a 24-declaration opaque stand-in
+with zero real bodies. Real ground truth: 74 methods, `.text`+0x3a96e0
+through +0x3aee80.
+
+55/74 reconstructed for real: ctor/dtor (placement-constructs `CKGParamEdit`/
+a NEW opaque dependency `CKGTimerManager`/`CKGEventDisplayManager`,
+zero-inits every field the real ctor touches plus `m_numModules` — real
+ctor genuinely never sets it, only `Initialize()` does, a documented
+"deterministic KAT tests" deviation), `GetKarmaMode()` (the Combi/Program/
+Song mode dispatcher, with a Program-mode special case comparing
+`CKGBankManager`'s own first field against a fixed offset into the SAME
+allocation — the built-in KorgX2100 template — confirmed via the identical
+inline computation independently reused inside
+`SendChangePerformanceToEngine()`), the KARMA-engine performance-change
+pipeline (`SendChangePerformanceToEngine`/`ChangePerformancePtrForEngine`/
+`Initialize`), per-module channel/timbre-thru queries (with a real quirk:
+`module >= m_numModules` falls back to module 0's own record rather than
+erroring), MIDI real-time message forwarding, RTC reset/compare/backup
+plumbing, and `CopyCurrentParameterToSharedMemory()` (3 real memcpy
+segments, decoded from GCC's own `rep movsd` + conditional
+`movsw`/`movsb` tail-copy expansion back into (dst,src,byte-count)
+triples — the tail byte-count encoding is the real total size's own low 2
+bits, confirmed by cross-checking against the visible dword count rather
+than guessed).
+
+**19 methods DEFERRED**, declared but not defined (standard "expected
+Unknown symbol at insmod" convention, verified via a real Kbuild build —
+`nm` on the linked `OA.ko` shows exactly these 19 plus the new KARMA
+externs as `U`, nothing unexpected): `IsEditedPerf()` (9458 bytes, a huge
+outlier, almost certainly a giant per-RTParam edited-state comparison —
+not attempted at all); the "per-RTParam table" family
+(`FakeTimbreThru`/`RefreshPERTParmInfo`/`SetPERTParmMinMax`/
+`SetPERTParmControlModule`/`SetGERTParmMinMax`/`RefreshGERTParmInfo`/
+`SendChangeGEToEngine`/`DoInitModule`/`DoRandomCaptureExec`/
+`UpdateEnableDirectPathForVectorCC`/`ChangePerformance` (the top-level
+2-arg orchestrator)/`CloseGECategoryPopup`/`UpdateGEInfo`) — all real,
+address-confirmed, and proven mechanical-but-lengthy by contrast with the
+two INCLUDED members of the same general shape
+(`StoreGERTParmMinMaxToBank`/`DoRandomCapture`, both fully reconstructed
+this batch); and `ChangeValuesInBackupWhenChangingGE()` (both overloads)
++ `ProcessForSeqWhenChangingGE()` (whose only 2 real call targets are
+those overloads) — a dense, multi-segment field-by-field struct copy
+between a live `CKarmaPerfCommon`/`CKarmaPerfModule` record and its
+per-seq backup slot, traced far enough to see the overall shape (offsets
++0x4/+0x14/+0x127/+0x128/+0x136/+0x138/+0x148/+0x194, several
+reused/rebased scratch registers) but not independently confirmed to the
+same byte-exact confidence as the rest of this batch — a real, scoped
+follow-up, not abandoned.
+
+New dependency surface: `CKGTimerManager` (5 of 14 real methods — the
+ones `CKGEngine` itself calls; the other 9 are a self-contained future
+cluster of their own), ~50 free `RT_*`/`KS_*`/`KGOutGate_*` KARMA-library
+externs (the generative/sequencing engine core itself, a separate
+unmodeled subsystem, same "opaque out-of-project library" treatment
+already established for the handful of such externs in
+`oa_ckg_switch_family.h`), 11 new `CKGBankManager` methods, 2 new
+`CKGRTCHandler` methods, 3 new `CKGParamEdit` methods — all
+declare-the-interface-defer-the-body per this project's standing
+convention for out-of-scope dependencies.
+
+**Two real bugs caught and fixed in THIS batch's own new code** (not
+pre-existing):
+1. The SAME `ADDR_RE`-matches-prose gotcha already documented above for
+   `CKGControlMsgHandler`/`HandleMessage` — re-triggered independently
+   here by every one of this batch's own "DEFERRED -- .text+0xNNNNNN"
+   comments, each of which falsely credited whatever unrelated real
+   ground-truth function happens to share that manifest address purely
+   from the citation (caught 5 collisions via the baseline diff, e.g.
+   `CSPRHDRManager::SetErrorCode`/`ShouldPlayCheckingAutoInput`,
+   `CSPRAudioPlayer::WaitUntilPlayStandby`/
+   `SetStandbyNextEventBeforeRunning`). Fixed by rewording every deferred
+   citation to "ground-truth offset 0xNNNNNN" (no `.text+0x` substring).
+2. A systematic address-transcription error: every real `.text+0xNNNNNN`
+   comment in this batch was computed via a stray subtract-then-mis-readd
+   of the 0x10000 Ghidra image base (the correct convention is
+   `comment_offset == raw nm address`, unmodified — the `TEXT_BASE` math
+   in `gen_oa_manifest.py` already accounts for Ghidra's own base
+   assignment). This put every citation at the WRONG manifest address,
+   silently colliding with unrelated ground-truth functions the same way
+   as gotcha #1 above, just for the 55 REAL (non-deferred) methods this
+   time. Caught by the same baseline-diff technique (comparing before/
+   after exact address sets, not trusting the raw newly-credited count);
+   fixed by recomputing every citation directly from each method's own
+   real nm address and re-verifying with a second clean diff (0
+   collisions, 55 credited, 0 regressions).
+
+Independent-oracle KAT (`verify/test_ckg_engine.cpp`, 85 checks) caught a
+third, genuine logic bug before it shipped: `SendChannelMessage()`'s
+`m_field0` gating direction was backwards on the first draft (the real
+body does nothing at all when `m_field0 != 0`, not the reverse). Also
+caught and fixed a 32-bit-vs-64-bit pointer-width host/target mismatch:
+`CKGBankManager::ms_poInstance[+0]`/`[+4]`/`[+8]` are 3 independent 4-byte
+pointer slots on the real i386 target, but a naive `unsigned char **`
+cast reads/writes 8 bytes on this 64-bit verify host and silently
+clobbers the adjacent slot — fixed using this project's established
+`ToU32()`/`FromU32()` packed-pointer convention (already documented for
+exactly this class of field elsewhere, e.g. `oa_engine_init.h`/
+`oa_engine.h`) in both `ckg_engine.cpp` itself and the test's own mocks,
+plus `-fno-pie`/`-no-pie` (same fix already established for
+`test_tone_adjust_descriptors`) so the mock buffers' addresses fit in 32
+bits for the round-trip.
+
+`make objs`, `make verify` (all binaries green), and a real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build all green.
+Manifest 3406 -> 3461/21,689 (+55, 0 regressions). Commit `018ce7e`.
+
+Real-HW test that would help: none identified this batch either — KARMA
+performance-change orchestration has no direct single-observable front-
+panel/audio effect distinguishable from the dozens of other real KARMA
+call paths already exercised by prior batches.
