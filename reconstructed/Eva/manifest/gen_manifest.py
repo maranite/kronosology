@@ -3746,6 +3746,92 @@ RECONSTRUCTED = {
     "089ce100",  # CKorgKsc::GetUUID(char*, unsigned int) const
     "089ce150",  # CKorgKsc::SetUUID(char const*)
     "089ce1a0",  # CKorgKsc::MakeFolder()
+
+    # CChkItem/CDumpReqDescr/CDumpHeaderDescr/CChunkClient (src/dump/chunk_client.cpp,
+    # include/chunk_client.h), fresh nm -C class-inventory sweep (2026-07-28). Found via
+    # buffering_task.h's own pre-existing "mChunkClient -- genuinely separate,
+    # un-reconstructed chunk-transfer client class (out of scope)" flag. CChunkClient
+    # derives from the already-real CTask (task.h); manual-vtable-as-data-array
+    # convention (PTR__CChunkClient_08e857c8, 26 slots, confirmed via direct .rodata
+    # byte read). CDumpReqDescr/CDumpHeaderDescr use real C++ virtual (a plain
+    # single-base override chain, same convention as chunk_family.h's CChunkBase/
+    # CChunk). 64 of 67 methods found in this cluster are reconstructed here;
+    # OpenSubChunk()/CloseSubChunk() (real signature, Tier B) and CChunkClient's own
+    # D0 "deleting" destructor (080c8e90) stay pending -- see chunk_client.h for the
+    # full writeup, including why those 3 (CChunkRootWithSeek/CResourceChunk
+    # dependency, D0-vs-D1 dtor precedent) are genuinely out of scope for this batch.
+    # verify/test_chunk_client.cpp (62 checks): CChkItem/CDumpReqDescr/
+    # CDumpHeaderDescr Serialize/DeSerialize/operator= round-trips, CChunkClient ctor
+    # field checks, Abort/StoppedByUser/Save.../Load... "no override -> no-op" default
+    # behavior, PrepareList()/OnPrepareMicro() all 3 real branches, LoadRes/SaveRes/
+    # MergeRes/LoadResSync real internal state transitions (ungated, no IsXxx hook --
+    # OutMono() itself fails cleanly with no live receiver wired up), and Exec(CMessage&)
+    # dispatch across every real ECB code including the 2 FailAndReset()/Reset()-driving
+    # shapes of ECB 0xe2/0xe5. Full `make verify` (87 binaries) stays green (0 FAIL).
+    "080c8b60",  # CChkItem::CChkItem(unsigned char, unsigned char, unsigned char*)
+    "080c8bf0",  # CChkItem::CChkItem()
+    "080c8c10",  # CChkItem::~CChkItem()
+    "080c8c40",  # CChkItem::Serialize(unsigned char*) const
+    "080c8cf0",  # CChkItem::DeSerialize(unsigned char*)
+    "080cc980",  # CDumpReqDescr::Serialize(unsigned char*, unsigned char) const
+    "080cca80",  # CDumpReqDescr::~CDumpReqDescr() [D0, deleting]
+    "080ccaf0",  # CDumpReqDescr::Reset()
+    "080ccb60",  # CDumpReqDescr::~CDumpReqDescr() [D1]
+    "080ccbb0",  # CDumpReqDescr::DeSerialize(unsigned char const*, unsigned char)
+    "080cce10",  # CDumpReqDescr::CDumpReqDescr()
+    "080cce40",  # CDumpReqDescr::SetMicro(unsigned char, unsigned char, unsigned char*)
+    "080ccfe0",  # CDumpReqDescr::SetSingle(CDumpReqDescr::EResource, unsigned char, unsigned char*)
+    "080cd170",  # CDumpReqDescr::operator=(CDumpReqDescr const&)
+    "080cc610",  # CDumpHeaderDescr::DeSerialize(unsigned char const*, unsigned char)
+    "080cc700",  # CDumpHeaderDescr::Serialize(unsigned char*, unsigned char) const
+    "080cc7f0",  # CDumpHeaderDescr::Reset()
+    "080cc810",  # CDumpHeaderDescr::~CDumpHeaderDescr() [D1]
+    "080cc830",  # CDumpHeaderDescr::~CDumpHeaderDescr() [D0, deleting]
+    "080cc860",  # CDumpHeaderDescr::CDumpHeaderDescr()
+    "080cc890",  # CDumpHeaderDescr::SetMicro(unsigned char, unsigned char, unsigned char*, unsigned long)
+    "080cc8d0",  # CDumpHeaderDescr::SetSingle(CDumpReqDescr::EResource, unsigned char, unsigned char*, unsigned long)
+    "080cc910",  # CDumpHeaderDescr::operator=(CDumpReqDescr const&)
+    "080cc940",  # CDumpHeaderDescr::operator=(CDumpHeaderDescr const&)
+    "080c8da0",  # CChunkClient::OnPrepareSingle(CDumpReqDescr const*, TPtrArray<CChkItem>&)
+    "080c8db0",  # CChunkClient::~CChunkClient() [D1]
+    "080c8e80",  # CChunkClient::~CChunkClient() [non-virtual this-8 thunk]
+    "080c8f80",  # CChunkClient::~CChunkClient() [non-virtual this-8 thunk]
+    "080c8f90",  # CChunkClient::CChunkClient(CModule const&)
+    "080c90d0",  # CChunkClient::Abort()
+    "080c9130",  # CChunkClient::StoppedByUser()
+    "080c9190",  # CChunkClient::PrepareList(CDumpReqDescr const*, TPtrArray<CChkItem>&)
+    "080c9330",  # CChunkClient::SaveDump(CDumpReqDescr const&)
+    "080c96d0",  # CChunkClient::LoadDump(CDumpHeaderDescr const&)
+    "080c9aa0",  # CChunkClient::SaveFile(char const*, CDumpReqDescr const&)
+    "080c9f50",  # CChunkClient::LoadFile(char const*, CDumpHeaderDescr const&)
+    "080ca420",  # CChunkClient::OnPrepareMicro(CDumpReqDescr const*, TPtrArray<CChkItem>&)
+    "080ca4d0",  # CChunkClient::Reset()
+    "080ca580",  # CChunkClient::FailAndReset()
+    "080ca720",  # CChunkClient::Exec(CMessage&)
+    "080caa40",  # CChunkClient::LoadRes(CResourceChunk*, TPtrArray<CLoadResElem> const&, int)
+    "080cad40",  # CChunkClient::LoadResSync(CResourceChunk*, TPtrArray<CLoadResElem> const&)
+    "080cadc0",  # CChunkClient::SaveRes(char const*, TPtrArray<CSaveResElem> const&)
+    "080cb0e0",  # CChunkClient::MergeRes(CResourceChunk*, CResourceChunk*, TPtrArray<CMergeElem> const*, unsigned long)
+    "08185da0",  # CChunkClient::OnAcceptedHd(CDumpHeaderDescr const&)
+    "08185db0",  # CChunkClient::OnAcceptedRq(CDumpHeaderDescr const&)
+    "08185dc0",  # CChunkClient::OnInternalAbort(CDumpReqDescr const&)
+    "08185dd0",  # CChunkClient::OnExternalAbort(CDumpReqDescr const&)
+    "08185de0",  # CChunkClient::OnStoppedByUser(CDumpReqDescr const&)
+    "08185df0",  # CChunkClient::OnByteCount(unsigned long)
+    "08185e00",  # CChunkClient::OnEnd(TObjArray<unsigned char> const*, CDumpReqDescr const&)
+    "08185e30",  # CChunkClient::OnBegin()
+    "08185e60",  # CChunkClient::OnEnd()
+    "08185e90",  # CChunkClient::OnSingleEnd(TPtrArray<CResElemBase>*)
+    "08185ea0",  # CChunkClient::IsLoadFileToBeExecuted(char const*, CDumpHeaderDescr const&) const
+    "08185eb0",  # CChunkClient::IsSaveFileToBeExecuted(char const*, CDumpReqDescr const&) const
+    "08185ec0",  # CChunkClient::IsLoadDumpToBeExecuted(CDumpHeaderDescr const&) const
+    "08185ed0",  # CChunkClient::IsSaveDumpToBeExecuted(CDumpReqDescr const&) const
+    "08185ee0",  # CChunkClient::IsAbortToBeExecuted() const
+    "08185ef0",  # CChunkClient::IsStoppedByUserToBeExecuted() const
+    "08185f00",  # CChunkClient::OnGetParamForSaveFile() const
+    "08185f50",  # CChunkClient::OnGetParamForSaveDump() const
+    "08185fa0",  # CChunkClient::OnGetParamForLoadFile() const
+    "08185ff0",  # CChunkClient::OnGetParamForLoadDump() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
