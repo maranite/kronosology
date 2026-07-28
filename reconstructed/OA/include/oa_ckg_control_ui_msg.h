@@ -180,6 +180,15 @@ struct CKGRTCHandler {
 					   int changeSource);
 	void AnalizeAndProcessCCMessage(int channel, int statusType, int data1, int data2,
 					 int changeSource);
+
+	/*
+	 * 2 more real instance methods, discovered while reconstructing
+	 * CKGEngine (oa_ckg_module_param_msg_handler.h,
+	 * src/engine/ckg_engine.cpp) -- same cast-through-`ms_poInstance`
+	 * idiom as every other method above. Own bodies out of scope.
+	 */
+	int GetDestinationModule(int module);
+	void ResetMIDIChordTrigger();
 };
 
 /*

@@ -2393,6 +2393,30 @@ struct CKGBankManager {
 	void ChangeKarmaPerfForProgram(eSTGProgramBankId bankId, unsigned int index);
 	void ChangeKarmaPerfForCombi(eSTGCombiBankId bankId, unsigned int index);
 	void ChangeKarmaPerfForSeq(unsigned int index);
+
+	/*
+	 * 11 more real 0-arg instance methods, discovered while
+	 * reconstructing CKGEngine (oa_ckg_module_param_msg_handler.h,
+	 * src/engine/ckg_engine.cpp) -- same "this IS the singleton" call
+	 * shape as every method above. Unlike GetCombiKarmaPerfModule/
+	 * GetProgKarmaPerfModule (bankId+index lookups), the 4 Backup
+	 * variants take no arguments at all -- confirmed distinct real
+	 * mangled names (`Ev`), not overloads of the existing 2-arg
+	 * methods. `GetGenEffect(int,int)` and the rest are opaque
+	 * pass-through helpers CKGEngine calls without needing their own
+	 * bodies here. Own bodies out of scope.
+	 */
+	unsigned char *GetSeqDefaultKarmaPerfModule();
+	unsigned char *GetCombiBackupKarmaPerfCommon();
+	unsigned char *GetCombiBackupKarmaPerfModule();
+	unsigned char *GetProgBackupKarmaPerfCommon();
+	unsigned char *GetProgBackupKarmaPerfModule();
+	unsigned char *GetGenEffect(int a, int b);
+	void InitializePerfData();
+	void SetupInitUserGEForUI();
+	void ResetKarmaPerfForSeq();
+	void RenewBackupKarmaPerf(eSTGMsgPerfType type);
+	void SetGECategoryToSharedMemory(int a, int b);
 };
 
 /*

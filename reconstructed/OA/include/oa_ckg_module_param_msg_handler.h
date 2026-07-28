@@ -398,116 +398,405 @@ struct CKGModuleParamMsgHandler {
 };
 
 /*
- * CKGEngine -- the KARMA/UI edit-suppression singleton. `+0xb0` gates
- * every Shape-B method's own CKGParamEdit::SendXxx()+NotifyAfterEdit()
- * pair ("edit suppressed" byte, guessed from behaviour/class name -- real
- * meaning not confirmed beyond the byte offset). `ms_poKGParamEdit` is the
- * real `CKGParamEdit` instance every SendXxx() call dispatches through.
+ * === CKGEngine's own external KARMA-library surface ===
+ * ~50 free `RT_*`/`KS_*`/`KGOutGate_*` functions CKGEngine's own real body
+ * calls into directly -- the generative/sequencing KARMA engine core
+ * itself, a separate, unmodeled subsystem (same "opaque out-of-project
+ * library" treatment already established for the handful of RT_*, KS_*,
+ * KGOutGate_*, SKSTGGate_* externs declared in oa_ckg_switch_family.h;
+ * this is that same family, just the ~50 additional real names
+ * CKGEngine's own disassembly pulls in). Real argument COUNT/WIDTH
+ * confirmed from each call site's own register/stack setup; enum-typed
+ * ground-truth parameters (`RTParmBufferDisplay`/`RTParmBufferSelect`/
+ * `EditBufferLocation`/`KorgX2100KarmaModes`) are widened to plain `int`
+ * here -- harmless since `extern "C"` linkage isn't affected by C++
+ * parameter types, only by the name, same technique already used
+ * throughout this project for enum-typed extern "C" KARMA calls.
+ * regparm(3) like every other free function declared elsewhere in this
+ * project. Return values not read at any real call site are declared
+ * `void` even where the real function may return something in EAX.
  */
-/* eSTGMsgPerfType is declared in oa_engine_init.h (included above) --
- * both CKGBankManager::ChangeMode() and CKGEngine::ChangePerformance()
- * below need it, and oa_engine_init.h is the lower header in this
- * include chain. */
+extern "C" {
+void RT_pe_select_KorgX2100(void *editBuffer, unsigned char edited, int mode, bool isSingle)
+	__attribute__((regparm(3)));
+void KS_get_rtcm_name_for_ge(short typeId, char *outName) __attribute__((regparm(3)));
+void RT_run(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_timbre_thru(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void BirthOfKarma(void) __attribute__((regparm(3)));
+void KS_set_ge_load_options(unsigned char opts) __attribute__((regparm(3)));
+void KS_set_ge_load_use_rtc_model(bool on) __attribute__((regparm(3)));
+void KS_set_ge_load_reset_scenes(bool on) __attribute__((regparm(3)));
+void InitScheduler(long a, long b, long c) __attribute__((regparm(3)));
+void RT_sync_mode(unsigned char mode) __attribute__((regparm(3)));
+void KS_sync_mode_x9100(unsigned char mode) __attribute__((regparm(3)));
+void KS_set_enable_midi_in_to_karma(bool on) __attribute__((regparm(3)));
+void KM_process_before_tx_cc(void) __attribute__((regparm(3)));
+short KS_get_rte_val_ge(unsigned char index, int display, unsigned char sub) __attribute__((regparm(3)));
+short KS_get_rte_min_ge(unsigned char index, int display, unsigned char sub) __attribute__((regparm(3)));
+short KS_get_rte_max_ge(unsigned char index, int display, unsigned char sub) __attribute__((regparm(3)));
+void RT_pe_rand_capture(unsigned char type, long *out) __attribute__((regparm(3)));
+void KS_update_rtc_display_value(unsigned char value) __attribute__((regparm(3)));
+bool KS_rtc_auto_assign_names(int select, int location) __attribute__((regparm(3)));
+void KS_pe_write(void) __attribute__((regparm(3)));
+bool KS_get_timbre_thru(unsigned char channel) __attribute__((regparm(3)));
+bool KS_is_module_running(unsigned char module) __attribute__((regparm(3)));
+void RT_channel_in(short a, short b, short c, short d, short e) __attribute__((regparm(3)));
+void RT_bnd_range_thru(unsigned char channel, char lo, char hi) __attribute__((regparm(3)));
+int KGOutGate_GetChannelInCombi(int timbre) __attribute__((regparm(3)));
+int KGOutGate_GetChannelInSong(int timbre) __attribute__((regparm(3)));
+void RT_midi_filt_in_tch(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_midi_filt_in_bnd(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_midi_filt_in_sus(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_midi_filt_in_cc1(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_midi_filt_in_cc2(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_midi_filt_in_ctl(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+void RT_sysex_in(unsigned char *buf, long len) __attribute__((regparm(3)));
+void KS_get_rtp_name_string(unsigned char a, unsigned char b, char *out, unsigned char c)
+	__attribute__((regparm(3)));
+void KGOutGate_SendToSoundEngine(unsigned char *bytes, unsigned short len) __attribute__((regparm(3)));
+bool KGOutGate_IsLocatingZeroInSeq(void) __attribute__((regparm(3)));
+void RT_real_time_in(short status) __attribute__((regparm(3)));
+void RT_spp_in(short lo, short hi) __attribute__((regparm(3)));
+void KS_start_precount(void) __attribute__((regparm(3)));
+void RT_karma_on(unsigned char on) __attribute__((regparm(3)));
+void KS_reset_sst(bool on) __attribute__((regparm(3)));
+void KS_rtc_revert_all_buffers(void) __attribute__((regparm(3)));
+void KS_rtc_revert_one_buffer(int select) __attribute__((regparm(3)));
+void KS_rtc_compare_one_scene(int select, unsigned char scene, bool arg) __attribute__((regparm(3)));
+void KS_rtc_compare_one_control(int select, unsigned char a, unsigned char b, bool arg)
+	__attribute__((regparm(3)));
+void KS_clear_scheduler(void) __attribute__((regparm(3)));
+void RT_stop_and_rpt_damp(void) __attribute__((regparm(3)));
+void SchedulerTask(void) __attribute__((regparm(3)));
+void SKSTGGate_NotifyKarmaAllSlidersPosition(void) __attribute__((regparm(3)));
+}
 
+/*
+ * CKGTimerManager -- KARMA tempo/clock singleton, discovered constructing
+ * CKGEngine (its ctor placement-constructs one via `operator new(0x38)` +
+ * `CSTGBankMemory::AllocAligned(0x10,0x38)`, real relocation
+ * `_ZN15CKGTimerManagerC1Ev`). Real class has 14 methods total (`nm -C`
+ * confirmed: AdvanceClock/IncElapsedTick/SetCurrentTempo/SetTempoPercent/
+ * GetIntervalClock/ReceiveMIDIClock/ShouldTempoLEDFlash/
+ * GetTicksUntilTheBeat/GetKarmaIntervalClock/SetTempo in addition to the
+ * 5 below) -- only the 5 CKGEngine itself calls are declared here, the
+ * other 9 are a real, self-contained future cluster of their own. Own
+ * class layout/body entirely out of scope here.
+ */
+struct CKGTimerManager {
+	CKGTimerManager();
+	void Process();
+	void ChangePerformance();
+	void StopSync();
+	void StartSync();
+};
+
+/*
+ * CKarmaPerfCommon / CKarmaPerfModule -- opaque KARMA "performance"
+ * record types, real ground-truth pointer types for several CKGEngine
+ * methods below (`SendChangePerformanceToEngine`/
+ * `ChangePerformancePtrForEngine`/`ChangeValuesInBackupWhenChangingGE`).
+ * Forward-declared only -- every real CKGEngine method that touches one
+ * either passes it through opaquely to CKGBankManager/the KARMA library,
+ * or (StoreGERTParmMinMaxToBank/DoRandomCapture/ChangeValuesInBackup...)
+ * accesses it via raw offsets exactly as ground truth does, same
+ * "unmodeled record, raw offset access" convention already used
+ * throughout this project (e.g. CKGBankManager's own 0x97c7xx range).
+ */
+struct CKarmaPerfCommon;
+struct CKarmaPerfModule;
+
+/*
+ * CKGEngine -- the KARMA/UI edit-suppression singleton AND the real
+ * top-level Combi/Program/Song "performance change" orchestrator --
+ * previously a 24-method opaque stand-in (declare-only, bodies deferred
+ * to whichever batch first needed each one), now the real class for the
+ * majority of its 74 real ground-truth methods (2026-07-28 batch, see
+ * `ckg_engine.cpp`). `+0xb0` gates every Shape-B method's own
+ * `CKGParamEdit::SendXxx()`+`NotifyAfterEdit()` pair ("edit suppressed"
+ * byte). `ms_poKGParamEdit` is the real `CKGParamEdit` instance every
+ * `SendXxx()` call dispatches through.
+ *
+ * === Field layout (all confirmed from real ctor/Initialize()/method
+ *     disassembly; `_unrecoveredNN` fillers are confirmed-real gaps no
+ *     method in this batch reads or writes) ===
+ *   m_field0    +0x00 int   -- ctor sets 1, Initialize() resets to 0;
+ *                              never read elsewhere in this batch.
+ *   m_globalChannel +0x04 int -- fallback MIDI channel every
+ *                              GetRealInput/OutputChannel()-family method
+ *                              substitutes when a per-timbre record's own
+ *                              channel byte reads as the sentinel 0x10.
+ *   m_numModules +0x08 int -- KARMA module count, Initialize() sets 4.
+ *   m_field10   +0x10 int   -- Initialize() zeroes it; never read
+ *                              elsewhere in this batch.
+ *   m_field14   +0x14 int   -- Initialize() sets 4; Idle() compares
+ *                              against 4 to gate SchedulerTask().
+ *   m_bendRangeLo +0x18 int[16] / m_bendRangeHi +0x58 int[16] -- per-
+ *                              module KARMA bend-range low/high, default
+ *                              0x7f (127, this project's established "no
+ *                              value assigned" sentinel elsewhere too).
+ *                              SetBendRange() writes full dwords;
+ *                              CheckAndSendTimbreBendRange() only ever
+ *                              reads their low BYTE back (confirmed via
+ *                              its own `movsx`, not guessed).
+ *   m_bendRangeDirty +0x98 byte -- "resend pending" flag, set by
+ *                              SetBendRange(), cleared by
+ *                              CheckAndSendTimbreBendRange() once sent.
+ *   m_rtcDisplayValue +0x9c int -- UpdateRTCDisplay()'s own cached value.
+ *   m_perfType  +0xa0 int (real `eSTGMsgPerfType` values, widened to
+ *                              plain int to avoid an enum-sized-storage
+ *                              assumption) -- confirmed via
+ *                              ProcessForSeqWhenChangingGE()'s own
+ *                              `==2` (Song) branch and GetKarmaMode()'s
+ *                              `==1`/`==2` (Program/Song) branches
+ *                              matching `eSTGMsgPerfType`'s real 0/1/2
+ *                              enumerators exactly.
+ *   m_field_a4  +0xa4 int   -- Initialize() zeroes it; never read
+ *                              elsewhere in this batch.
+ *   m_currentCommon +0xa8 / m_currentModule +0xac (both `unsigned char*`)
+ *                              -- cached copies of
+ *                              `CKGBankManager::ms_poInstance[0]`/`[4]`
+ *                              (Initialize()'s own real body), the
+ *                              current Combi/Program/Song "common"
+ *                              record and the base of its per-module
+ *                              0x2e8-stride array -- the SAME 2 pointers
+ *                              nearly every method in this class reads.
+ *   m_editSuppressed +0xb0 byte -- see class comment above.
+ *   m_geCategoryPopupOpen +0xb1 byte / m_geCategoryPopupModule +0xb4 int
+ *                              (default 4, "no module selected" sentinel)
+ *                              / m_geCategoryBackup +0xb8
+ *                              unsigned char[0x50] -- OpenGECategoryPopup/
+ *                              CloseGECategoryPopup/
+ *                              CheckAndStoreModifiedStateWhenOpen...'s own
+ *                              popup-state + one saved per-module GE
+ *                              record snapshot (raw byte buffer, own
+ *                              field layout not modeled -- same
+ *                              "unmodeled record, raw offset copy"
+ *                              convention as `CopyCurrentParameterToSharedMemory()`'s
+ *                              own shared-memory blob below).
+ *
+ * === Methods DELIBERATELY DEFERRED this batch (declared, not defined --
+ *     same "expected Unknown symbol at insmod" convention as any other
+ *     not-yet-reconstructed class surface in this project; see
+ *     ckg_engine.cpp's own header comment for the real address/size list
+ *     and why) ===
+ *   IsEditedPerf() (9458 bytes -- a huge outlier, almost certainly a
+ *     giant per-RTParam edited-state comparison; not attempted this
+ *     batch), FakeTimbreThru(), RefreshPERTParmInfo(), SetPERTParmMinMax(),
+ *   SetPERTParmControlModule(), SetGERTParmMinMax(), RefreshGERTParmInfo(),
+ *   SendChangeGEToEngine(), DoInitModule(), DoRandomCaptureExec(),
+ *   UpdateEnableDirectPathForVectorCC(), ChangePerformance() (the 2-arg
+ *   top-level orchestrator), CloseGECategoryPopup(), UpdateGEInfo(),
+ *   ChangeValuesInBackupWhenChangingGE() (both overloads),
+ *   ProcessForSeqWhenChangingGE() (its only 2 real call targets are
+ *   those 2 overloads), and CheckAndSendTimbreBendRange() (a
+ *   per-channel dedup loop whose exact bitmap register flow wasn't
+ *   independently confirmed to this batch's own confidence bar, still
+ *   declared and called from the real Idle() below) -- all real,
+ *   real-address-confirmed, and all belong to the SAME "per-RTParam
+ *   table" / dense struct-copy family already proven
+ *   mechanical-but-lengthy while transcribing
+ *   `StoreGERTParmMinMaxToBank()`/`DoRandomCapture()`
+ *   (both INCLUDED this batch) -- a real, scoped follow-up, not
+ *   abandoned.
+ */
 struct CKGParamEdit;
-struct CKGEngine {
+class CKGEngine {
+public:
 	static unsigned char *ms_poInstance;
 	static CKGParamEdit *ms_poKGParamEdit;
+	static CKGTimerManager *ms_poKGTimerManager;
+	static unsigned char *ms_poKGEventDisplayManager;
 
-	/*
-	 * ResetLocalController() -- real instance method, discovered while
-	 * reconstructing CKGGlobalParamMsgHandler::SetGlobalKeyTranspose()/
-	 * SetMIDIChannel() (src/engine/ckg_global_param_handler.cpp), called
-	 * through ms_poInstance as `this` (same cast-through-raw-pointer
-	 * idiom as every other singleton here). Own body out of scope.
-	 */
-	void ResetLocalController();
+	/* .text+0x3a96e0, 428 bytes (C1==C2). */
+	CKGEngine();
+	/* .text+0x3a9890, 30 bytes. */
+	~CKGEngine();
 
-	/*
-	 * More real instance methods, discovered while reconstructing
-	 * CKGControlMsgHandler (src/engine/ckg_control_msg_handler.cpp,
-	 * oa_ckg_control_ui_msg.h) -- same cast-through-`ms_poInstance`
-	 * idiom as ResetLocalController() above. `+0xb0` is the SAME
-	 * "edit suppressed" byte the ParamMsgHandler family's own
-	 * ShouldAttemptSysExShadowWrite() gates on; Start()/Stop() write
-	 * it directly (0/1) rather than reading it.
-	 */
-	void WritePerformance();
-	void DoCurrentDump();
-	void DoCompare();
-	void ChangePerformance(eSTGMsgPerfType type, bool arg2);
-	void UpdateGEInfo(int a);	/* single-int overload -- distinct
-					 * from CKGUIMsgSender's own 2-int
-					 * UpdateGEInfo(int,int) */
-	void SendShutUp();
-	void UpdateUserGE(int a, int b);
-	void DoInitModule(int arg);
-	void DoAutoAssignRTName(int arg);
-	void DoRandomCapture(long arg);
-	void DoClearRTCSetup(long arg);
+	/* .text+0x3a98b0, 47 bytes. */
+	int GetKarmaMode();
+	/* .text+0x3abdf0, 315 bytes. */
+	void SendChangePerformanceToEngine(CKarmaPerfCommon *common, CKarmaPerfModule *modules, int count);
+	/* .text+0x3abf40, 255 bytes. */
+	void Initialize();
+	/* .text+0x3ac040, 60 bytes. */
+	void ChangePerformancePtrForEngine(CKarmaPerfCommon *common, CKarmaPerfModule *modules, int count);
+	/* .text+0x3ac080, 47 bytes. */
+	void UpdateSoloStatus(bool solo);
+	/* .text+0x3ac0c0, 159 bytes. */
+	void NotifyRTCSetupStatus();
+	/* .text+0x3ac170, 75 bytes. */
+	void InitializeRTCSetup();
+	/* .text+0x3ac1c0, 296 bytes. */
+	void StoreGERTParmMinMaxToBank();
+	/* .text+0x3ac2f0, 16 bytes. Real body ignores its own `long`
+	 * argument entirely -- byte-identical to DoClearRTCSetup(). */
 	void DoAutoRTCSetup(long arg);
-	void OpenGECategoryPopup();
-	void CloseGECategoryPopup(bool arg);
-	void UpdateRTCDisplay(int arg);
-	void UpdateRTCModelName(int arg);
-
-	/*
-	 * 4 more real instance methods, discovered while reconstructing
-	 * the CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
-	 * widget hierarchy (oa_ckg_switch_family.h) -- same
-	 * cast-through-`ms_poInstance` idiom as every other method above.
-	 */
+	/* .text+0x3ac300, 16 bytes. */
+	void DoClearRTCSetup(long arg);
+	/* .text+0x3ac310, 654 bytes. */
+	void DoRandomCapture(long type);
+	/* DEFERRED -- ground-truth offset 0x3ac5b0, 164 bytes. */
+	void DoRandomCaptureExec(int arg);
+	/* .text+0x3ac660, 32 bytes. */
+	void UpdateRTCDisplay(int value);
+	/* .text+0x3ac680, 80 bytes. */
+	void UpdateRTCModelName(int module);
+	/* .text+0x3ac6d0, 208 bytes. */
+	void CopyCurrentParameterToSharedMemory();
+	/* .text+0x3ac7a0, 240 bytes. */
+	void DoAutoAssignRTName(int module);
+	/* .text+0x3ac890, 32 bytes. */
+	void DoCurrentDump();
+	/* .text+0x3ac8b0, 32 bytes. */
+	void DoCompare();
+	/* .text+0x3ac8d0, 73 bytes. */
+	void WritePerformance();
+	/* DEFERRED -- ground-truth offset 0x3ac920, 480 bytes. Real body is a dense,
+	 * multi-segment field-by-field struct copy (CKarmaPerfCommon's own
+	 * +0x4/+0x14 dwords, CKarmaPerfModule's own +0x128/+0x138/+0x127
+	 * regions, a big +0x136/+0x148 tail, a +0x1e 0x100-byte block, and
+	 * a final +0x194 conditionally-word-aligned tail) -- traced far
+	 * enough to see the overall shape (see ckg_engine.cpp's own header
+	 * comment) but not independently confirmed to the same byte-exact
+	 * confidence as the rest of this batch; a real follow-up target. */
+	void ChangeValuesInBackupWhenChangingGE(int module);
+	/* DEFERRED -- ground-truth offset 0x3acb00, 432 bytes. Same struct-copy family as
+	 * the 1-arg overload above, reversed direction. */
+	void ChangeValuesInBackupWhenChangingGE(int module, CKarmaPerfCommon *common, CKarmaPerfModule *rec);
+	/* DEFERRED -- ground-truth offset 0x3accb0, 192 bytes. Trivial control-flow
+	 * itself, but its only 2 real call targets are the 2 deferred
+	 * overloads directly above -- deferred alongside them rather than
+	 * declared-and-defined against not-yet-real dependencies. */
+	void ProcessForSeqWhenChangingGE(int module);
+	/* .text+0x3acd70, 48 bytes. */
+	bool IsKarmaOn();
+	/* .text+0x3acda0, 48 bytes. */
+	bool IsTimbreZoneThru(int module);
+	/* .text+0x3acdd0, 16 bytes. */
 	int GetLocalControllerChannel();
-	void ResetKRTCSwitch(int ccNumber);
-	void ResetKRTCSlider(int id);
+	/* .text+0x3acde0, 35 bytes. */
+	bool IsTimbreThruParam(int module);
+	/* .text+0x3ace10, 32 bytes. */
+	bool IsTimbreThruInternalAction(int channel);
+	/* .text+0x3ace30, 16 bytes. */
 	int GetNumOfModule();
-
-	/*
-	 * 6 more real instance methods, discovered while reconstructing the
-	 * CSKMIDIMsgHandler/CSKSpecialMsgHandler/CSKSysExMsgHandler MIDI
-	 * dispatch family (oa_ckg_midi_msg_handler.h) -- same
-	 * cast-through-`ms_poInstance` idiom as every other method above.
-	 * `+0x14` (CSKSpecialMsgHandler::ProcessResetAllControllerMessage's
-	 * own raw dword write, 2 or 3 depending on case) is a real field
-	 * accessed directly as a raw offset rather than through a method,
-	 * same convention as `+0xb0` above.
-	 */
-	bool ShouldKeepKarmaPerformance();
-	void ClearScheduler();
-	void KarmaTurnOnWhenFinishDump();
-	void KarmaTurnOffWhenStartDump();
-	void SendCCOffsetBack();
-	void SetBendRange(int range, unsigned int arg2, unsigned int arg3);
-
-	/*
-	 * 2 more real instance methods, discovered reconstructing
-	 * CSKMIDIInMsgHandler::Process()/SendChannelMessageToKarmaEngine()
-	 * (oa_ckg_midi_msg_handler.h) -- same cast-through-`ms_poInstance`
-	 * idiom. Own bodies out of scope.
-	 */
+	/* .text+0x3ace40, 64 bytes. */
+	int GetRealInputChannel(int module);
+	/* .text+0x3ace80, 48 bytes. */
+	int GetRealOutputChannel(int module);
+	/* .text+0x3aceb0, 64 bytes. */
+	int GetRealInputLocalControllerChannel(int module);
+	/* .text+0x3acef0, 176 bytes. */
 	void SendChannelMessage(unsigned char statusType, unsigned char channel,
 				 signed char data1, signed char data2);
+	/* DEFERRED -- ground-truth offset 0x3acfa0, 531 bytes. */
+	void FakeTimbreThru();
+	/* .text+0x3ad1c0, 16 bytes. */
+	void SendShutUp();
+	/* .text+0x3ad1d0, 16 bytes. */
+	void ClearScheduler();
+	/* DEFERRED -- ground-truth offset 0x3ad1e0, 368 bytes. Traced far enough to see
+	 * the overall shape (a per-channel dedup loop deciding which of
+	 * the 16 possible MIDI channels' own bend range to resend) but its
+	 * exact bitmap-dedup register flow was not independently confirmed
+	 * to the same byte-exact confidence as the rest of this batch --
+	 * still called (declared-only) from Idle() below. */
+	void CheckAndSendTimbreBendRange();
+	/* .text+0x3ad360, 64 bytes. */
+	void Idle();
+	/* .text+0x3ad3a0, 32 bytes. */
+	void SetBendRange(int module, unsigned int lo, unsigned int hi);
+	/* .text+0x3ad3c0, 96 bytes. */
+	bool HaveAllModulesStopped();
+	/* .text+0x3ad420, 64 bytes. */
+	void NotifyEndProcessPerformanceChangeOfSTG();
+	/* DEFERRED -- ground-truth offset 0x3ad460, 256 bytes. */
+	void SetMIDIFilterForUnusedModules();
+	/* .text+0x3ad560, 64 bytes. */
+	void ReceiveDisableMIDIInput(unsigned char *buf, int len);
+	/* .text+0x3ad5a0, 160 bytes. */
 	bool ShouldForceTimbreZoneBypass(int channel, int flagsChannel);
+	/* .text+0x3ad650, 32 bytes. */
+	bool ShouldKeepKarmaPerformance();
+	/* DEFERRED -- ground-truth offset 0x3ad670, 467 bytes. */
+	void RefreshPERTParmInfo();
+	/* DEFERRED -- ground-truth offset 0x3ad860, 192 bytes. */
+	void SetPERTParmMinMax(int a);
+	/* DEFERRED -- ground-truth offset 0x3ad920, 352 bytes. */
+	void SetPERTParmControlModule(int a);
+	/* DEFERRED -- ground-truth offset 0x3ada80, 288 bytes. */
+	void SetGERTParmMinMax(int a, int b);
+	/* DEFERRED -- ground-truth offset 0x3adba0, 144 bytes. */
+	void RefreshGERTParmInfo();
+	/* DEFERRED -- ground-truth offset 0x3adc30, 816 bytes. */
+	void SendChangeGEToEngine(int a, int b, bool arg3);
+	/* DEFERRED -- ground-truth offset 0x3adf60, 464 bytes. */
+	void DoInitModule(int arg);
+	/* .text+0x3ae130, 96 bytes. */
+	void SetGERTParmName(int module, int index);
+	/* DEFERRED -- ground-truth offset 0x3ae190, 272 bytes. */
+	void UpdateEnableDirectPathForVectorCC();
+	/* DEFERRED -- ground-truth offset 0x3ae2a0, 960 bytes -- the top-level 2-arg
+	 * Combi/Program/Song performance-change orchestrator. */
+	void ChangePerformance(eSTGMsgPerfType type, bool arg2);
+	/* .text+0x3ae660, 96 bytes. */
+	void SendRealTimeMIDIMessage(unsigned char status);
+	/* .text+0x3ae6c0, 32 bytes. */
+	void SendSongPositionPointer(int position);
+	/* .text+0x3ae6e0, 16 bytes. */
+	void SendEnterPrecount();
+	/* .text+0x3ae6f0, 32 bytes. */
+	void KarmaTurnOffWhenStartDump();
+	/* .text+0x3ae710, 64 bytes. */
+	void KarmaTurnOnWhenFinishDump();
+	/* .text+0x3ae750, 48 bytes. */
+	void SendCCOffsetBack();
+	/* .text+0x3ae780, 48 bytes. */
+	void ResetLocalController();
+	/* .text+0x3ae7b0, 64 bytes. */
+	void ResetAllRTC();
+	/* .text+0x3ae7f0, 80 bytes. */
+	void ResetOneBuffer(int select);
+	/* .text+0x3ae840, 63 bytes. */
+	void CompareScene(int select, int scene, bool arg3);
+	/* .text+0x3ae880, 80 bytes. */
+	void ResetKRTCSlider(int ccNumber);
+	/* .text+0x3ae8d0, 80 bytes. */
+	void ResetKRTCSwitch(int ccNumber);
+	/* .text+0x3ae920, 24 bytes. */
+	void OpenGECategoryPopup();
+	/* DEFERRED -- ground-truth offset 0x3ae940, 1072 bytes. */
+	void CloseGECategoryPopup(bool arg);
+	/* .text+0x3aed70, 128 bytes. */
+	void CheckAndStoreModifiedStateWhenOpenGECategoryPopup(int module);
+	/* .text+0x3aedf0, 144 bytes. */
+	void UpdateUserGE(int a, int b);
+	/* DEFERRED -- ground-truth offset 0x3aee80, 368 bytes. */
+	void UpdateGEInfo(int a);
+	/* DEFERRED -- ground-truth offset 0x3a98e0, 9458 bytes. */
+	bool IsEditedPerf();
 
-	/*
-	 * 2 more real instance methods, discovered while reconstructing
-	 * CKGMIDIMsgProcessor (oa_ckg_midi_msg_handler.h) -- same
-	 * cast-through-`ms_poInstance` idiom. Own bodies out of scope.
-	 */
-	bool IsKarmaOn();
-	int GetRealOutputChannel(int module);
-
-	/*
-	 * A real, plain static pointer (own relocation
-	 * `_ZN9CKGEngine26ms_poKGEventDisplayManagerE`, same class-scope-
-	 * static idiom as `ms_poInstance` itself, NOT an offset field on
-	 * the instance) -- discovered reconstructing CSKMIDIInMsgHandler::
-	 * NotifyNoteEventToUI() (oa_ckg_midi_msg_handler.h), whose own
-	 * CKGEventDisplayManager type is declared there (this header's own
-	 * include chain sits below it, hence `unsigned char *` here rather
-	 * than the real pointer type; cast at each use site).
-	 */
-	static unsigned char *ms_poKGEventDisplayManager;
+	int m_field0;
+	int m_globalChannel;
+	int m_numModules;
+	unsigned char _unrecovered0c[4];
+	int m_field10;
+	int m_field14;
+	int m_bendRangeLo[16];
+	int m_bendRangeHi[16];
+	unsigned char m_bendRangeDirty;
+	unsigned char _unrecovered99[3];
+	int m_rtcDisplayValue;
+	int m_perfType;
+	int m_field_a4;
+	unsigned char *m_currentCommon;
+	unsigned char *m_currentModule;
+	unsigned char m_editSuppressed;
+	unsigned char m_geCategoryPopupOpen;
+	unsigned char _unrecoveredb2[2];
+	int m_geCategoryPopupModule;
+	unsigned char m_geCategoryBackup[0x50];
 };
 
 /*
@@ -519,6 +808,15 @@ struct CKGEngine {
  */
 struct CKGParamEdit {
 #include "oa_ckg_param_edit_send_decls.inc"
+
+	/*
+	 * 3 more real methods, discovered while reconstructing CKGEngine
+	 * (src/engine/ckg_engine.cpp) -- same "declared, body genuinely
+	 * out of scope" convention as every SendXxx() above.
+	 */
+	void ClearSoloStatus();
+	void ResendSoloStatus();
+	void ForceSendOnOff(bool on);
 };
 
 /*
