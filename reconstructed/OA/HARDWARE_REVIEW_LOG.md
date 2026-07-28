@@ -2365,3 +2365,74 @@ verified by a full before/after reconstructed-name-set diff).
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGEG + CSTGPanOutputBase + CSTGPianoLPF value-getter families -- 28 methods (batch 10, 2026-07-28)
+
+Tenth batch in the STG value-getter family (see the `stg-value-getter-
+family` agent memory entry for the full running derivation notes).
+`CSTGEG` (10/10), `CSTGPanOutputBase` (9/9), and `CSTGPianoLPF` (9/9)
+all reconstructed clean -- zero outliers across the whole batch, the
+third batch in a row with none excluded. All three picked from the
+ninth batch's own backlog via the standard checklist: word-boundary
+grep confirming each genuinely fresh, then an `nm`-derived weak-linkage
++ `ER23CSTGPatchMessageContext`-suffix filter to get the exact real
+candidate set before ever running the decoder. That filter correctly
+excluded, up front: `CSTGEG`'s 4 extra-arg overloads
+(`GetAMSTimeModSource`/`GetAMSLevelModSource`/`GetAMSTimeModIntensity`/
+`GetAMSLevelModIntensity`, all taking an explicit slot-index argument
+instead of the family's plain ctx-only signature);
+`CSTGPanOutputBase`'s `GetVoiceLevelEstimate(CSTGVoice const&)`, spot-
+checked via direct disassembly and confirmed to be the same per-voice-
+runtime-state false-positive shape as `CSTGOrganOsc`'s own precedent
+from batch 5, plus its `SetMute` (global linkage, extra bool arg); and
+`CSTGPianoLPF`'s `GetSubComponent(unsigned short)` (the familiar
+sub-object-accessor outlier) plus its `SetupComponentOffsets` (global
+linkage, extra args).
+
+`CSTGPianoLPF` (the acoustic-piano voice model's lowpass-filter patch
+component, distinct from `CPianoOsc`) is the family's familiar simplest
+dialect -- every candidate a fixed-K field read directly off `this`,
+zero ctx-dynamic-index methods. Its own
+`GetFreqAMS1IntensityAMSSource`/`GetFreqAMS1IntensityAMSIntensity`
+naming implies a second modulation level but resolves to a plain fixed
+offset once disassembled -- same lesson as `CSTGMS20EG`'s and
+`CSTGSimple2Pole`'s own earlier naming quirks. `CSTGEG` (general-purpose
+envelope-generator patch component) mixes plain fixed-byte Source
+fields with a real ctx-index sub-family on the matching Intensity
+fields, using the by-now-established bare stride-4 SIB-scaled load with
+no `lea` premultiply (first confirmed on `CSTGMultiFilter2Pole` in
+batch 7) -- no new decoder shape needed.
+
+`CSTGPanOutputBase` (STG pan/output-mixer patch component) contributes
+a genuinely new field-shape: `GetPatchSolo` never dereferences `this`
+at all. Its entire body stores the literal 0 straight into
+`sValueGetterTemp.value` (single-write, no `.displayValue`) and returns
+the pointer -- a hardcoded-constant getter, the first of its kind in
+this family across 10 batches. Modeled directly as a plain literal
+assignment with no field-read expression at all. The rest of the class
+is the usual mix of fixed-K dword/signed-byte fields plus two
+single-bit booleans sharing one byte at offset `0x21`
+(`PanUseDrumkitSetting` bit 0, `PatchMute` bit 1) via the established
+shift-then-mask shape.
+
+Tooling: hit and fixed 2 fresh instances of the parenthesis-swallow
+`DEF_RE` gotcha, both notable for being literal, accurate mentions of
+real code rather than incidental prose -- `oa_stg_eg.h`'s own
+"GetAMSTimeModSource(unsigned char)" (describing an excluded overload's
+real signature) and `stg_eg_valuegetters.cpp`'s own "shape (no lea
+premultiply)". Both hit the same `word\s*\(` trigger as every prior
+instance; caught via the standard exact-name-set diff before ever
+attempting to build, fixed by rewording to drop the parens entirely.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 3 new
+KATs passing. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko`
+produced (496956 bytes), zero warnings or errors traceable to the 3 new
+files. `DECOMPILE_ERRORS.md` stays empty -- no compile/link blocker
+hit. `manifest/gen_oa_manifest.py` regenerated, OA.ko manifest
+2338 -> 2366/21,689 (10.909%), delta exactly +28 (0 regressions,
+verified by a full before/after reconstructed-name-set diff).
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.
