@@ -3251,6 +3251,36 @@ RECONSTRUCTED = {
     "08092240",  # CCtrlAndParamTracer::CCtrlAndParamTracer(CCtrlAndParamTracer const&)
     "08092c70",  # CCtrlAndParamTracer::UpdateCtrl(unsigned char, unsigned char)
     "08092e80",  # CCtrlAndParamTracer::operator=(CCtrlAndParamTracer const&)
+
+    # --- CNoteTracer, "Tracer" family follow-up (2026-07-28). CNoteTracerTransposer
+    # deliberately deferred -- see note_tracer.h's own header comment (interface
+    # CNoteTransposerOwner resolved as a single pure-virtual method, but
+    # CNoteTracerTransposer::RendundantInsertion's own override is a genuinely dense
+    # ~1400-byte duplicate-note-conflict resolver, out of this pass's scope). ---
+    "08093050",  # CNoteTracer::~CNoteTracer() (D1, complete)
+    "080930b0",  # CNoteTracer::~CNoteTracer() (D0, deleting)
+    "08093790",  # Swap(CNoteTracer&, CNoteTracer&)
+    "08093ff0",  # CNoteTracer::CNoteTracer()
+    "080940b0",  # CNoteTracer::CNoteTracer(unsigned char)
+    "08094170",  # CNoteTracer::CNoteTracer(CNoteTracer const&)
+    "08094290",  # CNoteTracer::operator=(CNoteTracer const&)
+    "080946b0",  # CNoteTracer::ResetPendingNotes()
+    "080947d0",  # CNoteTracer::Remove(unsigned char)
+    "08094860",  # CNoteTracer::GetLeftMost() const
+    "08094980",  # CNoteTracer::GetRightMost() const
+    "08094da0",  # CNoteTracer::CreateBuffer(TDynBuffer<CNoteTracer::CBufferedNote>&, unsigned int)
+    "08094e40",  # CNoteTracer::ReallocBuffer(TDynBuffer<CNoteTracer::CBufferedNote>&, unsigned int)
+    "08094ed0",  # CNoteTracer::DestroyBuffer(TDynBuffer<CNoteTracer::CBufferedNote>&)
+    "08094f20",  # CNoteTracer::SwapBuffer(TDynBuffer<CNoteTracer::CBufferedNote>&)
+    "08095200",  # CNoteTracer::Insert(CNoteTracer::CBufferedNote)
+    "08095330",  # CNoteTracer::ListNotesOn(CLinkedEvent*&) const
+    "080958d0",  # CNoteTracer::ListNotesOn(CLinkedEvent*&, signed char) const
+    "08095eb0",  # CNoteTracer::ListNotesOff(CLinkedEvent*&) const
+    "08096460",  # CNoteTracer::ListSoundsOn(CLinkedEvent*&) const
+    "08096a00",  # CNoteTracer::ListSoundsOff(CLinkedEvent*&) const
+    "08096fb0",  # CNoteTracer::ClearEntries()
+    "080970d0",  # CNoteTracer::RefreshEntries()
+    "08183f60",  # CNoteTracer::RendundantInsertion(CNoteTracer::CBufferedNote&, CNoteTracer::CBufferedNote) (weak, base vtable slot)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

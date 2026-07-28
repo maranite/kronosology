@@ -1380,3 +1380,49 @@ should know they exist and are untested/unmodeled, not silently absent.
   `CFileIoCdda`, `CFileIoUdf` all done; `CDDriverIO`/`CScsiDriverBase`
   (partially)/`CFilesys`/`CDiskUtil` remain the cluster's own open leads).
   Eva manifest 2008 -> 2084/37,795 (5.514%).
+
+- **`CNoteTracer`** (`note_tracer.h`/`.cpp`, 2026-07-28, "Tracer" family
+  follow-up to `CParamTracer`/`CControllerTracer`/`CCtrlAndParamTracer`) —
+  24 real `.text` entries reconstructed (ctor x3, dtor, operator=,
+  Insert/Remove, ResetPendingNotes/ClearEntries/RefreshEntries,
+  GetLeftMost/GetRightMost, the 4 static `TDynBuffer<CBufferedNote>` helpers
+  + the non-static `SwapBuffer`, the virtual `RendundantInsertion` hook, all
+  4 event-list emitters (`ListNotesOn` x2/`ListNotesOff`/`ListSoundsOn`/
+  `ListSoundsOff`), and the friend free function `Swap`). Introduced a new
+  minimal `TDynBuffer<T>` template (distinct from the already-reconstructed
+  `TVector<T,N>`, tvector.h) after confirming via disassembly that
+  `CreateBuffer`/`ReallocBuffer`/`DestroyBuffer` are genuinely STATIC (no
+  `this` load at all) while `SwapBuffer` alone is a real non-static member.
+  Went back to `CControllerTracer`'s own prior-session deferral note and
+  resolved its open question: `CNoteTransposerOwner` (the blocking interface
+  for the still-deferred `CNoteTracerTransposer`, below) IS a genuinely tiny
+  abstract interface -- real vtable has exactly ONE pure-virtual slot beyond
+  D1/D0, and its exact signature was recovered without guessing by finding
+  its one real implementer: `CTrackBase`'s own `__vmi_class_type_info`
+  (.rodata+0x8e827fc) lists it as a real base, and `CTrackBase`'s own vtable
+  has `OnRejectNotesForTransposeConflict(CNoteTracerTransposer&,
+  CLinkedEvent*, CLinkedEvent*, unsigned char)` sitting in exactly that
+  inherited slot. `CNoteTracerTransposer` itself STAYS deferred anyway: its
+  own `RendundantInsertion` override (.text+0x08093140, ~1400 bytes) is a
+  genuinely dense duplicate-note-conflict resolver in its own right
+  (channel-mismatch detection, an 8-way unrolled note-index-invalidation
+  loop, multiple synthetic-event builds, a real virtual dispatch back out to
+  the now-resolved `CNoteTransposerOwner` interface) -- comparable in size/
+  depth to an entire prior batch on its own, so the class as a whole stays
+  out of scope even though its blocking dependency is gone; a real,
+  well-scoped future pickup once that one method gets its own pass. Also
+  newly out of scope this pass: `operator<<(CMStream&, const CNoteTracer&)`/
+  `operator>>(CMStream&, CNoteTracer&)` (.text+0x08093c80/0x08093cf0) --
+  simple, fully-understood bodies (write/read `mSize` then the raw
+  `mNotes[]` buffer, rebuilding `mNoteIndex[]` on read via the same
+  `RefreshEntries()` idiom used throughout), but they're the FIRST real call
+  site this project has found into `CMStream` (`Write(const void*,
+  unsigned)`/`Read(void*, unsigned)`), a class with no existing
+  reconstruction anywhere in this tree -- deferred rather than hand-adding
+  an under-specified new external dependency's shape on faith; note_tracer.h
+  documents the exact 2 real bodies for whenever `CMStream` itself gets
+  reconstructed. `CSysExTracer`/`CTracer` remain confirmed UNRELATED despite
+  the similar name (already established in the prior `CControllerTracer`
+  pass's own agent-memory note). Full host `make verify` green (2676 checks
+  across all binaries, 0 failures); new `verify/test_note_tracer.cpp` (37
+  checks). Eva manifest 2143 -> 2167/37,795 (5.734%).
