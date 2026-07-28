@@ -6,6 +6,12 @@
  * Every body below is one of exactly three shapes: the one real memcpy
  * (Ext0000toInt0000), a same-target-Y tail-call thunk, or an empty no-op --
  * see the header comment for the full X/Y rule and how it was verified.
+ *
+ * NOTE: this body's own source text is UNCHANGED by the 2026-07-28
+ * m_externalBuf/m_size offset correction (storage_converter_base.h) -- it
+ * already referenced both fields by name, so swapping which offset each name
+ * maps to made this call correct with no edit needed here. Only the BUFID
+ * ValidateExtXXXX formula (below) needed an actual source change.
  */
 
 #include "storage_converter_base.h"
@@ -21,6 +27,19 @@
 void CStorageConverterBase::Ext0000toInt0000(const CConvertStorageParam &param) const
 {
 	std::memcpy(param.m_internalBuf, param.m_externalBuf, param.m_size);
+}
+
+/* .text+0x08dea920, 37B. NEW 2026-07-28: the reverse (export) direction of
+ * Ext0000toInt0000 above -- ground truth's own mirror-image body
+ * (memcpy(external, internal, size)), not previously declared. Needed by 3
+ * sibling classes' own Int0000toExt0000-family thunks (CGlobalConverter::
+ * Int0002toExt0002, CRegionConverter::Int0001toExt0001, CWaveSeqConverter::
+ * Int0001toExt0001 -- storage_format_converters.cpp), confirmed via each
+ * one's own `jmp` target address resolving here.
+ */
+void CStorageConverterBase::Int0000toExt0000(const CConvertStorageParam &param) const
+{
+	std::memcpy(param.m_externalBuf, param.m_internalBuf, param.m_size);
 }
 
 /* .text+0x08de9180, 19B. Real: tail-call (jmp, not call+ret) to Ext0000toInt0000
@@ -2460,17 +2479,21 @@ void CStorageConverterBase::Ext000FtoInt000F(const CConvertStorageParam &) const
  * stay deferred. See storage_converter_base.h's own header comment.
  */
 
-/* .text+0x08e07bb0, 14B. Real: return param.m_extFormatId ==
- * (unsigned long)param.m_externalBuf -- a literal transcription. This only
- * makes sense as a "never really meant to be called generically" base-class
- * default (comparing a format tag against the raw bit pattern of a buffer
- * pointer); consistent with this whole method family having no confirmed
- * caller of its own (only the still-deferred ValidateExt() dispatcher might
- * reach it, and even that is unconfirmed).
+/* .text+0x08e07bb0, 14B. Real: return param.m_extFormatId == param.m_size --
+ * ground truth reads raw offset +0x04 (`mov edx,[eax+0x4]`) and compares it
+ * to +0x10 directly, no cast. CORRECTED 2026-07-28: previously written as
+ * `(unsigned long)param.m_externalBuf`, which was right about WHICH OFFSET
+ * (+0x04) under the prior (wrong) field/offset mapping but is wrong now that
+ * m_externalBuf has moved to +0x0c -- see storage_converter_base.h's own
+ * correction note. This only makes sense as a "never really meant to be
+ * called generically" base-class default (comparing a format tag against a
+ * raw size value); consistent with this whole method family having no
+ * confirmed caller of its own (only the still-deferred ValidateExt()
+ * dispatcher might reach it, and even that is unconfirmed).
  */
 bool CStorageConverterBase::ValidateExt0000(const CConvertStorageParam &param) const
 {
-	return param.m_extFormatId == reinterpret_cast<unsigned long>(param.m_externalBuf);
+	return param.m_extFormatId == param.m_size;
 }
 
 /* .text+0x08e07bc0..0x08e07ca0, 3B each (bare `xor eax,eax; ret`). Real:

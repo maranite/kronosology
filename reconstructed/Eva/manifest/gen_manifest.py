@@ -2001,6 +2001,45 @@ RECONSTRUCTED = {
     "08e07d90",  # CProgConverter::~CProgConverter() (D1, complete object)
     "08e07db0",  # CProgConverter::~CProgConverter() (D0, deleting)
     "08df7590",  # CProgConverter::Close()
+
+    # --- 2026-07-28 follow-up-follow-up batch: the real ExtXXXXtoIntYYYY/
+    # IntXXXXtoExtYYYY conversion payload (not just ValidateExtXXXX predicates).
+    # Found this is NOT a scriptable matrix like the base class's own 256-method
+    # one (sizes 1B..0x14c7B, real per-format field-migration/legacy-copy logic) --
+    # reconstructed the tractable <~0x200B subset (26 methods) plus 1 new base
+    # method (Int0000toExt0000, needed by 3 sibling thunks). Also fixed a real bug
+    # this pass: CConvertStorageParam's m_externalBuf/m_size fields were swapped
+    # relative to their true offsets (storage_converter_base.h's own correction
+    # note has the full derivation) -- affects every already-shipped memcpy-based
+    # body above plus the 6 BUFID ValidateExtXXXX formulas (base ValidateExt0000
+    # + the 5 "event converters" above), none of which need new manifest rows
+    # (already counted) but whose SOURCE changed.
+    "08dea920",  # CStorageConverterBase::Int0000toExt0000(CConvertStorageParam const&) const
+    "08dfd180",  # CGlobalConverter::Int0002toExt0002(CConvertStorageParam const&) const
+    "08dfd620",  # CRegionConverter::Int0001toExt0001(CConvertStorageParam const&) const
+    "08dfcfa0",  # CWaveSeqConverter::Int0001toExt0001(CConvertStorageParam const&) const
+    "08e07d20",  # CMOSSProgConverter::Ext0004toInt0005(CConvertStorageParam const&) const
+    "08dfd190",  # CGlobalConverter::Ext0002toInt0002(CConvertStorageParam const&) const
+    "08dfd2f0",  # CGEConverter::Ext0000toInt0000(CConvertStorageParam const&) const
+    "08dfd490",  # CRegionConverter::Ext0001toInt0001(CConvertStorageParam const&) const
+    "08dfd3a0",  # CGETemplateConverter::Ext0000toInt0000(CConvertStorageParam const&) const
+    "08df7940",  # CCombiConverter::Int0003toExt0003(CConvertStorageParam const&) const
+    "08dfc740",  # CDrumKitConverter::Int0003toExt0003(CConvertStorageParam const&) const
+    "08df47e0",  # CPCMProgConverter::Int0005toExt0005(CConvertStorageParam const&) const
+    "08df5c50",  # CMOSSProgConverter::Int0005toExt0005(CConvertStorageParam const&) const
+    "08dfc770",  # CDrumKitConverter::Ext0003toInt0003(CConvertStorageParam const&) const
+    "08dfcfb0",  # CWaveSeqConverter::Ext0001toInt0001(CConvertStorageParam const&) const
+    "08df4f60",  # CPCMProgConverter::Ext0005toInt0005(CConvertStorageParam const&) const
+    "08df6620",  # CMOSSProgConverter::Ext0005toInt0005(CConvertStorageParam const&) const
+    "08dfd1a0",  # CGlobalConverter::Ext0001toInt0002(CConvertStorageParam const&) const
+    "08dfd230",  # CGlobalConverter::Ext0000toInt0002(CConvertStorageParam const&) const
+    "08dfd560",  # CRegionConverter::Ext0000toInt0001(CConvertStorageParam const&) const
+    "08dfd4c0",  # CRegionConverter::Int0000toExt0000(CConvertStorageParam const&) const
+    "08dfd320",  # CGEConverter::Int0000toExt0000(CConvertStorageParam const&) const
+    "08dfd3d0",  # CGETemplateConverter::Int0000toExt0000(CConvertStorageParam const&) const
+    "08dfd640",  # CSongControlConverter::Int0000toExt0000(CConvertStorageParam const&) const
+    "08e03200",  # CSongConverter::Ext0003toInt0003(CConvertStorageParam const&) const
+    "08df42f0",  # CProgCombiSongCommonConverter::ConvertToCurrent(CProgCombiSongCommon*, CProgCombiSongCommon0000 const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

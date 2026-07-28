@@ -92,10 +92,61 @@
  *
  * CConvertStorageParam: extended 2026-07-28 with 3 more real confirmed fields
  * (`m_extFormatId` +0x10, `m_skipValidate` +0x19, `m_variantFlag` +0x1a -- see the
- * struct's own per-field comments for how each was confirmed, including a genuine
- * unresolved dual-use finding on `m_size` +0x0c). Struct now sized to 0x20
- * (highest confirmed-live offset +0x1a, rounded up) -- same "declare uncertain
- * fields clearly" convention as scsi_driver_base.h's SDriverIOPbuf.
+ * struct's own per-field comments for how each was confirmed). Struct now sized
+ * to 0x20 (highest confirmed-live offset +0x1a, rounded up) -- same "declare
+ * uncertain fields clearly" convention as scsi_driver_base.h's SDriverIOPbuf.
+ *
+ * *** CORRECTION, 2026-07-28 follow-up batch (ExtXXXXtoIntYYYY payload trace) ***
+ * `m_externalBuf` and `m_size` were SWAPPED relative to their true offsets in
+ * the prior batch's declaration (`m_externalBuf` was declared at +0x04,
+ * `m_size` at +0x0c). A fresh `objdump -dr` trace of the real ExtXXXXtoIntYYYY/
+ * IntXXXXtoExtYYYY conversion bodies -- which is what actually exercises BOTH
+ * fields together in one call, unlike any single-field read the prior batch's
+ * own ValidateExtXXXX/Close() work happened to check -- found the true layout
+ * is the other way around: +0x04 is the plain byte-count SIZE field, +0x0c is
+ * the EXTERNAL BUFFER POINTER. Confirmed independently across 6+ call sites,
+ * not a single sample: `CStorageConverterBase::Ext0000toInt0000`/`Int0000toExt0000`
+ * (base identity-copy pair, both directions), 3 sibling classes' own literal
+ * identity-copy overrides (`CGEConverter`/`CRegionConverter`/
+ * `CGETemplateConverter::Ext0000toInt0000`), `CPCMProgConverter::ValidateExt0000`
+ * (dereferences +0x0c directly as a pointer, `mov ecx,[edx+0xc]` then
+ * `movzx edx,BYTE PTR [ecx+0x9f2]`), and `CWaveSeqConverter::Ext0000toInt0001`
+ * (dereferences +0x0c directly as a source struct pointer for a manual
+ * field-by-field copy, never touches +0x04 at all since its loop count is a
+ * fixed table size, not param-driven).
+ *
+ * This ALSO retroactively resolves the prior batch's own documented "genuine
+ * dual-use" mystery on `m_size`: it was never dual-use. `CPCMProgConverter`/
+ * `CMOSSProgConverter`'s `ValidateExtXXXX` dereferencing "`m_size`" as a
+ * session-context pointer was always reading the SAME field this correction
+ * renames to `m_externalBuf` -- a plain, single-purpose pointer field that
+ * happens to point at a flat copy buffer in the simple identity-copy case and
+ * at a larger session/context object in the PCM/MOSS case. One field, one
+ * role (pointer); no dual use, just a stale offset label.
+ *
+ * REAL BUG FIXED THIS BATCH: because `CStorageConverterBase::Ext0000toInt0000`'s
+ * already-shipped body (`std::memcpy(param.m_internalBuf, param.m_externalBuf,
+ * param.m_size)`, commit `622cd61`) referenced the OLD (wrong) offsets by NAME,
+ * swapping the offsets under those same names in this correction makes the
+ * existing source text behaviorally correct with ZERO code changes needed
+ * there -- but the 6 `ValidateExtXXXX` BUFID-formula bodies (base class +
+ * `CMidiEventConverter`/`CMasterEventConverter`/`CAudioEventConverter`/
+ * `CAutomationEventConverter`/`CPatternEventConverter`), which read ground
+ * truth's +0x04 specifically (confirmed via fresh disassembly of each), DID
+ * need their source updated from `(unsigned long)param.m_externalBuf` (now
+ * +0x0c, wrong) to plain `param.m_size` (now +0x04, correct) -- see
+ * storage_converter_base.cpp/storage_format_converters.cpp. `m_externalBuf`'s
+ * type also changed from `const void *` to `void *`: ground truth genuinely
+ * WRITES through it in the `IntXXXXtoExtYYYY` (export) direction (confirmed,
+ * e.g. `CMemoryAccessor::WriteBig32Bit` writes 4 bytes right after it in
+ * `CGEConverter::Int0000toExt0000`), so `const` was never accurate.
+ *
+ * NOTE (not chased down this batch): `m_pad_17` (+0x17, 1 byte) and
+ * `m_skipValidate` (+0x19) leave an undeclared 1-byte gap at +0x18 with no
+ * field claiming it -- flagged for whoever next disassembles the still-
+ * deferred `CStorageConverterBase::Open()`/`CProgConverter::Open()` (the only
+ * 2 real consumers of `m_skipValidate`), since confirming/fixing this needs
+ * tracing those, out of scope for this pass.
  */
 
 #ifndef STORAGE_CONVERTER_BASE_H
@@ -104,24 +155,23 @@
 #include <cstddef>
 
 struct CConvertStorageParam {
-	void       *m_internalBuf;     // +0x00, confirmed: memcpy dst in Ext0000toInt0000
-	const void *m_externalBuf;     // +0x04, confirmed: memcpy src in Ext0000toInt0000
+	void       *m_internalBuf;     // +0x00, confirmed: memcpy dst in Ext0000toInt0000, src in Int0000toExt0000
+	unsigned long  m_size;            // +0x04, CORRECTED 2026-07-28 (was misdeclared as m_externalBuf here,
+	                                   // see header note above): the plain memcpy byte count, confirmed via
+	                                   // CStorageConverterBase::Ext0000toInt0000/Int0000toExt0000 and every
+	                                   // sibling identity-copy override.
 	unsigned short m_internalVersion; // +0x08, confirmed: CheckVersion's `cx` compare target (not used this pass)
 	unsigned char  m_unknown_0a;      // +0x0a, confirmed touched by CheckVersion, meaning not recovered
 	unsigned char  m_pad_0b;          // +0x0b, unconfirmed padding
-	unsigned long  m_size;            // +0x0c, DUAL-USE (2026-07-28 finding): CStorageConverterBase's own
-	                                   // Ext0000toInt0000 reads this as a plain memcpy byte count (confirmed,
-	                                   // unchanged from before), but EVERY concrete-subclass ValidateExtXXXX
-	                                   // in CPCMProgConverter/CMOSSProgConverter instead dereferences it as a
-	                                   // `void*` to a large (~0xa00+ byte) owning/session context object and
-	                                   // reads a 3-bit mode flag at that object's own +0x9f2/+0x9fe. Both uses
-	                                   // are independently confirmed via direct disassembly; NOT reconciled --
-	                                   // most likely this field is genuinely reused for different purposes by
-	                                   // different converter subclasses/call sites (the base class's own
-	                                   // Ext0000toInt0000 is itself confirmed dead code on the real boot path,
-	                                   // so its "size" reading never has to coexist with a live "pointer"
-	                                   // reading in practice). Left as unsigned long; the pointer-shaped uses
-	                                   // reinterpret_cast it locally rather than retyping this field.
+	void       *m_externalBuf;     // +0x0c, CORRECTED 2026-07-28 (was misdeclared as m_size here, see
+	                                   // header note above): the external-format buffer pointer -- memcpy src
+	                                   // in Ext0000toInt0000, memcpy/WriteBig32Bit dst in Int0000toExt0000.
+	                                   // Non-const: ground truth genuinely writes through it in the export
+	                                   // (IntXXXXtoExtYYYY) direction. Also confirmed reused by
+	                                   // CPCMProgConverter/CMOSSProgConverter's ValidateExtXXXX as a pointer to
+	                                   // a larger (~0xa00+ byte) session/context object (its own +0x9f2/+0x9fe
+	                                   // holds a 3-bit mode flag) -- same single pointer field, not a second
+	                                   // "dual use" of m_size as the prior batch's note assumed.
 	unsigned long  m_extFormatId;     // +0x10, confirmed 2026-07-28: the format/subtype magic number checked
 	                                   // by essentially every concrete converter subclass's ValidateExtXXXX()
 	                                   // (48 methods across ~20 classes, storage_format_converters.h) -- was
@@ -148,6 +198,7 @@ class CStorageConverterBase {
 public:
 	// -- target Int0000 --
 	void Ext0000toInt0000(const CConvertStorageParam &param) const;  // REAL identity copy, .text+0x08dea8f0, 37B
+	void Int0000toExt0000(const CConvertStorageParam &param) const;  // REAL reverse identity copy, .text+0x08dea920, 37B, NEW 2026-07-28
 	void Ext0001toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de9180, 19B
 	void Ext0002toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de91a0, 19B
 	void Ext0003toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de91c0, 19B
