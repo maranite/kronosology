@@ -19,6 +19,31 @@ CParamTracer::CParamTracer(unsigned char channel, ECtrlChange ctrlChangeType)
 {
 }
 
+CParamTracer::CParamTracer(const CParamTracer &other)
+	: mChannel(other.mChannel), mCtrlChangeType(other.mCtrlChangeType), mCurAddr(other.mCurAddr)
+{
+	/* mParams starts empty (TVector's own default ctor); Insert() at Begin()==0
+	 * on an empty vector is a plain append of the whole source range. */
+	SParam *pos = mParams.Begin();
+	mParams.Insert(pos, other.mParams.Begin(), other.mParams.End());
+}
+
+CParamTracer &CParamTracer::operator=(const CParamTracer &other)
+{
+	if (this == &other)
+		return *this;
+
+	mChannel = other.mChannel;
+	mCtrlChangeType = other.mCtrlChangeType;
+	mCurAddr = other.mCurAddr;
+
+	mParams.Clear();
+	SParam *pos = mParams.Begin();
+	mParams.Insert(pos, other.mParams.Begin(), other.mParams.End());
+
+	return *this;
+}
+
 void CParamTracer::InitAfterDefaultCtor(unsigned char channel, ECtrlChange ctrlChangeType)
 {
 	mChannel = channel;

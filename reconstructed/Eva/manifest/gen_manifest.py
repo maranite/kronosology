@@ -3220,6 +3220,37 @@ RECONSTRUCTED = {
     "089ca470",  # CKorgFile::MakeNameRight(char const*, char*, unsigned int)
     "089ca4a0",  # CKorgFile::MakeNameLeft(char const*, char*, unsigned int)
     "089ca4d0",  # CKorgFile::MakeFileName(char*, unsigned int, char const*)
+
+    # --- CControllerTracer / CCtrlAndParamTracer, "Tracer" family follow-up to
+    # CParamTracer (2026-07-28) ---
+    "0808efa0",  # CControllerTracer::Reset()
+    "0808f090",  # CControllerTracer::CControllerTracer()
+    "0808f100",  # CControllerTracer::CControllerTracer(unsigned char)
+    "0808f170",  # CControllerTracer::EraseCtrl(unsigned char)
+    "0808f1c0",  # CControllerTracer::EraseCtrls(unsigned char const*)
+    "0808f2a0",  # CControllerTracer::SetDefCtrls(unsigned char const*)
+    "0808f320",  # CControllerTracer::AppendChnPressure(CLinkedEvent*&) const
+    "0808f410",  # CControllerTracer::AppendPitchBend(CLinkedEvent*&) const
+    "0808f520",  # CControllerTracer::AppendFullProgram(CLinkedEvent*&) const
+    "0808f770",  # CControllerTracer::AppendCtrl(CLinkedEvent*&, unsigned char) const
+    "0808f890",  # CControllerTracer::AppendCtrls(CLinkedEvent*&, unsigned char const*) const
+    "0808f9d0",  # CControllerTracer::AppendDefaultChnPressure(CLinkedEvent*&) const
+    "0808faa0",  # CControllerTracer::AppendDefaultPitchBend(CLinkedEvent*&) const
+    "0808fb80",  # CControllerTracer::AppendDefaultCtrl(CLinkedEvent*&, unsigned char) const
+    "0808fcc0",  # CControllerTracer::AppendDefaultCtrls(CLinkedEvent*&, unsigned char const*) const
+    "08182de0",  # CControllerTracer::~CControllerTracer() (D1, complete)
+    "08182df0",  # CControllerTracer::InitAfterDefaultCtor(unsigned char)
+    "08182e00",  # CControllerTracer::UpdateCtrl(unsigned char, unsigned char)
+    "08182e20",  # CControllerTracer::~CControllerTracer() (D0, deleting)
+    "0808ef70",  # CCtrlAndParamTracer::InitAfterDefaultCtor(unsigned char)
+    "0808f000",  # CCtrlAndParamTracer::Reset()
+    "08091450",  # CCtrlAndParamTracer::CCtrlAndParamTracer(unsigned char)
+    "080918c0",  # CCtrlAndParamTracer::CCtrlAndParamTracer()
+    "08091d20",  # CCtrlAndParamTracer::AppendParams(CLinkedEvent*&, SBytePair const*, SBytePair const*) const
+    "08091e00",  # CCtrlAndParamTracer::AppendAllParams(CLinkedEvent*&) const
+    "08092240",  # CCtrlAndParamTracer::CCtrlAndParamTracer(CCtrlAndParamTracer const&)
+    "08092c70",  # CCtrlAndParamTracer::UpdateCtrl(unsigned char, unsigned char)
+    "08092e80",  # CCtrlAndParamTracer::operator=(CCtrlAndParamTracer const&)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

@@ -100,6 +100,32 @@
  * no isolated observable effect found this pass; both are reconstructed here as
  * behaviorally identical pending a closer look, flagged rather than silently
  * guessed away.
+ *
+ * UPDATE (2026-07-28, CControllerTracer/CCtrlAndParamTracer follow-up, see
+ * controller_tracer.h/ctrl_and_param_tracer.h): CCtrlAndParamTracer : public
+ * CControllerTracer really does compose two embedded CParamTracer subobjects, exactly
+ * as speculated above -- confirmed field-for-field from its own real ctor/copy-ctor/
+ * operator= bodies. this+0x8c is the RPN tracker (mCtrlChangeType stamped 0x64=100
+ * directly in the ctor), this+0xa8 is the NRPN tracker (stamped 0x62=98) -- the "NRPN
+ * vs RPN, unconfirmed" question above is now resolved. Two small additions needed for
+ * that reconstruction, both added here rather than duplicated:
+ *   - `friend class CCtrlAndParamTracer` -- its own real UpdateCtrl() disassembly
+ *     writes `mCurAddr.b0`/`.b1` directly (NOT through SetDataMSB/SetDataLSB/DataInc/
+ *     DataDec) when a
+ *     Parameter-Number CC (0x62/0x63/0x64/0x65) arrives, exactly the same raw-field
+ *     access CParamTracer's own methods use internally -- there is no real
+ *     "SetCurAddrByte"-shaped accessor in ground truth to wrap this in.
+ *   - A real copy ctor and `operator=` -- ground truth never emits a standalone
+ *     `CParamTracer::CParamTracer(const CParamTracer&)`/`operator=` symbol (same "never
+ *     independently ODR-used" reason ~CParamTracer doesn't exist either), but
+ *     CCtrlAndParamTracer's OWN copy ctor/operator= disassembly inlines the equivalent
+ *     logic per subobject (copy mChannel/mCtrlChangeType/mCurAddr, then
+ *     `TVector::Insert` the source's [Begin,End) range into a freshly-cleared/empty
+ *     destination mParams) TWICE, once per embedded tracker. Declaring real
+ *     CParamTracer copy ctor/operator= here lets the compiler generate
+ *     CCtrlAndParamTracer's own via ordinary memberwise subobject copy instead of
+ *     hand-duplicating the same TVector-copy logic twice more -- observably identical
+ *     to ground truth's inlined version.
  */
 
 #ifndef PARAM_TRACER_H
@@ -145,6 +171,14 @@ public:
 
 	/* .text+0x08090000. */
 	CParamTracer(unsigned char channel, ECtrlChange ctrlChangeType);
+
+	/* No standalone real symbol exists for either of these (ground truth inlines the
+	 * equivalent logic directly into CCtrlAndParamTracer's own copy ctor/operator=,
+	 * once per embedded subobject -- see this file's 2026-07-28 update note above).
+	 * Deep-copies mParams via TVector::Insert so CCtrlAndParamTracer can just compose
+	 * two of these as ordinary members and get the real observable behavior for free. */
+	CParamTracer(const CParamTracer &other);
+	CParamTracer &operator=(const CParamTracer &other);
 
 	/* .text+0x080901f0, 18 bytes -- re-stamps mChannel/mCtrlChangeType only (used
 	 * when a CParamTracer is default-constructed in bulk, then individually
@@ -235,6 +269,11 @@ private:
 	ECtrlChange   mCtrlChangeType; /* +0x04 */
 	SBytePair     mCurAddr;        /* +0x08 */
 	TVector<SParam, 0> mParams;    /* +0x0c */
+
+	/* CCtrlAndParamTracer::UpdateCtrl() writes mCurAddr.b0/.b1 directly for the raw
+	 * Parameter-Number CC messages (0x62-0x65) -- see this file's 2026-07-28 update
+	 * note above. */
+	friend class CCtrlAndParamTracer;
 };
 
 #endif /* PARAM_TRACER_H */

@@ -102,6 +102,7 @@ public:
 	 * `node->mNext = head; head = node;`. Exposed here as plain public methods
 	 * rather than re-deriving a raw-pointer idiom at every call site. */
 	void SetTag(int tag) { mTag = tag; }
+	int GetTag() const { return mTag; }
 	void SetNext(CLinkedEvent *next) { mNext = next; }
 	CLinkedEvent *GetNext() const { return (CLinkedEvent *)mNext; }
 
