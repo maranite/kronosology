@@ -1102,3 +1102,51 @@ should know they exist and are untested/unmodeled, not silently absent.
   real hardware -- no reconstructed caller anywhere in this project yet (same
   status as the rest of the storage/disk-driver cluster). Eva manifest
   738 -> 778/37,795.
+- **`CStorageConverterBase::CheckVersion`/`ValidateExt`/`Save`/`Load`/`Open`/
+  `Close`/16x `ExttoIntXXXX`/16x `ValidateExtXXXX`/ctor** (2026-07-28, storage
+  cluster follow-up to the batch above) — 40 methods, `.text+0x08de8f20`-
+  `0x08e07cb0`, deliberately deferred while the class's real headline finding
+  -- the 256-method `Ext{X}toInt{Y}` combinatorial matrix -- is fully
+  reconstructed (`include/storage_converter_base.h`/
+  `src/init/storage_converter_base.cpp`). Found via a fresh pending-manifest
+  class-count sweep (same technique that found OA.ko's
+  `CKGSeqBackupCommonParam`/`CKGSeqBackupModuleParam`, commit `efa0926`) --
+  this was the single largest untouched cluster left in the storage survey.
+  The matrix itself was decoded by a scripted `objdump -dr -M intel` -> Python
+  instruction-pattern decoder (all 256 bodies are exactly one of 4 byte sizes,
+  1/19/22/37, ZERO anomalies) cross-checked against a direct `.rodata` dump of
+  `vtable for CStorageConverterBase` (`0x08fcc9c0`) to resolve every
+  forwarding thunk's real target -- confirmed rule with zero exceptions:
+  `(X=0,Y=0)` is the one real `memcpy` identity copy (Int0000 is
+  byte-identical to Ext0000); `X>Y` is a genuine tail-call thunk to
+  `Ext{Y}toInt{Y}` (120 instances, all individually resolved via the vtable
+  dump, not assumed from the first couple of samples); `X<=Y` excluding
+  `(0,0)` is a bare 1-byte `ret` no-op (135 instances, including all 15
+  non-zero diagonals -- meaning every internal version other than 0000 is
+  genuinely unimplemented in this build). The 40 deferred methods above are a
+  SEPARATE, parallel real-implementation surface the matrix never calls into:
+  `ExttoInt0000`..`ExttoInt000F` (16 methods, `.text+0x08deaba0`-`0x08dec4c0`,
+  343-379 bytes each, NO `X` digits in the name -- distinct symbols from the
+  matrix's own `Ext0000toInt0000`) look like the "real" per-version conversion
+  bodies but are not wired to the matrix at all (independently confirmed --
+  the matrix's own diagonal stubs for Y>=1 are bare `ret`, not calls into
+  these). `Open()` (`.text+0x08deab30`, 103B) is the one method in this whole
+  class confirmed to have real external callers (`.text+0x08df76b9`,
+  `0x08df778d`, both in an unidentified `0x08df7xxx` region -- a lead for
+  whichever future batch reaches `CFilesys`/`CDiskUtil`) and itself calls
+  `ValidateExt()` (389B). Independently confirmed the matrix itself has ZERO
+  external callers anywhere in the binary (whole-binary `call` grep against
+  all 256 addresses plus `Save`/`Load`/`Close`/`CheckVersion`) -- same "real,
+  faithfully reconstructed, but dead on the current build's own reachable
+  paths" finding as `CScsiDriverBase`'s 35 `SetParamXxx` methods above. No
+  ctor symbol found in this export (2 dtor overloads exist but no plain
+  constructor) -- likely elided/inline, or only ever constructed through a
+  derived class not yet identified; a real open question for a future pass,
+  not assumed. Verified with 256 KAT checks
+  (`verify/test_storage_converter_base.cpp`) that EXHAUSTIVELY exercise all
+  256 `(X,Y)` combinations via an INDEPENDENT black-box rule (does the
+  destination buffer end up copied or left at its sentinel value) rather than
+  re-deriving the generator's own size/offset classification, plus the full
+  existing host `make verify` suite (0 failures across 51 binaries). Not
+  tested on real hardware -- no reconstructed caller anywhere in this project
+  yet. Eva manifest 778 -> 1034/37,795.

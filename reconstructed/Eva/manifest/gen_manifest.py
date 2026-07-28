@@ -1657,6 +1657,287 @@ RECONSTRUCTED = {
     "08309fe0",  # CScsiDriverBase::SetParamStartStop(SDriverIOPbuf*)
     "0830a030",  # CScsiDriverBase::SetParamCheckWriteProtect(SDriverIOPbuf*)
     "0830a080",  # CScsiDriverBase::SetParamSleep(SDriverIOPbuf*)
+
+    # --- CStorageConverterBase, the 256-method Ext{X}toInt{Y} combinatorial
+    # matrix (2026-07-28, storage-cluster follow-up -- found via a fresh
+    # pending-manifest class-count sweep, same technique as OA.ko's
+    # CKGSeqBackupCommonParam/CKGSeqBackupModuleParam batch). Reconstructed by a
+    # scripted objdump -dr -M intel -> Python instruction-pattern decoder that
+    # classified all 256 bodies by exact byte size (1/19/22/37, zero anomalies)
+    # and mechanically resolved every forwarding thunk's vtable-slot read
+    # against a direct .rodata dump of "vtable for CStorageConverterBase"
+    # (0x08fcc9c0). Verified rule, zero exceptions: (X=0,Y=0) is the one real
+    # memcpy identity copy; X>Y is a tail-call thunk to Ext{Y}toInt{Y} (120
+    # instances); X<=Y excluding (0,0) is a bare no-op ret (135 instances,
+    # including all 15 non-zero diagonals -- every internal version other than
+    # 0000 is unimplemented in this build). See include/storage_converter_base.h
+    # for the full derivation and src/init/storage_converter_base.cpp. 256 KAT
+    # checks in verify/test_storage_converter_base.cpp use an INDEPENDENT
+    # black-box rule (does the destination buffer end up copied or untouched),
+    # not a re-check of this same size/offset classification. CheckVersion/
+    # ValidateExt/Save/Load/Open/Close/the 16 ExttoIntY real-body methods/the 16
+    # ValidateExtY methods/ctor are deliberately deferred -- documented in the
+    # header. Open() has 2 real external callers (.text+0x08df76b9/0x08df778d,
+    # not yet traced to a caller class) -- the only evidence anything in this
+    # class is live; nothing in this matrix itself is reachable from outside
+    # the class (independently confirmed via a whole-binary call grep, same
+    # "real but dead code" finding as CScsiDriverBase's own SetParamXxx family).
+    "08dea8f0",  # CStorageConverterBase::Ext0000toInt0000(CConvertStorageParam const&) const
+    "08de9180",  # CStorageConverterBase::Ext0001toInt0000(CConvertStorageParam const&) const
+    "08de91a0",  # CStorageConverterBase::Ext0002toInt0000(CConvertStorageParam const&) const
+    "08de91c0",  # CStorageConverterBase::Ext0003toInt0000(CConvertStorageParam const&) const
+    "08de91e0",  # CStorageConverterBase::Ext0004toInt0000(CConvertStorageParam const&) const
+    "08de9200",  # CStorageConverterBase::Ext0005toInt0000(CConvertStorageParam const&) const
+    "08de9220",  # CStorageConverterBase::Ext0006toInt0000(CConvertStorageParam const&) const
+    "08de9240",  # CStorageConverterBase::Ext0007toInt0000(CConvertStorageParam const&) const
+    "08de9260",  # CStorageConverterBase::Ext0008toInt0000(CConvertStorageParam const&) const
+    "08de9280",  # CStorageConverterBase::Ext0009toInt0000(CConvertStorageParam const&) const
+    "08de92a0",  # CStorageConverterBase::Ext000AtoInt0000(CConvertStorageParam const&) const
+    "08de92c0",  # CStorageConverterBase::Ext000BtoInt0000(CConvertStorageParam const&) const
+    "08de92e0",  # CStorageConverterBase::Ext000CtoInt0000(CConvertStorageParam const&) const
+    "08de9300",  # CStorageConverterBase::Ext000DtoInt0000(CConvertStorageParam const&) const
+    "08de9320",  # CStorageConverterBase::Ext000EtoInt0000(CConvertStorageParam const&) const
+    "08de9340",  # CStorageConverterBase::Ext000FtoInt0000(CConvertStorageParam const&) const
+    "08de9360",  # CStorageConverterBase::Ext0000toInt0001(CConvertStorageParam const&) const
+    "08de9370",  # CStorageConverterBase::Ext0001toInt0001(CConvertStorageParam const&) const
+    "08de9380",  # CStorageConverterBase::Ext0002toInt0001(CConvertStorageParam const&) const
+    "08de93a0",  # CStorageConverterBase::Ext0003toInt0001(CConvertStorageParam const&) const
+    "08de93c0",  # CStorageConverterBase::Ext0004toInt0001(CConvertStorageParam const&) const
+    "08de93e0",  # CStorageConverterBase::Ext0005toInt0001(CConvertStorageParam const&) const
+    "08de9400",  # CStorageConverterBase::Ext0006toInt0001(CConvertStorageParam const&) const
+    "08de9420",  # CStorageConverterBase::Ext0007toInt0001(CConvertStorageParam const&) const
+    "08de9440",  # CStorageConverterBase::Ext0008toInt0001(CConvertStorageParam const&) const
+    "08de9460",  # CStorageConverterBase::Ext0009toInt0001(CConvertStorageParam const&) const
+    "08de9480",  # CStorageConverterBase::Ext000AtoInt0001(CConvertStorageParam const&) const
+    "08de94a0",  # CStorageConverterBase::Ext000BtoInt0001(CConvertStorageParam const&) const
+    "08de94c0",  # CStorageConverterBase::Ext000CtoInt0001(CConvertStorageParam const&) const
+    "08de94e0",  # CStorageConverterBase::Ext000DtoInt0001(CConvertStorageParam const&) const
+    "08de9500",  # CStorageConverterBase::Ext000EtoInt0001(CConvertStorageParam const&) const
+    "08de9520",  # CStorageConverterBase::Ext000FtoInt0001(CConvertStorageParam const&) const
+    "08de9540",  # CStorageConverterBase::Ext0000toInt0002(CConvertStorageParam const&) const
+    "08de9550",  # CStorageConverterBase::Ext0001toInt0002(CConvertStorageParam const&) const
+    "08de9560",  # CStorageConverterBase::Ext0002toInt0002(CConvertStorageParam const&) const
+    "08de9570",  # CStorageConverterBase::Ext0003toInt0002(CConvertStorageParam const&) const
+    "08de9590",  # CStorageConverterBase::Ext0004toInt0002(CConvertStorageParam const&) const
+    "08de95b0",  # CStorageConverterBase::Ext0005toInt0002(CConvertStorageParam const&) const
+    "08de95d0",  # CStorageConverterBase::Ext0006toInt0002(CConvertStorageParam const&) const
+    "08de95f0",  # CStorageConverterBase::Ext0007toInt0002(CConvertStorageParam const&) const
+    "08de9610",  # CStorageConverterBase::Ext0008toInt0002(CConvertStorageParam const&) const
+    "08de9630",  # CStorageConverterBase::Ext0009toInt0002(CConvertStorageParam const&) const
+    "08de9650",  # CStorageConverterBase::Ext000AtoInt0002(CConvertStorageParam const&) const
+    "08de9670",  # CStorageConverterBase::Ext000BtoInt0002(CConvertStorageParam const&) const
+    "08de9690",  # CStorageConverterBase::Ext000CtoInt0002(CConvertStorageParam const&) const
+    "08de96b0",  # CStorageConverterBase::Ext000DtoInt0002(CConvertStorageParam const&) const
+    "08de96d0",  # CStorageConverterBase::Ext000EtoInt0002(CConvertStorageParam const&) const
+    "08de96f0",  # CStorageConverterBase::Ext000FtoInt0002(CConvertStorageParam const&) const
+    "08de9710",  # CStorageConverterBase::Ext0000toInt0003(CConvertStorageParam const&) const
+    "08de9720",  # CStorageConverterBase::Ext0001toInt0003(CConvertStorageParam const&) const
+    "08de9730",  # CStorageConverterBase::Ext0002toInt0003(CConvertStorageParam const&) const
+    "08de9740",  # CStorageConverterBase::Ext0003toInt0003(CConvertStorageParam const&) const
+    "08de9750",  # CStorageConverterBase::Ext0004toInt0003(CConvertStorageParam const&) const
+    "08de9770",  # CStorageConverterBase::Ext0005toInt0003(CConvertStorageParam const&) const
+    "08de9790",  # CStorageConverterBase::Ext0006toInt0003(CConvertStorageParam const&) const
+    "08de97b0",  # CStorageConverterBase::Ext0007toInt0003(CConvertStorageParam const&) const
+    "08de97d0",  # CStorageConverterBase::Ext0008toInt0003(CConvertStorageParam const&) const
+    "08de97f0",  # CStorageConverterBase::Ext0009toInt0003(CConvertStorageParam const&) const
+    "08de9810",  # CStorageConverterBase::Ext000AtoInt0003(CConvertStorageParam const&) const
+    "08de9830",  # CStorageConverterBase::Ext000BtoInt0003(CConvertStorageParam const&) const
+    "08de9850",  # CStorageConverterBase::Ext000CtoInt0003(CConvertStorageParam const&) const
+    "08de9870",  # CStorageConverterBase::Ext000DtoInt0003(CConvertStorageParam const&) const
+    "08de9890",  # CStorageConverterBase::Ext000EtoInt0003(CConvertStorageParam const&) const
+    "08de98b0",  # CStorageConverterBase::Ext000FtoInt0003(CConvertStorageParam const&) const
+    "08de98d0",  # CStorageConverterBase::Ext0000toInt0004(CConvertStorageParam const&) const
+    "08de98e0",  # CStorageConverterBase::Ext0001toInt0004(CConvertStorageParam const&) const
+    "08de98f0",  # CStorageConverterBase::Ext0002toInt0004(CConvertStorageParam const&) const
+    "08de9900",  # CStorageConverterBase::Ext0003toInt0004(CConvertStorageParam const&) const
+    "08de9910",  # CStorageConverterBase::Ext0004toInt0004(CConvertStorageParam const&) const
+    "08de9920",  # CStorageConverterBase::Ext0005toInt0004(CConvertStorageParam const&) const
+    "08de9940",  # CStorageConverterBase::Ext0006toInt0004(CConvertStorageParam const&) const
+    "08de9960",  # CStorageConverterBase::Ext0007toInt0004(CConvertStorageParam const&) const
+    "08de9980",  # CStorageConverterBase::Ext0008toInt0004(CConvertStorageParam const&) const
+    "08de99a0",  # CStorageConverterBase::Ext0009toInt0004(CConvertStorageParam const&) const
+    "08de99c0",  # CStorageConverterBase::Ext000AtoInt0004(CConvertStorageParam const&) const
+    "08de99e0",  # CStorageConverterBase::Ext000BtoInt0004(CConvertStorageParam const&) const
+    "08de9a00",  # CStorageConverterBase::Ext000CtoInt0004(CConvertStorageParam const&) const
+    "08de9a20",  # CStorageConverterBase::Ext000DtoInt0004(CConvertStorageParam const&) const
+    "08de9a40",  # CStorageConverterBase::Ext000EtoInt0004(CConvertStorageParam const&) const
+    "08de9a60",  # CStorageConverterBase::Ext000FtoInt0004(CConvertStorageParam const&) const
+    "08de9a80",  # CStorageConverterBase::Ext0000toInt0005(CConvertStorageParam const&) const
+    "08de9a90",  # CStorageConverterBase::Ext0001toInt0005(CConvertStorageParam const&) const
+    "08de9aa0",  # CStorageConverterBase::Ext0002toInt0005(CConvertStorageParam const&) const
+    "08de9ab0",  # CStorageConverterBase::Ext0003toInt0005(CConvertStorageParam const&) const
+    "08de9ac0",  # CStorageConverterBase::Ext0004toInt0005(CConvertStorageParam const&) const
+    "08de9ad0",  # CStorageConverterBase::Ext0005toInt0005(CConvertStorageParam const&) const
+    "08de9ae0",  # CStorageConverterBase::Ext0006toInt0005(CConvertStorageParam const&) const
+    "08de9b00",  # CStorageConverterBase::Ext0007toInt0005(CConvertStorageParam const&) const
+    "08de9b20",  # CStorageConverterBase::Ext0008toInt0005(CConvertStorageParam const&) const
+    "08de9b40",  # CStorageConverterBase::Ext0009toInt0005(CConvertStorageParam const&) const
+    "08de9b60",  # CStorageConverterBase::Ext000AtoInt0005(CConvertStorageParam const&) const
+    "08de9b80",  # CStorageConverterBase::Ext000BtoInt0005(CConvertStorageParam const&) const
+    "08de9ba0",  # CStorageConverterBase::Ext000CtoInt0005(CConvertStorageParam const&) const
+    "08de9bc0",  # CStorageConverterBase::Ext000DtoInt0005(CConvertStorageParam const&) const
+    "08de9be0",  # CStorageConverterBase::Ext000EtoInt0005(CConvertStorageParam const&) const
+    "08de9c00",  # CStorageConverterBase::Ext000FtoInt0005(CConvertStorageParam const&) const
+    "08de9c20",  # CStorageConverterBase::Ext0000toInt0006(CConvertStorageParam const&) const
+    "08de9c30",  # CStorageConverterBase::Ext0001toInt0006(CConvertStorageParam const&) const
+    "08de9c40",  # CStorageConverterBase::Ext0002toInt0006(CConvertStorageParam const&) const
+    "08de9c50",  # CStorageConverterBase::Ext0003toInt0006(CConvertStorageParam const&) const
+    "08de9c60",  # CStorageConverterBase::Ext0004toInt0006(CConvertStorageParam const&) const
+    "08de9c70",  # CStorageConverterBase::Ext0005toInt0006(CConvertStorageParam const&) const
+    "08de9c80",  # CStorageConverterBase::Ext0006toInt0006(CConvertStorageParam const&) const
+    "08de9c90",  # CStorageConverterBase::Ext0007toInt0006(CConvertStorageParam const&) const
+    "08de9cb0",  # CStorageConverterBase::Ext0008toInt0006(CConvertStorageParam const&) const
+    "08de9cd0",  # CStorageConverterBase::Ext0009toInt0006(CConvertStorageParam const&) const
+    "08de9cf0",  # CStorageConverterBase::Ext000AtoInt0006(CConvertStorageParam const&) const
+    "08de9d10",  # CStorageConverterBase::Ext000BtoInt0006(CConvertStorageParam const&) const
+    "08de9d30",  # CStorageConverterBase::Ext000CtoInt0006(CConvertStorageParam const&) const
+    "08de9d50",  # CStorageConverterBase::Ext000DtoInt0006(CConvertStorageParam const&) const
+    "08de9d70",  # CStorageConverterBase::Ext000EtoInt0006(CConvertStorageParam const&) const
+    "08de9d90",  # CStorageConverterBase::Ext000FtoInt0006(CConvertStorageParam const&) const
+    "08de9db0",  # CStorageConverterBase::Ext0000toInt0007(CConvertStorageParam const&) const
+    "08de9dc0",  # CStorageConverterBase::Ext0001toInt0007(CConvertStorageParam const&) const
+    "08de9dd0",  # CStorageConverterBase::Ext0002toInt0007(CConvertStorageParam const&) const
+    "08de9de0",  # CStorageConverterBase::Ext0003toInt0007(CConvertStorageParam const&) const
+    "08de9df0",  # CStorageConverterBase::Ext0004toInt0007(CConvertStorageParam const&) const
+    "08de9e00",  # CStorageConverterBase::Ext0005toInt0007(CConvertStorageParam const&) const
+    "08de9e10",  # CStorageConverterBase::Ext0006toInt0007(CConvertStorageParam const&) const
+    "08de9e20",  # CStorageConverterBase::Ext0007toInt0007(CConvertStorageParam const&) const
+    "08de9e30",  # CStorageConverterBase::Ext0008toInt0007(CConvertStorageParam const&) const
+    "08de9e50",  # CStorageConverterBase::Ext0009toInt0007(CConvertStorageParam const&) const
+    "08de9e70",  # CStorageConverterBase::Ext000AtoInt0007(CConvertStorageParam const&) const
+    "08de9e90",  # CStorageConverterBase::Ext000BtoInt0007(CConvertStorageParam const&) const
+    "08de9eb0",  # CStorageConverterBase::Ext000CtoInt0007(CConvertStorageParam const&) const
+    "08de9ed0",  # CStorageConverterBase::Ext000DtoInt0007(CConvertStorageParam const&) const
+    "08de9ef0",  # CStorageConverterBase::Ext000EtoInt0007(CConvertStorageParam const&) const
+    "08de9f10",  # CStorageConverterBase::Ext000FtoInt0007(CConvertStorageParam const&) const
+    "08de9f30",  # CStorageConverterBase::Ext0000toInt0008(CConvertStorageParam const&) const
+    "08de9f40",  # CStorageConverterBase::Ext0001toInt0008(CConvertStorageParam const&) const
+    "08de9f50",  # CStorageConverterBase::Ext0002toInt0008(CConvertStorageParam const&) const
+    "08de9f60",  # CStorageConverterBase::Ext0003toInt0008(CConvertStorageParam const&) const
+    "08de9f70",  # CStorageConverterBase::Ext0004toInt0008(CConvertStorageParam const&) const
+    "08de9f80",  # CStorageConverterBase::Ext0005toInt0008(CConvertStorageParam const&) const
+    "08de9f90",  # CStorageConverterBase::Ext0006toInt0008(CConvertStorageParam const&) const
+    "08de9fa0",  # CStorageConverterBase::Ext0007toInt0008(CConvertStorageParam const&) const
+    "08de9fb0",  # CStorageConverterBase::Ext0008toInt0008(CConvertStorageParam const&) const
+    "08de9fc0",  # CStorageConverterBase::Ext0009toInt0008(CConvertStorageParam const&) const
+    "08de9fe0",  # CStorageConverterBase::Ext000AtoInt0008(CConvertStorageParam const&) const
+    "08dea000",  # CStorageConverterBase::Ext000BtoInt0008(CConvertStorageParam const&) const
+    "08dea020",  # CStorageConverterBase::Ext000CtoInt0008(CConvertStorageParam const&) const
+    "08dea040",  # CStorageConverterBase::Ext000DtoInt0008(CConvertStorageParam const&) const
+    "08dea060",  # CStorageConverterBase::Ext000EtoInt0008(CConvertStorageParam const&) const
+    "08dea080",  # CStorageConverterBase::Ext000FtoInt0008(CConvertStorageParam const&) const
+    "08dea0a0",  # CStorageConverterBase::Ext0000toInt0009(CConvertStorageParam const&) const
+    "08dea0b0",  # CStorageConverterBase::Ext0001toInt0009(CConvertStorageParam const&) const
+    "08dea0c0",  # CStorageConverterBase::Ext0002toInt0009(CConvertStorageParam const&) const
+    "08dea0d0",  # CStorageConverterBase::Ext0003toInt0009(CConvertStorageParam const&) const
+    "08dea0e0",  # CStorageConverterBase::Ext0004toInt0009(CConvertStorageParam const&) const
+    "08dea0f0",  # CStorageConverterBase::Ext0005toInt0009(CConvertStorageParam const&) const
+    "08dea100",  # CStorageConverterBase::Ext0006toInt0009(CConvertStorageParam const&) const
+    "08dea110",  # CStorageConverterBase::Ext0007toInt0009(CConvertStorageParam const&) const
+    "08dea120",  # CStorageConverterBase::Ext0008toInt0009(CConvertStorageParam const&) const
+    "08dea130",  # CStorageConverterBase::Ext0009toInt0009(CConvertStorageParam const&) const
+    "08dea140",  # CStorageConverterBase::Ext000AtoInt0009(CConvertStorageParam const&) const
+    "08dea160",  # CStorageConverterBase::Ext000BtoInt0009(CConvertStorageParam const&) const
+    "08dea180",  # CStorageConverterBase::Ext000CtoInt0009(CConvertStorageParam const&) const
+    "08dea1a0",  # CStorageConverterBase::Ext000DtoInt0009(CConvertStorageParam const&) const
+    "08dea1c0",  # CStorageConverterBase::Ext000EtoInt0009(CConvertStorageParam const&) const
+    "08dea1e0",  # CStorageConverterBase::Ext000FtoInt0009(CConvertStorageParam const&) const
+    "08dea200",  # CStorageConverterBase::Ext0000toInt000A(CConvertStorageParam const&) const
+    "08dea210",  # CStorageConverterBase::Ext0001toInt000A(CConvertStorageParam const&) const
+    "08dea220",  # CStorageConverterBase::Ext0002toInt000A(CConvertStorageParam const&) const
+    "08dea230",  # CStorageConverterBase::Ext0003toInt000A(CConvertStorageParam const&) const
+    "08dea240",  # CStorageConverterBase::Ext0004toInt000A(CConvertStorageParam const&) const
+    "08dea250",  # CStorageConverterBase::Ext0005toInt000A(CConvertStorageParam const&) const
+    "08dea260",  # CStorageConverterBase::Ext0006toInt000A(CConvertStorageParam const&) const
+    "08dea270",  # CStorageConverterBase::Ext0007toInt000A(CConvertStorageParam const&) const
+    "08dea280",  # CStorageConverterBase::Ext0008toInt000A(CConvertStorageParam const&) const
+    "08dea290",  # CStorageConverterBase::Ext0009toInt000A(CConvertStorageParam const&) const
+    "08dea2a0",  # CStorageConverterBase::Ext000AtoInt000A(CConvertStorageParam const&) const
+    "08dea2b0",  # CStorageConverterBase::Ext000BtoInt000A(CConvertStorageParam const&) const
+    "08dea2d0",  # CStorageConverterBase::Ext000CtoInt000A(CConvertStorageParam const&) const
+    "08dea2f0",  # CStorageConverterBase::Ext000DtoInt000A(CConvertStorageParam const&) const
+    "08dea310",  # CStorageConverterBase::Ext000EtoInt000A(CConvertStorageParam const&) const
+    "08dea330",  # CStorageConverterBase::Ext000FtoInt000A(CConvertStorageParam const&) const
+    "08dea350",  # CStorageConverterBase::Ext0000toInt000B(CConvertStorageParam const&) const
+    "08dea360",  # CStorageConverterBase::Ext0001toInt000B(CConvertStorageParam const&) const
+    "08dea370",  # CStorageConverterBase::Ext0002toInt000B(CConvertStorageParam const&) const
+    "08dea380",  # CStorageConverterBase::Ext0003toInt000B(CConvertStorageParam const&) const
+    "08dea390",  # CStorageConverterBase::Ext0004toInt000B(CConvertStorageParam const&) const
+    "08dea3a0",  # CStorageConverterBase::Ext0005toInt000B(CConvertStorageParam const&) const
+    "08dea3b0",  # CStorageConverterBase::Ext0006toInt000B(CConvertStorageParam const&) const
+    "08dea3c0",  # CStorageConverterBase::Ext0007toInt000B(CConvertStorageParam const&) const
+    "08dea3d0",  # CStorageConverterBase::Ext0008toInt000B(CConvertStorageParam const&) const
+    "08dea3e0",  # CStorageConverterBase::Ext0009toInt000B(CConvertStorageParam const&) const
+    "08dea3f0",  # CStorageConverterBase::Ext000AtoInt000B(CConvertStorageParam const&) const
+    "08dea400",  # CStorageConverterBase::Ext000BtoInt000B(CConvertStorageParam const&) const
+    "08dea410",  # CStorageConverterBase::Ext000CtoInt000B(CConvertStorageParam const&) const
+    "08dea430",  # CStorageConverterBase::Ext000DtoInt000B(CConvertStorageParam const&) const
+    "08dea450",  # CStorageConverterBase::Ext000EtoInt000B(CConvertStorageParam const&) const
+    "08dea470",  # CStorageConverterBase::Ext000FtoInt000B(CConvertStorageParam const&) const
+    "08dea490",  # CStorageConverterBase::Ext0000toInt000C(CConvertStorageParam const&) const
+    "08dea4a0",  # CStorageConverterBase::Ext0001toInt000C(CConvertStorageParam const&) const
+    "08dea4b0",  # CStorageConverterBase::Ext0002toInt000C(CConvertStorageParam const&) const
+    "08dea4c0",  # CStorageConverterBase::Ext0003toInt000C(CConvertStorageParam const&) const
+    "08dea4d0",  # CStorageConverterBase::Ext0004toInt000C(CConvertStorageParam const&) const
+    "08dea4e0",  # CStorageConverterBase::Ext0005toInt000C(CConvertStorageParam const&) const
+    "08dea4f0",  # CStorageConverterBase::Ext0006toInt000C(CConvertStorageParam const&) const
+    "08dea500",  # CStorageConverterBase::Ext0007toInt000C(CConvertStorageParam const&) const
+    "08dea510",  # CStorageConverterBase::Ext0008toInt000C(CConvertStorageParam const&) const
+    "08dea520",  # CStorageConverterBase::Ext0009toInt000C(CConvertStorageParam const&) const
+    "08dea530",  # CStorageConverterBase::Ext000AtoInt000C(CConvertStorageParam const&) const
+    "08dea540",  # CStorageConverterBase::Ext000BtoInt000C(CConvertStorageParam const&) const
+    "08dea550",  # CStorageConverterBase::Ext000CtoInt000C(CConvertStorageParam const&) const
+    "08dea560",  # CStorageConverterBase::Ext000DtoInt000C(CConvertStorageParam const&) const
+    "08dea580",  # CStorageConverterBase::Ext000EtoInt000C(CConvertStorageParam const&) const
+    "08dea5a0",  # CStorageConverterBase::Ext000FtoInt000C(CConvertStorageParam const&) const
+    "08dea5c0",  # CStorageConverterBase::Ext0000toInt000D(CConvertStorageParam const&) const
+    "08dea5d0",  # CStorageConverterBase::Ext0001toInt000D(CConvertStorageParam const&) const
+    "08dea5e0",  # CStorageConverterBase::Ext0002toInt000D(CConvertStorageParam const&) const
+    "08dea5f0",  # CStorageConverterBase::Ext0003toInt000D(CConvertStorageParam const&) const
+    "08dea600",  # CStorageConverterBase::Ext0004toInt000D(CConvertStorageParam const&) const
+    "08dea610",  # CStorageConverterBase::Ext0005toInt000D(CConvertStorageParam const&) const
+    "08dea620",  # CStorageConverterBase::Ext0006toInt000D(CConvertStorageParam const&) const
+    "08dea630",  # CStorageConverterBase::Ext0007toInt000D(CConvertStorageParam const&) const
+    "08dea640",  # CStorageConverterBase::Ext0008toInt000D(CConvertStorageParam const&) const
+    "08dea650",  # CStorageConverterBase::Ext0009toInt000D(CConvertStorageParam const&) const
+    "08dea660",  # CStorageConverterBase::Ext000AtoInt000D(CConvertStorageParam const&) const
+    "08dea670",  # CStorageConverterBase::Ext000BtoInt000D(CConvertStorageParam const&) const
+    "08dea680",  # CStorageConverterBase::Ext000CtoInt000D(CConvertStorageParam const&) const
+    "08dea690",  # CStorageConverterBase::Ext000DtoInt000D(CConvertStorageParam const&) const
+    "08dea6a0",  # CStorageConverterBase::Ext000EtoInt000D(CConvertStorageParam const&) const
+    "08dea6c0",  # CStorageConverterBase::Ext000FtoInt000D(CConvertStorageParam const&) const
+    "08dea6e0",  # CStorageConverterBase::Ext0000toInt000E(CConvertStorageParam const&) const
+    "08dea6f0",  # CStorageConverterBase::Ext0001toInt000E(CConvertStorageParam const&) const
+    "08dea700",  # CStorageConverterBase::Ext0002toInt000E(CConvertStorageParam const&) const
+    "08dea710",  # CStorageConverterBase::Ext0003toInt000E(CConvertStorageParam const&) const
+    "08dea720",  # CStorageConverterBase::Ext0004toInt000E(CConvertStorageParam const&) const
+    "08dea730",  # CStorageConverterBase::Ext0005toInt000E(CConvertStorageParam const&) const
+    "08dea740",  # CStorageConverterBase::Ext0006toInt000E(CConvertStorageParam const&) const
+    "08dea750",  # CStorageConverterBase::Ext0007toInt000E(CConvertStorageParam const&) const
+    "08dea760",  # CStorageConverterBase::Ext0008toInt000E(CConvertStorageParam const&) const
+    "08dea770",  # CStorageConverterBase::Ext0009toInt000E(CConvertStorageParam const&) const
+    "08dea780",  # CStorageConverterBase::Ext000AtoInt000E(CConvertStorageParam const&) const
+    "08dea790",  # CStorageConverterBase::Ext000BtoInt000E(CConvertStorageParam const&) const
+    "08dea7a0",  # CStorageConverterBase::Ext000CtoInt000E(CConvertStorageParam const&) const
+    "08dea7b0",  # CStorageConverterBase::Ext000DtoInt000E(CConvertStorageParam const&) const
+    "08dea7c0",  # CStorageConverterBase::Ext000EtoInt000E(CConvertStorageParam const&) const
+    "08dea7d0",  # CStorageConverterBase::Ext000FtoInt000E(CConvertStorageParam const&) const
+    "08dea7f0",  # CStorageConverterBase::Ext0000toInt000F(CConvertStorageParam const&) const
+    "08dea800",  # CStorageConverterBase::Ext0001toInt000F(CConvertStorageParam const&) const
+    "08dea810",  # CStorageConverterBase::Ext0002toInt000F(CConvertStorageParam const&) const
+    "08dea820",  # CStorageConverterBase::Ext0003toInt000F(CConvertStorageParam const&) const
+    "08dea830",  # CStorageConverterBase::Ext0004toInt000F(CConvertStorageParam const&) const
+    "08dea840",  # CStorageConverterBase::Ext0005toInt000F(CConvertStorageParam const&) const
+    "08dea850",  # CStorageConverterBase::Ext0006toInt000F(CConvertStorageParam const&) const
+    "08dea860",  # CStorageConverterBase::Ext0007toInt000F(CConvertStorageParam const&) const
+    "08dea870",  # CStorageConverterBase::Ext0008toInt000F(CConvertStorageParam const&) const
+    "08dea880",  # CStorageConverterBase::Ext0009toInt000F(CConvertStorageParam const&) const
+    "08dea890",  # CStorageConverterBase::Ext000AtoInt000F(CConvertStorageParam const&) const
+    "08dea8a0",  # CStorageConverterBase::Ext000BtoInt000F(CConvertStorageParam const&) const
+    "08dea8b0",  # CStorageConverterBase::Ext000CtoInt000F(CConvertStorageParam const&) const
+    "08dea8c0",  # CStorageConverterBase::Ext000DtoInt000F(CConvertStorageParam const&) const
+    "08dea8d0",  # CStorageConverterBase::Ext000EtoInt000F(CConvertStorageParam const&) const
+    "08dea8e0",  # CStorageConverterBase::Ext000FtoInt000F(CConvertStorageParam const&) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
