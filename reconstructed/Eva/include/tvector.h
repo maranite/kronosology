@@ -2,7 +2,10 @@
  * tvector.h  -  TVector<T,N>, the small growable-array template used throughout this
  * binary (symbols.csv shows dozens of instantiations: TVector<CZ,1>, TVector<CLogicUnit,1>,
  * TVector<CLimiterBase*,1>, TVector<CTimerObject*,1>, TVector<CPool::SPool,1>, etc -- every
- * one seen so far uses N=1).
+ * one seen so far uses N=1, EXCEPT `TVector<CParamTracer::SParam, 0>` (param_tracer.h,
+ * CParamTracer family pass, 2026-07-28) -- N is never referenced anywhere in either the
+ * ctor or the new Insert() body below regardless of its value, confirming it really is
+ * an unused tag parameter, not a capacity/layout knob.
  *
  * Traced 2026-07-27 (Eva CPool/CSlotPool follow-up, see pool.h) against the richest real
  * instantiation available, TVector<CPool::SPool,1>:
@@ -112,6 +115,57 @@ public:
 		MakeCapacity(Size() + 1);
 		*mEnd = item;
 		++mEnd;
+	}
+
+	/* .text+0x08182f40 (TVector<CParamTracer::SParam,0> specialization, ~0xc80
+	 * bytes -- CParamTracer family pass, 2026-07-28, param_tracer.h). Real ground
+	 * truth is `insert(pos, first, last)`: grow if needed, shift [pos,mEnd) up by
+	 * (last-first) elements to make room, copy [first,last) into the gap, advance
+	 * mEnd. `pos` is taken (and updated) by reference because it is normalized to
+	 * an index across any reallocation the growth triggers, same reason
+	 * MakeCapacity() itself needs no such handling (it never moves an
+	 * externally-held iterator) -- verified real callers (CParamTracer::SetData/
+	 * SetDataLSB/SetDataMSB) always pass a single-element range (first+1==last)
+	 * and either `pos==End()` (fast-path append) or a genuine mid-array binary-
+	 * search insertion point; both are exercised by the real disassembly's own
+	 * `if (*pos == mEnd) ... else ...` split, collapsed here into one memmove-based
+	 * body since the two real branches are observably equivalent for POD T (same
+	 * "generalize the memcpy-based copy" reasoning as MakeCapacity's own header
+	 * note -- correct for CParamTracer::SParam, this project's only real
+	 * instantiation so far). */
+	void Insert(T *&pos, const T *first, const T *last)
+	{
+		unsigned insertOffset = (unsigned)(pos - mBegin);
+		unsigned count = (unsigned)(last - first);
+		if (count == 0) {
+			pos = mBegin + insertOffset;
+			return;
+		}
+
+		MakeCapacity(Size() + count);
+
+		T *insertPos = mBegin + insertOffset;
+		unsigned tailCount = (unsigned)(mEnd - insertPos);
+		if (tailCount)
+			memmove(insertPos + count, insertPos, (size_t)tailCount * sizeof(T));
+		memcpy(insertPos, first, (size_t)count * sizeof(T));
+
+		mEnd += count;
+		pos = insertPos;
+	}
+
+	/* Generic helpers backing CParamTracer::Reset()/Erase() (param_tracer.h) --
+	 * both real ground-truth operations (`mEnd = mBegin` to clear without
+	 * releasing capacity; memmove-down-then-shrink to erase one element) are
+	 * plain field manipulation with no per-instantiation logic of their own, so
+	 * pulled up here as ordinary shared TVector operations rather than exposing
+	 * mBegin/mEnd as public fields to every future caller. */
+	void Clear() { mEnd = mBegin; }
+
+	void Erase(T *pos)
+	{
+		memmove(pos, pos + 1, (size_t)(mEnd - (pos + 1)) * sizeof(T));
+		--mEnd;
 	}
 
 private:

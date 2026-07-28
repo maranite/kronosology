@@ -2760,6 +2760,40 @@ RECONSTRUCTED = {
     "0838e150",  # CNameBuff::getsecondarysize(int)
     "0838e190",  # CNameBuff::getfkind(int)
     "0838e1d0",  # CNameBuff::isavailable(int)
+
+    # --- CEventsPool (events_pool.h, 2026-07-28 sweep) -- the real, corrected
+    # type of CLinkedEvent::sm_oEventsPool (event.h's own prior mis-typing fixed
+    # this pass); support class for CParamTracer's Append* family below ---
+    "0807f8a0",  # CEventsPool::CEventsPool()
+    "0807fa70",  # CEventsPool::~CEventsPool()
+    "0807fb10",  # CEventsPool::GetNewEvent()
+
+    # --- CParamTracer (param_tracer.h, 2026-07-28 sweep) -- sorted-array MIDI
+    # NRPN/RPN tracker, class-inventory sweep after CNameBuff above. Sibling
+    # classes CControllerTracer/CCtrlAndParamTracer/CNoteTracer/
+    # CNoteTracerTransposer seen via the same nm sweep, deliberately deferred --
+    # see param_tracer.h's own header comment for why each one. ---
+    "0808fe10",  # CParamTracer::CParamTracer()
+    "08090000",  # CParamTracer::CParamTracer(unsigned char, ECtrlChange)
+    "080901f0",  # CParamTracer::InitAfterDefaultCtor(unsigned char, ECtrlChange)
+    "08090210",  # CParamTracer::Reset()
+    "08090230",  # CParamTracer::Erase(SBytePair const&)
+    "080903d0",  # CParamTracer::Erase(SBytePair const*)
+    "080905e0",  # CParamTracer::ModifyData(SBytePair, SBytePair)
+    "08090690",  # CParamTracer::DataInc()
+    "080907a0",  # CParamTracer::DataDec()
+    "080908b0",  # CParamTracer::First() const
+    "080908c0",  # CParamTracer::Next(CParamTracer::SParam const*) const
+    "08090970",  # CParamTracer::Find(SBytePair const&) const
+    "080909e0",  # CParamTracer::FindEqualOrNext(SBytePair const&) const
+    "08090a60",  # CParamTracer::AppendSingleParam(CLinkedEvent*&, SBytePair&, CParamTracer::SParam const&) const
+    "08090df0",  # CParamTracer::AppendAllParams(CLinkedEvent*&) const
+    "08091010",  # CParamTracer::AppendParamsDontCareAddr(CLinkedEvent*&, SBytePair const*) const
+    "08091140",  # CParamTracer::AppendParams(CLinkedEvent*&, SBytePair const*) const
+    "08091e90",  # CParamTracer::SetData(SBytePair, SBytePair)
+    "08092430",  # CParamTracer::SetDataLSB(unsigned char)
+    "08092850",  # CParamTracer::SetDataMSB(unsigned char)
+    "08182f40",  # TVector<CParamTracer::SParam, 0>::Insert(CParamTracer::SParam*&, CParamTracer::SParam const*, CParamTracer::SParam const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

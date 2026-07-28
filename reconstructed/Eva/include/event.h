@@ -34,19 +34,29 @@
  * `{mEvTag, mEvBuf}` pair (12 bytes total incl. the trailing `mUnknown28`/`mNext` slot)
  * as a `CLinkedEvent*` when calling `CSexServiceTask::TransmitSysEx(CLinkedEvent*,
  * unsigned char)` -- i.e. `CLinkedEvent` is exactly `CEvent` plus one trailing pointer,
- * nothing more, laid out contiguously. `CLinkedEvent::sm_oEventsPool` (a SEPARATE
- * static `CEvBuffersPool`-shaped object at .bss+0x0930a2b8, own
- * `_GLOBAL__I_sm_oEventsPool` constructor at .text+0x0807fba0) is a different pool
- * instance for whatever allocates real heap `CLinkedEvent` NODE objects elsewhere
- * (CEventsQueue et al) -- out of scope here, since nothing this pass reconstructs ever
- * calls through it; only `CEvent::sm_oEvBuffersPool` (the pool
- * `CClientCommServer`'s own ctor uses) is wired up.
+ * nothing more, laid out contiguously.
+ *
+ * CORRECTION (2026-07-28, CParamTracer family pass, see param_tracer.h): the prior
+ * version of this comment mis-typed `CLinkedEvent::sm_oEventsPool` (.bss+0x0930a2b8)
+ * as a `CEvBuffersPool`-shaped object and claimed it was unused/out of scope. Its real
+ * ground-truth type is `CEventsPool` (events_pool.h) -- an entirely different, simpler
+ * class (a static 2048-slot freelist of embedded 12-byte `CLinkedEvent`-shaped nodes,
+ * NOT a two-tier malloc'd-chunk allocator like CEvBuffersPool) -- confirmed by
+ * `nm -C`'s own `_ZN11CEventsPool11GetNewEventEv` symbol taking `this` as a real
+ * parameter, and by every one of its real callers (`CParamTracer::AppendSingleParam`/
+ * `AppendAllParams`/`AppendParams`/`AppendParamsDontCareAddr` -- reconstructed this
+ * pass -- plus the sibling `CControllerTracer`/`CCtrlAndParamTracer`/`CNoteTracer`/
+ * `CEventsQueue`/`CRTRouter`, not yet reconstructed, seen only via xref trace) loading
+ * the SAME literal address `mov DWORD PTR [esp],0x930a2b8` immediately before the
+ * call -- i.e. `sm_oEventsPool` genuinely is wired up and IS the single pool instance
+ * backing every heap `CLinkedEvent` node this project has traced so far.
  */
 
 #ifndef EVENT_H
 #define EVENT_H
 
 #include "ev_buffers_pool.h"
+#include "events_pool.h"
 
 class CEvent {
 public:
@@ -78,11 +88,27 @@ class CLinkedEvent : public CEvent {
 public:
 	CLinkedEvent() : mNext(0) {}
 
-	/* .bss+0x0930a2b8 -- a DIFFERENT pool instance, out of scope, see header
-	 * comment. Declared for shape/symbol-table completeness only; nothing
-	 * reconstructed this pass calls through it.
+	/* .bss+0x0930a2b8 -- the real, wired-up freelist pool backing every heap
+	 * CLinkedEvent node this project has traced so far (CParamTracer/
+	 * CControllerTracer's own Append* family, CEventsQueue, CRTRouter). See
+	 * events_pool.h and this file's header comment correction above.
 	 */
-	static CEvBuffersPool sm_oEventsPool;
+	static CEventsPool sm_oEventsPool;
+
+	/* Real callers (CParamTracer::AppendSingleParam et al) build a fresh node's
+	 * `{mEvTag, mEvBuf}`-sized tag word directly (no separate accessor exists in
+	 * the real binary -- every real call site just does `mov [node],tagWord`
+	 * against the raw pointer) then push it onto a `CLinkedEvent*&` list head via
+	 * `node->mNext = head; head = node;`. Exposed here as plain public methods
+	 * rather than re-deriving a raw-pointer idiom at every call site. */
+	void SetTag(int tag) { mTag = tag; }
+	void SetNext(CLinkedEvent *next) { mNext = next; }
+	CLinkedEvent *GetNext() const { return (CLinkedEvent *)mNext; }
+
+	/* CEventsPool::GetNewEvent() pops nodes off its freelist by writing
+	 * directly through this same 12-byte {mTag,mBuf,mNext} layout -- grant it
+	 * field access rather than exposing mNext publicly. */
+	friend class CEventsPool;
 
 private:
 	void *mNext; /* +0x08 */
