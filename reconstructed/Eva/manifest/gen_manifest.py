@@ -2742,6 +2742,24 @@ RECONSTRUCTED = {
     "080a1630",  # CMemory::CMemory(unsigned char*, unsigned long, int) C2
     "080a1750",  # CMemory::CMemory(unsigned char*, unsigned long, int) C1
     "080a1880",  # CMemory::~CMemory() D2
+
+    # --- CNameBuff (name_buff.h, 2026-07-28 sweep -- see stream_family.h's own
+    # header comment for the CFF investigate-and-reject that preceded this pick) ---
+    "0838dd80",  # CNameBuff::CNameBuff()
+    "0838dda0",  # CNameBuff::~CNameBuff()
+    "0838ddb0",  # CNameBuff::deletearray()
+    "0838ddc0",  # CNameBuff::init()
+    "0838ddd0",  # CNameBuff::setup(unsigned short)
+    "0838df40",  # CNameBuff::setname(char const*, int)
+    "0838dfe0",  # CNameBuff::setsize(unsigned long long, int)
+    "0838e030",  # CNameBuff::setsecondarysize(unsigned long long, int)
+    "0838e080",  # CNameBuff::setfkind(EFileKind, int)
+    "0838e0b0",  # CNameBuff::setavailable(bool, int)
+    "0838e0e0",  # CNameBuff::getname(int)
+    "0838e110",  # CNameBuff::getsize(int)
+    "0838e150",  # CNameBuff::getsecondarysize(int)
+    "0838e190",  # CNameBuff::getfkind(int)
+    "0838e1d0",  # CNameBuff::isavailable(int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

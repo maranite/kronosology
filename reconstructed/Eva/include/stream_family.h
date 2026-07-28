@@ -99,21 +99,39 @@
  *                         else means "wrap the caller's buffer directly, caller
  *                         keeps ownership"
  *
- * `CMemory::Open()`'s real tail (mAccessMode==1 -> mState=4; mAccessMode in {2,3}
- * -> mState=5; then if mState==4: mLength=mCapacity; else if mAccessMode==3:
- * mPosition=mLength) is transcribed as straight-line logic, not the raw
- * control-flow shape: ground truth's own disassembly (.text+0x080a1199..0x080a11cd)
- * reads, on a literal instruction-by-instruction trace, as TWO blocks
- * (0x80a1199/0x80a11c0) each unconditionally jumping to the other whenever
- * mState==4 -- which cannot be a real infinite loop in working, shipped code. This
- * is almost certainly gcc tail-merging the same "if(mState==4){mLength=mCapacity;}"
- * check shared by three real predecessors (fresh mode==1, fresh mode-in-{2,3}, and
- * direct fallthrough for any other mode) into one physical location reached via
- * multiple jumps; hand-tracing which specific edge is live from which predecessor
- * could not be fully resolved from static disassembly alone. The straight-line
- * version below reproduces the correct RESULT for all three real entry shapes
- * without asserting a specific (unverifiable) CFG. TODO: verify against ground
- * truth if a caller ever depends on this exact tail.
+ * `CMemory::Open()`'s real tail was flagged in an earlier pass as an unresolved
+ * CFG ambiguity ("looks like two blocks unconditionally jumping to each other at
+ * .text+0x080a1199/0x80a11c0"). RE-TRACED 2026-07-28 via `objdump -dr -M intel`
+ * against .text+0x080a1160..0x080a11ef, definitively resolved (not a guess): the
+ * earlier reading mis-attributed the jmp target of the instruction at 0x80a11cd.
+ * Its real target, per objdump's own symbolic annotation and independently
+ * verified by hand (`eb d2` at 0x80a11cd = 0x80a11cf + (int8_t)0xd2 = 0x80a11a1),
+ * is 0x80a11a1 -- NOT back to 0x80a1199. There is no loop. The real CFG is two
+ * ordinary diamonds: mode-branch -> mState-set -> converge at 0x80a1199 (checks
+ * mState==4), then -> converge at 0x80a11a1 (checks mAccessMode==3) -> epilogue.
+ * Every edge is taken at most once per call; fully acyclic, fully deterministic,
+ * zero ambiguity for any of the 3 real EAccessMode values:
+ *   eRead:      mState=4; mLength=mCapacity
+ *   eWrite:     mState=5; (mLength/mPosition untouched)
+ *   eReadWrite: mState=5; (mLength/mPosition untouched -- see below, this is
+ *               provably DEAD in practice, not merely "untouched by coincidence")
+ *
+ * Bonus finding made while re-tracing: CMemory::Open()'s own `mAccessMode==3`
+ * tail check (guarding `mPosition=mLength`) can NEVER fire for any real caller.
+ * CMemory::Open() calls CInOut::Open() FIRST, and the original `mode` argument
+ * arrives in a caller-saved register (eax) that call clobbers -- every later
+ * branch in CMemory::Open() reads the POST-call `mAccessMode` field, never the
+ * original argument. CInOut::Open() (see its class below, .text+0x080a1fd0)
+ * ALWAYS stores a FIXED eWrite(2) for either eWrite or eReadWrite input, never
+ * eReadWrite(3) itself -- confirmed from its own disassembly, and the identical
+ * remap is independently corroborated by CNullStr::Open() below (already
+ * documented in an earlier pass as "only the ==2 case is live in practice").
+ * So `mAccessMode` is 1 or 2 by the time CMemory::Open()'s tail runs, NEVER 3:
+ * both of CMemory::Open()'s own `mAccessMode==3` checks (the mid-function
+ * mState=5 branch and the final mPosition=mLength branch) are real,
+ * ground-truth-confirmed DEAD CODE in the shipped binary, not a defect
+ * introduced by this reconstruction. Transcribed as-is below, matching real
+ * dead code rather than "fixing" it into something that would actually execute.
  *
  * `CIn::Get`/`COut::Put` are single-byte convenience wrappers dispatching through
  * the SAME virtual slot Read()/Write() occupy (confirmed: `call [vtbl+0xc]` where,
@@ -475,8 +493,11 @@ public:
 	}
 
 	/* .text+0x080a1160, 158 bytes. Real body: CInOut::Open() first, then the
-	 * mState/mLength/mPosition tail -- see header comment re: the
-	 * straight-line simplification of ground truth's own control flow. */
+	 * mState/mLength/mPosition tail. CFG fully resolved 2026-07-28 (see header
+	 * comment) -- byte-exact match to ground truth, not an approximation. The
+	 * `mAccessMode == 3` branch below is confirmed-dead ground-truth code
+	 * (CInOut::Open() already collapsed eReadWrite to eWrite by this point);
+	 * kept as a literal transcription rather than removed. */
 	void Open(const char *path, EAccessMode mode)
 	{
 		CInOut::Open(path, mode);
