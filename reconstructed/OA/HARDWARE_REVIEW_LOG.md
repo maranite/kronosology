@@ -2436,3 +2436,71 @@ verified by a full before/after reconstructed-name-set diff).
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGAmp + CSTG3BandEQBase + CSTGEGBase value-getter families -- 18 methods (batch 11, 2026-07-28)
+
+Eleventh batch in the STG value-getter family (see the `stg-value-getter-
+family` agent memory entry for the full running derivation notes).
+`CSTGAmp` (7/10), `CSTG3BandEQBase` (6/6), and `CSTGEGBase` (5/19) all
+reconstructed clean -- zero outliers among the real ctx-only candidates,
+the fourth batch in a row with none excluded. All three picked from the
+tenth batch's own priority list via the standard checklist: word-boundary
+grep confirming each genuinely fresh, then an `nm`-derived weak-linkage +
+`ER23CSTGPatchMessageContext`-suffix filter to get the exact real
+candidate set before ever running the decoder.
+
+`CSTGEGBase` was this batch's headline verification: flagged unconfirmed
+across two prior batches' own notes as "19 raw pending but only 5
+weak-ctx-only." Directly queried via `nm` and confirmed the other 14 are
+a genuinely different mechanism entirely -- ten global-linkage per-voice
+state-machine transition helpers (attack, decay, sustain, release, hold,
+slope, free, quick-release, plus a generic normal-state dispatcher, each
+taking a `STGEGSubRateParamsSlice*` and a `CSTGVoice*`) and a filter-setup
+helper with the same slice-pointer shape, three extra-arg setters (EG
+type, an explicit control-value setter, a piano half-damper mode flag),
+and one two-int accumulator query -- zero overlap with this family's
+ctx-only convention, same "T linkage beats a superficially matching
+signature" outcome as `CSTGOrganOsc`'s own per-voice-runtime-state false
+positives from batch 5. Also confirmed `CSTGEGBase` is DISTINCT from the
+already-modeled `CSTGEG` despite the similar name, same
+`CSTGPolysix`/`CSTGPolysixModel` precedent.
+
+`CSTGAmp` (STG amplifier patch component) mixes plain fixed-K dwords and
+a signed byte for Level/VelocityAmount/LevelAMSIntensity/LevelAMSSource
+with a bare-stride-4 SIB-scaled ctx-index dword for LFOAmount and the
+stride-5 lea-premultiply ctx-index shape for the LFOAmountAMSSource/
+LFOAmountAMSIntensity pair -- both shapes already established, no new
+decoder work needed. `CSTG3BandEQBase` (STG 3-band parametric EQ patch
+component base) is the simplest dialect yet, a 100% ctx-only-suffix hit
+rate across all 6 of its raw pending symbols and zero ctx-index methods
+at all -- five plain fixed-K dwords plus one mask-only single-bit
+bitfield (`GetBypassValue`). `CSTGEGBase::GetCurve` is the first
+confirmed case in this family of a ctx-indexed UNSIGNED byte load (bare
+stride-1, `movzx`) -- prior unsigned-byte precedents were always plain
+fixed-K fields, never ctx-indexed; no decoder change needed since
+sign/width is already tracked independently of ctx-indexing.
+
+Tooling: hit and fixed one fresh instance of the parenthesis-swallow
+`DEF_RE` gotcha in `oa_stg_amp.h`'s leading comment -- multiple literal
+signature mentions and balanced parenthetical asides with zero real
+semicolons anywhere in the span let the greedy capture run all the way
+through to the real `CtxIndex` helper's own closing paren, swallowing its
+definition (captured `{"GetSubComponent"}` instead of the wanted
+`{"CtxIndex"}`). Caught via the standard exact-name-set diff before ever
+attempting to build; fixed by removing every literal `(` before the real
+code. Notable negative control this batch: `oa_stg_eg_base.h`'s prose had
+just as many `word\s*\(` matches but did NOT trigger the bug, saved only
+by one incidental real semicolon elsewhere in its own prose -- a reminder
+that passing the check by accident isn't the same as being written safely.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite (175 test
+binaries), all 3 new KATs passing. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko` produced
+(499508 bytes), zero warnings or errors traceable to the 3 new files.
+`DECOMPILE_ERRORS.md` stays empty -- no compile/link blocker hit.
+`manifest/gen_oa_manifest.py` regenerated, OA.ko manifest 2366 ->
+2384/21,689 (10.992%), delta exactly +18.
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.
