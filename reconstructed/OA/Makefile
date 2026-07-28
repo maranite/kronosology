@@ -203,6 +203,10 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_plucked_model_patch_valuegetters.o \
            src/engine/stg_moss_amp_valuegetters.o \
            src/engine/stg_pitch_mod_osc_valuegetters.o \
+           src/engine/stg_simple_ams_mixer_valuegetters.o \
+           src/engine/stg_pitch_mod_common_valuegetters.o \
+           src/engine/stg_pitch_mod_common_plus_ams_valuegetters.o \
+           src/engine/stg_vpm_eg_valuegetters.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -479,6 +483,10 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_plucked_model_patch_valuegetters.cpp \
        src/engine/stg_moss_amp_valuegetters.cpp \
        src/engine/stg_pitch_mod_osc_valuegetters.cpp \
+       src/engine/stg_simple_ams_mixer_valuegetters.cpp \
+       src/engine/stg_pitch_mod_common_valuegetters.cpp \
+       src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp \
+       src/engine/stg_vpm_eg_valuegetters.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -713,7 +721,11 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_analog4pole_valuegetters \
          verify/test_stg_plucked_model_patch_valuegetters \
          verify/test_stg_moss_amp_valuegetters \
-         verify/test_stg_pitch_mod_osc_valuegetters
+         verify/test_stg_pitch_mod_osc_valuegetters \
+         verify/test_stg_simple_ams_mixer_valuegetters \
+         verify/test_stg_pitch_mod_common_valuegetters \
+         verify/test_stg_pitch_mod_common_plus_ams_valuegetters \
+         verify/test_stg_vpm_eg_valuegetters
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -995,6 +1007,18 @@ verify/test_stg_moss_amp_valuegetters: verify/test_stg_moss_amp_valuegetters.cpp
 
 verify/test_stg_pitch_mod_osc_valuegetters: verify/test_stg_pitch_mod_osc_valuegetters.cpp src/engine/stg_pitch_mod_osc_valuegetters.cpp include/oa_stg_pitch_mod_osc.h include/oa_adsr_base.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_pitch_mod_osc_valuegetters.cpp src/engine/stg_pitch_mod_osc_valuegetters.cpp -o $@
+
+verify/test_stg_simple_ams_mixer_valuegetters: verify/test_stg_simple_ams_mixer_valuegetters.cpp src/engine/stg_simple_ams_mixer_valuegetters.cpp include/oa_stg_simple_ams_mixer.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_simple_ams_mixer_valuegetters.cpp src/engine/stg_simple_ams_mixer_valuegetters.cpp -o $@
+
+verify/test_stg_pitch_mod_common_valuegetters: verify/test_stg_pitch_mod_common_valuegetters.cpp src/engine/stg_pitch_mod_common_valuegetters.cpp include/oa_stg_pitch_mod_common.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_pitch_mod_common_valuegetters.cpp src/engine/stg_pitch_mod_common_valuegetters.cpp -o $@
+
+verify/test_stg_pitch_mod_common_plus_ams_valuegetters: verify/test_stg_pitch_mod_common_plus_ams_valuegetters.cpp src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp include/oa_stg_pitch_mod_common_plus_ams.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_pitch_mod_common_plus_ams_valuegetters.cpp src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp -o $@
+
+verify/test_stg_vpm_eg_valuegetters: verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp include/oa_stg_vpm_eg.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
