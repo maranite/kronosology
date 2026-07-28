@@ -742,6 +742,28 @@ class CKGKarmaAssignableSw : public CKGToggleSwitch {
 public:
 	explicit CKGKarmaAssignableSw(int id) : m_id(id) {}
 
+	/*
+	 * Real, distinct override -- confirmed via `nm -C` against ground
+	 * truth (`_ZN20CKGKarmaAssignableSw5GetIdEv` exists as its own weak
+	 * COMDAT symbol, not just inherited from CKGToggleSwitch::GetId()'s
+	 * `return 0` default), found while re-auditing this class 2026-07-28.
+	 * This override was missing from the prior batch that otherwise fully
+	 * reconstructed this class -- every sibling accessor here
+	 * (GetCurrentValue/GetCCNumber/GetCommonMsgId/GetModuleMsgId/
+	 * GetResetValue) already indexes by m_id, and GetId() feeds directly
+	 * into ResetKRTCSwitch(GetId()) call sites elsewhere in this family
+	 * (see e.g. CKGChordAssignSw::AnalizeAndProcessKarmaControllerMessage()
+	 * above) -- the inherited 0-for-everyone default would make every
+	 * per-slot instance of this class behave identically there, which
+	 * contradicts the whole per-slot design already present in its other
+	 * 5 real accessors. Exact ground-truth byte encoding not directly
+	 * confirmed (this symbol resolves to address 0 pre-link in the
+	 * unlinked ground-truth object, a COMDAT/weak-inline artifact, not a
+	 * disassemblable address in this static view) -- flagged here rather
+	 * than silently left as the (almost certainly wrong) inherited
+	 * default. */
+	int GetId() { return m_id; }
+
 	/* .text+0x3b8b40, 25 bytes. Real body: reads a bit (bit index
 	 * m_id) out of CKGRTCHandler::ms_poInstance[0xd4]'s pointee byte. */
 	int GetCurrentValue();

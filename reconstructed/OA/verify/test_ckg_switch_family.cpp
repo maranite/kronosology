@@ -257,6 +257,13 @@ int main(void)
 		g_bankBuf[OA_CKG_BANKMGR_KARMAASSIGNSW_CCNUM_OFF + 5] = 0x44;
 		CKGKarmaAssignableSw s5(5);
 		check("CKGKarmaAssignableSw(id=5)::GetCCNumber()", s5.GetCCNumber(), 0x44);
+		/* GetId() real override added 2026-07-28 -- previously fell through
+		 * to CKGToggleSwitch's inherited `return 0` default for every
+		 * instance regardless of id, confirmed wrong via nm -C against
+		 * ground truth (own distinct symbol exists). */
+		check("CKGKarmaAssignableSw(id=5)::GetId()", s5.GetId(), 5);
+		CKGKarmaAssignableSw s5b(0);
+		check("CKGKarmaAssignableSw(id=0)::GetId()", s5b.GetId(), 0);
 
 		reset_all_mocks();
 		g_bankBuf[OA_CKG_BANKMGR_KARMAASSIGNKNOB_CCNUM_OFF + 2] = 0x55;
