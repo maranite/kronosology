@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 50 classes done (batch 1-13 list: CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase, CSTGDriver, CSTGVPMNoise, CSTGAnalog4Pole, CSTGPluckedModelPatch, CSTGMOSSAmp, CSTGPitchModOsc; batch 14 adds CSTGSimpleAMSMixer, CSTGPitchModCommon, CSTGPitchModCommonPlusAMS, CSTGVPMEG; batch 15 adds CSTGPitchBase, CSTGVPMMixer, CSTGVPMAudioInput, CSTGStringTrackCommon; batch 16 adds CSTGVPMFilter, CSTGPitchModOscBase, CSTGTG92Osc, CSTGPitchModBase; batch 17 adds CSTGVPMPitchModTG92Osc, CSTGTG01Filter, CSTGStringTrack), 1049 methods reconstructed, manifest 1441->2494. CSTGPCMModelPatch DEFINITIVELY confirmed NOT part of family (batch 15 root-caused the batch-9-vs-14 contradiction). CSTGPanOutput (distinct from already-modeled CSTGPanOutputBase) also confirmed NOT part of family (batch 16). **As of batch 17, the whole-binary weak-linkage/ctx-only-suffix sweep is EXHAUSTED** -- every class the sweep can see is now reconstructed, confirmed excluded, confirmed already-modeled, or the CSTGTG92OscBase pure-virtual deferral; the remaining ~120 classes (of the family's original ~180-class estimate) are NOT visible to this sweep at all and need a different discovery method, see the batch-17 entry below.
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(some MessageContext-family type&) "value getter" convention; 57 classes done (batch 1-13 list: CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase, CSTGDriver, CSTGVPMNoise, CSTGAnalog4Pole, CSTGPluckedModelPatch, CSTGMOSSAmp, CSTGPitchModOsc; batch 14 adds CSTGSimpleAMSMixer, CSTGPitchModCommon, CSTGPitchModCommonPlusAMS, CSTGVPMEG; batch 15 adds CSTGPitchBase, CSTGVPMMixer, CSTGVPMAudioInput, CSTGStringTrackCommon; batch 16 adds CSTGVPMFilter, CSTGPitchModOscBase, CSTGTG92Osc, CSTGPitchModBase; batch 17 adds CSTGVPMPitchModTG92Osc, CSTGTG01Filter, CSTGStringTrack; batch 18 adds CSTGCombi, CSTGCommonEffectLFO, CSTGCommonLFO, CSTGEffectBalance, CSTGEffectRack, CSTGMetronomeSettings, CSTGToneAdjust), 1103 methods reconstructed, manifest 1441->2526. CSTGPCMModelPatch DEFINITIVELY confirmed NOT part of family (batch 15 root-caused the batch-9-vs-14 contradiction). CSTGPanOutput (distinct from already-modeled CSTGPanOutputBase) also confirmed NOT part of family (batch 16). The old whole-binary weak-linkage/`ER23CSTGPatchMessageContext`-suffix-only sweep was confirmed EXHAUSTED at batch 17 (every one of its 60 visible classes accounted for). **Batch 18 developed and validated a broader discovery method -- a global `objdump -dr` cross-reference of every relocation targeting `CSTGParamsOwner::sValueGetterTemp`, grouped by enclosing function -- which finds real value-getters regardless of linkage (weak OR strong) or context parameter type (the family is NOT exclusively `CSTGPatchMessageContext&`; siblings `CSTGMessageContext&`, `CSTGProgramMessageContext&`, `CSTGToneAdjustMessageContext&` and others also participate). This surfaced 75 classes total (vs 60 via the old sweep) and found 7 genuinely new ones this batch alone; see the batch-18 entry below for the exact recipe.
 type: project
 ---
 
@@ -1735,20 +1735,240 @@ as 10 files (3 headers + 3 `.cpp` + 3 test `.cpp` + Makefile);
 files plus a newly-modified `../Eva/include/stream_family.h` were
 sitting in `git status` throughout and correctly left untouched.
 
-**Next targets**: the whole-binary sweep is exhausted (see the
-description field and the "Major finding" note above) -- do NOT re-run
-the same `nm ... ER23CSTGPatchMessageContext$` sweep expecting new
-candidates, it will return the same 60 classes. Before picking up this
-family again, first determine WHY the remaining ~120 classes aren't
-sweep-visible: try loosening the suffix regex (drop the exact
-`ER23CSTGPatchMessageContext` requirement, keep only weak linkage plus a
-`Get`/`Set`-prefixed demangled name), or cross-reference
-`sValueGetterTemp`'s own relocation users directly via a global
-`objdump -dr` pass over the whole `.text` section rather than trusting
-per-symbol section presence. `CSTGTG92OscBase`'s pure-virtual deferral
-from batch 12 still open, now with 3 confirmed sibling/related classes
-via the adjustor-thunk trail (`CSTGPCMModelPatch` x2,
-`CSTGAnalogSyncModelPatch` x1).
+**Next targets (superseded by batch 18 below)**: `CSTGTG92OscBase`'s
+pure-virtual deferral from batch 12 still open, now with 3 confirmed
+sibling/related classes via the adjustor-thunk trail
+(`CSTGPCMModelPatch` x2, `CSTGAnalogSyncModelPatch` x1).
+
+---
+
+## Batch 18 (2026-07-28, commit `e43c010`): broader discovery method + 7 new classes
+
+**The broader discovery method, exact recipe** (validated this batch,
+reuse directly for future batches once the current backlog is
+exhausted again):
+
+1. Find `CSTGParamsOwner::sValueGetterTemp`'s mangled name and address
+   via `nm -C $KO | grep sValueGetterTemp` (ground truth binary is
+   still `/home/share/Decomp/OA.ko_Decomp/OA.ko`).
+2. `objdump -dr $KO > full_dis.txt` -- a full disassembly of every
+   section, weak/COMDAT `.text.<mangled>` sections AND the plain merged
+   `.text` section together, WITH relocation annotations (`-r`).
+3. Walk `full_dis.txt` with awk: track the most recent `<function>:`
+   label line, and every time a line contains `sValueGetterTemp`
+   (a relocation annotation line), record the CURRENT enclosing
+   function name. `sort -u` the result.
+4. This batch: 3608 raw relocation hits collapsed to 1462 UNIQUE
+   enclosing functions -- `c++filt` each mangled name, extract the
+   class name (text before `::`), `sort | uniq -c | sort -rn` to rank
+   by method count. 75 unique classes total (vs 60 via the old
+   `ER23CSTGPatchMessageContext$` sweep).
+5. `comm -23` the new class list against a hand-maintained list of
+   every class already done/excluded/already-modeled/deferred (79
+   entries as of batch 17) -- this batch found exactly 7 genuinely new
+   classes this way: `CSTGCombi`, `CSTGCommonEffectLFO`,
+   `CSTGCommonLFO`, `CSTGEffectBalance`, `CSTGEffectRack`,
+   `CSTGMetronomeSettings`, `CSTGToneAdjust` (plus 2 harmless false
+   positives to filter out by hand: `CSTGParamsOwner` itself, whose own
+   `DummyGetter` trivially references its own static, and the
+   "global constructors keyed to ..." static-initializer stub).
+
+**Why this catches classes the old sweep could never see -- confirmed
+on real examples, not just theorized**: the old sweep's regex required
+the EXACT mangled suffix `ER23CSTGPatchMessageContext$` -- reference to
+`CSTGPatchMessageContext`, weak linkage only. This batch's 7 new
+classes fail that filter on BOTH axes simultaneously in different
+combinations:
+  - Different context type entirely: `CSTGCombi`/`CSTGEffectRack`/
+    `CSTGMetronomeSettings`/`CSTGCommonEffectLFO`/`CSTGEffectBalance`
+    take `CSTGMessageContext&` -- a real, already-modeled SIBLING
+    context class (`oa_global.h`, with a confirmed real `index` field
+    at +0x4, the same offset the rest of the family reads its own
+    per-call dynamic index from). `CSTGCommonLFO` takes a
+    `CSTGProgramMessageContext&` and `CSTGToneAdjust` a
+    `CSTGToneAdjustMessageContext&` -- both BRAND NEW context types,
+    declared for the first time this batch (see below).
+  - Mixed/strong linkage: `CSTGEffectBalance`'s entire candidate set
+    and roughly half of `CSTGEffectRack`'s are `T` (global), not `W`
+    (weak/COMDAT) -- invisible to any weak-only sweep no matter how the
+    suffix regex is loosened.
+  A grep across the whole binary for other `*MessageContext` class
+  names (`nm -C $KO | grep -oE '[A-Za-z_][A-Za-z0-9_]*MessageContext'`)
+  turns up MORE siblings not yet investigated: `CSTGDrumkitMessageContext`,
+  `CSTGEffectMessageContext`, `CSTGHDRTrackMessageContext`,
+  `CSTGProgramSlotMessageContext`, `CSTGWaveSeqDataMessageContext` --
+  strong evidence the family's real context-type surface is much wider
+  than `CSTGPatchMessageContext` alone, confirming this discovery
+  method's premise rather than being a one-off.
+
+**Two brand-new minimal context structs declared this batch**, same
+"only the fields this cluster's own methods read" treatment as
+`CSTGPatchMessageContext` (`oa_adsr_base.h`):
+  - `CSTGProgramMessageContext` (`include/oa_engine_init.h`, right
+    before `CSTGCommonLFO`): just the shared `index` field at +0x4 --
+    confirmed UNUSED by every one of `CSTGCommonLFO`'s own 17
+    candidates (see below), kept only for structural consistency with
+    every sibling context type.
+  - `CSTGToneAdjustMessageContext` (`include/oa_global.h`, right before
+    `CSTGToneAdjust`): `index` at +0x4 (used by all 7 candidates) PLUS
+    a real OUTPUT field, `changedFlag` at +0x1c -- see the new
+    side-effect shape below.
+
+**4 of the 7 new classes already had minimal real structs elsewhere in
+this project** (ctor and/or `Initialize()` only, from earlier UNRELATED
+batches reconstructing `CSTGProgram`'s/`CSTGCombi`'s own constructor
+chains) -- `CSTGCombi`, `CSTGEffectRack`, `CSTGToneAdjust`,
+`CSTGCommonLFO`. Extended IN PLACE (new method declarations added to
+the existing `struct` in `oa_global.h`/`oa_engine_init.h`, new `.cpp`
+files for the definitions) rather than skipped -- this is DIFFERENT
+from the established `CSTGProgramSlot`/`CSTGProgram`/
+`CSTGControllerInfo`-class "already-modeled, SKIP" precedent, because
+none of these 4 structs carry that precedent's actual risk factor (a
+LARGE, heavily cross-referenced struct with a real modeled vtable and
+dispatch machinery) -- all 4 are tiny (1-2 pre-existing methods, no
+named fields, no vtable dispatch modeled). Always check the ACTUAL
+existing struct's size/complexity before defaulting to "already
+modeled = skip" -- the real risk factor is entanglement, not mere
+prior existence. The other 3 new classes
+(`CSTGCommonEffectLFO`/`CSTGEffectBalance`/`CSTGMetronomeSettings`)
+were genuinely fresh -- referenced only in OTHER classes' own header
+comments as inlined sub-objects (no out-of-line ctor in ground truth at
+all, confirmed via a whole-symbol-table grep), got brand new headers
+following the family's usual one-class-one-header convention.
+
+**3 genuinely new shapes for the whole family, all found in this single
+batch**:
+
+1. **Piecewise multi-bank record resolver** (`CSTGEffectRack::
+   GetValueAlgorithm`/`GetValueDModMIDIRouting`): a SINGLE unified
+   `ctx.index` (0..15) selects across THREE different fixed-base,
+   different-stride record arrays -- IFX (0..11, stride 0xa8, base
+   `this+4`), MFX (12..13, stride 0x9c, base `this+0x7e4`), TFX (14..15,
+   stride 0x98, base `this+0x91c`) -- reproduced as a small file-local
+   `ResolveEffectSlotRecord()` helper matching ground truth's own
+   branch structure exactly, including its own unguarded NULL fallback
+   for `idx>15` (dead code in practice, the real slot index is always
+   0..15, kept for exact behavioral fidelity anyway). Every OTHER
+   ctx-indexed getter in this same class uses a much simpler single-bank
+   `this + idx*stride + K` shape, matching every prior batch's
+   established `CtxIndex`-family convention -- this piecewise shape is
+   exclusive to the 2 "algorithm"/"routing" parameters that apply
+   uniformly across effect types.
+2. **Global-singleton indirection, ignoring `this` and `ctx` entirely**
+   (`CSTGEffectBalance`'s all 3 methods): resolves the process-wide
+   ACTIVE `CSTGPerformanceVarsManager` via the exact same raw
+   `sInstance[8]`-selector lookup this project's own
+   `CSTGGlobal::ResolveActivePerformanceVarsManager()` (`global.cpp`)
+   already establishes, confirmed via direct disassembly that ground
+   truth INLINES this sequence at each of the 3 call sites rather than
+   emitting a real `call` -- and since that helper is a PRIVATE
+   `CSTGGlobal` member, a real cross-class call wouldn't even compile,
+   so this file's own small static local reimplements the same raw
+   sequence rather than reusing the existing one. First confirmed case
+   in this whole family of a value-getter that reads neither the
+   object's own data NOR the passed context at all.
+3. **Side effect on the context object itself**
+   (`CSTGToneAdjust::GetValueAssignSlider`/`AssignKnob`/`AssignSwitch`):
+   the returned value is the upper 7 bits (`>>1`) of a ctx-indexed
+   packed byte, but bit 0 of that SAME byte is separately written back
+   into `ctx.changedFlag` (+0x1c) as a genuine mutation of the caller's
+   context object -- every prior batch's Get* methods were pure reads
+   of `this`/`ctx`, never writers. A related but distinct 4th shape,
+   `GetValueSwitchValue`, uses `ctx.index` as a variable BIT-SHIFT
+   AMOUNT (`(fixed_word >> ctx.index) & 1`) against a FIXED word field,
+   rather than as an array/record index at all -- the family's first
+   confirmed "index selects a bit position, not a record" case.
+
+**`CSTGCommonLFO`'s own naming trap, NOT a new shape**: despite 8 of its
+17 methods carrying AMSSource/AMSIntensity/nested-AMSIntensity naming
+that in EVERY other class so far has meant a real ctx-dynamic-indexed
+modulation-slot array, direct disassembly confirms ALL 17 of
+`CSTGCommonLFO`'s own candidates are plain fixed-K reads off `this` --
+`ctx` is never dereferenced by any of them. Third confirmed instance of
+"verify empirically, don't infer structure from a method's name" in
+this family (after `CSTGMS20EG` and `CSTGOrganOsc`'s own precedents).
+
+**Tooling note, 2 fresh DEF_RE gotcha instances this batch, both the
+already-known "bare paren in prose" class, one with a NEW trigger
+shape**: `stg_common_lfo_valuegetters.cpp`'s own leading comment hit
+the standard bare-word-plus-paren trigger ("methods (ctx is never
+dereferenced..."), swallowing `GetWaveform` (the file's own first real
+function) exactly as documented in every prior batch's version of this
+bug. `stg_effect_balance_valuegetters.cpp` hit a NEW variant of the
+SAME underlying regex flaw: a fully BALANCED, empty pair of parens in
+prose -- `` `ResolveActivePerformanceVarsManager()` is itself... `` --
+still triggers it, because `DEF_RE`'s captured-params group
+(`[^;{}]*`) doesn't stop at any `)` character, only at `;`/`{`/`}` --
+so a matched pair of parens offers ZERO protection, the runaway match
+just keeps extending through the literal `)` and everything after it
+until the next real brace. Updated standing rule: "zero literal `(`
+characters in prose before the first real code construct" applies to
+EVERY `(`, balanced or not -- there is no such thing as a "safe"
+parenthetical in a file DEF_RE will scan. Both fixed by rewording to
+remove the parens entirely (em-dash/comma-delimited clauses), caught
+via the standard 2-check discipline (comment open/close-count balance,
+which both files passed cleanly since the bug is orthogonal to
+brace/comment balance -- only the exact DEF_RE captured-name-set diff
+catches this class of bug) before ever attempting to build.
+
+**KAT-oracle gotcha found and fixed before shipping, distinct from any
+prior code bug**: the independent Python evaluator's own helper for
+reading dword fields (`buf[base+off:base+off+4]`) silently returns a
+TRUNCATED (or empty) slice when `base+off+4` exceeds the oracle
+script's own `BUFSZ`, and `int.from_bytes()` of a short/empty slice
+just returns a smaller/zero integer with NO error -- this produced
+`CSTGEffectBalance`'s draft expected values as all-zero (offsets
+0x2128/0x212c/0x2130, `BUFSZ` was only 0x2000) before being caught by
+inspection (all-zero KAT expectations are themselves a red flag worth
+checking, not just trusting) and fixed by widening `BUFSZ` to safely
+exceed every offset used. Worth flagging for any future oracle script
+in this family that computes offsets much larger than earlier classes'
+typical range (`CSTGEffectBalance` and `CSTGEffectRack` both index tens
+of KB into the fixture buffer) -- always size the oracle's own buffer
+from the MAXIMUM offset actually used, not a reused constant from a
+smaller prior class.
+
+`make verify`: exit 0, 0 FAIL lines, 188 test binaries total (up from
+54 at some earlier point in this project's own history -- the delta
+reflects OA.ko's many other unrelated families too, not just this
+one), all 7 new suites (54 checks) passing, including 2 explicit
+branch-coverage checks beyond the family's usual single-fixed-index
+convention: `CSTGEffectRack::GetValueAlgorithm` re-exercised at
+`ctx.index` = 3/12/14 to independently hit all 3 of
+`ResolveEffectSlotRecord`'s banks, and `CSTGToneAdjust::
+GetValueSwitchValue` re-exercised at 2 indices landing on a clear vs
+set bit of the same fixed word field. Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos`: clean link,
+`OA.ko` 523852 bytes (up from batch 17's 515908), zero warnings/errors
+traceable to any of the 7 new files. `DECOMPILE_ERRORS.md` unchanged --
+no compile/link blocker hit. `manifest/gen_oa_manifest.py` regenerated,
+reconstructed-status count 2472 -> 2526, delta exactly +54, confirmed
+via a full reconstructed qualified-name-set diff -- 0 regressions.
+Committed as 20 files (Makefile + 2 edited mega-headers + 3 new headers
++ 7 new `.cpp` + 7 new test `.cpp`); `git diff --cached --stat`
+verified immediately before commit per
+[[shared_repo_commit_hygiene]] -- 2 concurrent-session Eva files
+(`../Eva/tools/build_gdbserver.sh`, `../Eva/tools/gdbserver-i386-musl`)
+were sitting untracked in `git status` throughout and correctly left
+untouched.
+
+**Next targets**: re-run the batch-18 broader-discovery recipe fresh
+for the next batch -- 75 sweep-visible classes total, 68 now
+accounted for (57 done across all batches + `CSTGPCMModelPatch`/
+`CSTGPanOutput`/`CSTGComponent`/`CSTGAnalogSyncModelPatch` excluded +
+17 already-modeled + `CSTGTG92OscBase` deferred), so roughly 7 more
+sweep-visible classes may remain unexamined -- re-run the full recipe
+rather than assuming the count above is exhaustive, this batch did not
+exhaustively cross-check every one of the 75 by name. Also worth a
+follow-up sweep pass specifically for the OTHER sibling context types
+spotted but not yet investigated this batch:
+`CSTGDrumkitMessageContext`, `CSTGEffectMessageContext`,
+`CSTGHDRTrackMessageContext`, `CSTGProgramSlotMessageContext`,
+`CSTGWaveSeqDataMessageContext` -- grep
+`nm -C $KO | grep '::Get.*<ContextType>&)'` for each directly rather
+than relying on the sValueGetterTemp sweep alone, since a class using
+one of these might route through a different shared scratch temp or
+skip the convention's sink entirely (unconfirmed either way).
 
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
