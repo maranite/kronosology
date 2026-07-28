@@ -3187,6 +3187,39 @@ RECONSTRUCTED = {
     "0831f440",  # CFileIoUdf::SetRecoveryParam(EDevice_Id, int)
     "08995610",  # CFileIoUdf::~CFileIoUdf() (D1, complete-object)
     "08995620",  # CFileIoUdf::~CFileIoUdf() (D0, deleting)
+
+    # --- CKorgFile, 2026-07-28 (see korg_file.h for full provenance) ---
+    "089c94a0",  # CKorgFile::~CKorgFile() (D1, complete-object)
+    "089c94b0",  # CKorgFile::TransferTo(void const*, unsigned int, unsigned int)
+    "089c94f0",  # CKorgFile::TransferToEnd()
+    "089c9520",  # CKorgFile::TransferFromEnd()
+    "089c9550",  # CKorgFile::TransferFrom(void*, unsigned int, unsigned int)
+    "089c9590",  # CKorgFile::Write()
+    "089c95f0",  # CKorgFile::Read()
+    "089c9650",  # CKorgFile::TransferToBegin(unsigned int)
+    "089c9690",  # CKorgFile::TransferFromBegin(unsigned int)
+    "089c96d0",  # CKorgFile::~CKorgFile() (D0, deleting)
+    "089c96f0",  # CKorgFile::SetPath(char const*)
+    "089c97a0",  # CKorgFile::CKorgFile(char const*, char const*)
+    "089c9880",  # CKorgFile::GetPathName() const
+    "089c98b0",  # CKorgFile::GetPathNameNoExtension(char*, unsigned int) const
+    "089c9930",  # CKorgFile::GetFolder(char*, unsigned int)
+    "089c9990",  # CKorgFile::MakePathFromFolder(char*, char const*, unsigned int)
+    "089c9a50",  # CKorgFile::HasExtension(char const*, char const*)
+    "089c9a90",  # CKorgFile::AddExtension(char*, unsigned int, char const*)
+    "089c9ae0",  # CKorgFile::RemoveExtension(char*)
+    "089c9b10",  # CKorgFile::RemoveExtension(char*, char*, unsigned int)
+    "089c9b80",  # CKorgFile::ValidExtension(char const*)
+    "089c9ba0",  # CKorgFile::ExtractName(char const*, char*, unsigned int)
+    "089c9c20",  # CKorgFile::Sanitize(char*)
+    "089c9c60",  # CKorgFile::Capitalized(char const*)
+    "089c9c90",  # CKorgFile::WriteEmptyFile(_IO_FILE*, unsigned int, unsigned int)
+    "089c9da0",  # CKorgFile::NameLength(char const*, unsigned int)
+    "089c9e90",  # CKorgFile::MakeName(char const*, char*, unsigned int)
+    "089ca000",  # CKorgFile::MakeNameStereo(char const*, char*, unsigned int, char)
+    "089ca470",  # CKorgFile::MakeNameRight(char const*, char*, unsigned int)
+    "089ca4a0",  # CKorgFile::MakeNameLeft(char const*, char*, unsigned int)
+    "089ca4d0",  # CKorgFile::MakeFileName(char*, unsigned int, char const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
