@@ -1311,3 +1311,72 @@ should know they exist and are untested/unmodeled, not silently absent.
   yet (same status as the rest of the storage/disk-driver cluster).
   `CFileIoCdda`/`CFileIoUdf` remain fully out of scope. Eva manifest
   1940 -> 2008/37,795 (5.313%).
+
+- **`CFileIoCdda`/`CFileIoUdf`** (2026-07-28, fresh re-survey of the last 2
+  concrete `CFileIoBase` siblings) -- both had been passed over twice before
+  (once in `CFileIoBase`'s own original batch, once in the
+  `CFileIoAkai`/`CFileIoDos`/`CFileIoIso9660` batch) with a standing "less
+  tractable" verdict based on raw override count (41/35) and size
+  (`CFileIoUdf::format()` alone 4791 bytes). A fresh, careful re-trace via
+  `objdump -dr -M intel` against real ground truth found the prior verdict
+  was "larger method count", not "uniformly deeper" -- both classes are
+  almost entirely small, mechanical `cdda_*`/`udf_*` forwarding methods
+  (SAME "call library fn; 0=fail->set_error(),-1; else 0" shape already
+  established for `CFileIoAkai`/`CFileIoDos`) plus a handful of genuinely
+  real medium-sized routines, with exactly ONE outlier method each that
+  stays genuinely deep. Reconstructed 40/41 `CFileIoCdda` methods (`ctor`,
+  dtor pair, `set_error()` with its OWN 23-entry raw-error table --
+  distinct raw-code global `cdda_errno` (.bss+0x9600554), NOT the shared
+  `fs_user`/`cd_errno` the other 3 siblings use -- plus real `getmediainfo()`
+  /`fopen()`/`fmount()`/`finalize()` bodies) and 34/35 `CFileIoUdf` methods
+  (ditto, own `udf_errno` raw-code global + 82-entry table, plus real
+  `dir()`/`getmediainfo()`/`fmount()`/`writesetup()`/`fopen()`/
+  `SetRecoveryParam()` bodies, and the 2 self-contained non-iStage-touching
+  helper leaves `formatsub()`/`setfmtparam()` that the deferred `format()`
+  itself calls). Deferred `CFileIoCdda::getcurpos()` (1866 bytes, a genuine
+  CD-DA track/index binary-search + refinement loop) and
+  `CFileIoUdf::format()` (4791 bytes, a genuine resumable UDF-format state
+  machine driven by `CFileIoUdf::iStage` -- confirmed via a full-binary grep
+  that no other method anywhere touches that global) -- see
+  `DECOMPILE_ERRORS.md` for both. Neither deferred method is declared as a
+  virtual override in its class's header (same convention `CFileIoDos`'s own
+  deferred `format()` established), so both reconstructed vtables fall back
+  to the correct inherited `CFileIoBase` stub rather than leaving a
+  declared-but-undefined symbol.
+
+  Genuine findings along the way: (1) `CFileIoCdda::chdir()`/`dir()` use
+  DIFFERENT sentinels from `CFileIoBase`'s own (`chdir()==0`, `dir()==0` --
+  success/no-entry, not -1+assert -- a CD-DA disc has no directory
+  hierarchy, so both trivially no-op-succeed); (2) `CFileIoUdf::fopen()`
+  with `mode[0]=='v'` returns -1 UNCONDITIONALLY with no other work at all,
+  not even `set_error()` (confirmed: that jump target is a bare `mov
+  eax,-1; ret` epilogue) -- a real, independently verified difference from
+  `CFileIoCdda::fopen()`'s own `'v'` slot, which does real work; (3)
+  `CFileIoUdf`'s mode-char `fopen()` scheme is richer than every other
+  sibling's own -- 2 of its 23 jump-table slots (`'c'`/`'p'`) route to a
+  real embedded `repz cmpsb` full-string compare against the literals "cp"/
+  "pcp" (medium-confidence guess at meaning only, exact bit-level logic
+  transcribed faithfully); (4) `CFileIoCdda::finalize()`'s success/failure
+  sense on its own leading `cdda_writesetup()` call is the OPPOSITE of what
+  `settestmode()`'s identical-looking call implies -- SUCCESS continues into
+  more real work, FAILURE is the early-out -- caught and fixed during this
+  session's own first-draft transcription (verified via direct disassembly
+  re-check, not assumed). New `verify/test_file_io_cdda.cpp` (34 checks) and
+  `verify/test_file_io_udf.cpp` (28 checks); full host `make verify` green
+  (72/72 binaries). Two real host-side bugs caught and fixed before this
+  batch's own verify suite went green: an out-of-bounds hardcoded-
+  ground-truth-address dereference (`*(unsigned char*)0x93b0d5e` -- ground
+  truth `.bss` addresses don't exist in this host process; fixed to real
+  local stand-in arrays, same convention as `CFileIoAkai`'s own
+  `devstat_tab`) and a stack-buffer overflow in a shared `CDDriverIO::
+  scsi_mode_sense10` stand-in whose fixed `memset()` size exceeded one
+  caller's smaller stack buffer (`CFileIoUdf::SetRecoveryParam()`'s 20-byte
+  `buf` vs. the stub's original 48-byte memset) -- both caught by the host
+  verify suite itself (a segfault, not a silent wrong-answer), not
+  discovered by inspection. Not tested on real hardware -- no reconstructed
+  caller anywhere in this project yet (same status as the rest of the
+  storage/disk-driver cluster, now fully closed out: `CFileIoBase`,
+  `CFileIoUnknown`, `CFileIoAkai`, `CFileIoDos`, `CFileIoIso9660`,
+  `CFileIoCdda`, `CFileIoUdf` all done; `CDDriverIO`/`CScsiDriverBase`
+  (partially)/`CFilesys`/`CDiskUtil` remain the cluster's own open leads).
+  Eva manifest 2008 -> 2084/37,795 (5.514%).
