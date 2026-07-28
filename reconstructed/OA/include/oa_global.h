@@ -871,9 +871,67 @@ struct CSTGProgram;	/* forward decl, real definition further below */
  * omission. Declared opaque (no named fields) matching CSTGProgramSlot's
  * own established convention -- only the ctor's own writes are modeled.
  */
+/*
+ * Minimal, not-independently-named context object CSTGToneAdjust's own
+ * value-getter family takes by reference (batch 18, broader-discovery-
+ * method sweep) -- same "only the fields this cluster's own methods
+ * read" treatment as CSTGPatchMessageContext (oa_adsr_base.h). `index`
+ * at +0x4 is the same dynamic per-call slot index the rest of the STG
+ * value-getter family reads at this offset from every context type.
+ * `changedFlag` at +0x1c is a real OUTPUT the AssignSlider/AssignKnob/
+ * AssignSwitch getters below write into (a genuinely new shape for this
+ * family -- a Get* method with a side effect on the context object
+ * itself, not just this's own data); real meaning unconfirmed beyond
+ * "low bit of the same packed assign byte the getter's own return value
+ * is derived from", name is descriptive only.
+ */
+struct CSTGToneAdjustMessageContext {
+	unsigned char _unrecovered_head[4];	/* +0x00..+0x03, unconfirmed */
+	unsigned int index;			/* +0x04, confirmed */
+	unsigned char _unrecovered_mid[0x14];	/* +0x08..+0x1b, unconfirmed */
+	unsigned char changedFlag;		/* +0x1c, confirmed (see above) */
+};
+
 extern "C" unsigned char _ZTV14CSTGToneAdjust[12];
+/*
+ * CSTGToneAdjust's value-getter family (batch 18, broader-discovery-
+ * method sweep): 7 real Get*(CSTGToneAdjustMessageContext&) candidates,
+ * all weak/COMDAT, all confirmed via direct disassembly -- zero
+ * outliers. Field offsets cross-check cleanly against this class's own
+ * already-confirmed ctor zeroing (see header comment above): the
+ * AssignSlider/AssignKnob/AssignSwitch byte fields (+0x4/+0xd/+0x15)
+ * fall within the ctor's own confirmed-zeroed +0x4..+0x24 byte range,
+ * and the SliderValue/KnobValue word fields (+0x45/+0x57) fall within
+ * its confirmed-zeroed +0x45..+0x67 word range -- AssignSwitchOnValue's
+ * own field (+0x25) falls in the ctor's own confirmed, untouched
+ * +0x25..+0x44 gap, consistent with it not being part of that zeroing
+ * pass.
+ *
+ * Two new shapes for the family, both ctx-indexed at stride 1/2 off
+ * `this` (bare, no lea premultiply, same convention as CSTGMS20's own
+ * GetInputJack precedent):
+ *   - AssignSlider/AssignKnob/AssignSwitch: byte field at this[K+idx],
+ *     K=4/0xd/0x15. The RETURNED value is the byte's upper 7 bits
+ *     (>>1); bit 0 is instead written back into ctx.changedFlag -- see
+ *     the struct comment above.
+ *   - AssignSwitchOnValue/SliderValue/KnobValue: plain signed 16-bit
+ *     ctx-indexed field (stride 2) at this[K+idx*2], K=0x25/0x45/0x57,
+ *     single-write, no side effect.
+ * GetValueSwitchValue is a third, distinct new shape: ctx.index is used
+ * as a variable BIT-SHIFT AMOUNT (not an array index) applied to a
+ * FIXED 16-bit word field at this+0x67 -- `(word >> ctx.index) & 1`,
+ * i.e. ctx.index selects which bit of a packed 16-slot switch-state
+ * word to extract.
+ */
 struct CSTGToneAdjust {
 	CSTGToneAdjust();
+	STGConvertedParam &GetValueAssignKnob(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueAssignSlider(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueAssignSwitch(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueAssignSwitchOnValue(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueKnobValue(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueSliderValue(CSTGToneAdjustMessageContext &ctx);
+	STGConvertedParam &GetValueSwitchValue(CSTGToneAdjustMessageContext &ctx);
 };
 
 /*
@@ -2197,7 +2255,41 @@ extern "C" unsigned char _ZTV14CSTGEffectRack[0x60];
  * directly rather than adding a virtual-dispatch mechanism for a
  * single-caller, single-implementation getter.
  */
-struct CSTGEffectRack { void Initialize(); };
+/*
+ * CSTGEffectRack's value-getter family (batch 18, broader-discovery-method
+ * sweep -- see stg_value_getter_family.md's "objdump -dr sValueGetterTemp
+ * cross-reference" recipe): 13 real Get*(CSTGMessageContext&) candidates,
+ * mixed weak/strong linkage, all confirmed via direct disassembly of
+ * `.text+0xbe370..0xbe5c1`. 11 are plain `ctx.index`-scaled or fixed-K
+ * field reads off `this` (IFX bank: 12 slots, `this+4+idx*0xa8`; MFX
+ * per-parameter getter: `this+0x87c+idx*0x9c`, 0-based within the MFX
+ * bank; MFXChainDirection/MFXChainLevel/MasterVolume: fixed-K, no
+ * ctx-index at all -- rack-level, not per-slot). The remaining 2
+ * (GetValueAlgorithm/GetValueDModMIDIRouting) share a genuinely new
+ * shape for this family: a piecewise 3-bank record resolver spanning a
+ * SINGLE unified 0..15 slot index across IFX (0..11, stride 0xa8, base
+ * this+4), MFX (12..13, stride 0x9c, base this+0x7e4) and TFX (14..15,
+ * stride 0x98, base this+0x91c) -- see ResolveEffectSlotRecord() in
+ * stg_effect_rack_valuegetters.cpp, reproduced branch-for-branch
+ * including ground truth's own unguarded NULL fallback for idx>15
+ * (dead code in practice -- the real slot index is always 0..15).
+ */
+struct CSTGEffectRack {
+	void Initialize();
+	STGConvertedParam &GetValueAlgorithm(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueDModMIDIRouting(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXBusIndex(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXEffectChainIndex(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXFXControlBusIndex(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXHDRBusIndex(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXPan(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXSend1Level(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueIFXSend2Level(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueMFXChainDirection(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueMFXChainLevel(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueMFXReturnLevel(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueMasterVolume(CSTGMessageContext &ctx);
+};
 extern "C" unsigned char _ZTV11CSTGProgram[0x98];
 /* CMFXEffectSlot/CTFXEffectSlot/CSTGEffectBalance/CSTGCommonEffectLFO
  * have NO out-of-line ctor at all in ground truth (confirmed via a
@@ -2296,7 +2388,25 @@ struct CSTGProgram {
  * because this method is monomorphic in this project's own graph.
  */
 extern "C" unsigned char _ZTV9CSTGCombi[0x9c];
-struct CSTGCombi { CSTGCombi(); void Initialize(); };
+/*
+ * CSTGCombi's value-getter family (batch 18, broader-discovery-method
+ * sweep): 4 real Get*(CSTGMessageContext&) candidates, all weak/COMDAT,
+ * all confirmed via direct disassembly -- zero outliers, zero ctx-index
+ * (fixed-K field reads off `this` only, offsets 0x19e3..0x19e6, right
+ * after the confirmed-real `1792 CSTGCombi (14 banks x 128)` region's
+ * own per-instance tail -- see combi_ctor.cpp's header comment for the
+ * class's own confirmed footprint). GetValueAutoLoadToneAdjust packs a
+ * single boolean into bit 0 of +0x19e6, same mask-only bitfield shape
+ * used throughout this family.
+ */
+struct CSTGCombi {
+	CSTGCombi();
+	void Initialize();
+	STGConvertedParam &GetValueAutoLoadToneAdjust(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValuePitchRandomize(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueScaleKey(CSTGMessageContext &ctx);
+	STGConvertedParam &GetValueScaleType(CSTGMessageContext &ctx);
+};
 /*
  * CSTGSequence::CSTGSequence() (sec 10.153, `.text+0xcbfd0`, 546 bytes)
  * confirmed real: calls the base `CSTGCombi::CSTGCombi()` first (Itanium

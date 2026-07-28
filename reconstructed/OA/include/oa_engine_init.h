@@ -2642,7 +2642,42 @@ struct STGStepSeqSubRateParams { unsigned char _unrecovered[0x100]; };
  * dispatch" rule -- nothing reconstructed in this project reads a
  * function pointer out of it.
  */
+/*
+ * Minimal, not-independently-named context object CSTGCommonLFO's own
+ * value-getter family takes by reference (batch 18, broader-discovery-
+ * method sweep) -- same "only the fields this cluster's own methods
+ * read" treatment as CSTGPatchMessageContext (oa_adsr_base.h). `index`
+ * at +0x4 is the same dynamic per-call slot index the rest of the STG
+ * value-getter family reads at this offset from every context type --
+ * confirmed unused by every one of CSTGCommonLFO's own candidates
+ * (see below), kept only because it's the field this context type
+ * shares with every sibling context class in the family.
+ */
+struct CSTGProgramMessageContext {
+	unsigned char _unrecovered_head[4];	/* +0x00..+0x03, unconfirmed */
+	unsigned int index;			/* +0x04, confirmed */
+};
+
 extern "C" unsigned char _ZTV13CSTGCommonLFO[0x7c];
+/*
+ * CSTGCommonLFO's value-getter family (batch 18, broader-discovery-
+ * method sweep -- see stg_value_getter_family.md's "objdump -dr
+ * sValueGetterTemp cross-reference" recipe, this class's context
+ * parameter type, `CSTGProgramMessageContext&`, is distinct from every
+ * other context type already known to the family, hence invisible to
+ * the earlier `ER23CSTGPatchMessageContext$`-suffix-only sweep): 17
+ * real weak-symbol ctx-only candidates, zero outliers. Despite the
+ * AMSSource/AMSIntensity/AMSIntensityAMSSource/AMSIntensityAMSIntensity
+ * naming strongly implying a ctx-dynamic-indexed modulation-slot array
+ * (the shape used by many other classes in this family), EVERY one of
+ * these 17 methods is confirmed via direct disassembly to be a plain
+ * fixed-K field read directly off `this` -- `ctx` is never
+ * dereferenced by any of them. Same "verify empirically, don't infer
+ * from name" lesson already documented for `CSTGMS20EG`. Two bits are
+ * packed into the same byte at +0x1f (Stop bit 0, MIDITempoSync bit 2),
+ * same mask-only/shift-then-mask bitfield shapes used throughout this
+ * family.
+ */
 struct CSTGCommonLFO {
 	CSTGCommonLFO();
 	static void Initialize();
@@ -2651,6 +2686,24 @@ struct CSTGCommonLFO {
 	 * (0x4a00/0x250) STGLFOSubRateParams blocks, each initialized via
 	 * CSTGLFOBase::InitializeQuad(). */
 	static STGLFOSubRateParams *sSubRateParams;
+
+	STGConvertedParam &GetAMSResetSource(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequency(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequencyAMSIntensity(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequencyAMSIntensityAMSIntensity(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequencyAMSIntensityAMSSource(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequencyAMSSource(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetFrequencyFine(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetMIDITempoSync(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetMIDITempoSyncBaseNote(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetMIDITempoSyncTimes(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetOffset(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetShape(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetShapeAMSIntensity(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetShapeAMSSource(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetStartPhase(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetStop(CSTGProgramMessageContext &ctx);
+	STGConvertedParam &GetWaveform(CSTGProgramMessageContext &ctx);
 };
 struct CSTGCommonStepSeq {
 	static void Initialize();
