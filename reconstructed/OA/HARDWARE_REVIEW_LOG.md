@@ -2738,3 +2738,135 @@ qualified-name-set diff -- 41 added, 0 regressions.
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGSimpleAMSMixer + CSTGPitchModCommon + CSTGPitchModCommonPlusAMS + CSTGVPMEG value-getter families -- 17 methods (batch 14, 2026-07-28)
+
+Continuing the ~2300-method STG value-getter family, manifest 2445 ->
+2462/21,689 (11.351%). Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`).
+
+Re-ran batch 12's whole-binary weak-symbol sweep fresh (`nm $KO | grep -E
+'^[0-9a-f]+ W _ZN[0-9]+.*ER23CSTGPatchMessageContext$'`, grouped by
+mangled length-prefixed class name via a small Python parser) since the
+genuinely-fresh candidate pool has thinned out considerably -- only 61
+classes total still had at least one real ctx-only candidate, most
+already individually catalogued across the prior 13 batches. The two
+largest raw counts left, `CSTGLFO` (21 candidates) and `CSTGADSRBase` (20
+candidates), turned out to BOTH already be fully hand-modeled from an
+earlier, separate 2026-07-27 effort predating this scripted family
+entirely (`src/engine/lfo_component.cpp`, `src/engine/adsr_base.cpp`) --
+confirmed via word-boundary grep and correctly skipped, same
+`CSTGProgramSlot`/`CSTGProgram` already-modeled precedent. `CSTGPatch` (4
+candidates) is also already-modeled (a real `struct CSTGPatch` at
+`include/oa_types.h:123` plus stub member functions in
+`src/stub/bar2_stubs_auth.cpp`) -- skipped for the same reason.
+
+This left only small, 4-5-candidate fresh classes as this batch's own
+pool. `CSTGPitchModCommon`/`CSTGPitchModCommonPlusAMS` initially looked
+risky, since both names appear as bare word-boundary grep hits in the
+already-modeled `CSTGPitchMod`'s and `CSTGPitchModOsc`'s own header
+prose -- direct inspection confirmed both hits are purely incidental
+mentions listing sibling class names in a derivation comment, not real
+struct/ctor references, so both classes are genuinely fresh per the
+established incidental-vs-real-reference distinction (same kind of check
+as `CSTGPolysix`/`CSTGPolysixModel`). `CSTGPitchModCommonPlusAMS` was
+picked up as a bonus fourth class this batch because its own 2 real
+candidates fell out of the identical `nm` grep used for
+`CSTGPitchModCommon` -- its mangled class name is a superset match of the
+other's -- so writing both up together cost no extra survey work; the two
+are directly related sibling classes (the PlusAMS variant adds one extra
+AMS modulation leg on top of the Common base's own fields).
+
+All four classes came back fully clean -- zero outliers, extending the
+clean-sweep streak to batches 9-14 (the sole exception remains the
+deliberately-dropped, never-attempted `CSTGTG92OscBase` pure-virtual
+deferral from batch 12, still open). `CSTGSimpleAMSMixer` (a small
+two-input AMS modulation mixer -- Type selector plus two independent
+Source/Amount legs) and `CSTGPitchModCommonPlusAMS` are both the
+simplest dialect -- zero ctx-index, plain fixed-K bytes and dwords only.
+`CSTGPitchModCommon` is notable for sharing method names (`GetLFOAmount`,
+`GetLFOAMSSource`, `GetLFOAMSIntensity`, `GetJSYToLFOAmount`) with the
+already-modeled `CSTGPitchMod`'s own LFO group, at entirely different
+field offsets -- confirming the two are genuinely separate classes
+sharing a naming convention, not the same class reused, and also
+notable for being zero-ctx-index despite `CSTGPitchMod`'s own matching
+fields being ctx-indexed.
+
+**Genuinely new asymmetric ctx-index variant, first of its kind in the
+family.** `CSTGVPMEG`'s AMS1LevelModSource/AMS1LevelModIntensity and
+AMS1TimeModSource/AMS1TimeModIntensity pairs split the by-now-familiar
+bare-stride-4 SIB-scaled ctx-index shape (first confirmed on
+`CSTGMultiFilter2Pole`, reused on `CSTGEG`) so that ONLY the Intensity
+half of each pair is ctx-indexed:
+
+```
+GetAMS1LevelModSource:    movsx eax, BYTE PTR [eax+0x3e]        ; plain fixed byte
+GetAMS1LevelModIntensity: mov edx, DWORD PTR [edx+0x4]          ; ctx's own index field
+                           mov eax, DWORD PTR [eax+edx*4+0x3f]   ; bare stride-4 SIB
+```
+
+Every PRIOR class with this bare-stride-4 shape (`CSTGMultiFilter2Pole`,
+`CSTGEG`) had BOTH halves of each Source/Intensity pair ctx-indexed
+together -- this is the first confirmed case of the split, verified
+directly from the actual disassembly rather than inferred from the
+shared "AMS1" naming. No decoder change was needed: the shared decoder
+already evaluates each method's field-load shape independently rather
+than assuming pair symmetry, this is purely a new confirmed data point
+reinforcing the family's standing rule to verify every method
+individually. `CSTGVPMEG::GetTriggerAtNoteOn` reuses the established
+mask-only single-bit bitfield shape (no shift instruction, bit 0),
+single-write only -- no new shape needed there either.
+
+**Tooling: one fresh `DEF_RE` parenthesis-swallow instance found and
+fixed**, in `oa_stg_vpm_eg.h`'s own derivation prose -- two plain
+parenthetical asides ("stride-4 shape (CSTGMultiFilter2Pole, CSTGEG) had
+BOTH halves..." and "bitfield shape (no shift instruction, bit 0),
+single-write only") with zero semicolons anywhere in the span before the
+real `CtxIndex` helper's own closing brace, letting the runaway match
+reach past the comment close and mis-capture the word immediately before
+the first trigger paren ("shape") instead of `CtxIndex`. Caught via the
+standard exact `DEF_RE` captured-name-set diff (`got=={"shape"}` instead
+of the wanted `{"CtxIndex"}`) before ever attempting to build; fixed by
+rewording both to em-dash-delimited clauses, the established convention.
+All 8 new files (4 headers + 4 `.cpp`) passed both standard
+post-generation checks -- comment open/close-count balance and the exact
+`DEF_RE` captured-name-set diff -- before any build attempt; only this
+one instance needed a fix.
+
+KAT generation used a standalone scratch Python evaluator (same
+deterministic `buf[i] = (i*0x9f + 0x37) & 0xff` pattern, ctx index fixed
+at 3, 32-bit signed dword loads, 8-bit sign/zero-extension per field)
+from the very first draft, per batch 13's own hard-rule reinforcement --
+no KAT constant was ever hand-typed this batch.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite (43 checks
+total), all 4 new KATs (17 checks) passing. Real `make ko-clean && make
+ko KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko`
+produced (510736 bytes, up from batch 13's 508216), zero warnings or
+errors traceable to any of the 4 new files (confirmed via a build-log
+grep scoped to each new filename). `DECOMPILE_ERRORS.md` unchanged -- no
+compile/link blocker hit, and this batch had no new Tier-B scope
+deferral either (the `CSTGTG92OscBase` deferral from batch 12 remains the
+only open one). `manifest/gen_oa_manifest.py` regenerated, OA.ko
+manifest 2445 -> 2462/21,689 (11.351%), delta exactly +17, confirmed via
+a full reconstructed qualified-name-set diff -- 17 added, 0 regressions.
+
+**Open item carried forward, not resolved this batch**: this batch's own
+whole-binary sweep found `CSTGPCMModelPatch` with 2 real weak ('W')
+ctx-only-suffix candidates, which directly contradicts batch 9's own
+verdict that `CSTGPCMModelPatch` is "NOT part of this family" (batch 9
+found only 2 symbols total, both global ('T') linkage). Not re-checked
+or reconciled this batch -- flagged for a direct `nm` query on
+`CSTGPCMModelPatch` specifically next session before trusting either
+verdict.
+
+A concurrent session's untracked `reconstructed/Eva/tools/
+build_gdbserver.sh` / `gdbserver-i386-musl` files were visible in `git
+status` throughout this batch's work -- staged only the 13 intended OA
+files by exact path (never `git add -A`/`git add .`) and verified `git
+diff --cached --stat` matched exactly before committing, per this
+project's shared-repo commit hygiene convention.
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.

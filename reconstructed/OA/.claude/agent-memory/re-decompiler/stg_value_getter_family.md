@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 38 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase, CSTGDriver, CSTGVPMNoise, CSTGAnalog4Pole, CSTGPluckedModelPatch, CSTGMOSSAmp, CSTGPitchModOsc), 1000 methods reconstructed, manifest 1441->2445
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 42 classes done (batch 1-13 list: CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase, CSTGDriver, CSTGVPMNoise, CSTGAnalog4Pole, CSTGPluckedModelPatch, CSTGMOSSAmp, CSTGPitchModOsc; batch 14 adds CSTGSimpleAMSMixer, CSTGPitchModCommon, CSTGPitchModCommonPlusAMS, CSTGVPMEG), 1017 methods reconstructed, manifest 1441->2462
 type: project
 ---
 
@@ -1238,6 +1238,137 @@ grouped by mangled length-prefixed class name) fresh for the next
 batch's candidates, always doing the word-boundary grep +
 already-modeled check before picking.
 
+**Fourteenth batch (2026-07-28, commit `44fe4e0`): `CSTGSimpleAMSMixer`
+(5/5) + `CSTGPitchModCommon` (5/5) + `CSTGPitchModCommonPlusAMS` (2/2) +
+`CSTGVPMEG` (5/5) done**, manifest 2445 -> 2462, 17 methods. Same ground
+truth binary (`/home/share/Decomp/OA.ko_Decomp/OA.ko`). Re-ran batch 12's
+whole-binary sweep methodology fresh (`nm $KO | grep -E '^[0-9a-f]+ W
+_ZN[0-9]+.*ER23CSTGPatchMessageContext$'`, grouped by mangled
+length-prefixed class name via a small Python parser) since the class
+pool has thinned out considerably -- 61 classes total still had at least
+one real ctx-only candidate, the vast majority already individually
+catalogued across batches 1-13. Confirmed `CSTGLFO` (21 candidates) and
+`CSTGADSRBase` (20 candidates) -- this batch's two largest raw counts --
+are BOTH already fully hand-modeled (`src/engine/lfo_component.cpp`,
+`src/engine/adsr_base.cpp`, predating this scripted-family effort
+entirely) via word-boundary grep, correctly skipped without writing a
+file, same `CSTGProgramSlot`/`CSTGProgram` precedent. `CSTGPatch` (4
+candidates) also confirmed already-modeled (real `struct CSTGPatch` in
+`include/oa_types.h:123` plus stub member functions in
+`src/stub/bar2_stubs_auth.cpp`) -- skipped for the same reason. This
+left only small (4-5 candidate) genuinely-fresh classes as the batch's
+own picks -- `CSTGSimpleAMSMixer`, `CSTGVPMMixer`, `CSTGPitchBase`,
+`CSTGVPMAudioInput`, `CSTGStringTrackCommon` (all zero word-boundary grep
+hits) plus `CSTGPitchModCommon`/`CSTGPitchModCommonPlusAMS`, which showed
+up as only INCIDENTAL prose mentions (in the already-modeled
+`CSTGPitchMod`'s and `CSTGPitchModOsc`'s own header comments, listing
+sibling class names, not real references) rather than any struct/ctor --
+correctly treated as genuinely fresh per the established
+incidental-vs-real-reference distinction. `CSTGPitchModCommonPlusAMS`
+was picked up as a bonus 4th class this batch because its own 2 real
+candidates fell out of the identical `nm` grep used for
+`CSTGPitchModCommon` (its name is a superset match) -- both are directly
+related sibling classes (the PlusAMS variant adds one extra AMS
+modulation leg on top of the Common base), so writing them up together
+in the same batch cost no extra survey work.
+
+All four classes came back fully clean -- zero outliers, extending the
+clean-sweep streak (batches 9-13, now 9-14 excepting the deliberately-
+dropped `CSTGTG92OscBase`). `CSTGSimpleAMSMixer` is the simplest dialect
+-- a small two-input AMS mixer (Type selector, SourceA/SourceB,
+AmountA/AmountB), zero ctx-index, plain fixed-K bytes and dwords only.
+`CSTGPitchModCommonPlusAMS` (AMSSource/AMSIntensity pair) is likewise
+zero-ctx-index, plain fixed-K.
+
+**Genuinely new asymmetric ctx-index variant, first of its kind**:
+`CSTGVPMEG`'s AMS1LevelModSource/AMS1LevelModIntensity and
+AMS1TimeModSource/AMS1TimeModIntensity pairs split the by-now-familiar
+bare-stride-4-SIB ctx-index shape (first confirmed on
+`CSTGMultiFilter2Pole`, reused on `CSTGEG`) so that ONLY the Intensity
+half of each Source/Intensity pair is ctx-indexed -- the Source half is
+a plain fixed signed byte read directly off `this`, exactly like every
+OTHER class's fixed-field Source siblings, despite sharing the "AMS1"
+runtime-slot-implying name with its own ctx-indexed Intensity partner.
+Every PRIOR class with this bare-stride-4 shape (`CSTGMultiFilter2Pole`,
+`CSTGEG`) had BOTH halves of each Source/Intensity pair ctx-indexed
+together -- this is the first confirmed case of the split. Verified
+directly from disassembly, not inferred: `GetAMS1LevelModSource` is
+`movsx eax, BYTE [eax+0x3e]` (no `edx` load at all) while
+`GetAMS1LevelModIntensity` is `mov edx,[edx+0x4]; mov eax,[eax+edx*4+
+0x3f]`. No decoder change needed -- the shared decoder already handles
+fixed-K and ctx-indexed field loads independently per-method, this is
+purely a new confirmed data point reinforcing "verify each method's
+actual shape individually, never assume pair symmetry from naming or
+from a prior class's own pair-symmetric precedent."
+
+`CSTGVPMEG::GetTriggerAtNoteOn` reuses the established mask-only
+single-bit bitfield shape (no shift instruction, bit 0), single-write
+only -- no new shape needed.
+
+**Tooling note, DEF_RE gotcha hit and fixed before shipping, in the NEW
+class-level derivation prose this time rather than in a signature
+mention**: `oa_stg_vpm_eg.h`'s first-draft leading comment used
+"stride-4 shape (CSTGMultiFilter2Pole, CSTGEG) had BOTH halves..." and,
+independently, "bitfield shape (no shift instruction, bit 0), single-
+write only" -- both plain parenthetical asides listing other classes/
+qualifiers, with zero semicolons anywhere in the span before the real
+`CtxIndex` helper's own `{`, letting the runaway match reach past the
+comment close and mis-capture `CtxIndex` as belonging to the word
+immediately before the trigger paren ("shape"). Caught via the standard
+exact DEF_RE captured-name-set diff (`got=={"shape"}` instead of the
+wanted `{"CtxIndex"}` on the first check) before ever attempting to
+build; fixed by rewording both to em-dash-delimited clauses, the
+by-now-standard convention. All 8 new files (4 classes x header+cpp,
+technically the KAT test files weren't independently DEF_RE-checked
+since they contain no class-level derivation prose, only the two
+`.h`/`.cpp` pairs per class needed the check) passed both the `/*`/`*/`
+balance check and the exact-name-set diff before compiling.
+
+`make verify`: exit 0, 0 FAIL lines, all 4 new KATs (17 checks) passing,
+43 checks total across the whole suite. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko`
+produced (510736 bytes, up from batch 13's 508216), zero warnings/errors
+traceable to any of the 4 new files (confirmed via a build-log grep
+scoped to each new filename). `DECOMPILE_ERRORS.md` unchanged -- no
+compile/link blocker hit, no new Tier-B deferral either.
+`manifest/gen_oa_manifest.py` regenerated, OA.ko manifest 2445 -> 2462/
+21,689 (11.351%), delta exactly +17, confirmed via a full reconstructed
+qualified-name-set diff -- 0 regressions.
+
+**Shared-repo hygiene note, reconfirmed this batch**: `/home/share`'s
+git tree spans BOTH `reconstructed/OA` and `reconstructed/Eva` as one
+repo (confirmed via `git log --oneline` showing interleaved "OA.ko:" and
+"Eva:" commit messages), and a concurrent session's untracked
+`reconstructed/Eva/tools/build_gdbserver.sh` /
+`reconstructed/Eva/tools/gdbserver-i386-musl` files were sitting in
+`git status` output throughout this batch's work. Per
+[[shared_repo_commit_hygiene]], staged ONLY the 13 intended OA files by
+exact path (never `git add -A`/`git add .`) and verified `git diff
+--cached --stat` showed exactly those 13 paths immediately before
+committing -- avoided a repeat of the earlier CPianoOsc/CSTGEPModelPatch
+batch's accidental cross-project commit.
+
+**Next targets** (same technique, not yet done): ~127 more classes
+remain. `CSTGLFO`/`CSTGADSRBase`/`CSTGPatch` all CONFIRMED
+already-modeled this batch -- do not re-add to future candidate lists.
+`CSTGTG92OscBase`'s pure-virtual deferral from batch 12 still open.
+Fresh, not-yet-individually-verified candidates from this batch's own
+whole-binary sweep, by size: `CSTGVPMMixer` (4, confirmed fresh via
+word-boundary grep this batch, not yet picked), `CSTGPitchBase` (4,
+confirmed fresh), `CSTGVPMAudioInput` (4, confirmed fresh),
+`CSTGStringTrackCommon` (4, confirmed fresh). Below those: `CSTGPanOutput`
+(3), `CSTGVPMFilter` (3), `CSTGPitchModOscBase` (3), `CSTGTG92Osc` (2),
+`CSTGPitchModBase` (2), `CSTGPCMModelPatch` (2 -- note this contradicts
+batch 9's own "confirmed NOT part of this family" verdict, which found
+only 2 T-linkage symbols; this batch's whole-binary sweep found 2 W
+(weak) ctx-only-suffix symbols instead -- UNRECONCILED, re-check via a
+direct `nm` query on `CSTGPCMModelPatch` specifically before trusting
+either verdict, don't assume the newer sweep is automatically right),
+plus singletons `CSTGComponent`/`CSTGTG01Filter`/`CSTGStringTrack`/
+`CSTGAnalogSyncModelPatch` (1 each, unverified). Re-run the whole-binary
+sweep query fresh once these are exhausted, always doing the
+word-boundary grep + already-modeled check before picking.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
@@ -1253,6 +1384,8 @@ CSTGVPMModelPatch + CSTGVPMTG92Osc value-getter families",
 "CSTGEG + CSTGPanOutputBase + CSTGPianoLPF value-getter families",
 "CSTGAmp + CSTG3BandEQBase + CSTGEGBase value-getter families",
 "CSTGVPMOutputMixer + CSTGKeyTrack + CSTGPortamentoBase value-getter
-families", and "CSTGDriver + CSTGVPMNoise + CSTGAnalog4Pole +
+families", "CSTGDriver + CSTGVPMNoise + CSTGAnalog4Pole +
 CSTGPluckedModelPatch + CSTGMOSSAmp + CSTGPitchModOsc value-getter
-families" entries for the full per-batch derivation notes.
+families", and "CSTGSimpleAMSMixer + CSTGPitchModCommon +
+CSTGPitchModCommonPlusAMS + CSTGVPMEG value-getter families" entries for
+the full per-batch derivation notes.
