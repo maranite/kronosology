@@ -3479,6 +3479,52 @@ RECONSTRUCTED = {
     "083013c0",  # CLongBinaryFile::Open(char const*, int, bool)
     "08301410",  # CLongBinaryFile::~CLongBinaryFile()
     "08301470",  # CLongBinaryFile::CLongBinaryFile()
+
+    # CKorgPath/CKorgLinuxPath/UKontaktOposPath (2026-07-28) -- see korg_path.h,
+    # korg_linux_path.h, kontakt_opos_path.h for full provenance. Abstract path
+    # value-class base + its one real concrete Linux override, plus the 2 (of 3)
+    # UKontaktOposPath OPOS<->Linux conversion helpers this family's own
+    # GetOposPath/SetOposPath dispatch through. Also added this batch:
+    # CFileOperation::GetLinuxRemapPath (long_binary_file.h) as an extern-only
+    # slice of the already out-of-scope CFileOperation god object -- NOT added
+    # to RECONSTRUCTED (no real body here, host-stub-backed only, same
+    # convention as CFileOperation::Open/Close/Read/Write/Seek/Tell above).
+    "089d25c0",  # CKorgPath::~CKorgPath()
+    "089d25d0",  # CKorgPath::~CKorgPath()
+    "089d25f0",  # CKorgPath::GetOposPath(char*, unsigned int)
+    "089d2630",  # CKorgPath::SetOposPath(char const*)
+    "089d2680",  # CKorgPath::CKorgPath(char const*)
+    "089d26d0",  # CKorgPath::CKorgPath(CKorgPath const*)
+    "089d2720",  # CKorgPath::Set(CKorgPath const*, char const*)
+    "089d27d0",  # CKorgPath::GetPath(char*, unsigned int) const
+    "089d2810",  # CKorgPath::SetPath(char const*)
+    "089d2860",  # CKorgPath::GetPathName() const
+    "089d28a0",  # CKorgPath::GetPathExtension() const
+    "089d28c0",  # CKorgPath::GetPathNameNoExtension(char*, unsigned int) const
+    "089d2950",  # CKorgPath::GetFolder() const
+    "089d29a0",  # CKorgPath::MakePathFromFolder(char const*) const
+    "089d2a50",  # CKorgPath::Find(CKorgPath const&) const
+    "089d2b40",  # CKorgPath::HasExtension(char const*, char const*)
+    "089d2b80",  # CKorgPath::AddExtension(char*, unsigned int, char const*)
+    "089d2bd0",  # CKorgPath::RemoveExtension(char*)
+    "089d2c00",  # CKorgPath::RemoveExtension(char*, char*, unsigned int)
+    "089d2c70",  # CKorgPath::ValidExtension(char const*)
+    "089d2c90",  # CKorgPath::Sanitize(char*)
+    "089d2cd0",  # CKorgPath::Capitalized(char const*)
+    "089d32e0",  # CKorgPath::Make(char const*)
+    "089d2d00",  # CKorgLinuxPath::Separator() const
+    "089d2d10",  # CKorgLinuxPath::SetOposPath(char const*)
+    "089d2d60",  # CKorgLinuxPath::GetOposPath(char*, unsigned int)
+    "089d2d80",  # CKorgLinuxPath::~CKorgLinuxPath()
+    "089d2da0",  # CKorgLinuxPath::~CKorgLinuxPath()
+    "089d2dd0",  # CKorgLinuxPath::Copy() const
+    "089d2e20",  # CKorgLinuxPath::FindRecurse(char const*, CKorgPath const*) const
+    "089d30f0",  # CKorgLinuxPath::TemporaryFileUsingExtension(char const*) const
+    "089d3280",  # CKorgLinuxPath::CKorgLinuxPath(char const*)
+    "089d32b0",  # CKorgLinuxPath::CKorgLinuxPath(CKorgPath const*)
+    "089d3330",  # CKorgLinuxPath::Valid(char const*)
+    "0846ca20",  # UKontaktOposPath::ConvertOposToLinux(char const*, char*, unsigned int)
+    "0846cbe0",  # UKontaktOposPath::ConvertLinuxToOpos(char const*, char*, unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

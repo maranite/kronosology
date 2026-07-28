@@ -70,3 +70,27 @@ unsigned int CFileOperation::Tell(SFilePointer *fp, unsigned long *outPos)
 	*outPos = (unsigned long)pos;
 	return 1;
 }
+
+/* Added 2026-07-28 for UKontaktOposPath::ConvertOposToLinux()/
+ * ConvertLinuxToOpos() (kontakt_opos_path.h) -- real body is an out-of-scope
+ * static 2-level table lookup (see long_binary_file.h). Host stand-in
+ * returns 8 fixed, distinct paths under this project's build-host filesystem
+ * so the CKorgPath/CKorgLinuxPath KAT test can exercise real round-trip
+ * OPOS<->Linux conversion. */
+const char *CFileOperation::GetLinuxRemapPath(EDevice_Id id)
+{
+	static const char *const kPaths[8] = {
+		"/korg/rw",
+		"/mnt/usb0",
+		"/mnt/usb1",
+		"/mnt/sd",
+		"/mnt/cdrom",
+		"/mnt/net0",
+		"/mnt/net1",
+		"/mnt/ram",
+	};
+	unsigned int idx = (unsigned int)id;
+	if (idx >= 8)
+		idx = 0;
+	return kPaths[idx];
+}

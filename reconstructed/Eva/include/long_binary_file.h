@@ -71,6 +71,10 @@
 
 #include <cstddef>
 
+#include "file_io_base.h"	/* EDevice_Id, for CFileOperation::GetLinuxRemapPath() below --
+				 * added 2026-07-28 for the CKorgPath/CKorgLinuxPath batch, see
+				 * korg_path.h's own header comment. */
+
 /* Opaque file handle -- real ground truth is `CFileOperation`'s own
  * internal per-open-file record; never dereferenced by CLongBinaryFile
  * itself, only carried around and passed back to CFileOperation. */
@@ -98,6 +102,16 @@ public:
 	static unsigned int Write(const void *buf, unsigned int elemSize, unsigned int count, SFilePointer *fp);
 	static int Seek(SFilePointer *fp, long offset, ESeekType type);
 	static unsigned int Tell(SFilePointer *fp, unsigned long *outPos);
+
+	/* .text+0x083d0190, 24 bytes. Added 2026-07-28 for
+	 * UKontaktOposPath::ConvertOposToLinux()/ConvertLinuxToOpos()
+	 * (kontakt_opos_path.h) -- real body is a 2-level static table lookup
+	 * (`gDriveLetterRemap[id]` folded through a second `gDeviceMountPath[]`
+	 * table, both `.data`), not reproduced here (same "extern-only slice
+	 * of the out-of-scope god object" convention as Open/Close/Read/
+	 * Write/Seek/Tell above) -- see file_operation_stub.cpp for the host
+	 * KAT-test stand-in. */
+	static const char *GetLinuxRemapPath(EDevice_Id id);
 };
 
 class CLongBinaryFile {
