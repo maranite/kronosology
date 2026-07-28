@@ -73,3 +73,18 @@ reconstructs, not silently bounds-clamped away.
 
 See Eva's `include/waveform_template.h` (commit pending as of this note, follow-up #2 on
 top of `476a0dd`) for the worked example.
+
+**Second confirmed use, 2026-07-28 (Eva `CVFATEntry`, commit `3179c77`)**: applied again to
+3 methods in a fresh, unrelated class (`GetAliasChecksum()`'s own-field form, both
+`IsLongNameBitArrayEmpty()` overloads — see [[eva-vfat-entry-class-facts]]) found via a
+plain whole-binary `nm -C` class sweep, not a follow-up on the same function family as the
+first use. Confirms this technique generalizes beyond one-off "the interpreter tooling
+didn't survive" recovery — it's now the default choice (over hand-derivation-then-KAT) for
+any dense/branchy self-contained function, per the parent task's own standing instruction.
+Same recipe as before: confirm zero `call`/`R_386` relocations in the function's own byte
+range via `objdump -dr` FIRST, then extract+mmap+exec. This session's harness additionally
+swept input dimensions PAST their real/expected bounds (name/ext lengths past 8/3 chars,
+slot-array `count`/poke-position past the real 20-slot bound) specifically to confirm
+clamping/bounds behavior, not just typical-input correctness — worth doing whenever the
+real function's own bound constant (`GetMaxNumEntryForLongName()` etc) is itself one of the
+things being verified.

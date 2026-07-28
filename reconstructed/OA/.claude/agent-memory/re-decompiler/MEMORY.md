@@ -6,3 +6,4 @@
 - [CKGBankManager/CSPREngine/CKGSeqBackup* facts](ckg_bankmanager_class_facts.md) — struct layout + open GetValue() case-mapping gap, current as of commit efa0926; case-order != Set* declaration order CONFIRMED not simple, see stg_value_getter_family.md follow-up note
 - [STG value-getter family (~2300 methods, ~180 classes)](stg_value_getter_family.md) — huge codebase-wide Get*(ctx)->STGConvertedParam& pattern; 38 classes done (1000 methods), manifest 2445/21689, NEVER hand-compute KAT constants — script them, ~131 classes pending
 - [Shared-repo commit hygiene](shared_repo_commit_hygiene.md) — always `git diff --cached --stat` immediately before committing; concurrent sessions on /home/share can stage files between your `add` and `commit`
+- [Eva CVFATEntry class facts](eva_vfat_entry_class_facts.md) — real field offsets, VFAT checksum algorithm, slot-array/named-field overlap gotcha; GetSlotIndex needs CFATEntry modeled first
