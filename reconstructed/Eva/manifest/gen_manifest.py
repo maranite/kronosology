@@ -2646,6 +2646,31 @@ RECONSTRUCTED = {
     "089858e0",  # CWaveformTemplate::GetData(int) const
     "08985990",  # CWaveformTemplate::Shape(char) const
     "08985f80",  # CWaveformTemplate::EquationPolyline(int,int,int,int,const u8*,const char*)
+
+    # --- CVFATEntry, filesystem-metadata series continuation alongside CDirEntry/CZ
+    # (see include/vfat_entry.h for full provenance). 16 self-contained methods --
+    # zero external calls/relocations, confirmed via objdump -dr. GetAliasChecksum()
+    # and both IsLongNameBitArrayEmpty() overloads verified via the direct-execution
+    # oracle technique (mmap+PROT_EXEC on the real extracted machine code), 60000
+    # randomized trials + 3 exact spot-checks, 0 mismatches. GetSlotIndex()/
+    # OnShortNameChanged()/OnShortExtChanged()/Serialize()/Deserialize()/etc left
+    # unreconstructed -- see vfat_entry.h's own header comment for exact reasons.
+    "081462d0",  # CVFATEntry::ComputeChecksum(unsigned char, unsigned char)
+    "08146180",  # CVFATEntry::GetAliasChecksum(unsigned char const*) const
+    "081461d0",  # CVFATEntry::GetAliasChecksum() const
+    "08145970",  # CVFATEntry::GetMaxNumEntryForLongName()
+    "08145980",  # CVFATEntry::GetMaxCharPerEntry()
+    "08145990",  # CVFATEntry::GetMaxCharForLongName()
+    "081459a0",  # CVFATEntry::GetLongNameMark()
+    "08146920",  # CVFATEntry::GetCurrentSlotIndex() const
+    "08146930",  # CVFATEntry::GetCurrentAliasChecksum() const
+    "08146940",  # CVFATEntry::GetCurrentNumForShortNameExt() const
+    "08146950",  # CVFATEntry::GetOutputCodePage() const
+    "08142510",  # CVFATEntry::HasValidLongNameExt() const
+    "08142520",  # CVFATEntry::OnLongNameChanged()
+    "08142530",  # CVFATEntry::OnLongExtChanged()
+    "081437c0",  # CVFATEntry::IsLongNameBitArrayEmpty() const
+    "081438c0",  # CVFATEntry::IsLongNameBitArrayEmpty(unsigned int) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
