@@ -1265,3 +1265,49 @@ should know they exist and are untested/unmodeled, not silently absent.
   `Parse`/`SkipNode`/`AddObject` (the libxml2-calling methods) are not
   independently host-tested for the same reason. Full host `make verify`
   green (65/65 binaries). Eva manifest 1747 -> 1772/37,795 (4.688%).
+- **`CFileIoAkai`/`CFileIoDos`/`CFileIoIso9660`** (2026-07-28, storage-cluster
+  follow-up to `CFileIoUnknown` -- the 3 concrete `CFileIoBase` media-I/O
+  drivers file_io_base.h's own "OUT OF SCOPE" list flagged as good future-pass
+  candidates) — 68 of 69 real `.text` entry points reconstructed (19/19 Akai,
+  30/31 Dos, 19/19 Iso9660): ctor/dtor + every real virtual override + the
+  shared `set_error()`/path-conversion helper(s) for each. Each wraps a
+  distinct real embedded filesystem library (`aki_`/`akiutil_` for Akai,
+  `pc_`/`po_` -- the well-known HCC/EBS RTFS embedded FAT API shape -- for
+  Dos, `cd_` for Iso9660), all out of scope, modeled as inert stand-ins same
+  convention as `CFileIoUnknown`'s own. `CFileIoDos::format(EDevice_Id, int,
+  EFatType)` (`.text+0x0831afc0`, 0xbd8=3032 bytes, the single largest method
+  in this whole batch) is DEFERRED -- see `DECOMPILE_ERRORS.md` for the full
+  rationale (a genuine multi-call resumable FAT-format state machine driven by
+  the static `CFileIoDos::iStage`, real `pc_mkfs`/`pc_fat_size` calls, real
+  boot-sector/volume-label string building -- fully disassembled and
+  understood at the control-flow level but too large for this pass, same
+  "surveyed and explicitly passed over" treatment `CFileIoCdda`/`CFileIoUdf`
+  already got the batch before). Two genuinely interesting independently
+  verified findings surfaced along the way: (1) `CFileIoAkai::set_error()`
+  and `CFileIoDos::set_error()` share the exact same raw-error-code global
+  (`fs_user`, .bss+0x9608d90) and the same 44-entry-table SHAPE, but their
+  tables differ at exactly one mapped slot (raw code 24) and Akai logs an
+  Api-assert on unmapped codes while Dos silently ignores them -- confirmed
+  via two independent `objdump -s` reads of the two distinct `.rodata` table
+  addresses; (2) `CFileIoIso9660::fmount()` returns -1 on EVERY code path,
+  including full success (the return register is set once at function entry
+  and never reassigned anywhere in the function body) -- the real
+  `scsi_mode_sel`/`cd_dskopen` side-effecting calls still happen, only the
+  reported result is always failure. `dir()`'s inline packed-date-decode
+  arithmetic (a real divide-by-100-via-multiply idiom, `0x147b >> 0x11`) is
+  byte-identical across all 3 classes and also matches the shape already
+  documented for other reconstructed classes project-wide. A few of the
+  deepest sub-branches (`CFileIoDos::optimizemedium()`/`scandisk()`/
+  `getmediainfo()`/`fmount()`'s own opaque `ddrive`/`fsinfo` field reads,
+  `CFileIoIso9660::ConvertPathRtfsToCdfs()`'s final `strcat()` argument
+  wiring) are transcribed at a faithful structural level with clearly-flagged
+  medium-confidence simplifications rather than forced byte-exact matches --
+  see each method's own header/source comment. `verify/test_file_io_akai.cpp`
+  (19 checks), `verify/test_file_io_dos.cpp` (32 checks), and
+  `verify/test_file_io_iso9660.cpp` (19 checks) all green; full host
+  `make verify` green (70/70 binaries, the pre-existing
+  `test_client_comm_server` ASLR flake did not reproduce this run). Not
+  tested on real hardware -- no reconstructed caller anywhere in this project
+  yet (same status as the rest of the storage/disk-driver cluster).
+  `CFileIoCdda`/`CFileIoUdf` remain fully out of scope. Eva manifest
+  1940 -> 2008/37,795 (5.313%).
