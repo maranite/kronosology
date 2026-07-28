@@ -3488,3 +3488,48 @@ but never touched `manifest/gen_manifest.py`'s own `RECONSTRUCTED` address set â
 bookkeeping gap, not a re-opened RE question. All 25 addresses (verified against each
 commit's own header-comment-documented `.text+0x...` values, no new disassembly needed)
 backfilled in one pass. Manifest 512 -> 555 of 37,795.
+
+## Manifest audit + CKorgRiff reconstruction (2026-07-28)
+
+Two-part pass: (1) audit whether Eva's manifest generator (a hand-maintained literal
+`RECONSTRUCTED` address set, not OA.ko's regex-name-matching approach) has the same
+class of systemic undercounting bug OA.ko's own generator was just found to have
+(`e585c62`) -- verified it does NOT have that SPECIFIC bug class (no regex, no
+inline-in-class blind spot), but a systematic cross-check (every commit touching
+`src`/`include` checked for whether it ALSO touched `manifest/gen_manifest.py` in the
+same commit) found 2 real, previously-unbackfilled gaps from 2 different prior commits:
+`bb606a3`'s own backfill of the `00885a4` `CHeap`/`CChkCmdBG`/`CTimerEngine` batch
+listed 13 of 14 real addresses but missed `CTimerEngine::~CTimerEngine()`'s D0
+(deleting) half (`0816be90`) -- its D2 sibling (`0816be00`) WAS backfilled; and
+`fa6ac5c` ("`CChunkServer::Exec(CMessage&)` promoted Tier B -> Tier A") never touched
+the manifest at all, leaving a stale in-file comment claiming that exact function
+"stays Tier B" despite the commit's own message saying it closed the class. Both fixed
+(`080cc0d0` added, stale comment corrected). Every other manifest-silent commit in the
+full history (24 total) was individually checked and confirmed doc-only/bugfix-only
+(no new reconstructed address), and the 2 already-known backfill commits (`1877d3f`,
+`abf285d`) were independently re-verified complete against their own source commits'
+real addresses. Manifest 2479 -> 2481 of 37,795.
+
+(2) Fresh `nm -C` class-inventory sweep (same technique as `korg_file.h`'s own
+"shared root + siblings" discovery) found `CKorgRiff`, a SECOND, previously
+undocumented sibling family sharing the `CKorgFile` root -- see
+`include/korg_riff.h` for full provenance (vtable-slot-shape confirmation via direct
+`.rodata` typeinfo/vtable byte reads, not inferred from naming; `CKorgKmp`/`CKorgKsf`
+in turn derive from `CKorgRiff` itself, while `CKorgKsc` derives directly from
+`CKorgFile` instead and is a different, NOT-part-of-this-family sibling). Reconstructed
+`CKorgRiff` itself in full (22 addresses, 12 distinctly-named methods: ctor/dtor(D1+D0),
+`ReadFile`/`WriteFile` (the real "NAME"-chunk-vs-virtual-`ReadChunk()`-dispatch RIFF
+loop), `ReadChunk`'s own base skip-via-`fseek` body, `WriteHeader`, `IsBigEndian`
+(base: always false), the `SwapFile`/`SwapLittleEndian`/`SwapBigEndian`/`Swap` overload
+families (3 each), and the nested `CNameChunk` value type's `GetName`/`SetName`) --
+`CKorgKmp`/`CKorgKsc`/`CKorgKsf`/`CKorgProgram` (the real concrete siblings, one of
+which -- `CKorgKsc` -- has a confirmed-real caller, `UKontaktToKorgConvert::Create()`/
+`::Convert()`, proving this whole hierarchy is live ground-truth code, not vestigial)
+deliberately deferred as the natural next lead, same "clean base first, concrete
+siblings later" precedent `CKorgFile` itself already established. New
+`verify/test_korg_riff.cpp`: 27 checks including a real host round-trip (`WriteFile()`
+-> real `fopen`/`fwrite` -> fresh instance `ReadFile()`s it back) exercising the
+"NAME"-chunk special case, virtual `ReadChunk()` dispatch for an unrecognized tag, and
+both `IsBigEndian()` branches of `SwapFile()`/`WriteHeader()`'s length-field swap. Full
+`make -k verify` (83 binaries) stays green (0 FAIL); `tools/build_lenny.sh`: `LINK OK`
+against the real on-image ABI. Manifest 2481 -> 2503 of 37,795.

@@ -729,7 +729,10 @@ RECONSTRUCTED = {
     "0816ec60",  # CInternalClock::CInternalClock()
     "08195e30",  # CInternalClock::~CInternalClock() (non-deleting)
     "0816bf40",  # CTimerEngine::CTimerEngine(CModule const&)
-    "0816be00",  # CTimerEngine::~CTimerEngine() (non-deleting)
+    "0816be00",  # CTimerEngine::~CTimerEngine() (D2, non-deleting)
+    "0816be90",  # CTimerEngine::~CTimerEngine() (D0, deleting) -- 2026-07-28 gap fix,
+                 # see comment below: commit bb606a3's own backfill of the 00885a4
+                 # batch listed the D2 half but missed this D0 sibling
 
     # CFileMan/CResMan ctor batch (Stage 6 breadth sweep, 2026-07-25 -- the "What's
     # still open" CFileMan/CResMan ctor batch, file_man.h/res_man.h/
@@ -855,7 +858,11 @@ RECONSTRUCTED = {
     # CreateUserModules() unlock) -- CChunkServer (chunk_server.h) + CEditor::
     # CChunkServerTask (editor.h), the LAST previously-deferred fan-out target,
     # wired in UNCONDITIONALLY (not gated, unlike CAlphaKeybIfcTask). Exec
-    # (CMessage&) (080cc0d0) stays Tier B -- see chunk_server.h. Load()
+    # (CMessage&) (080cc0d0) originally stayed Tier B here -- see chunk_server.h.
+    # STALE: promoted to Tier A the same day by fa6ac5c ("CChunkServer::
+    # Exec(CMessage&) promoted Tier B -> Tier A", closes the last Tier B method
+    # in CChunkServer), but that commit never touched this manifest -- backfilled
+    # 2026-07-28, see the standalone entry further below (search "fa6ac5c"). Load()
     # (080cbfd0) was ALSO originally left Tier B here but promoted later the
     # same day -- see the standalone entry further below.
     "080cbcf0",  # CChunkServer::CChunkServer(CModule const&, EAccessMode)
@@ -3619,6 +3626,55 @@ RECONSTRUCTED = {
     "080b2600",  # CChunkOrphan::CChunkOrphan(SChkHeader const&, unsigned char*, int)
     "081852f0",  # CChunkBase::GetAvailBytes() const
     "08185360",  # CChunkBlock::GetRelSonNestLev() const
+
+    # --- Manifest bookkeeping gap fix (2026-07-28, Eva manifest audit): commit
+    # fa6ac5c ("CChunkServer::Exec(CMessage&) promoted Tier B -> Tier A", closes the
+    # last Tier B method in CChunkServer, chunk_server.h) reconstructed a real 1336-
+    # byte function but never updated this manifest. Found via a systematic pass
+    # cross-checking every commit that touched src/include against whether it also
+    # touched this file in the same commit -- see also the 0816be90 entry above
+    # (same bug class, different commit: bb606a3's own backfill of the 00885a4 batch
+    # missed one sibling address).
+    "080cc0d0",  # CChunkServer::Exec(CMessage&)
+
+    # --- CKorgRiff, a generic RIFF-style chunked-file base deriving from the
+    # already-reconstructed CKorgFile (2026-07-28, fresh nm -C class-inventory
+    # sweep -- see include/korg_riff.h for the full "shared root + siblings"
+    # provenance, vtable-slot layout, and the deliberately-deferred
+    # CKorgKmp/CKorgKsc/CKorgKsf/CKorgProgram sibling family). All 22
+    # addresses below (12 distinctly-named real methods; dtor/SwapFile/
+    # SwapLittleEndian/SwapBigEndian/Swap each contribute 2-3 addresses for
+    # D1/D0 or the short/ushort/uint overload set) verified present in the
+    # static export via a direct functions.csv address lookup before being
+    # added here. verify/test_korg_riff.cpp: 27 checks, including a real host
+    # round-trip (WriteFile() -> fopen/fwrite a real file -> fresh instance
+    # ReadFile()s it back) exercising the "NAME"-chunk special case, the
+    # virtual ReadChunk() dispatch for an unrecognized tag, and both
+    # IsBigEndian() branches of SwapFile()/WriteHeader(). Full make -k verify
+    # (83 binaries) stays green (0 FAIL); tools/build_lenny.sh LINK OK
+    # against the real on-image ABI.
+    "089d1770",  # CKorgRiff::ReadChunk(unsigned int, unsigned int, FILE*)
+    "089d17a0",  # CKorgRiff::~CKorgRiff() [D1]
+    "089d17c0",  # CKorgRiff::~CKorgRiff() [D0, deleting]
+    "089d17f0",  # CKorgRiff::ReadFile(FILE*)
+    "089d18e0",  # CKorgRiff::WriteFile(FILE*)
+    "089d1990",  # CKorgRiff::CKorgRiff(char const*, char const*)
+    "089d19d0",  # CKorgRiff::CNameChunk::GetName(char*, unsigned int) const
+    "089d1a00",  # CKorgRiff::CNameChunk::SetName(char const*)
+    "089d1a30",  # CKorgRiff::WriteHeader(unsigned int, unsigned int, FILE*)
+    "089d1a90",  # CKorgRiff::SwapFile(short&)
+    "089d1ac0",  # CKorgRiff::SwapFile(unsigned short&)
+    "089d1af0",  # CKorgRiff::SwapFile(unsigned int&)
+    "089d1b20",  # CKorgRiff::SwapLittleEndian(short&)
+    "089d1b30",  # CKorgRiff::SwapLittleEndian(unsigned short&)
+    "089d1b40",  # CKorgRiff::SwapLittleEndian(unsigned int&)
+    "089d1b50",  # CKorgRiff::SwapBigEndian(short&)
+    "089d1b60",  # CKorgRiff::SwapBigEndian(unsigned short&)
+    "089d1b70",  # CKorgRiff::SwapBigEndian(unsigned int&)
+    "089d1b80",  # CKorgRiff::Swap(short&)
+    "089d1b90",  # CKorgRiff::Swap(unsigned short&)
+    "089d1ba0",  # CKorgRiff::Swap(unsigned int&)
+    "089da490",  # CKorgRiff::IsBigEndian() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
