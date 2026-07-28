@@ -173,6 +173,9 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_analog_sync_osc_valuegetters.o \
            src/engine/piano_osc_valuegetters.o \
            src/engine/stg_ep_model_patch_valuegetters.o \
+           src/engine/stg_organ_osc_valuegetters.o \
+           src/engine/stg_vpm_osc_valuegetters.o \
+           src/engine/stg_ms20_model_patch_valuegetters.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -419,6 +422,9 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_analog_sync_osc_valuegetters.cpp \
        src/engine/piano_osc_valuegetters.cpp \
        src/engine/stg_ep_model_patch_valuegetters.cpp \
+       src/engine/stg_organ_osc_valuegetters.cpp \
+       src/engine/stg_vpm_osc_valuegetters.cpp \
+       src/engine/stg_ms20_model_patch_valuegetters.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -623,7 +629,10 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_polysix_valuegetters \
          verify/test_stg_analog_sync_osc_valuegetters \
          verify/test_piano_osc_valuegetters \
-         verify/test_stg_ep_model_patch_valuegetters
+         verify/test_stg_ep_model_patch_valuegetters \
+         verify/test_stg_organ_osc_valuegetters \
+         verify/test_stg_vpm_osc_valuegetters \
+         verify/test_stg_ms20_model_patch_valuegetters
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -815,6 +824,15 @@ verify/test_piano_osc_valuegetters: verify/test_piano_osc_valuegetters.cpp src/e
 
 verify/test_stg_ep_model_patch_valuegetters: verify/test_stg_ep_model_patch_valuegetters.cpp src/engine/stg_ep_model_patch_valuegetters.cpp include/oa_stg_ep_model_patch.h include/oa_adsr_base.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_ep_model_patch_valuegetters.cpp src/engine/stg_ep_model_patch_valuegetters.cpp -o $@
+
+verify/test_stg_organ_osc_valuegetters: verify/test_stg_organ_osc_valuegetters.cpp src/engine/stg_organ_osc_valuegetters.cpp include/oa_stg_organ_osc.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_organ_osc_valuegetters.cpp src/engine/stg_organ_osc_valuegetters.cpp -o $@
+
+verify/test_stg_vpm_osc_valuegetters: verify/test_stg_vpm_osc_valuegetters.cpp src/engine/stg_vpm_osc_valuegetters.cpp include/oa_stg_vpm_osc.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_vpm_osc_valuegetters.cpp src/engine/stg_vpm_osc_valuegetters.cpp -o $@
+
+verify/test_stg_ms20_model_patch_valuegetters: verify/test_stg_ms20_model_patch_valuegetters.cpp src/engine/stg_ms20_model_patch_valuegetters.cpp include/oa_stg_ms20_model_patch.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_ms20_model_patch_valuegetters.cpp src/engine/stg_ms20_model_patch_valuegetters.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
