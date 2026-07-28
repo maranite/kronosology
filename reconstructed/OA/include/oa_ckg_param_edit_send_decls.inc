@@ -88,3 +88,50 @@
 	void SendUseGChAlso(unsigned char, unsigned char);
 
 	unsigned int GetRTParmBufferSelectId(int deviceIndex);  /* used by the Shape-C/D Knob/Sw/Scene families */
+
+	/*
+	 * CKGCommonParamMsgHandler's own SendXxx() targets (src/engine/
+	 * ckg_common_param_handler.cpp) -- same "declare only what's
+	 * actually called, bodies out of scope" convention as the Module
+	 * group above.
+	 */
+	void SendTempo(unsigned short);
+	void SendTimeSig(unsigned char);
+	void SendPadMode(unsigned char);
+	void SendBufferSelect(unsigned char);
+	void SendLatch(bool);
+	void SendOnOff(bool);
+	void SendNoteMapTable(int, int);
+	void SendSceneChangeQuantize(int);
+	void SendDynInputModule(unsigned char, unsigned char);
+	void SendDynPolarity(unsigned char, unsigned char);
+	void SendDynSource(unsigned char, unsigned char);
+	void SendDynDestination(unsigned char, unsigned char);
+	void SendDynModule(unsigned char, unsigned char, unsigned char);
+	void SendDynAction(unsigned char, unsigned char);
+	void SendDynTop(unsigned char, unsigned char);
+	void SendDynBottom(unsigned char, unsigned char);
+	void SendRTPParamGroup(unsigned char, unsigned char);
+	void SendRTPParamAssign(unsigned char, unsigned char);
+	void SendRTPModule(unsigned char, unsigned char, unsigned char);
+	void SendRTPPolarity(unsigned char, char);
+	void SendRTPDestKnob(unsigned char, char);
+	void SendRTPMinValue(unsigned char, short);
+	void SendRTPMaxValue(unsigned char, short);
+	void SendRTPValue(unsigned char, short);
+	void SendChordMemNote(int, int, int);
+	void SendChordMemVelocity(int, int, unsigned char);
+	void SendChordMemChannel(int, unsigned char);
+	void SendDTRun(unsigned char, unsigned char);
+
+	/*
+	 * CKGGlobalParamMsgHandler's own SendXxx() targets (src/engine/
+	 * ckg_global_param_handler.cpp). SetEnableMIDIInToKarmaModule is a
+	 * real confirmed exception to the "Send" prefix convention -- its
+	 * own real mangled name has no "Send" at all.
+	 */
+	void SendGlobalTranspose(signed char);
+	void SendGlobalMIDICh(signed char);
+	void SendMIDIClockSource(bool);
+	void SendForceKarmaOff(bool);
+	void SetEnableMIDIInToKarmaModule(bool);

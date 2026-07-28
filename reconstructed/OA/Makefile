@@ -229,6 +229,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_wave_sequence_valuegetters.o \
            src/engine/stg_tg92_osc_base_valuegetters.o \
            src/engine/ckg_module_param_handler.o \
+           src/engine/ckg_common_param_handler.o \
+           src/engine/ckg_global_param_handler.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -531,6 +533,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_wave_sequence_valuegetters.cpp \
        src/engine/stg_tg92_osc_base_valuegetters.cpp \
        src/engine/ckg_module_param_handler.cpp \
+       src/engine/ckg_common_param_handler.cpp \
+       src/engine/ckg_global_param_handler.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -791,7 +795,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_hdr_track_valuegetters \
          verify/test_stg_wave_sequence_valuegetters \
          verify/test_stg_tg92_osc_base_valuegetters \
-         verify/test_ckg_module_param_handler
+         verify/test_ckg_module_param_handler \
+         verify/test_ckg_common_param_handler \
+         verify/test_ckg_global_param_handler
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -1151,6 +1157,12 @@ verify/test_stg_tg92_osc_base_valuegetters: verify/test_stg_tg92_osc_base_valueg
 
 verify/test_ckg_module_param_handler: verify/test_ckg_module_param_handler.cpp src/engine/ckg_module_param_handler.cpp include/oa_ckg_module_param_msg_handler.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_module_param_handler.cpp src/engine/ckg_module_param_handler.cpp -o $@
+
+verify/test_ckg_common_param_handler: verify/test_ckg_common_param_handler.cpp src/engine/ckg_common_param_handler.cpp include/oa_ckg_common_param_msg_handler.h include/oa_ckg_module_param_msg_handler.h include/oa_engine_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_common_param_handler.cpp src/engine/ckg_common_param_handler.cpp -o $@
+
+verify/test_ckg_global_param_handler: verify/test_ckg_global_param_handler.cpp src/engine/ckg_global_param_handler.cpp include/oa_ckg_global_param_msg_handler.h include/oa_ckg_module_param_msg_handler.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_global_param_handler.cpp src/engine/ckg_global_param_handler.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@

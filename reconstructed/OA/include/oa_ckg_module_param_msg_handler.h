@@ -408,6 +408,15 @@ struct CKGParamEdit;
 struct CKGEngine {
 	static unsigned char *ms_poInstance;
 	static CKGParamEdit *ms_poKGParamEdit;
+
+	/*
+	 * ResetLocalController() -- real instance method, discovered while
+	 * reconstructing CKGGlobalParamMsgHandler::SetGlobalKeyTranspose()/
+	 * SetMIDIChannel() (src/engine/ckg_global_param_handler.cpp), called
+	 * through ms_poInstance as `this` (same cast-through-raw-pointer
+	 * idiom as every other singleton here). Own body out of scope.
+	 */
+	void ResetLocalController();
 };
 
 /*
@@ -438,6 +447,19 @@ struct CKGParamEdit {
 struct CKGUIMsgProcessor {
 	static unsigned char *ms_poInstance;
 	void NotifyAfterEdit();
+
+	/*
+	 * Two more real overloads/methods, discovered while reconstructing
+	 * CKGCommonParamMsgHandler (src/engine/ckg_common_param_handler.cpp):
+	 * SetTempo() calls a 2-arg NotifyAfterEdit(bool, int) overload
+	 * instead of the 0-arg one every other Shape-B method uses (real
+	 * mangled `Ebi`, confirmed distinct from `Ev`); SetScene()'s own
+	 * 4-module linked-scene broadcast loop calls SendModuleSceneMessage
+	 * (real mangled `Eii`) once per real KARMA module whose own
+	 * `+0x2e4` byte has bit 0x8 set.
+	 */
+	void NotifyAfterEdit(bool immediate, int value);
+	void SendModuleSceneMessage(int moduleIndex, int sceneId);
 };
 
 /*

@@ -2334,6 +2334,21 @@ struct CKGBankManager {
 	 */
 	unsigned char *GetCombiKarmaPerfModule(eSTGCombiBankId bankId, unsigned int index);
 	unsigned char *GetProgKarmaPerfModule(eSTGProgramBankId bankId, unsigned int index);
+
+	/*
+	 * Two more real methods, discovered while reconstructing
+	 * CKGCommonParamMsgHandler::GetKarmaPerfCommon() (src/engine/
+	 * ckg_common_param_handler.cpp) -- same "this IS the singleton"
+	 * call shape as the others above. Unlike GetProgKarmaPerfModule/
+	 * GetCombiKarmaPerfModule (which are the deviceIndex*0x2e8-offset
+	 * base for a per-module record), these two are the direct
+	 * per-Combi/Song "Common" record base -- confirmed by
+	 * GetKarmaPerfCommon()'s own disassembly returning each call's
+	 * result completely unmodified (no offset add of any kind), unlike
+	 * the Module-side siblings' Seq/Combi cases.
+	 */
+	unsigned char *GetProgKarmaPerfCommon(eSTGProgramBankId bankId, unsigned int index);
+	unsigned char *GetCombiKarmaPerfCommon(eSTGCombiBankId bankId, unsigned int index);
 };
 
 /*
