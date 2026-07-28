@@ -2691,6 +2691,57 @@ RECONSTRUCTED = {
     "0838e510",  # CBitMaskL::init(unsigned long)
     "0838e530",  # CBitMaskL::GetNumOfSetBit()
     "0838e6c0",  # CBitMaskL::getbit(unsigned long&)
+
+    # --- CStream/CIn/COut/CInOut/CNullStr/CMemory (2026-07-28, fresh nm -C
+    # class-inventory sweep after CBitMaskL/CVFATEntry; CBigEndObj re-confirmed
+    # rejected -- see stream_family.h's own header comment) ---
+    "0804cf60",  # CStream::~CStream() D1
+    "0804d120",  # CStream::~CStream() D0
+    "0804cf70",  # CStream::GetLength() const volatile
+    "0804cf80",  # CStream::Tell() const volatile
+    "080a1df0",  # CStream::Open(char const*, CStream::EAccessMode)
+    "080a2100",  # CStream::CStream()
+    "080a2130",  # CStream::IsSought(long&, CStream::ESeekType)
+    "0804cf90",  # CIn::~CIn() D1
+    "0804d1a0",  # CIn::~CIn() D0
+    "0804cfc0",  # CIn::Get(unsigned char&)
+    "080a1e20",  # CIn::Open(char const*, CStream::EAccessMode)
+    "0804cff0",  # COut::~COut() D1
+    "0804d0c0",  # COut::~COut() D0
+    "0804d020",  # COut::Put(unsigned char)
+    "080a1ec0",  # COut::Open(char const*, CStream::EAccessMode)
+    "080a1f60",  # CInOut::~CInOut() D1
+    "080a2090",  # CInOut::~CInOut() D0
+    "080a2230",  # CInOut::~CInOut() D2
+    "080a1fd0",  # CInOut::Open(char const*, CStream::EAccessMode)
+    "080a18f0",  # CNullStr::Close()
+    "080a1920",  # CNullStr::Read(void*, unsigned int)
+    "080a19b0",  # CNullStr::Write(void const*, unsigned int)
+    "080a1a50",  # CNullStr::Flush()
+    "080a1ab0",  # CNullStr::AreUsingTheNext(unsigned int)
+    "080a1ad0",  # CNullStr::CurrBufferCapacity() const
+    "080a1af0",  # CNullStr::IsReady() volatile
+    "080a1b10",  # CNullStr::Open(char const*, CStream::EAccessMode)
+    "080a1b90",  # CNullStr::Seek(long, CStream::ESeekType)
+    "080a1bf0",  # CNullStr::~CNullStr() D1
+    "080a1c60",  # CNullStr::~CNullStr() D0
+    "080a1ce0",  # CNullStr::CNullStr() C2
+    "080a1d40",  # CNullStr::CNullStr() C1
+    "080a1db0",  # CNullStr::~CNullStr() D2
+    "080a1070",  # CMemory::Close()
+    "080a10a0",  # CMemory::Flush()
+    "080a1100",  # CMemory::AreUsingTheNext(unsigned int)
+    "080a1120",  # CMemory::CurrBufferCapacity() const
+    "080a1140",  # CMemory::IsReady() volatile
+    "080a1160",  # CMemory::Open(char const*, CStream::EAccessMode)
+    "080a1220",  # CMemory::Write(void const*, unsigned int)
+    "080a1350",  # CMemory::Read(void*, unsigned int)
+    "080a1470",  # CMemory::Seek(long, CStream::ESeekType)
+    "080a1520",  # CMemory::~CMemory() D1
+    "080a15a0",  # CMemory::~CMemory() D0
+    "080a1630",  # CMemory::CMemory(unsigned char*, unsigned long, int) C2
+    "080a1750",  # CMemory::CMemory(unsigned char*, unsigned long, int) C1
+    "080a1880",  # CMemory::~CMemory() D2
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
