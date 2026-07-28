@@ -1,8 +1,58 @@
 ---
 name: ckg-module-param-msg-handler-family
-description: OA.ko's KARMA "checked write" message-dispatch family -- CKGModuleParamMsgHandler/CKGCommonParamMsgHandler/CKGGlobalParamMsgHandler, the NEXT dense cluster found after the STG value-getter family was exhausted (2026-07-28). CKGModuleParamMsgHandler batch 1 done: 113/131 methods, manifest 2598->2711.
+description: OA.ko's KARMA "checked write" message-dispatch family -- CKGModuleParamMsgHandler/CKGCommonParamMsgHandler/CKGGlobalParamMsgHandler, the NEXT dense cluster found after the STG value-getter family was exhausted (2026-07-28). CKGModuleParamMsgHandler now COMPLETE: 131/131 methods (batch 1: 113, manifest 2598->2711; batch 2: 18, manifest 2711->2730, commit 3c451f6) -- also fixed a systemic inverted-gate bug from batch 1 affecting all 85 Shape-B methods.
 type: project
 ---
+
+**UPDATE 2026-07-28 (batch 2, commit `3c451f6`)**: finished the 18
+deliberately-deferred methods from batch 1 -- `SetKnob1Value`..`SetKnob8Value`/
+`SetSw1Value`..`SetSw8Value` (Shape C/D: same Shape-B skeleton plus a
+`CKGParamEdit::GetRTParmBufferSelectId(msg->m_deviceIndex)` indirection
+feeding the Send call's own first arg; Knob-only adds a conditional
+`SKSTGGate_NotifyKarmaSliderPosition(0)` tail call gated on UI mode != 1)
+and `SetScene`/`SetLinkedSceneId` (real idx-dependent packed-nibble
+outliers, traced from raw disassembly, NOT mechanically derivable from the
+skeleton -- see the header comment in `oa_ckg_module_param_msg_handler.h`
+for the full step-ordering trace; the two invert which of their two real
+fields is suppression-gated vs unconditional). `CKGModuleParamMsgHandler`
+is now 131/131, fully closed.
+
+**Bug found + fixed in the process (affects ALL 85 batch-1 Shape-B
+methods)**: `ShouldAttemptSysExShadowWrite()`'s range check was INVERTED.
+Batch 1 wrote `return (unsigned)(mode-8) <= 2u; /* mode in {8,9,10} */` --
+re-deriving the same gate while tracing `SetKnob1Value`/`SetSw1Value`
+against 3 independent ground-truth disassemblies (`SetValue`
+@.text+0x3cd650, `SetKnob1Value` @.text+0x3cf930, `SetGenCC`
+@.text+0x3cb1a0, all byte-identical in this block) showed the `ja
+<sysex-lookup-block>` branch is actually taken when `(mode-8)` is
+unsigned `> 2`, i.e. mode is OUTSIDE {8,9,10} -- the shadow-write attempt
+happens when mode is NOT in that range, not when it is. Fixed by flipping
+the comparison to `> 2u`. The batch-1 KAT test had encoded the SAME
+inverted assumption (`mode=9` "in {8,9,10}" expecting the shadow branch)
+so it was internally self-consistent but not ground-truth-faithful; fixed
+by changing the test's mode value to something outside the range (20)
+instead. No other assertions needed to change since the test was
+comparing against its own (also-inverted) expectations either way. This
+is a good general lesson: a KAT passing cleanly only proves internal
+self-consistency between the source and its own test, not ground-truth
+fidelity -- worth an independent disassembly spot-check even on
+"already-verified, already-shipped" shared helpers when a later batch
+gives a natural opportunity (here: needing to re-derive the same gate for
+2 more instances anyway).
+
+**New field discovered**: `CKGModuleParamMsgHandler::m_pendingSceneSendGuard`
+(`+0x14`, `void*`) -- `SetScene`-only, non-NULL suppresses its own
+`SendScene()`/`NotifyAfterEdit()` pair entirely. Semantics beyond that
+unconfirmed (never touched by any other method in this 131-method class).
+
+**Manifest gotcha reconfirmed**: the SKSTGGate_NotifyKarmaSliderPosition
+no-op stub (added to `src/stub/bar2_stubs.cpp` purely to link-satisfy the
+Knob tail call, real body a separate out-of-scope KARMA-slider-UI
+subsystem) counts as "reconstructed" in the manifest tool's own
+name-match convention despite being an empty stub -- same as every other
+deliberately-stubbed confirmed-real dependency project-wide. Manifest
+delta was +19 (18 real methods + this 1 stub-credit), confirmed harmless
+via the standard full before/after name-set diff (0 regressions).
 
 Discovered 2026-07-28 during a fresh broad survey for the next dense
 cluster after [[stg_value_getter_family]] was confirmed exhausted (both its
@@ -120,7 +170,8 @@ identical logic to the already-reconstructed
 `CKGSeqBackupModuleParam::GetKarmaPerfModuleForSeqBackup`, cross-checked
 against it directly).
 
-**Deliberately excluded, next-batch targets** (18/131, already fully
+**[RESOLVED in batch 2, 2026-07-28 -- see the UPDATE note at the top of
+this file] Was: deliberately excluded, next-batch targets** (18/131, already fully
 traced, NOT yet written up as C):
 - `SetKnob1Value`..`SetKnob8Value` (8) and `SetSw1Value`..`SetSw8Value` (8):
   same Shape-B skeleton PLUS a `CKGParamEdit::GetRTParmBufferSelectId()`
@@ -218,9 +269,8 @@ file (or one directory) per `mv` invocation when doing this kind of
 temporary relocation, never batch multiple sources against multiple
 plausible destinations in one command.
 
-**Next targets**: finish `CKGModuleParamMsgHandler`'s own remaining 18
-(Knob/Sw-value RTParm indirection + Scene/LinkedSceneId), then start
-`CKGCommonParamMsgHandler` (~76 pending) and `CKGGlobalParamMsgHandler`
+**Next targets**: `CKGModuleParamMsgHandler` itself is now fully closed
+(131/131, batch 2, 2026-07-28). Start `CKGCommonParamMsgHandler` (~76 pending) and `CKGGlobalParamMsgHandler`
 (~27 pending) -- check first whether a `CKGSeqBackupCommonParam`-equivalent
 read-side sibling exists for field cross-reference (very likely, given
 `CKGSeqBackupCommonParam` already exists per [[ckg_seq_backup_technique]]'s
