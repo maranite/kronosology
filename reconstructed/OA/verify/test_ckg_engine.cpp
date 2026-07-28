@@ -89,14 +89,18 @@ void RT_channel_in(short, short, short, short, short) { g_channelInCalls++; }
 void RT_bnd_range_thru(unsigned char, char, char) {}
 int KGOutGate_GetChannelInCombi(int) { return 0; }
 int KGOutGate_GetChannelInSong(int) { return 0; }
-void RT_midi_filt_in_tch(unsigned char, unsigned char) {}
-void RT_midi_filt_in_bnd(unsigned char, unsigned char) {}
-void RT_midi_filt_in_sus(unsigned char, unsigned char) {}
-void RT_midi_filt_in_cc1(unsigned char, unsigned char) {}
-void RT_midi_filt_in_cc2(unsigned char, unsigned char) {}
-void RT_midi_filt_in_ctl(unsigned char, unsigned char) {}
+static int g_midiFiltCalls;
+void RT_midi_filt_in_tch(unsigned char, unsigned char) { g_midiFiltCalls++; }
+void RT_midi_filt_in_bnd(unsigned char, unsigned char) { g_midiFiltCalls++; }
+void RT_midi_filt_in_sus(unsigned char, unsigned char) { g_midiFiltCalls++; }
+void RT_midi_filt_in_cc1(unsigned char, unsigned char) { g_midiFiltCalls++; }
+void RT_midi_filt_in_cc2(unsigned char, unsigned char) { g_midiFiltCalls++; }
+void RT_midi_filt_in_ctl(unsigned char, unsigned char) { g_midiFiltCalls++; }
 void RT_sysex_in(unsigned char *, long) {}
-void KS_get_rtp_name_string(unsigned char, unsigned char, char *out, unsigned char) { if (out) out[0] = 0; }
+static int g_nameStringCalls;
+static int g_lastNameStringA = -1, g_lastNameStringB = -1;
+void KS_get_rtp_name_string(unsigned char a, unsigned char b, char *out, unsigned char)
+{ g_nameStringCalls++; g_lastNameStringA = a; g_lastNameStringB = b; if (out) out[0] = 0; }
 static unsigned char g_lastSentMsg[8];
 static int g_lastSentLen;
 void KGOutGate_SendToSoundEngine(unsigned char *bytes, unsigned short len)
@@ -119,6 +123,31 @@ static int g_notifySlidersCalls;
 void SKSTGGate_NotifyKarmaAllSlidersPosition(void) { g_notifySlidersCalls++; }
 static bool g_moduleRunning[4];
 bool KS_is_module_running(unsigned char m) { return m < 4 && g_moduleRunning[m]; }
+
+/* Deterministic formulaic mocks for the "per-RTParam table" cluster's
+ * own KARMA-library externs -- each returns a value that encodes its own
+ * input(s) so a KAT can recompute the expected result independently
+ * (from the formula below, not from ckg_engine.cpp's own source). */
+short KS_get_rtp_min_pe(unsigned char idx) { return (short)(0x100 + idx); }
+short KS_get_rtp_max_pe(unsigned char idx) { return (short)(0x200 + idx); }
+short KS_get_rtd_min_pe(unsigned char idx) { return (short)(0x300 + idx); }
+short KS_get_rtd_max_pe(unsigned char idx) { return (short)(0x400 + idx); }
+static unsigned char g_enabledBits[8];
+unsigned char KS_get_rtp_enabled_bits(unsigned char idx) { return idx < 8 ? g_enabledBits[idx] : 0; }
+static unsigned char g_bankMenu[8];
+unsigned char KS_get_rtp_bank_menu_pe(unsigned char idx) { return idx < 8 ? g_bankMenu[idx] : 0; }
+static unsigned char g_multiId[8];
+unsigned char KS_get_rtp_multi_id_pe(unsigned char idx) { return idx < 8 ? g_multiId[idx] : 0; }
+short KS_get_rtd_min_ge(unsigned char module, unsigned char ge) { return (short)(0x500 + module * 0x40 + ge); }
+short KS_get_rtd_max_ge(unsigned char module, unsigned char ge) { return (short)(0x600 + module * 0x40 + ge); }
+static unsigned char g_lastGeSelectModule, g_lastGeSelectArg3;
+static GenEffect_pub *g_lastGeSelectPtr;
+void RT_ge_select(unsigned char module, GenEffect_pub *ge, unsigned char arg3)
+{ g_lastGeSelectModule = module; g_lastGeSelectPtr = ge; g_lastGeSelectArg3 = arg3; }
+static int g_directPathCalls;
+static bool g_lastDirectPathEnable;
+void KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(bool enable)
+{ g_directPathCalls++; g_lastDirectPathEnable = enable; }
 }
 
 /* ==================== class-method mocks ==================== */
@@ -127,6 +156,8 @@ void CKGBankManager::InitializePerfData() {}
 void CKGBankManager::SetupInitUserGEForUI() {}
 unsigned char *CKGBankManager::GetSeqKarmaPerfCommon(unsigned int) { return g_sharedBuf + 0x1000; }
 unsigned char *CKGBankManager::GetSeqKarmaPerfModule(unsigned int) { return g_sharedBuf + 0x2000; }
+unsigned char *CKGBankManager::GetSeqDefaultKarmaPerfCommon() { return g_sharedBuf + 0x3000; }
+unsigned char *CKGBankManager::GetSeqDefaultKarmaPerfModule() { return g_sharedBuf + 0x4000; }
 void CKGBankManager::ResetKarmaPerfForSeq() {}
 static eSTGMsgPerfType g_lastRenewType;
 void CKGBankManager::RenewBackupKarmaPerf(eSTGMsgPerfType type) { g_lastRenewType = type; }
@@ -159,12 +190,19 @@ void CSKMIDIMsgProcessor::TrunAllNotesFromKeyboardOff() { g_trunAllOffCalls++; }
 
 static int g_resetKarmaCCCalls;
 void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue() { g_resetKarmaCCCalls++; }
+static int g_resetKarmaCCChannelCalls;
+static int g_lastResetKarmaCCChannel = -1;
+void CKGMIDIMsgProcessor::ResetKarmaGeneratedCCValue(int channel)
+{ g_resetKarmaCCChannelCalls++; g_lastResetKarmaCCChannel = channel; }
 static int g_processTimbreThruCalls;
 void CKGMIDIMsgProcessor::ProcessTimbreThruChannelMessage(int, unsigned char, char, char, bool)
 { g_processTimbreThruCalls++; }
 
 static int g_updateRTCModelNameCalls;
 void CKGUIMsgSender::UpdateRTCModelName() { g_updateRTCModelNameCalls++; }
+static int g_changeGECalls;
+static long g_lastChangeGEArg = -1;
+void CKGUIMsgSender::ChangeGE(long geIndex) { g_changeGECalls++; g_lastChangeGEArg = geIndex; }
 static int g_lastResetCtrlBufArg = -1;
 void CKGUIMsgSender::ResetValuesInControlBuffer(int a) { g_lastResetCtrlBufArg = a; }
 static int g_resetCurrentSceneCalls;
@@ -192,13 +230,23 @@ bool CKGEngine::IsEditedPerf() { return g_editedPerfResult; }
 static int g_checkBendRangeCalls;
 void CKGEngine::CheckAndSendTimbreBendRange() { g_checkBendRangeCalls++; }
 
-/* SendChangeGEToEngine() is DEFERRED (declared, not defined) in
- * ckg_engine.cpp itself -- UpdateUserGE() below still calls it for
- * modules whose type falls in range, so this test provides its own
- * mock (does not conflict with the real production build, which never
- * links this test file). */
-static int g_sendChangeGECalls;
-void CKGEngine::SendChangeGEToEngine(int a, int b, bool) { g_lastArg0 = a; g_lastArg1 = b; g_sendChangeGECalls++; }
+/* ChangeValuesInBackupWhenChangingGE(int,CKarmaPerfCommon*,CKarmaPerfModule*)
+ * is DEFERRED (declared, not defined) in ckg_engine.cpp itself --
+ * SendChangeGEToEngine() (now real, see below) calls it on its own
+ * m_perfType==2 path, so this test provides its own mock (does not
+ * conflict with the real production build, which never links this test
+ * file). */
+static int g_changeBackupGECalls;
+static int g_lastChangeBackupGEModule = -1;
+static CKarmaPerfCommon *g_lastChangeBackupGECommon;
+static CKarmaPerfModule *g_lastChangeBackupGEModulePtr;
+void CKGEngine::ChangeValuesInBackupWhenChangingGE(int module, CKarmaPerfCommon *common, CKarmaPerfModule *rec)
+{
+	g_changeBackupGECalls++;
+	g_lastChangeBackupGEModule = module;
+	g_lastChangeBackupGECommon = common;
+	g_lastChangeBackupGEModulePtr = rec;
+}
 
 /* ==================== test scaffolding ==================== */
 
@@ -215,6 +263,9 @@ static void setup()
 	CSKMIDIMsgProcessor::ms_poInstance = g_bankBuf;
 	CKGMIDIMsgProcessor::ms_poInstance = g_bankBuf;
 	CKGRTCHandler::ms_poInstance = g_bankBuf;
+	__builtin_memset(g_enabledBits, 0, sizeof(g_enabledBits));
+	__builtin_memset(g_bankMenu, 0, sizeof(g_bankMenu));
+	__builtin_memset(g_multiId, 0, sizeof(g_multiId));
 }
 
 int main()
@@ -497,12 +548,19 @@ int main()
 
 	/* ---- UpdateUserGE(): loop over modules whose type is in [a,b] only
 	 * runs when the buffer is NOT the KorgX2100 template; always calls
-	 * SetGECategoryToSharedMemory(a,b) regardless. ---- */
+	 * SetGECategoryToSharedMemory(a,b) regardless. Since SendChangeGEToEngine()
+	 * is now real (no longer mocked), a module whose type falls in
+	 * range exercises its full body -- including
+	 * CopyCurrentParameterToSharedMemory(), which reads m_currentCommon,
+	 * so this fixture must set it to a valid buffer. ---- */
 	{
+		setup();
 		unsigned char raw[sizeof(CKGEngine) + 64];
 		CKGEngine *eng = new (raw) CKGEngine();
 		unsigned char modules[2 * 0x2e8] = {0};
+		unsigned char common[0x200] = {0};
 		eng->m_currentModule = modules;
+		eng->m_currentCommon = common;
 		eng->m_numModules = 2;
 		*(short *)(modules + 0) = 5;          /* module 0 type = 5, in [1,10] */
 		*(short *)(modules + 0x2e8) = 20;      /* module 1 type = 20, out of [1,10] */
@@ -613,6 +671,327 @@ int main()
 		int idleBefore = g_timerProcessCalls;
 		eng->Idle();
 		check("Idle: CKGTimerManager::Process() invoked", g_timerProcessCalls, idleBefore + 1);
+		eng->~CKGEngine();
+	}
+
+	/* ---- DoRandomCaptureExec(arg): rec=m_currentModule+arg*0x2e8+0x1a,
+	 * shared=SharedMemBase()+arg*0x2e8+0x90b4, both get value's 4 bytes
+	 * big-endian-order (value=0x11223344 from the RT_pe_rand_capture
+	 * mock). ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		unsigned char modules[2 * 0x2e8] = {0};
+		eng->m_currentModule = modules;
+		eng->m_numModules = 2;
+
+		eng->DoRandomCaptureExec(1);
+		unsigned char *rec = modules + 1 * 0x2e8 + 0x1a;
+		unsigned char *shared = g_sharedBuf + 1 * 0x2e8 + 0x90b4;
+		check("DoRandomCaptureExec: rec[0]==0x11", rec[0], 0x11);
+		check("DoRandomCaptureExec: rec[1]==0x22", rec[1], 0x22);
+		check("DoRandomCaptureExec: rec[2]==0x33", rec[2], 0x33);
+		check("DoRandomCaptureExec: rec[3]==0x44", rec[3], 0x44);
+		check("DoRandomCaptureExec: shared[0]==0x11", shared[0], 0x11);
+		check("DoRandomCaptureExec: shared[3]==0x44", shared[3], 0x44);
+		eng->~CKGEngine();
+	}
+
+	/* ---- RefreshPERTParmInfo(): idx=2 uses the enabled-bits-gated
+	 * control/enabled byte-pair path; idx=5 uses the bank_menu==1
+	 * force-all-enabled path (control bytes untouched). rtd/rtp sorted
+	 * pairs are written unconditionally for both. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+
+		g_enabledBits[2] = 0x5;  /* bits 0,2 set */
+		g_multiId[2] = 0x1;      /* bit 0 set only */
+		g_bankMenu[5] = 1;
+
+		eng->RefreshPERTParmInfo();
+
+		unsigned char *rec2 = g_sharedBuf + 2 * 0x12;
+		check("RefreshPERTParmInfo: idx2 rtdMin", *(short *)(rec2 + 0), 0x302);
+		check("RefreshPERTParmInfo: idx2 rtdMax", *(short *)(rec2 + 2), 0x402);
+		check("RefreshPERTParmInfo: idx2 rtpMin", *(short *)(rec2 + 4), 0x102);
+		check("RefreshPERTParmInfo: idx2 rtpMax", *(short *)(rec2 + 6), 0x202);
+		check("RefreshPERTParmInfo: idx2 control[0]==1(bit0 set,multiId bit0 set)", rec2[0xa], 1);
+		check("RefreshPERTParmInfo: idx2 enabled[0]==0", rec2[0xe], 0);
+		check("RefreshPERTParmInfo: idx2 control[1]==0(bit1 clear)", rec2[0xb], 0);
+		check("RefreshPERTParmInfo: idx2 enabled[1]==1", rec2[0xf], 1);
+		check("RefreshPERTParmInfo: idx2 control[2]==0(bit2 set,multiId bit2 clear)", rec2[0xc], 0);
+		check("RefreshPERTParmInfo: idx2 enabled[2]==0", rec2[0x10], 0);
+		check("RefreshPERTParmInfo: idx2 control[3]==0(bit3 clear)", rec2[0xd], 0);
+		check("RefreshPERTParmInfo: idx2 enabled[3]==1", rec2[0x11], 1);
+
+		unsigned char *rec5 = g_sharedBuf + 5 * 0x12;
+		check("RefreshPERTParmInfo: idx5 rtdMin", *(short *)(rec5 + 0), 0x305);
+		check("RefreshPERTParmInfo: idx5 bank_menu forces enabled[0]==1", rec5[0xe], 1);
+		check("RefreshPERTParmInfo: idx5 bank_menu forces enabled[3]==1", rec5[0x11], 1);
+		check("RefreshPERTParmInfo: idx5 bank_menu leaves control[0]==0(untouched)", rec5[0xa], 0);
+		eng->~CKGEngine();
+	}
+
+	/* ---- SetPERTParmMinMax(a)/SetPERTParmControlModule(a): same
+	 * formulas as RefreshPERTParmInfo() above, for a single idx. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+
+		eng->SetPERTParmMinMax(3);
+		unsigned char *rec3 = g_sharedBuf + 3 * 0x12;
+		check("SetPERTParmMinMax: rtdMin", *(short *)(rec3 + 0), 0x303);
+		check("SetPERTParmMinMax: rtdMax", *(short *)(rec3 + 2), 0x403);
+		check("SetPERTParmMinMax: rtpMin", *(short *)(rec3 + 4), 0x103);
+		check("SetPERTParmMinMax: rtpMax", *(short *)(rec3 + 6), 0x203);
+
+		g_enabledBits[4] = 0x9; /* bits 0,3 set */
+		g_multiId[4] = 0x8;     /* bit 3 set only */
+		eng->SetPERTParmControlModule(4);
+		unsigned char *rec4 = g_sharedBuf + 4 * 0x12;
+		check("SetPERTParmControlModule: control[0]==0(bit0 set,multiId bit0 clear)", rec4[0xa], 0);
+		check("SetPERTParmControlModule: enabled[0]==0", rec4[0xe], 0);
+		check("SetPERTParmControlModule: control[3]==1(bit3 set,multiId bit3 set)", rec4[0xd], 1);
+		check("SetPERTParmControlModule: enabled[3]==0", rec4[0x11], 0);
+		check("SetPERTParmControlModule: control[1]==0(bit1 clear)", rec4[0xb], 0);
+		check("SetPERTParmControlModule: enabled[1]==1", rec4[0xf], 1);
+		eng->~CKGEngine();
+	}
+
+	/* ---- SetGERTParmMinMax(module,ge): recBase=shared+ge*0x3c+
+	 * module*0x780; display-0 block at +0xc0, display-1 block at
+	 * +0x1ec0, sorted rtd pair at +0xc0+0/+2. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+
+		eng->SetGERTParmMinMax(1, 2);
+		unsigned char *recBase = g_sharedBuf + 2 * 0x3c + 1 * 0x780;
+		unsigned char *block0 = recBase + 0xc0;
+		unsigned char *block1 = recBase + 0x1ec0;
+		check("SetGERTParmMinMax: block0 val", *(short *)(block0 + 8), 0x1102);
+		check("SetGERTParmMinMax: block0 min", *(short *)(block0 + 4), 0x2102);
+		check("SetGERTParmMinMax: block0 max", *(short *)(block0 + 6), 0x3102);
+		check("SetGERTParmMinMax: block1 val", *(short *)(block1 + 8), 0x1142);
+		check("SetGERTParmMinMax: block1 min", *(short *)(block1 + 4), 0x2142);
+		check("SetGERTParmMinMax: block1 max", *(short *)(block1 + 6), 0x3142);
+		check("SetGERTParmMinMax: block0 rtd sorted min", *(short *)(block0 + 0), 0x542);
+		check("SetGERTParmMinMax: block0 rtd sorted max", *(short *)(block0 + 2), 0x642);
+		eng->~CKGEngine();
+	}
+
+	/* ---- RefreshGERTParmInfo(): loops module in [0,m_numModules),
+	 * ge in [0,0x20), calling KS_get_rtp_name_string() then
+	 * SetGERTParmMinMax() for every pair. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		eng->m_numModules = 2;
+
+		g_nameStringCalls = 0;
+		eng->RefreshGERTParmInfo();
+		check("RefreshGERTParmInfo: name_string called 2*0x20 times", g_nameStringCalls, 2 * 0x20);
+
+		unsigned char *recBase = g_sharedBuf + 3 * 0x3c + 1 * 0x780;
+		check("RefreshGERTParmInfo: (module=1,ge=3) block0 val via SetGERTParmMinMax",
+		      *(short *)(recBase + 0xc0 + 8), 0x1000 + 0x100 + 3);
+		eng->~CKGEngine();
+	}
+
+	/* ---- SendChangeGEToEngine(module,ge,arg3): default perfType (0)
+	 * selects the 0x722c/0x7230 slot pair; loadOptions!=0 forces both
+	 * useRtcModel/resetScenes false regardless of loadKind. arg3==true
+	 * triggers CKGUIMsgSender::ChangeGE(); module<numModules triggers
+	 * UpdateRTCModelName(). perfType==2 with the +0x74 guard clear
+	 * dispatches through GetSeqDefaultKarmaPerf{Module,Common}(). ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		unsigned char modules[2 * 0x2e8] = {0};
+		unsigned char common[0x200] = {0};
+		eng->m_currentModule = modules;
+		eng->m_currentCommon = common;
+		eng->m_numModules = 2;
+		modules[0 * 0x2e8 + 3] = 0x07; /* voiceModelType != 0x10 */
+
+		*(unsigned int *)(g_sharedBuf + 0x722c) = 5; /* loadOptions != 0 */
+		*(unsigned int *)(g_sharedBuf + 0x7230) = 3; /* loadKind (irrelevant, loadOptions!=0) */
+		g_lastArg0 = -1;
+		g_lastBoolArg = true;
+		g_changeGECalls = 0;
+		g_updateRTCModelNameCalls = 0;
+		g_resetKarmaCCChannelCalls = 0;
+
+		eng->SendChangeGEToEngine(0, 7, true);
+		check("SendChangeGEToEngine: ResetKarmaGeneratedCCValue(module) -- voiceModelType!=0x10",
+		      g_lastResetKarmaCCChannel, 0);
+		check("SendChangeGEToEngine: KS_set_ge_load_options low byte", g_lastArg0, 5);
+		check("SendChangeGEToEngine: loadOptions!=0 forces useRtcModel false", g_lastBoolArg, false);
+		check("SendChangeGEToEngine: RT_ge_select module arg", g_lastGeSelectModule, 0);
+		check("SendChangeGEToEngine: arg3==true calls ChangeGE()", g_changeGECalls, 1);
+		check("SendChangeGEToEngine: ChangeGE(module) arg", g_lastChangeGEArg, 0);
+		check("SendChangeGEToEngine: module<numModules calls UpdateRTCModelName()", g_updateRTCModelNameCalls, 1);
+		check("SendChangeGEToEngine: perfType!=2 -- no ChangeValuesInBackupWhenChangingGE", g_changeBackupGECalls, 0);
+
+		/* voiceModelType==0x10 -> ResetKarmaGeneratedCCValue(m_globalChannel) */
+		modules[0 * 0x2e8 + 3] = 0x10;
+		eng->m_globalChannel = 9;
+		eng->SendChangeGEToEngine(0, 7, false);
+		check("SendChangeGEToEngine: voiceModelType==0x10 remaps to m_globalChannel",
+		      g_lastResetKarmaCCChannel, 9);
+		eng->m_globalChannel = 0;
+		modules[0 * 0x2e8 + 3] = 0x07;
+
+		/* perfType==2, +0x74 guard clear -> GetSeqDefaultKarmaPerf*() path */
+		eng->m_perfType = 2;
+		*(unsigned int *)(g_sharedBuf + 0x7234) = 0; /* != 2, so the dispatch runs */
+		*(unsigned int *)(g_sharedBuf + 0x7238) = 0;
+		CKGUIMsgProcessor::ms_poInstance[0x74] = 0;
+		g_changeBackupGECalls = 0;
+		eng->SendChangeGEToEngine(1, 4, false);
+		check("SendChangeGEToEngine: perfType==2,+0x74==0 calls ChangeValuesInBackupWhenChangingGE",
+		      g_changeBackupGECalls, 1);
+		check("SendChangeGEToEngine: ...with the real module arg", g_lastChangeBackupGEModule, 1);
+		checkp("SendChangeGEToEngine: ...common from GetSeqDefaultKarmaPerfCommon()",
+		       g_lastChangeBackupGECommon, g_sharedBuf + 0x3000);
+		checkp("SendChangeGEToEngine: ...rec from GetSeqDefaultKarmaPerfModule()",
+		       g_lastChangeBackupGEModulePtr, g_sharedBuf + 0x4000);
+
+		/* perfType==2 but shared[0x7234]==2 -> dispatch skipped entirely */
+		*(unsigned int *)(g_sharedBuf + 0x7234) = 2;
+		g_changeBackupGECalls = 0;
+		eng->SendChangeGEToEngine(1, 4, false);
+		check("SendChangeGEToEngine: perfType==2,shared[0x7234]==2 skips the dispatch",
+		      g_changeBackupGECalls, 0);
+
+		eng->~CKGEngine();
+	}
+
+	/* ---- DoInitModule(module): snapshots the record, calls
+	 * SendChangeGEToEngine(), overwrites from a template, restores 3
+	 * preserved fields + the velocity-zone word array from the
+	 * pre-template snapshot, mirrors the result to shared memory, and
+	 * marks shared[0x7222]=1. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		unsigned char modules[2 * 0x2e8];
+		unsigned char common[0x200] = {0};
+		__builtin_memset(modules, 0xcc, sizeof(modules)); /* recognizable "old" bytes */
+		eng->m_currentModule = modules;
+		eng->m_currentCommon = common;
+		eng->m_numModules = 2;
+
+		unsigned char *rec = modules + 1 * 0x2e8;
+		*(short *)(rec + 0) = 0x1234;      /* typeId */
+		rec[0x2] = 0xa5;                   /* programNumber-low5 bits = 0x05 */
+		rec[0x3] = 0x07;                   /* voiceModelType */
+		rec[0x126] = 0x20;                 /* flag bit5 set */
+		*(short *)(rec + 0x20) = (short)0x1111; /* velocity-zone word, preserved verbatim */
+		*(short *)(rec + 0x19a + 8 * 5) = (short)0x2222; /* i=5 slot, second triplet */
+
+		/* Template source: m_perfType==0 -> shared+module*0x2e8+0xbaa8. */
+		unsigned char *tmpl = g_sharedBuf + 1 * 0x2e8 + 0xbaa8;
+		__builtin_memset(tmpl, 0x00, 0x2e8);
+		*(short *)(tmpl + 0) = 0x9999; /* template's own typeId, must be overwritten back */
+		tmpl[0x2] = 0x40;              /* template's own low-5 bits must be replaced */
+		tmpl[0x3] = 0x11;              /* template's own voiceModelType must be replaced */
+
+		g_sharedBuf[0x7222] = 0;
+		eng->DoInitModule(1);
+
+		check("DoInitModule: typeId restored from snapshot", *(short *)(rec + 0), 0x1234);
+		check("DoInitModule: voiceModelType restored from snapshot", rec[0x3], 0x07);
+		check("DoInitModule: programNumber-low5 restored, high bits from template",
+		      rec[0x2], (0x40 & 0xe0) | 0x05);
+		check("DoInitModule: flag bit5 restored set", rec[0x126] & 0x20, 0x20);
+		check("DoInitModule: velocity-zone word preserved from snapshot", *(short *)(rec + 0x20), 0x1111);
+		check("DoInitModule: velocity-zone word (2nd triplet, i=5) preserved",
+		      *(short *)(rec + 0x19a + 8 * 5), 0x2222);
+		check("DoInitModule: marks shared[0x7222]=1", g_sharedBuf[0x7222], 1);
+		unsigned char *mirror = g_sharedBuf + 1 * 0x2e8 + 0x909a;
+		check("DoInitModule: mirrors rebuilt record to shared+module*0x2e8+0x909a (typeId)",
+		      *(short *)(mirror + 0), 0x1234);
+		check("DoInitModule: ...mirror voiceModelType too", mirror[0x3], 0x07);
+
+		eng->~CKGEngine();
+	}
+
+	/* ---- UpdateEnableDirectPathForVectorCC(): 4 up-front guards all
+	 * default to `enable=true` when any fails; the loop OR-accumulates
+	 * bit 0x20 of +0x14 across every module whose "effective channel"
+	 * equals m_globalChannel, defaulting back to true if no module ever
+	 * matched. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		unsigned char common[8] = {0};
+		unsigned char modules[2 * 0x2e8] = {0};
+		eng->m_currentCommon = common;
+		eng->m_currentModule = modules;
+		eng->m_numModules = 2;
+		eng->m_globalChannel = 3;
+		common[2] = 0x80; /* signed negative -- passes the 3rd guard */
+
+		/* Guard fails (numModules<=0) -> default true. */
+		eng->m_numModules = 0;
+		g_directPathCalls = 0;
+		eng->UpdateEnableDirectPathForVectorCC();
+		check("UpdateEnableDirectPathForVectorCC: numModules<=0 -> enable=true", g_lastDirectPathEnable, true);
+		eng->m_numModules = 2;
+
+		/* module0: voiceModelType==3==m_globalChannel(3) directly (c==progLow5
+		 * path not taken since progLow5(module0[2]&0x1f)!=3 here) -- use the
+		 * "c==progLow5" match shape instead: set module0[2]&0x1f==3 too, so
+		 * c(3)==progLow5(3) -> matched, and c==m_globalChannel(3) -> updates.
+		 * bit 0x20 of +0x14 CLEAR -> lastVal stays 0. module1: type doesn't
+		 * match anything -> skipped. Result: matchedAny=true, lastVal=0 ->
+		 * enable=false. */
+		modules[0 * 0x2e8 + 3] = 3;    /* voiceModelType */
+		modules[0 * 0x2e8 + 2] = 3;    /* progLow5 == 3 == voiceModelType */
+		modules[0 * 0x2e8 + 0x14] = 0; /* bit 0x20 clear */
+		modules[1 * 0x2e8 + 3] = 9;    /* module1: no match at all */
+		modules[1 * 0x2e8 + 2] = 9;
+		g_directPathCalls = 0;
+		eng->UpdateEnableDirectPathForVectorCC();
+		check("UpdateEnableDirectPathForVectorCC: matched w/ bit clear -> enable=false",
+		      g_lastDirectPathEnable, false);
+		check("UpdateEnableDirectPathForVectorCC: calls the KGOutGate notify exactly once",
+		      g_directPathCalls, 1);
+
+		/* Same setup but module0's own +0x14 bit 0x20 SET -> enable=true. */
+		modules[0 * 0x2e8 + 0x14] = 0x20;
+		eng->UpdateEnableDirectPathForVectorCC();
+		check("UpdateEnableDirectPathForVectorCC: matched w/ bit set -> enable=true",
+		      g_lastDirectPathEnable, true);
+
+		eng->~CKGEngine();
+	}
+
+	/* ---- SetMIDIFilterForUnusedModules(): sets m_bSuspended, fires 18
+	 * RT_midi_filt_in_* calls (6 funcs * 3 channels), clears
+	 * m_bSuspended again. ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+		CKGMIDIMsgProcessor *proc = (CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance;
+		proc->m_bSuspended = 0;
+
+		g_midiFiltCalls = 0;
+		eng->SetMIDIFilterForUnusedModules();
+		check("SetMIDIFilterForUnusedModules: 18 RT_midi_filt_in_* calls", g_midiFiltCalls, 18);
+		check("SetMIDIFilterForUnusedModules: m_bSuspended cleared afterward", proc->m_bSuspended, 0);
+
 		eng->~CKGEngine();
 	}
 

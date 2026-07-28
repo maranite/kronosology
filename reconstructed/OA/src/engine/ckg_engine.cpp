@@ -423,6 +423,25 @@ void CKGEngine::DoRandomCapture(long type)
 	SharedMemBase()[0x7222] = 1;
 }
 
+/* .text+0x3ac5b0, 164 bytes. Same per-type math as DoRandomCapture()'s
+ * own unrolled switch, parameterized instead of unrolled -- a separate
+ * real entry point (does not call, and is not called by,
+ * DoRandomCapture() itself; no type==4/SharedMemBase()[0x7222] tail
+ * here). */
+void CKGEngine::DoRandomCaptureExec(int arg)
+{
+	long value = 0;
+	RT_pe_rand_capture((unsigned char)arg, &value);
+
+	unsigned int off = (unsigned int)arg * 0x2e8;
+	unsigned char *rec = m_currentModule + off + 0x1a;
+	unsigned char *shared = SharedMemBase() + off + 0x90b4;
+	rec[0] = shared[0] = (unsigned char)(value >> 24);
+	rec[1] = shared[1] = (unsigned char)(value >> 16);
+	rec[2] = shared[2] = (unsigned char)(value >> 8);
+	rec[3] = shared[3] = (unsigned char)value;
+}
+
 /* .text+0x3ac660, 32 bytes. */
 void CKGEngine::UpdateRTCDisplay(int value)
 {
@@ -681,6 +700,27 @@ void CKGEngine::NotifyEndProcessPerformanceChangeOfSTG()
 	KGOutGate_SendToSoundEngine(msg, 5);
 }
 
+/* .text+0x3ad460, 256 bytes. Sets CKGMIDIMsgProcessor::ms_poInstance's
+ * m_bSuspended, fires all 6 RT_midi_filt_in_* free functions for
+ * channels 1,2,3 (arg2 always 0), then clears m_bSuspended -- literally
+ * the same 18-call block embedded inline inside ChangePerformance()'s
+ * own combi/song-mode setup path (still deferred separately), recognized
+ * here as a real standalone entry point via its own distinct symbol. */
+void CKGEngine::SetMIDIFilterForUnusedModules()
+{
+	CKGMIDIMsgProcessor *proc = (CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance;
+	proc->m_bSuspended = 1;
+	for (unsigned char channel = 1; channel <= 3; channel++) {
+		RT_midi_filt_in_tch(channel, 0);
+		RT_midi_filt_in_bnd(channel, 0);
+		RT_midi_filt_in_sus(channel, 0);
+		RT_midi_filt_in_cc1(channel, 0);
+		RT_midi_filt_in_cc2(channel, 0);
+		RT_midi_filt_in_ctl(channel, 0);
+	}
+	proc->m_bSuspended = 0;
+}
+
 /* .text+0x3ad560, 64 bytes. */
 void CKGEngine::ReceiveDisableMIDIInput(unsigned char *buf, int len)
 {
@@ -726,6 +766,372 @@ bool CKGEngine::ShouldKeepKarmaPerformance()
 	return m_perfType == 1;
 }
 
+/* .text+0x3ad670, 467 bytes. For each of the 8 "PERT" (per-timbre RT
+ * param) table slots (18-byte records at SharedMemBase()+idx*0x12),
+ * re-derive a sorted (min,max) word pair from KS_get_rtd_min_pe/
+ * KS_get_rtd_max_pe at +0x0/+0x2, a sorted (min,max) word pair from
+ * KS_get_rtp_min_pe/KS_get_rtp_max_pe at +0x4/+0x6, and (unless
+ * KS_get_rtp_bank_menu_pe(idx)==1, which instead force-sets all 4
+ * "enabled" bytes to 1 and leaves the control bytes untouched) 4 per-bit
+ * control/enabled byte pairs at +0xa+bit/+0xe+bit derived from
+ * KS_get_rtp_enabled_bits(idx)'s own bit: clear -> control=0,enabled=1;
+ * set -> control=(KS_get_rtp_multi_id_pe(idx)'s own bit)?1:0, enabled=0.
+ * Re-fetches SharedMemBase() TWICE per idx (once for the rtd/rtp block,
+ * once again for the bank_menu/control-byte block) and skips that
+ * section entirely if that particular read is NULL -- transcribed
+ * exactly, not simplified/hoisted to one read, since a genuine
+ * data-race window can't be ruled out. Same record layout and control/
+ * enabled-byte idiom reused by SetPERTParmMinMax()/
+ * SetPERTParmControlModule() below for a single caller-supplied idx. */
+void CKGEngine::RefreshPERTParmInfo()
+{
+	for (int idx = 0; idx < 8; idx++) {
+		unsigned char idxb = (unsigned char)idx;
+		unsigned char *shared = SharedMemBase();
+		if (shared) {
+			unsigned char *rec = shared + (unsigned int)idx * 0x12;
+
+			short rtdMin = KS_get_rtd_min_pe(idxb);
+			short rtdMax = KS_get_rtd_max_pe(idxb);
+			*(short *)(rec + 0x0) = (rtdMin > rtdMax) ? rtdMax : rtdMin;
+			*(short *)(rec + 0x2) = (rtdMin > rtdMax) ? rtdMin : rtdMax;
+
+			short rtpMin = KS_get_rtp_min_pe(idxb);
+			short rtpMax = KS_get_rtp_max_pe(idxb);
+			*(short *)(rec + 0x4) = (rtpMin > rtpMax) ? rtpMax : rtpMin;
+			*(short *)(rec + 0x6) = (rtpMin > rtpMax) ? rtpMin : rtpMax;
+		}
+
+		unsigned char enabledBits = KS_get_rtp_enabled_bits(idxb);
+		shared = SharedMemBase();
+		if (!shared)
+			continue;
+		unsigned char *rec = shared + (unsigned int)idx * 0x12;
+
+		if (KS_get_rtp_bank_menu_pe(idxb) == 1) {
+			rec[0xe] = 1;
+			rec[0xf] = 1;
+			rec[0x10] = 1;
+			rec[0x11] = 1;
+			continue;
+		}
+
+		for (int bit = 0; bit < 4; bit++) {
+			unsigned char control, enabled;
+			if (enabledBits & (1 << bit)) {
+				unsigned char multiId = KS_get_rtp_multi_id_pe(idxb);
+				control = (multiId & (1 << bit)) ? 1 : 0;
+				enabled = 0;
+			} else {
+				control = 0;
+				enabled = 1;
+			}
+			rec[0xa + bit] = control;
+			rec[0xe + bit] = enabled;
+		}
+	}
+}
+
+/* .text+0x3ad860, 192 bytes. Same sorted-(min,max)-pair idiom as the
+ * rtd/rtp half of RefreshPERTParmInfo() above, for a single
+ * caller-supplied idx; single up-front SharedMemBase() NULL check
+ * gates the whole method. */
+void CKGEngine::SetPERTParmMinMax(int a)
+{
+	unsigned char *shared = SharedMemBase();
+	if (!shared)
+		return;
+	unsigned char idxb = (unsigned char)a;
+	unsigned char *rec = shared + (unsigned int)a * 0x12;
+
+	short rtdMin = KS_get_rtd_min_pe(idxb);
+	short rtdMax = KS_get_rtd_max_pe(idxb);
+	*(short *)(rec + 0x0) = (rtdMin > rtdMax) ? rtdMax : rtdMin;
+	*(short *)(rec + 0x2) = (rtdMin > rtdMax) ? rtdMin : rtdMax;
+
+	short rtpMin = KS_get_rtp_min_pe(idxb);
+	short rtpMax = KS_get_rtp_max_pe(idxb);
+	*(short *)(rec + 0x4) = (rtpMin > rtpMax) ? rtpMax : rtpMin;
+	*(short *)(rec + 0x6) = (rtpMin > rtpMax) ? rtpMin : rtpMax;
+}
+
+/* .text+0x3ad920, 352 bytes. Same enabled-bits-gated control/enabled
+ * byte-pair idiom as the tail of RefreshPERTParmInfo() above, for a
+ * single caller-supplied idx. KS_get_rtp_enabled_bits(idx) is called
+ * BEFORE the SharedMemBase() NULL check (its side effect always
+ * happens even if the record write is skipped); the bank_menu/multi_id
+ * calls are gated behind the NULL check. */
+void CKGEngine::SetPERTParmControlModule(int a)
+{
+	unsigned char idxb = (unsigned char)a;
+	unsigned char enabledBits = KS_get_rtp_enabled_bits(idxb);
+	unsigned char *shared = SharedMemBase();
+	if (!shared)
+		return;
+	unsigned char *rec = shared + (unsigned int)a * 0x12;
+
+	if (KS_get_rtp_bank_menu_pe(idxb) == 1) {
+		rec[0xe] = 1;
+		rec[0xf] = 1;
+		rec[0x10] = 1;
+		rec[0x11] = 1;
+		return;
+	}
+
+	for (int bit = 0; bit < 4; bit++) {
+		unsigned char control, enabled;
+		if (enabledBits & (1 << bit)) {
+			unsigned char multiId = KS_get_rtp_multi_id_pe(idxb);
+			control = (multiId & (1 << bit)) ? 1 : 0;
+			enabled = 0;
+		} else {
+			control = 0;
+			enabled = 1;
+		}
+		rec[0xa + bit] = control;
+		rec[0xe + bit] = enabled;
+	}
+}
+
+/* .text+0x3ada80, 288 bytes. GE ("GERT") sibling of SetPERTParmMinMax()
+ * above -- writes into a per-(module,ge) record at SharedMemBase()+
+ * ge*0x3c+module*0x780 (32 ge-slots per module, 0x780=0x20*0x3c):
+ * KS_get_rte_val_ge/min_ge/max_ge at +0xc0+8/+4/+6 (display=0) and
+ * +0x1ec0+8/+4/+6 (display=1), plus a sorted (min,max) word pair from
+ * KS_get_rtd_min_ge/KS_get_rtd_max_ge at +0xc0+0/+2. Whole method
+ * no-ops if SharedMemBase() is NULL. */
+void CKGEngine::SetGERTParmMinMax(int a, int b)
+{
+	unsigned char *shared = SharedMemBase();
+	if (!shared)
+		return;
+
+	unsigned char m = (unsigned char)a;
+	unsigned char g = (unsigned char)b;
+	unsigned char *recBase = shared + (unsigned int)b * 0x3c + (unsigned int)a * 0x780;
+	unsigned char *block0 = recBase + 0xc0;
+	unsigned char *block1 = recBase + 0x1ec0;
+
+	*(short *)(block0 + 0x8) = KS_get_rte_val_ge(m, 0, g);
+	*(short *)(block0 + 0x4) = KS_get_rte_min_ge(m, 0, g);
+	*(short *)(block0 + 0x6) = KS_get_rte_max_ge(m, 0, g);
+
+	*(short *)(block1 + 0x8) = KS_get_rte_val_ge(m, 1, g);
+	*(short *)(block1 + 0x4) = KS_get_rte_min_ge(m, 1, g);
+	*(short *)(block1 + 0x6) = KS_get_rte_max_ge(m, 1, g);
+
+	short rtdMin = KS_get_rtd_min_ge(m, g);
+	short rtdMax = KS_get_rtd_max_ge(m, g);
+	*(short *)(block0 + 0x0) = (rtdMin > rtdMax) ? rtdMax : rtdMin;
+	*(short *)(block0 + 0x2) = (rtdMin > rtdMax) ? rtdMin : rtdMax;
+}
+
+/* .text+0x3adba0, 144 bytes. For every (module,ge) pair (module in
+ * [0,m_numModules), ge in [0,0x20)): if SharedMemBase() is non-NULL,
+ * calls KS_get_rtp_name_string(module,ge,SharedMemBase()+module*0x780+
+ * ge*0x3c+0x90,1) for its side effect (writes the GE's own display name
+ * into that shared-memory slot); then unconditionally calls
+ * SetGERTParmMinMax(module,ge). Identical inner double-loop body reused
+ * verbatim inside SendChangeGEToEngine() below. */
+void CKGEngine::RefreshGERTParmInfo()
+{
+	if (m_numModules <= 0)
+		return;
+
+	for (int module = 0; module < m_numModules; module++) {
+		for (int ge = 0; ge < 0x20; ge++) {
+			unsigned char *shared = SharedMemBase();
+			if (shared) {
+				char *nameOut = (char *)(shared + (unsigned int)module * 0x780
+							  + (unsigned int)ge * 0x3c + 0x90);
+				KS_get_rtp_name_string((unsigned char)module, (unsigned char)ge, nameOut, 1);
+			}
+			SetGERTParmMinMax(module, ge);
+		}
+	}
+}
+
+/* .text+0x3adc30, 816 bytes. Real body, in execution order:
+ *  1. If m_geCategoryPopupOpen and m_geCategoryPopupModule==4 (sentinel
+ *     "no module cached yet"): snapshot the target module's own +0x294
+ *     region (0x50 bytes) into m_geCategoryBackup and set
+ *     m_geCategoryPopupModule=module. Always falls through afterward.
+ *  2. Compute an "effective channel" for ResetKarmaGeneratedCCValue():
+ *     the target module's own voiceModelType byte (record[+3]), read
+ *     from m_currentModule+module*0x2e8 if module is in range, else
+ *     from m_currentModule+0 (module 0's own record, unclamped `module`
+ *     used everywhere else below) -- remapped to m_globalChannel when
+ *     that byte==0x10.
+ *  3. bankMgr->GetGenEffect(ge, module) -> genEffect pointer.
+ *  4. Select a (loadOptions,loadKind) dword pair from SharedMemBase()
+ *     at a m_perfType-selected offset pair (1->0x7224/0x7228,
+ *     2->0x7234/0x7238, else->0x722c/0x7230); KS_set_ge_load_options()
+ *     with loadOptions' low byte; then a real 3-way decode of
+ *     (loadOptions!=0, loadKind) into (useRtcModel,resetScenes) booleans
+ *     fed to KS_set_ge_load_use_rtc_model()/KS_set_ge_load_reset_scenes()
+ *     -- loadOptions!=0 forces both false; else loadKind 1->(true,false),
+ *     2->(false,true), 3->(true,true), other->(false,false).
+ *  5. RT_ge_select(module, genEffect, 1).
+ *  6. If m_perfType==2 AND SharedMemBase()[+0x7234] (re-read, a dword)
+ *     != 2: dispatch to ChangeValuesInBackupWhenChangingGE(module,
+ *     common, rec) (still deferred -- expected external symbol) using
+ *     either GetSeqKarmaPerfModule/Common(bankMgr[+0x97c7d4]) when
+ *     CKGUIMsgProcessor::ms_poInstance[+0x74]!=0, else
+ *     GetSeqDefaultKarmaPerfModule/Common().
+ *  7. Unconditional tail: CopyCurrentParameterToSharedMemory(), the SAME
+ *     name-string+SetGERTParmMinMax double loop as
+ *     RefreshGERTParmInfo() above, StoreGERTParmMinMaxToBank(), then
+ *     (if arg3) CKGUIMsgSender::ChangeGE(module) before, always,
+ *     SKSTGGate_NotifyKarmaAllSlidersPosition(); finally, if module is
+ *     in range, KS_get_rtcm_name_for_ge()+CKGUIMsgSender::
+ *     UpdateRTCModelName() (same idiom as UpdateRTCModelName() itself),
+ *     and unconditionally KS_update_rtc_display_value(m_rtcDisplayValue). */
+void CKGEngine::SendChangeGEToEngine(int module, int ge, bool arg3)
+{
+	if (m_geCategoryPopupOpen && m_geCategoryPopupModule == 4) {
+		unsigned char *moduleRec = m_currentModule + (unsigned int)module * 0x2e8;
+		m_geCategoryPopupModule = module;
+		__builtin_memcpy(m_geCategoryBackup, moduleRec + 0x294, 0x50);
+	}
+
+	unsigned char voiceModelType = (module < m_numModules)
+		? m_currentModule[(unsigned int)module * 0x2e8 + 3]
+		: m_currentModule[3];
+	int resetChannel = (voiceModelType == 0x10) ? m_globalChannel : module;
+	((CKGMIDIMsgProcessor *)CKGMIDIMsgProcessor::ms_poInstance)->ResetKarmaGeneratedCCValue(resetChannel);
+
+	unsigned char *bankMgr = CKGBankManager::ms_poInstance;
+	GenEffect_pub *genEffect = (GenEffect_pub *)((CKGBankManager *)bankMgr)->GetGenEffect(ge, module);
+
+	unsigned char *shared = SharedMemBase();
+	unsigned int loSlot, hiSlot;
+	switch (m_perfType) {
+	case 1: loSlot = 0x7224; hiSlot = 0x7228; break;
+	case 2: loSlot = 0x7234; hiSlot = 0x7238; break;
+	default: loSlot = 0x722c; hiSlot = 0x7230; break;
+	}
+	unsigned int loadOptions = *(unsigned int *)(shared + loSlot);
+	unsigned int loadKind = *(unsigned int *)(shared + hiSlot);
+
+	KS_set_ge_load_options((unsigned char)loadOptions);
+
+	bool useRtcModel, resetScenes;
+	if (loadOptions != 0) {
+		useRtcModel = false;
+		resetScenes = false;
+	} else if (loadKind == 1) {
+		useRtcModel = true;
+		resetScenes = false;
+	} else if (loadKind == 2) {
+		useRtcModel = false;
+		resetScenes = true;
+	} else if (loadKind == 3) {
+		useRtcModel = true;
+		resetScenes = true;
+	} else {
+		useRtcModel = false;
+		resetScenes = false;
+	}
+	KS_set_ge_load_use_rtc_model(useRtcModel);
+	KS_set_ge_load_reset_scenes(resetScenes);
+
+	RT_ge_select((unsigned char)module, genEffect, 1);
+
+	if (m_perfType == 2 && *(unsigned int *)(SharedMemBase() + 0x7234) != 2) {
+		CKarmaPerfModule *seqModule;
+		CKarmaPerfCommon *seqCommon;
+		if (CKGUIMsgProcessor::ms_poInstance[0x74] != 0) {
+			unsigned int seqIndex = *(unsigned int *)(bankMgr + 0x97c7d4);
+			seqModule = (CKarmaPerfModule *)((CKGBankManager *)bankMgr)->GetSeqKarmaPerfModule(seqIndex);
+			seqIndex = *(unsigned int *)(bankMgr + 0x97c7d4);
+			seqCommon = (CKarmaPerfCommon *)((CKGBankManager *)bankMgr)->GetSeqKarmaPerfCommon(seqIndex);
+		} else {
+			seqModule = (CKarmaPerfModule *)((CKGBankManager *)bankMgr)->GetSeqDefaultKarmaPerfModule();
+			seqCommon = (CKarmaPerfCommon *)((CKGBankManager *)bankMgr)->GetSeqDefaultKarmaPerfCommon();
+		}
+		ChangeValuesInBackupWhenChangingGE(module, seqCommon, seqModule);
+	}
+
+	CopyCurrentParameterToSharedMemory();
+	for (int m = 0; m < m_numModules; m++) {
+		for (int g = 0; g < 0x20; g++) {
+			unsigned char *sh = SharedMemBase();
+			if (sh) {
+				char *nameOut = (char *)(sh + (unsigned int)m * 0x780 + (unsigned int)g * 0x3c + 0x90);
+				KS_get_rtp_name_string((unsigned char)m, (unsigned char)g, nameOut, 1);
+			}
+			SetGERTParmMinMax(m, g);
+		}
+	}
+	StoreGERTParmMinMaxToBank();
+
+	if (arg3)
+		((CKGUIMsgSender *)(CKGUIMsgProcessor::ms_poInstance + 0x5c))->ChangeGE(module);
+	SKSTGGate_NotifyKarmaAllSlidersPosition();
+
+	if (module < m_numModules) {
+		unsigned char *sh = SharedMemBase();
+		short typeId = *(short *)(m_currentModule + (unsigned int)module * 0x2e8);
+		KS_get_rtcm_name_for_ge(typeId, (char *)(sh + 0x14330));
+		((CKGUIMsgSender *)(CKGUIMsgProcessor::ms_poInstance + 0x5c))->UpdateRTCModelName();
+	}
+	KS_update_rtc_display_value((unsigned char)m_rtcDisplayValue);
+}
+
+/* .text+0x3adf60, 464 bytes. Snapshots the whole 0x2e8-byte module
+ * record to a local stack buffer, calls SendChangeGEToEngine(module,
+ * savedTypeId, false), overwrites the record from a template (a fixed
+ * SharedMemBase()+0xb5c2 template when m_perfType==1, else a per-module
+ * SharedMemBase()+module*0x2e8+0xbaa8 template), restores 3 preserved
+ * fields (typeId word, voiceModelType byte, low-5-bits of the
+ * program-number byte) from the pre-template snapshot, sets/clears bit
+ * 0x20 of byte +0x126 from the snapshot's own value, then unconditionally
+ * restores a 32-slot/6-word-per-slot "velocity zone" array (offsets
+ * +0x20/+0x22/+0x24/+0x196/+0x198/+0x19a, stride 8) from the snapshot,
+ * mirrors the rebuilt record out to SharedMemBase()+module*0x2e8+0x909a,
+ * then marks SharedMemBase()[0x7222]=1. */
+void CKGEngine::DoInitModule(int module)
+{
+	unsigned char *shared = SharedMemBase();
+	unsigned char *moduleRec = m_currentModule + (unsigned int)module * 0x2e8;
+
+	unsigned char backup[0x2e8];
+	__builtin_memcpy(backup, moduleRec, 0x2e8);
+
+	short savedTypeId = *(short *)(moduleRec + 0x0);
+	unsigned char savedVoiceModelType = moduleRec[0x3];
+	unsigned char savedProgramNumberBits = (unsigned char)(moduleRec[0x2] & 0x1f);
+	bool savedFlagBit5 = (moduleRec[0x126] & 0x20) != 0;
+
+	SendChangeGEToEngine(module, savedTypeId, false);
+
+	if (m_perfType == 1)
+		__builtin_memcpy(moduleRec, shared + 0xb5c2, 0x2e8);
+	else
+		__builtin_memcpy(moduleRec, shared + (unsigned int)module * 0x2e8 + 0xbaa8, 0x2e8);
+
+	moduleRec[0x2] = (unsigned char)((moduleRec[0x2] & 0xe0) | savedProgramNumberBits);
+	*(short *)(moduleRec + 0x0) = savedTypeId;
+	moduleRec[0x3] = savedVoiceModelType;
+
+	if (savedFlagBit5)
+		moduleRec[0x126] |= 0x20;
+	else
+		moduleRec[0x126] &= 0xdf;
+
+	for (int i = 0; i < 0x20; i++) {
+		*(short *)(moduleRec + i * 8 + 0x20) = *(short *)(backup + i * 8 + 0x20);
+		*(short *)(moduleRec + i * 8 + 0x22) = *(short *)(backup + i * 8 + 0x22);
+		*(short *)(moduleRec + i * 8 + 0x24) = *(short *)(backup + i * 8 + 0x24);
+		*(short *)(moduleRec + i * 8 + 0x196) = *(short *)(backup + i * 8 + 0x196);
+		*(short *)(moduleRec + i * 8 + 0x198) = *(short *)(backup + i * 8 + 0x198);
+		*(short *)(moduleRec + i * 8 + 0x19a) = *(short *)(backup + i * 8 + 0x19a);
+	}
+
+	__builtin_memcpy(shared + (unsigned int)module * 0x2e8 + 0x909a, moduleRec, 0x2e8);
+	shared[0x7222] = 1;
+}
+
 /* .text+0x3ae130, 96 bytes. `module` is scaled by 0x780 and `index` by
  * 0x3c into the shared memory blob's own name-string table (base
  * +0x90); no-op if the shared blob pointer itself is NULL. */
@@ -736,6 +1142,72 @@ void CKGEngine::SetGERTParmName(int module, int index)
 		return;
 	char *out = (char *)(shared + (unsigned int)module * 0x780 + (unsigned int)index * 0x3c + 0x90);
 	KS_get_rtp_name_string((unsigned char)index, (unsigned char)module, out, 1);
+}
+
+/* .text+0x3ae190, 272 bytes. For each module 0..m_numModules-1, computes
+ * the same per-module "effective channel" value FakeTimbreThru()/
+ * CheckAndSendTimbreBendRange() use (still deferred separately): the
+ * module's own voiceModelType byte (record[+3]), remapped to
+ * m_globalChannel when ==0x10, is compared against either (a) the
+ * record's own program-number-low-5-bits (record[+2]&0x1f), remapped to
+ * m_globalChannel when THAT ==0x10, using ONLY that comparison and
+ * nothing else if program-number-low-5-bits==0x10; or (b) if
+ * program-number-low-5-bits!=0x10, first tried directly unremapped, then
+ * (if that fails) against a fallback (-1 if m_perfType==1 OR
+ * record[+2]'s raw byte is non-negative as signed, else m_globalChannel).
+ * Every module whose resulting "effective channel" equals
+ * m_globalChannel OR-accumulates its own record[+0x14] bit 0x20 into the
+ * result. Result defaults to `true` both when any of 4 up-front guard
+ * checks fail (CKGBankManager[+0x97c7bb] set, m_currentCommon NULL,
+ * m_currentCommon[+2]>=0 as a SIGNED byte, or m_numModules<=0) AND when
+ * the loop runs to completion but never finds a matching module.
+ * Result fed straight to
+ * KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(). */
+void CKGEngine::UpdateEnableDirectPathForVectorCC()
+{
+	bool enable = true;
+
+	unsigned char *bankMgr = CKGBankManager::ms_poInstance;
+	if (bankMgr[0x97c7bb] == 0 && m_currentCommon != 0
+	    && (signed char)m_currentCommon[2] < 0 && m_numModules > 0) {
+		unsigned char lastVal = 0;
+		bool matchedAny = false;
+		unsigned char *rec = m_currentModule;
+
+		for (int i = 0; i < m_numModules; i++, rec += 0x2e8) {
+			unsigned char rawByte2 = rec[2];
+			int c = rec[3];
+			if (c == 0x10)
+				c = m_globalChannel;
+
+			unsigned char progLow5 = (unsigned char)(rawByte2 & 0x1f);
+			bool matched;
+			if (progLow5 == 0x10) {
+				matched = (c == m_globalChannel);
+			} else if (c == (int)progLow5) {
+				matched = true;
+			} else {
+				int fallback;
+				if (m_perfType == 1)
+					fallback = -1;
+				else if ((signed char)rawByte2 >= 0)
+					fallback = -1;
+				else
+					fallback = m_globalChannel;
+				matched = (c == fallback);
+			}
+
+			if (matched && c == m_globalChannel) {
+				bool bitSet = (rec[0x14] & 0x20) != 0;
+				lastVal = bitSet ? 1 : lastVal;
+				matchedAny = true;
+			}
+		}
+
+		enable = matchedAny ? (lastVal != 0) : true;
+	}
+
+	KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(enable);
 }
 
 /* .text+0x3ae660, 96 bytes. Status bytes 0xf8/0xf9 (SendRealTimeMIDIMessage

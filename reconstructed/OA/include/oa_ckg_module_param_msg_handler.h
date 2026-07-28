@@ -469,6 +469,39 @@ void KS_clear_scheduler(void) __attribute__((regparm(3)));
 void RT_stop_and_rpt_damp(void) __attribute__((regparm(3)));
 void SchedulerTask(void) __attribute__((regparm(3)));
 void SKSTGGate_NotifyKarmaAllSlidersPosition(void) __attribute__((regparm(3)));
+
+/*
+ * 10 more real KARMA-library externs, pulled in while reconstructing
+ * the "per-RTParam table" cluster (RefreshPERTParmInfo/SetPERTParmMinMax/
+ * SetPERTParmControlModule/SetGERTParmMinMax/RefreshGERTParmInfo/
+ * SendChangeGEToEngine/DoInitModule/UpdateEnableDirectPathForVectorCC/
+ * DoRandomCaptureExec/SetMIDIFilterForUnusedModules,
+ * src/engine/ckg_engine.cpp). Same regparm(3)/enum-widened-to-int
+ * convention as every other extern in this block; real mangled names
+ * confirmed via a whole-file relocation sweep of the ground-truth
+ * object (`objdump -dr`), not guessed from usage. Return widths (short
+ * vs bool) confirmed from each call site's own use of the EAX/AX result
+ * (word compares for the `short`-returning pair, `test`/direct-bool use
+ * for `KS_get_rtp_enabled_bits`).
+ */
+short KS_get_rtp_min_pe(unsigned char index) __attribute__((regparm(3)));
+short KS_get_rtp_max_pe(unsigned char index) __attribute__((regparm(3)));
+short KS_get_rtd_min_pe(unsigned char index) __attribute__((regparm(3)));
+short KS_get_rtd_max_pe(unsigned char index) __attribute__((regparm(3)));
+unsigned char KS_get_rtp_enabled_bits(unsigned char index) __attribute__((regparm(3)));
+unsigned char KS_get_rtp_bank_menu_pe(unsigned char index) __attribute__((regparm(3)));
+unsigned char KS_get_rtp_multi_id_pe(unsigned char index) __attribute__((regparm(3)));
+short KS_get_rtd_min_ge(unsigned char module, unsigned char ge) __attribute__((regparm(3)));
+short KS_get_rtd_max_ge(unsigned char module, unsigned char ge) __attribute__((regparm(3)));
+/* GenEffect_pub -- opaque KARMA-library record pointer, never
+ * dereferenced by any reconstructed caller (only passed through), same
+ * "opaque forward-declared pointer" treatment as every other unmodeled
+ * library struct in this project. */
+struct GenEffect_pub;
+void RT_ge_select(unsigned char module, GenEffect_pub *ge, unsigned char arg3)
+	__attribute__((regparm(3)));
+void KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(bool enable)
+	__attribute__((regparm(3)));
 }
 
 /*
@@ -575,30 +608,42 @@ struct CKarmaPerfModule;
  *                              convention as `CopyCurrentParameterToSharedMemory()`'s
  *                              own shared-memory blob below).
  *
- * === Methods DELIBERATELY DEFERRED this batch (declared, not defined --
+ * === "per-RTParam table" cluster, 2026-07-28 follow-up batch ===
+ * 10 of the 12 methods this family originally deferred are now real:
+ * DoRandomCaptureExec(), RefreshPERTParmInfo(), SetPERTParmMinMax(),
+ * SetPERTParmControlModule(), SetGERTParmMinMax(), RefreshGERTParmInfo(),
+ * SendChangeGEToEngine(), DoInitModule(), UpdateEnableDirectPathForVectorCC(),
+ * and SetMIDIFilterForUnusedModules() (a 13th method from the same
+ * cluster, not originally counted in the "12"). All share (directly or
+ * via a call) the record layout at `CKGBankManager::ms_poInstance[+8]`
+ * (`SharedMemBase()`) + `idx*0x12` (8-slot "PERT" table) or
+ * `+ge*0x3c+module*0x780` (32-slot-per-module "GERT"/GE table) -- see
+ * `ckg_engine.cpp`'s own header comment for the full field-offset
+ * derivation and the shared "sorted (min,max) word pair" /
+ * "enabled-bits-gated control/enabled byte pair" idioms reused across
+ * all of them.
+ *
+ * === Methods still DELIBERATELY DEFERRED (declared, not defined --
  *     same "expected Unknown symbol at insmod" convention as any other
  *     not-yet-reconstructed class surface in this project; see
  *     ckg_engine.cpp's own header comment for the real address/size list
  *     and why) ===
  *   IsEditedPerf() (9458 bytes -- a huge outlier, almost certainly a
  *     giant per-RTParam edited-state comparison; not attempted this
- *     batch), FakeTimbreThru(), RefreshPERTParmInfo(), SetPERTParmMinMax(),
- *   SetPERTParmControlModule(), SetGERTParmMinMax(), RefreshGERTParmInfo(),
- *   SendChangeGEToEngine(), DoInitModule(), DoRandomCaptureExec(),
- *   UpdateEnableDirectPathForVectorCC(), ChangePerformance() (the 2-arg
- *   top-level orchestrator), CloseGECategoryPopup(), UpdateGEInfo(),
- *   ChangeValuesInBackupWhenChangingGE() (both overloads),
+ *     batch), FakeTimbreThru() and CheckAndSendTimbreBendRange() (a
+ *     sibling pair sharing the same per-module "effective channel"
+ *     remap idiom as the now-real UpdateEnableDirectPathForVectorCC(),
+ *     plus a real 8-slot leader/dedup bitmap build not independently
+ *     confirmed to this batch's own byte-exact bar), ChangePerformance()
+ *   (the 2-arg top-level Combi/Program/Song orchestrator, ~30 external
+ *     calls across multiple subsystems), CloseGECategoryPopup() (the
+ *     largest single deferred method left in this class, 1072 bytes),
+ *     UpdateGEInfo(), ChangeValuesInBackupWhenChangingGE() (both
+ *     overloads -- SendChangeGEToEngine()'s own real body now calls the
+ *     3-arg overload directly, an expected-external-symbol link
+ *     dependency same as any other not-yet-reconstructed callee),
  *   ProcessForSeqWhenChangingGE() (its only 2 real call targets are
- *   those 2 overloads), and CheckAndSendTimbreBendRange() (a
- *   per-channel dedup loop whose exact bitmap register flow wasn't
- *   independently confirmed to this batch's own confidence bar, still
- *   declared and called from the real Idle() below) -- all real,
- *   real-address-confirmed, and all belong to the SAME "per-RTParam
- *   table" / dense struct-copy family already proven
- *   mechanical-but-lengthy while transcribing
- *   `StoreGERTParmMinMaxToBank()`/`DoRandomCapture()`
- *   (both INCLUDED this batch) -- a real, scoped follow-up, not
- *   abandoned.
+ *   those 2 overloads).
  */
 struct CKGParamEdit;
 class CKGEngine {
@@ -636,7 +681,11 @@ public:
 	void DoClearRTCSetup(long arg);
 	/* .text+0x3ac310, 654 bytes. */
 	void DoRandomCapture(long type);
-	/* DEFERRED -- ground-truth offset 0x3ac5b0, 164 bytes. */
+	/* .text+0x3ac5b0, 164 bytes. Same per-type math as DoRandomCapture()'s
+	 * own unrolled switch (recOff=arg*0x2e8+0x1a, sharedOff=
+	 * arg*0x2e8+0x90b4), just parameterized and without the type==4/
+	 * SharedMemBase()[0x7222] tail -- a separate real entry point, not
+	 * called by DoRandomCapture() and not calling it either. */
 	void DoRandomCaptureExec(int arg);
 	/* .text+0x3ac660, 32 bytes. */
 	void UpdateRTCDisplay(int value);
@@ -690,7 +739,13 @@ public:
 	/* .text+0x3acef0, 176 bytes. */
 	void SendChannelMessage(unsigned char statusType, unsigned char channel,
 				 signed char data1, signed char data2);
-	/* DEFERRED -- ground-truth offset 0x3acfa0, 531 bytes. */
+	/* DEFERRED -- ground-truth offset 0x3acfa0, 531 bytes. Traced far
+	 * enough to identify it as the SAME per-module "effective channel"
+	 * remap idiom used by UpdateEnableDirectPathForVectorCC() below
+	 * (now reconstructed), plus a real 8-bit leader/dedup bitmap build
+	 * over up to 8 remap-channel buckets -- not independently confirmed
+	 * to this batch's own byte-exact confidence bar, a real scoped
+	 * follow-up alongside its sibling CheckAndSendTimbreBendRange(). */
 	void FakeTimbreThru();
 	/* .text+0x3ad1c0, 16 bytes. */
 	void SendShutUp();
@@ -711,7 +766,13 @@ public:
 	bool HaveAllModulesStopped();
 	/* .text+0x3ad420, 64 bytes. */
 	void NotifyEndProcessPerformanceChangeOfSTG();
-	/* DEFERRED -- ground-truth offset 0x3ad460, 256 bytes. */
+	/* .text+0x3ad460, 256 bytes. Sets CKGMIDIMsgProcessor::ms_poInstance
+	 * [+0x50]=1, fires all 6 RT_midi_filt_in_* free functions for
+	 * channels 1,2,3 (arg2 always 0), then clears the +0x50 flag --
+	 * literally the same 18-call block embedded inline inside
+	 * ChangePerformance()'s own combi/song-mode setup path (still
+	 * deferred separately below), recognized as a real standalone
+	 * entry point via its own distinct symbol. */
 	void SetMIDIFilterForUnusedModules();
 	/* .text+0x3ad560, 64 bytes. */
 	void ReceiveDisableMIDIInput(unsigned char *buf, int len);
@@ -719,23 +780,86 @@ public:
 	bool ShouldForceTimbreZoneBypass(int channel, int flagsChannel);
 	/* .text+0x3ad650, 32 bytes. */
 	bool ShouldKeepKarmaPerformance();
-	/* DEFERRED -- ground-truth offset 0x3ad670, 467 bytes. */
+	/* .text+0x3ad670, 467 bytes. For each of the 8 "PERT" (per-timbre RT
+	 * param) table slots (18-byte records at SharedMemBase()+idx*0x12),
+	 * re-derive a sorted (min,max) word pair from KS_get_rtd_min_pe/
+	 * KS_get_rtd_max_pe at +0x0/+0x2, a sorted (min,max) word pair from
+	 * KS_get_rtp_min_pe/KS_get_rtp_max_pe at +0x4/+0x6, and 4 per-bit
+	 * control/enabled byte pairs at +0xa+i/+0xe+i (i=0..3) gated by
+	 * KS_get_rtp_enabled_bits' own bit i (clear -> control=0,enabled=1;
+	 * set -> control=KS_get_rtp_multi_id_pe's own bit i,enabled=0) --
+	 * UNLESS KS_get_rtp_bank_menu_pe(idx)==1, in which case all 4
+	 * enabled bytes are force-set to 1 and the control bytes are left
+	 * untouched. Re-fetches SharedMemBase() TWICE per idx (once before
+	 * the rtd/rtp block, once again before the bank_menu/control-byte
+	 * block) and skips the corresponding section if that particular
+	 * read is NULL -- transcribed exactly, not simplified, since a
+	 * genuine data-race window can't be ruled out. */
 	void RefreshPERTParmInfo();
-	/* DEFERRED -- ground-truth offset 0x3ad860, 192 bytes. */
+	/* .text+0x3ad860, 192 bytes. Same sorted-(min,max)-pair idiom as the
+	 * rtd/rtp half of RefreshPERTParmInfo() above, for a single
+	 * caller-supplied idx instead of looping 0..7; single up-front
+	 * SharedMemBase() NULL check gates the whole method. */
 	void SetPERTParmMinMax(int a);
-	/* DEFERRED -- ground-truth offset 0x3ad920, 352 bytes. */
+	/* .text+0x3ad920, 352 bytes. Same enabled-bits-gated control/enabled
+	 * byte-pair idiom as the tail of RefreshPERTParmInfo() above, for a
+	 * single caller-supplied idx. KS_get_rtp_enabled_bits(idx) is
+	 * called BEFORE the SharedMemBase() NULL check (side effect always
+	 * happens); the bank_menu/multi_id calls are gated behind it. */
 	void SetPERTParmControlModule(int a);
-	/* DEFERRED -- ground-truth offset 0x3ada80, 288 bytes. */
+	/* .text+0x3ada80, 288 bytes. GE ("GERT") sibling of SetPERTParmMinMax
+	 * above -- writes into a per-(module,ge) 0x3c-stride*32-slot
+	 * *0x780-stride-per-module record at SharedMemBase()+ge*0x3c+
+	 * module*0x780: KS_get_rte_val_ge/min_ge/max_ge at +0xc0+8/+4/+6
+	 * (display=0) and +0x1ec0+8/+4/+6 (display=1), plus a sorted
+	 * (min,max) word pair from KS_get_rtd_min_ge/KS_get_rtd_max_ge at
+	 * +0xc0+0/+2. Whole method no-ops if SharedMemBase() is NULL. */
 	void SetGERTParmMinMax(int a, int b);
-	/* DEFERRED -- ground-truth offset 0x3adba0, 144 bytes. */
+	/* .text+0x3adba0, 144 bytes. For every (module,ge) pair (module in
+	 * [0,m_numModules), ge in [0,0x20)): if SharedMemBase() is non-NULL,
+	 * calls KS_get_rtp_name_string(module,ge,SharedMemBase()+module*0x780
+	 * +ge*0x3c+0x90,1) for its side effect (writes the GE's display
+	 * name into that shared-memory slot); then unconditionally calls
+	 * SetGERTParmMinMax(module,ge). */
 	void RefreshGERTParmInfo();
-	/* DEFERRED -- ground-truth offset 0x3adc30, 816 bytes. */
+	/* .text+0x3adc30, 816 bytes. See ckg_engine.cpp's own function
+	 * comment for the full derivation (geCategoryBackup caching,
+	 * effective-channel remap for ResetKarmaGeneratedCCValue, the
+	 * perfType-selected load-options/use-rtc-model/reset-scenes 3-way
+	 * decode, RT_ge_select, the perfType==2 seq-vs-default backup
+	 * dispatch into ChangeValuesInBackupWhenChangingGE() (still
+	 * deferred below -- an expected external symbol), the
+	 * CopyCurrentParameterToSharedMemory()+RefreshGERTParmInfo()-shaped
+	 * name/minmax double loop, StoreGERTParmMinMaxToBank(), and the
+	 * final ChangeGE()/NotifyKarmaAllSlidersPosition()/
+	 * UpdateRTCModelName() tail). */
 	void SendChangeGEToEngine(int a, int b, bool arg3);
-	/* DEFERRED -- ground-truth offset 0x3adf60, 464 bytes. */
+	/* .text+0x3adf60, 464 bytes. Snapshots the whole 0x2e8-byte module
+	 * record to a local stack buffer, calls SendChangeGEToEngine(module,
+	 * savedTypeId, false), overwrites the record from a template (a
+	 * fixed SharedMemBase()+0xb5c2 template when m_perfType==1, else a
+	 * per-module SharedMemBase()+module*0x2e8+0xbaa8 template), restores
+	 * 3 preserved fields (typeId word, voiceModelType byte, low-5-bits
+	 * of the program-number byte) plus a 32-slot/6-word-per-slot
+	 * "velocity zone" array (offsets +0x20/+0x22/+0x24/+0x196/+0x198/
+	 * +0x19a, stride 8) from the pre-template snapshot, sets/clears bit
+	 * 0x20 of byte +0x126 from the snapshot's own value, mirrors the
+	 * rebuilt record out to SharedMemBase()+module*0x2e8+0x909a, then
+	 * marks SharedMemBase()[0x7222]=1. */
 	void DoInitModule(int arg);
 	/* .text+0x3ae130, 96 bytes. */
 	void SetGERTParmName(int module, int index);
-	/* DEFERRED -- ground-truth offset 0x3ae190, 272 bytes. */
+	/* .text+0x3ae190, 272 bytes. For each module 0..m_numModules-1,
+	 * computes the SAME per-module "effective channel" value FakeTimbreThru()/
+	 * CheckAndSendTimbreBendRange() use (voiceModelType-or-m_globalChannel
+	 * vs program-number-low-5-bits-or-m_globalChannel-or-perfType/sign-gated
+	 * override), and OR-accumulates byte+0x14 bit 0x20 across every module
+	 * whose effective channel equals m_globalChannel; result defaults to
+	 * `true` both when the 4 up-front guard checks fail (CKGBankManager
+	 * [+0x97c7bb] set, no m_currentCommon, m_currentCommon[+2]>=0 signed,
+	 * or m_numModules<=0) AND when the loop runs but never finds a
+	 * matching module. Feeds the result straight to
+	 * KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(). */
 	void UpdateEnableDirectPathForVectorCC();
 	/* DEFERRED -- ground-truth offset 0x3ae2a0, 960 bytes -- the top-level 2-arg
 	 * Combi/Program/Song performance-change orchestrator. */
