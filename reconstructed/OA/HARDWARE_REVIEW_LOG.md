@@ -2634,3 +2634,107 @@ classes' real candidate counts (7+7+6) with zero regressions.
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGDriver + CSTGVPMNoise + CSTGAnalog4Pole + CSTGPluckedModelPatch + CSTGMOSSAmp + CSTGPitchModOsc value-getter families -- 41 methods (batch 13, 2026-07-28)
+
+Continuing the ~2300-method STG value-getter family, manifest 2404 ->
+2445/21,689 (11.273%). Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`).
+
+All six classes were carried over from batch 12's own notes, which had
+already spot-checked and shape-classified all six as zero-outlier before
+this session began, but had NOT recorded their exact field offsets --
+this session re-pulled the real disassembly for all 41 candidates via `nm`
++ `objdump -dr -M intel -j .text.<mangled>` (per-symbol COMDAT sections,
+same technique as every prior batch) rather than trusting the prior
+summary's shape description alone. Every offset, width, sign, and
+dual/single-write fact below was independently re-derived from the actual
+bytes, not copied from batch 12's prose. All six classes' real candidate
+counts matched the memory file's carried-over counts exactly (8 + 7 + 7 +
+7 + 6 + 6 = 41), and all re-confirmed zero outliers -- a sixth batch in a
+row with a full clean sweep across every class attempted (this streak now
+spans batches 9-13 with the sole exception of the deliberately-dropped,
+never-attempted `CSTGTG92OscBase`).
+
+Word-boundary `grep -rn '\bClassName\b' src include` re-confirmed all six
+still genuinely fresh (only `CSTGPitchModOsc` has an incidental,
+non-triggering mention in `oa_stg_pitch_mod.h`'s own prose, as already
+noted in batch 12). `CSTGAnalog4Pole` reconfirmed distinct from the
+already-done `CSTGAnalog4PoleBase` (name-collision precedent). No new
+outlier shapes or decoder generalizations were needed this batch -- every
+one of the 41 methods fits shapes already established in batches 1-12:
+plain fixed-K dword/signed-byte fields (dual/single-write per the
+established width rule), the mask-only single-bit bitfield shape
+(`CSTGDriver::GetBypass`), the hardcoded-constant-getter shape first seen
+on `CSTGPanOutputBase::GetPatchSolo` (`CSTGVPMNoise::GetSaturation`, no
+`this` dereference at all, single 0-write), the unsigned non-bitfield byte
+variant first seen on `CSTGPolysixMG::GetMIDITempoSyncTimes`
+(`CSTGPitchModOsc::GetEGSelect`), and the stride-5 lea-premultiply
+ctx-dynamic-index sub-family (`CSTGMOSSAmp`'s and `CSTGPitchModOsc`'s own
+AMSSource/AMSIntensity/AMSIntensityAMSSource/AMSIntensityAMSIntensity
+groups) -- the same naming-implies-second-modulation-level shape that was
+a false alarm on `CSTGMS20EG` but is confirmed REAL ctx-indexing on both
+of these two classes, reconfirming that field-shape must always be
+verified from disassembly per method/class rather than assumed from a
+prior class's outcome with similar naming.
+
+`CSTGAnalog4Pole` is notable for unusually large field offsets (up to
+`+0x12c`) reflecting a big struct layout, otherwise a plain fixed-K-only
+dialect like `CSTGVPMNoise`/`CSTGDriver`/`CSTGPluckedModelPatch`.
+`CSTGPluckedModelPatch` had 5 further pending symbols correctly excluded
+up front (`GetRequiredVoiceInfo`/`SetupComponentOffsets`/
+`GetFeedbackChannelLevels` global-linkage extra-arg methods,
+`GetEG(unsigned int)`/`GetLFO(unsigned int)` weak but explicit-index
+signatures) -- none fed to the decoder. `CSTGMOSSAmp` had its own 3
+pre-excluded symbols (`GetSubComponent(unsigned short)` sub-object-accessor
+outlier, `SetupComponentOffsets`/`SetOutputLevelMultiplier` global-linkage
+extra-arg methods).
+
+KAT generation this batch used a small standalone Python evaluator
+(`/tmp/.../kat_gen_batch13.py`, one-shot scratch script, not checked in)
+mirroring the family's established discipline -- same deterministic
+`buf[i] = (i*0x9f + 0x37) & 0xff` pattern, ctx index fixed at 3, 32-bit
+signed dword loads, 8-bit sign/zero-extension per field -- generating
+every expected constant mechanically rather than by hand. This caught a
+real transcription slip: the first hand-typed draft of
+`test_stg_driver_valuegetters.cpp`'s expected values (computed mentally
+rather than via the script) was wrong in every single constant; replaced
+with the script's output before ever running `make verify`, and every
+other class's test file was written directly from script output from the
+start. Worth reinforcing as a hard rule for all future batches in this
+family: NEVER hand-compute a KAT expected constant, always generate it
+via a script, even for `make verify`-only host tests where an error would
+be immediately visible on the FIRST run -- the risk isn't test failure,
+it's a wrong constant that happens to still "pass" against an equally
+wrong return value if the same slip were made twice (not the case here,
+but not worth risking).
+
+**Tooling: one fresh `DEF_RE` parenthesis-swallow instance found and
+fixed**, in `oa_stg_moss_amp.h`'s own derivation prose -- "rather than a
+false alarm (unlike CSTGMS20EG's own case, which turned out to be plain
+fixed offsets throughout)." had no semicolon before it and reached past
+the real `CtxIndex` helper's own closing brace, captured name set was
+`{"alarm"}` instead of the wanted `{"CtxIndex"}`. Fixed by rewording to
+an em-dash-delimited clause per the established convention. All 12 new
+files (6 headers + 6 `.cpp`) were run through both standard checks --
+comment open/close-count balance and an exact `DEF_RE` captured-name-set
+diff -- before any build attempt; only this one instance needed a fix.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 6 new
+KATs (41 checks total) passing. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko` produced
+(508216 bytes, up from batch 12's 502300), zero warnings or errors
+traceable to any of the 6 new files (confirmed via a build-log grep
+scoped to each new filename -- only the same boilerplate
+command-line-flag warnings shared by every TU in the build appear, no
+content-specific warnings). `DECOMPILE_ERRORS.md` unchanged -- no
+compile/link blocker hit, and this batch had no new Tier-B scope
+deferral either (the `CSTGTG92OscBase` deferral from batch 12 remains the
+only open one). `manifest/gen_oa_manifest.py` regenerated, OA.ko manifest
+2404 -> 2445/21,689 (11.273%), delta exactly +41 (8+7+7+7+6+6, matching
+every class's real candidate count), confirmed via a full reconstructed
+qualified-name-set diff -- 41 added, 0 regressions.
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.

@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 32 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase), 959 methods reconstructed, manifest 1441->2404
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 38 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc, CSTGEG, CSTGPanOutputBase, CSTGPianoLPF, CSTGAmp, CSTG3BandEQBase, CSTGEGBase, CSTGVPMOutputMixer, CSTGKeyTrack, CSTGPortamentoBase, CSTGDriver, CSTGVPMNoise, CSTGAnalog4Pole, CSTGPluckedModelPatch, CSTGMOSSAmp, CSTGPitchModOsc), 1000 methods reconstructed, manifest 1441->2445
 type: project
 ---
 
@@ -1167,6 +1167,77 @@ re-run the whole-binary sweep query (see this batch's own methodology
 note above) rather than the old per-class-grep approach for anything
 below this batch's known-clean list.
 
+**Thirteenth batch (2026-07-28, this batch): `CSTGDriver` (7/7) +
+`CSTGVPMNoise` (7/7) + `CSTGAnalog4Pole` (7/7) + `CSTGPluckedModelPatch`
+(6/6) + `CSTGMOSSAmp` (6/6) + `CSTGPitchModOsc` (8/8) done**, manifest
+2404 -> 2445, 41 methods. Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`). All six classes were carried
+over from batch 12's own notes, which had already shape-classified all
+six as zero-outlier via disassembly captured during that session, but had
+NOT recorded exact field offsets in this memory file (only in general
+shape terms) -- this batch re-pulled the real disassembly for all 41
+candidates from scratch via `nm` + `objdump -dr -M intel
+-j .text.<mangled>` rather than trusting the prior summary alone. Every
+offset/width/sign/dual-write fact was independently re-derived from the
+actual bytes. All six classes' real candidate counts matched the
+carried-over counts exactly (8+7+7+7+6+6=41) and all reconfirmed zero
+outliers -- a sixth batch in a row with a full clean sweep (batches 9-13,
+excepting the deliberately-dropped, never-attempted `CSTGTG92OscBase`).
+
+No new outlier shapes or decoder generalizations were needed -- every
+method fit shapes already established in batches 1-12: plain fixed-K
+dword/signed-byte fields, the mask-only single-bit bitfield shape
+(`CSTGDriver::GetBypass`), the hardcoded-constant-getter shape first seen
+on `CSTGPanOutputBase::GetPatchSolo` (`CSTGVPMNoise::GetSaturation`), the
+unsigned non-bitfield byte variant first seen on
+`CSTGPolysixMG::GetMIDITempoSyncTimes` (`CSTGPitchModOsc::GetEGSelect`),
+and the stride-5 lea-premultiply ctx-dynamic-index sub-family
+(`CSTGMOSSAmp`'s and `CSTGPitchModOsc`'s own AMSSource/AMSIntensity/
+AMSIntensityAMSSource/AMSIntensityAMSIntensity groups) -- the same
+naming-implies-second-modulation-level shape that was a false alarm on
+`CSTGMS20EG` but confirmed REAL ctx-indexing on both of these two
+classes, reinforcing that field-shape must always be verified from
+disassembly per class rather than assumed from a prior class's outcome
+with similar naming. `CSTGAnalog4Pole` has unusually large field offsets
+(up to `+0x12c`) from a big struct layout, otherwise plain fixed-K-only
+like `CSTGVPMNoise`/`CSTGDriver`/`CSTGPluckedModelPatch`.
+
+**Hard rule reinforced this batch, worth treating as standard from now
+on: NEVER hand-compute a KAT expected constant.** The first hand-typed
+draft of `test_stg_driver_valuegetters.cpp`'s expected values (computed
+mentally rather than via a script) was wrong in every single constant --
+caught immediately by writing and running a standalone Python evaluator
+(same deterministic `buf[i]=(i*0x9f+0x37)&0xff` pattern, ctx index fixed
+at 3, 32-bit signed dword / 8-bit sign-or-zero-extend field rules) before
+ever running `make verify`, then rewriting that one file and generating
+every other new file's constants directly from the script's output from
+the start. All prior batches' own notes already describe using "a
+separate Python evaluator" for the KAT test file's OWN internal
+re-derivation logic (verify/test_*.cpp itself), but this is the first
+batch to explicitly flag that the same discipline must also apply to
+producing the numeric literals that go INTO that test file in the first
+place -- do not trust mental arithmetic for 32-bit signed wraparound or
+sign-extension, always script it.
+
+`make verify`: exit 0, 0 FAIL lines, all 6 new KATs (41 checks) passing.
+Real `make ko-clean && make ko KDIR=/home/build/linux-kronos` Kbuild
+build: clean link, `OA.ko` produced (508216 bytes, up from batch 12's
+502300), zero warnings/errors traceable to any of the 6 new files.
+`DECOMPILE_ERRORS.md` unchanged -- no compile/link blocker, no new
+Tier-B deferral either. `manifest/gen_oa_manifest.py` regenerated, OA.ko
+manifest 2404 -> 2445/21,689 (11.273%), delta exactly +41, confirmed via
+a full reconstructed qualified-name-set diff -- 0 regressions.
+
+**Next targets** (same technique, not yet done): ~131 more classes
+remain. `CSTGTG92OscBase`'s pure-virtual deferral from batch 12 is still
+open, still needs its concrete subclass identified before revisiting.
+No fresh candidates were pre-investigated this batch beyond the six
+picked -- re-run the whole-binary sweep (batch 12's own methodology: `nm
+$KO | grep -E '^[0-9a-f]+ W _ZN[0-9]+.*ER23CSTGPatchMessageContext$'`
+grouped by mangled length-prefixed class name) fresh for the next
+batch's candidates, always doing the word-boundary grep +
+already-modeled check before picking.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
@@ -1180,6 +1251,8 @@ CSTGPolysixMG value-getter families", "CSTGAMSMixerBase + CSTGStepSeq +
 CSTGPitchMod value-getter families", "CSTGSimple2Pole +
 CSTGVPMModelPatch + CSTGVPMTG92Osc value-getter families",
 "CSTGEG + CSTGPanOutputBase + CSTGPianoLPF value-getter families",
-"CSTGAmp + CSTG3BandEQBase + CSTGEGBase value-getter families", and
+"CSTGAmp + CSTG3BandEQBase + CSTGEGBase value-getter families",
 "CSTGVPMOutputMixer + CSTGKeyTrack + CSTGPortamentoBase value-getter
+families", and "CSTGDriver + CSTGVPMNoise + CSTGAnalog4Pole +
+CSTGPluckedModelPatch + CSTGMOSSAmp + CSTGPitchModOsc value-getter
 families" entries for the full per-batch derivation notes.
