@@ -1970,6 +1970,249 @@ than relying on the sValueGetterTemp sweep alone, since a class using
 one of these might route through a different shared scratch temp or
 skip the convention's sink entirely (unconfirmed either way).
 
+## Batch 19 (2026-07-28, commit `739d72a`): CSTGHDRTrack + CSTGWaveSequence, 49 methods
+
+**Confirmed the batch-18 sweep is exhausted for real this time.** Re-ran
+the exact batch-18 recipe (`objdump -dr` cross-reference of every
+relocation targeting `CSTGParamsOwner::sValueGetterTemp`, grouped by
+enclosing function, classes ranked by method count) fresh against the
+same ground truth binary and got the identical 75-class list, byte-for-
+byte the same class names and counts as batch 18's own table -- every
+one of the 75 already accounted for (done/excluded/already-modeled/
+deferred) except the still-open `CSTGTG92OscBase` pure-virtual deferral
+from batch 12. Zero new classes from this specific method this batch.
+
+**Follow-up per batch 18's own open item, and the real find this
+batch**: batch 18 flagged 5 sibling `*MessageContext` types spotted but
+never individually checked (`nm -C $KO | grep -oE
+'[A-Za-z_][A-Za-z0-9_]*MessageContext'` lists them all). Checked each
+directly this batch via `nm -C $KO | grep -oE
+'[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*\(CSTG<Type>MessageContext
+&?\)$'` (anchored at the closing paren so extra-arg methods don't match)
+rather than relying on the `sValueGetterTemp` sweep at all -- this is a
+genuinely INDEPENDENT discovery axis, useful whenever the
+`sValueGetterTemp` sweep itself goes quiet, since some real getters
+apparently route through no shared sink at all (see the piecewise/
+UUID-copy shapes below) yet still keep this exact context-typed
+signature shape:
+  - `CSTGDrumkitMessageContext` -> `CSTGDrumKitData` (30 real weak
+    candidates, `Getter*` naming). Investigated but NOT picked this
+    batch -- see below.
+  - `CSTGEffectMessageContext` -> ~250 real weak/strong hits across
+    ~70 DIFFERENT effect-DSP classes (`CSTGStereoCompressor`,
+    `CSTGReverbGate`, dozens more), but ALL named `InitMeters`/
+    `RefreshMeters`/`ResetMeterVars`/`UpdateMeterData`/`UpdateXxxCoeff` --
+    a completely different, real-time audio-meter/coefficient-update
+    mechanism, not this family's value-getter convention at all (no
+    `Get`/`Set` prefix on any of them). Confirmed NOT part of this
+    family -- do not re-investigate, this is a large unrelated
+    subsystem.
+  - `CSTGHDRTrackMessageContext` -> `CSTGHDRTrack` (15 real weak
+    candidates, all `GetValue*`). Reconstructed this batch, see below.
+  - `CSTGProgramSlotMessageContext` -> `CSTGProgramSlot` (~75 real weak
+    `GetValue*`/`GetChord*` candidates). `CSTGProgramSlot` is the
+    already-established "SKIP -- large, heavily-annotated real struct
+    with a modeled vtable" class from the very first batches of this
+    family; this just reconfirms that verdict via a different discovery
+    path, still correctly out of scope.
+  - `CSTGWaveSeqDataMessageContext` -> `CSTGWaveSequence` (34 real weak
+    `Getter*` candidates). Reconstructed this batch, see below.
+
+**`CSTGDrumKitData` investigated, deliberately SKIPPED (not excluded --
+a real future target)**: sampled `GetterDrumkitLevel`'s own disassembly
+directly. It's a genuinely complex PIECEWISE multi-dimensional index
+computation -- combines a bank byte (`this+0x1c`) scaled by 0x200
+(`shl esi,9`) with a note-index dword (`this+0x4`) premultiplied by 25
+(`lea`/`lea` chain) plus a further `note*2` term, THEN adds a separate
+velocity-zone term computed via `imul ecx,[this+0x18],0x10302`, sums
+all three, and finally indexes into the 17.3MB `_unrecovered[0x1143530]`
+blob already declared in `oa_global.h` (see that class's own header
+comment -- a confirmed 273 x 129 x 8 legacy multisample-bank UUID
+table). This is real entanglement, not mere prior existence -- the
+established "always check the actual struct's size/complexity before
+defaulting to skip" rule (batch 18) cuts the OTHER way here: the class
+genuinely IS the giant already-opaque blob the rule warns about, unlike
+batch 18's own small ctor-stub classes. Left as a documented, scoped-out
+future target requiring a dedicated 3-dimensional-index decoder
+extension, not attempted this batch.
+
+**`CSTGHDRTrack` (15/15) reconstructed, zero outliers.** Was previously
+a FULLY opaque, raw-offset-only embedded sub-object (16 instances at a
+confirmed 0x2c stride inside `CSTGSequence`, see that class's own header
+comment in `oa_global.h`) -- no standalone struct existed anywhere in
+this project before this batch, a genuinely fresh class same as
+`CSTGCommonEffectLFO`/`CSTGEffectBalance`/`CSTGMetronomeSettings` from
+batch 18. New header `include/oa_stg_hdr_track.h` (matching the
+"genuinely fresh -> own header" convention, as opposed to extending an
+existing in-place stub).
+
+Field layout independently cross-checks against `CSTGSequence`'s own
+already-confirmed ctor: it zeros exactly 3 bytes per HDRTrack slot at
+`+0x4`/`+0x5`/`+0x6` -- this batch's own field discovery independently
+lands `GetValueOutputBus`/`GetValueFXCtrlBus`/`GetValueHDRBus` (all
+signed bytes) at those SAME three offsets. A real, useful cross-check
+technique: when a class's OWN embedding ctor already documents which of
+its bytes get zeroed, check whether your own newly-discovered field
+offsets land on exactly those bytes before trusting either independently.
+
+**Genuinely new combined shape**: `GetValueSolo` reads NEITHER `this`
+nor `ctx.index` -- `mov eax,ds:CSTGControllerRTData::sInstance` (a REAL,
+already-declared external singleton pointer, `oa_global.h`'s own
+`CSTGControllerRTData::sInstance`, not a private raw-selector
+reimplementation like `CSTGEffectBalance`'s own precedent), then
+`movzx ecx,[edx+0x18]` (ctx's own per-call byte, NOT the family's usual
+`+0x4` slot), then `movzx eax,WORD[eax+0x24]` (a WORD read off the
+GLOBAL object, not `this`), `sar eax,cl` (variable shift by the
+ctx-derived amount, x86's own 5-bit shift-count masking applied
+explicitly since C++ doesn't guarantee it), `and eax,1`. This combines
+TWO shapes the family has each seen SEPARATELY before -- global-
+singleton indirection ignoring `this` (`CSTGEffectBalance`, batch 18)
+and a per-call ctx-derived variable bit-shift amount (`CtxShift`,
+`CSTGVPMModelPatch`, earlier batch) -- into one method, and is the first
+confirmed case of EITHER shape reading its shifted data through a REAL,
+already-declared external symbol rather than a private lookup or a
+fixed field on `this`. No new C++ struct/global declaration was needed
+since `CSTGControllerRTData::sInstance` already existed from earlier,
+unrelated project work.
+
+**`CSTGWaveSequence` (34/34) reconstructed, zero outliers.** This class
+already had a real, hand-confirmed ctor (`waveseq_setlist_init.cpp`,
+predating this family entirely) but a totally EMPTY struct body
+(`struct CSTGWaveSequence { CSTGWaveSequence(); };`, zero named fields,
+zero vtable dispatch modeled) -- extended IN PLACE in `oa_global.h`,
+matching batch 18's own precedent for small pre-existing stubs
+(`CSTGCombi`/`CSTGEffectRack`/`CSTGToneAdjust`/`CSTGCommonLFO`) rather
+than moved to a dedicated header.
+
+Two groups: 17 methods index a per-step record array whose element 0
+begins at `this` itself (`this + ctx.index*0x34 + K`); 17 more never
+touch `ctx` at all, plain fixed-K fields at `this+0x4..0x13` (three of
+them -- `RunSequence`/`NoteOnAdvance`/`TimeTempoMode` -- packed as
+independent single-bit booleans into byte `0x4`, the established
+shift-then-mask shape).
+
+**New instruction FORM for the ctx-index premultiply, not a new
+effective stride**: `imul edx,[edx+0x4],0x34` -- a direct 3-operand
+`imul` immediate multiply. Every PRIOR ctx-index premultiply in this
+family used either a `lea`-chain (stride 5/9/25 etc) or a bare SIB
+scale on the final load (stride 1/4) -- this is the first confirmed
+case of the compiler emitting a literal 3-operand immediate `imul`
+instead, for effective stride 0x34 (52). Purely a new confirmed
+instruction encoding, not a new conceptual shape -- modeled with the
+same `this + idx*stride + K` arithmetic as every other ctx-indexed
+class, no decoder generalization needed (this class's own `.cpp` just
+inlines `int idx = (int)ctx.index;` directly rather than using a shared
+`CtxIndex` helper, since `CSTGWaveSeqDataMessageContext` -- like
+`CSTGMessageContext`, `CSTGEffectRack`'s own context type -- declares
+`index` as a real NAMED field rather than requiring a raw byte-offset
+read).
+
+**Reconfirmed the CSTGDrumKitData-style "field genuinely overflows the
+nominal per-record stride" quirk on a SECOND class.** Several of
+`CSTGWaveSequence`'s own confirmed per-step field offsets (up to
+`+0x47`) exceed the 0x34-byte (52) nominal stride between two adjacent
+step records -- i.e. one step's own confirmed field set genuinely
+overlaps into the next step's own leading bytes. Reproduced verbatim
+via raw per-method address arithmetic exactly as disassembled, NOT
+"fixed" into a padded record type -- same treatment as
+`CSTGDrumKitData`'s own already-documented instance of this exact
+quirk class (see that class's own header comment). Worth treating as a
+recognized, expected pattern in per-step/per-record ctx-indexed classes
+generally now that it's been seen twice independently, not a red flag
+to "fix."
+
+**Genuinely new shape, first raw multi-dword struct-copy in the
+family**: `GetterBankSelect`/`GetterBankSelectUUID` -- byte-identical
+bodies, confirmed via two independent isolated re-dumps, not a
+copy-paste mixup -- copy a 16-byte UUID (4 sequential dwords at record
+offset `0x14`/`0x18`/`0x1c`/`0x20`) directly into `sValueGetterTemp`'s
+own `+0x0`/`+0x4`/`+0x8`/`+0xc` bytes, in place of the usual
+`.value`/`.displayValue` write. No `STGConvertedParam` struct change was
+needed: that struct's own already-declared `_unrecovered_a[0x0c]` gap
+(`+0x04..+0x0f`) already covers exactly those 3 extra dword slots, so
+this is a raw pointer-cast 4-dword copy against bytes the struct already
+declares as writable, not a new named field. Same conceptual family as
+`CPianoOsc`'s own still-open `GetBankIdAndStereoFlag` outlier from
+batch 4 (both are "bank select returns a UUID, not a scalar") but a
+DIFFERENT, much simpler mechanism here -- this class's own UUID lives
+directly in ITS OWN per-step record, no delegate call into another
+still-unreconstructed class needed, so it was decodable in place rather
+than excluded as an outlier.
+
+**2 fresh DEF_RE parenthesis-swallow gotchas, both caught before
+compiling via the standard exact-name-set diff**: `stg_wave_sequence_
+valuegetters.cpp`'s own leading comment for the BankSelect pair had
+"16-byte record UUID (4 sequential dwords at record offset..." --
+swallowed `GetterBankSelect` ENTIRELY into a bogus capture named `UUID`
+(confirmed via `got=={"UUID", ...}` missing `GetterBankSelect` from the
+expected 34-name set). `stg_hdr_track_valuegetters.cpp`'s own
+`GetValueSolo` comment had "per-call bit index read from ctx's own
++0x18 byte (masked to 5 bits..." -- same trigger shape, swallowed
+`GetValueSolo`. Both fixed the same established way, removing the
+literal `(` (em-dash/comma-delimited rewording). Also ran the same
+exact-name-set diff directly against the `oa_global.h` EDIT itself this
+batch (not just the new standalone files) via a before/after DEF_RE
+capture-set diff on the whole file -- confirmed 0 added, 0 removed
+captures, i.e. the large new comment block inserted into that
+already-huge, heavily-cross-referenced file introduced no new gotcha
+despite the file's own size and density. Worth doing this "diff DEF_RE
+captures across the whole file before/after" check specifically
+whenever editing an ALREADY-EXISTING shared header in place (as opposed
+to a fresh file), since the count-based per-file check used for new
+files doesn't directly apply when a file already has other legitimate
+captures in it.
+
+**Manifest counting convention clarified this batch** (a real point of
+confusion worth documenting): `manifest/gen_oa_manifest.py`'s own
+printed summary line counts RAW REconstructed ROWS (some `qualified_name`
+values repeat across overloads/duplicate address entries), while this
+memory file's own running batch-to-batch narrative -- and
+`PROJECT_BRAIN/status.md`'s own convention -- counts UNIQUE
+`qualified_name` strings (a strictly smaller number, since it collapses
+duplicates via `set()`). This batch's own delta was clean either way
+(+49) but the baseline shifts depending which convention is used:
+2548->2597 by raw row count, 2526->2575 by unique-name count. Use the
+UNIQUE-name count (matching `status.md`'s own historical numbers) when
+reporting the family's running total, but don't be surprised if a raw
+`gen_oa_manifest.py` run reports a different, larger number for the
+same state -- both are internally consistent, they're just counting
+different things.
+
+`make verify`: exit 0, 0 FAIL lines, 208 test suites total (up from 188
+at batch 18 -- other unrelated project work happened in between,
+confirmed via `oa_global.h`'s own comments referencing "batch 45"/
+"batch 55" work on `CSTGCombi`/`CSTGSequence` ctors, a DIFFERENT,
+project-wide batch counter than this family's own local batch
+numbering -- don't conflate the two when reading header comments). Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` Kbuild build:
+clean link, `OA.ko` 530640 bytes, zero warnings/errors traceable to
+either of the 2 new files (only the harmless
+`-Werror-implicit-function-declaration`-in-the-invocation-line false
+positive, same as every prior batch's own build-log grep). Manifest
+delta exactly +49 (15+34), 0 regressions -- confirmed via `git stash`
+(stashing just this batch's own changed/new files), regenerating the
+manifest against the TRUE prior committed state, then `git stash pop`
+and regenerating again, rather than trusting whatever `manifest/
+oa_functions.csv` happened to already contain on disk (which can be
+stale/uncommitted leftover state from a different, unrelated prior
+session -- this generated CSV is untracked by git, so there is no
+`git diff` to fall back on for it the way there is for real source
+files).
+
+**Next targets**: `CSTGDrumKitData` (30 real candidates) is the
+best-documented next target -- full piecewise-index derivation already
+captured in this batch's own entry above, ready to decode once a
+3-dimensional ctx-index helper shape is designed (bank term `<<9`, note
+term via `this+0x4` premultiplied by 25 plus `note*2`, velocity-zone
+term via `[this+0x18]*0x10302`, all summed then added to a fixed base
+`+0x14e`). `CSTGTG92OscBase`'s pure-virtual deferral from batch 12
+still open. The `sValueGetterTemp` whole-binary sweep is confirmed
+re-exhausted (75/75 accounted for) -- future batches should default to
+the per-context-type `nm` sweep demonstrated this batch (grep each
+`*MessageContext` type's own `Get*(Type&)`-shaped mangled suffix
+directly) rather than re-running the `sValueGetterTemp` sweep again
+without a specific reason to expect it's changed.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
