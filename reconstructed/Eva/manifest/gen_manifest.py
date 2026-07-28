@@ -2794,6 +2794,42 @@ RECONSTRUCTED = {
     "08092430",  # CParamTracer::SetDataLSB(unsigned char)
     "08092850",  # CParamTracer::SetDataMSB(unsigned char)
     "08182f40",  # TVector<CParamTracer::SParam, 0>::Insert(CParamTracer::SParam*&, CParamTracer::SParam const*, CParamTracer::SParam const*)
+
+    # --- CKontaktXml (kontakt_xml.h, 2026-07-28 sweep) -- the shared libxml2
+    # xmlTextReader wrapper / value-parsing helper underneath the entire ~180-class
+    # Kontakt (NKI) import subsystem (confirmed via objdump -dr xref: every
+    # CKontaktXxxParameter::AddIndexedParameter dispatch table funnels through
+    # UnsignedValue/SignedValue here -- the OA-side sValueGetterTemp pattern's Eva
+    # analogue). 25 of 29 real methods reconstructed; TruncateName/UnpackPath/
+    # RemoveTrailingCharacters/PathName deliberately deferred -- see
+    # kontakt_xml.h's own header comment for why each one. Rest of the ~180-class
+    # family (CKontaktGroup/CKontaktZone/CKontaktProgram/... + the
+    # CKontaktXxxParameter accessors) untouched, out of scope this pass. ---
+    "089c4bc0",  # CKontaktXml::CKontaktXml()
+    "089c4b20",  # CKontaktXml::~CKontaktXml() (complete-object)
+    "089c4b40",  # CKontaktXml::~CKontaktXml() (deleting)
+    "089c4be0",  # CKontaktXml::StateString(CKontaktXml::KontaktState)
+    "089c4b60",  # CKontaktXml::AddObject(_xmlTextReader*, unsigned char const*)
+    "089c4b30",  # CKontaktXml::AddAttribute(unsigned int, unsigned char const*, unsigned char const*)
+    "089c4c00",  # CKontaktXml::ProcessNode(_xmlTextReader*)
+    "089c4ed0",  # CKontaktXml::ProcessNodes(_xmlTextReader*, bool)
+    "089c4f30",  # CKontaktXml::Parse(_xmlTextReader*)
+    "089c4f80",  # CKontaktXml::Parse(char const*)
+    "089c4ff0",  # CKontaktXml::SkipNode(_xmlTextReader*)
+    "089c5050",  # CKontaktXml::StringIndex(char const**, unsigned char const*)
+    "089c50b0",  # CKontaktXml::StringIndex(char const**, unsigned char const*, unsigned int&)
+    "089c5170",  # CKontaktXml::StringIndex(char const**, unsigned char const*, char*, unsigned int)
+    "089c5210",  # CKontaktXml::StringsEqual(unsigned char const*, char const*)
+    "089c5240",  # CKontaktXml::BooleanValue(unsigned char const*)
+    "089c52b0",  # CKontaktXml::UnsignedValue(unsigned char const*)
+    "089c52e0",  # CKontaktXml::SignedValue(unsigned char const*)
+    "089c5310",  # CKontaktXml::FloatValue(unsigned char const*)
+    "089c5610",  # CKontaktXml::VolumeLength(unsigned char const*, unsigned int&)
+    "089c5680",  # CKontaktXml::DirectoryLength(unsigned char const*, unsigned int&)
+    "089c56f0",  # CKontaktXml::FileLength(unsigned char const*, unsigned int&)
+    "089c5760",  # CKontaktXml::Append(unsigned char const*, unsigned int&, unsigned int, char*, unsigned int)
+    "089c57f0",  # CKontaktXml::AbsolutePath(char const*, char const*, char*, unsigned int)
+    "089c58f0",  # CKontaktXml::RemoveNameExtension(char*, unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

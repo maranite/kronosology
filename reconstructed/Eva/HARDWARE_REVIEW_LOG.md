@@ -1231,3 +1231,37 @@ should know they exist and are untested/unmodeled, not silently absent.
   fabricating an unverified `CUsrSample` layout; see `ram_sample.h`'s own
   header comment for the full disassembly-derived writeup. Not real-hardware
   relevant on its own (host-side reconstruction gap only).
+
+- **`CKontaktXml`** (`kontakt_xml.h`/`.cpp`, 2026-07-28 sweep, 25/29 methods) —
+  fresh `nm -C` class-inventory sweep found the ~180-class, previously-100%-
+  untouched Kontakt (NKI) import subsystem; before touching any of the ~180
+  classes, traced what the whole `CKontaktXxxParameter::AddIndexedParameter`
+  family (e.g. `CKontaktGroupParameter`) actually calls into via
+  `objdump -dr` and found every dispatch case funnels through
+  `CKontaktXml::UnsignedValue`/`SignedValue` — the same "shared write-sink
+  helper" pattern as OA's `sValueGetterTemp` — so `CKontaktXml` itself was
+  reconstructed first, as the natural root for any future pass over the rest
+  of the family (untouched, out of scope this pass). 4 real methods
+  deliberately DEFERRED (not attempted, to avoid a low-confidence transcription
+  masquerading as ground truth): `TruncateName` (9731 bytes, by far the
+  largest method in the class — a genuinely complex name-shortening algorithm
+  warranting its own pass), `UnpackPath` (a packed-path token-decoder whose
+  token semantics aren't pinned down with confidence yet), `PathName` (its
+  shared tail mixes an inlined SWAR `strlen()` with a `strncat()` count not
+  confidently disambiguated, and it tail-calls the also-deferred
+  `TruncateName` regardless), `RemoveTrailingCharacters` (a backward scan
+  that resolves to exactly one `strcpy`-shift-left-by-one whose precise
+  boundary rule wasn't disambiguated). See `kontakt_xml.h`'s own header
+  comment for full per-method derivation and disassembly addresses. Also
+  added `src/convert/libxml2_host_stubs.cpp` — this build host has no i386
+  (-m32) libxml2 package (only amd64), and the Makefile's `verify` target
+  links every `verify/test_*` binary against the full object set, so
+  `CKontaktXml`'s real `xmlTextReader*` calls needed inert stand-in
+  definitions somewhere always-linked rather than genuinely-unresolved
+  symbols (which would have broken every OTHER class's verify binary, not
+  just this one) — the real Kronos/Eva runtime links against real libxml2,
+  this is host-build-only. `verify/test_kontakt_xml.cpp` covers every
+  reconstructed pure/leaf method (32 checks); `ProcessNode`/`ProcessNodes`/
+  `Parse`/`SkipNode`/`AddObject` (the libxml2-calling methods) are not
+  independently host-tested for the same reason. Full host `make verify`
+  green (65/65 binaries). Eva manifest 1747 -> 1772/37,795 (4.688%).
