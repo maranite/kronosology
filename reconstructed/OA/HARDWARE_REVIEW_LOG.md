@@ -2054,3 +2054,164 @@ checking in `.cpp` files' leading comment block, not headers.
 
 Real-HW test that would help: none identified, same rationale as
 CSTGString and CKGSeqBackup above.
+
+## STG value-getter family, batches 3-7 -- 513 methods across 12 classes (documentation catch-up, 2026-07-28)
+
+Consolidated entry closing a gap flagged by batch 7's own agent memory:
+this log had not been kept current with the STG value-getter family past
+batch 2 (`CSTGOrganModelPatch`+`CSTGMS20` above), even though five more
+batches shipped the same day. Facts below are transcribed from
+`/home/share/PROJECT_BRAIN/status.md`'s own dated entries and
+`.claude/agent-memory/re-decompiler/stg_value_getter_family.md`, not
+re-derived. Manifest moved 1741 -> 2263/21,689 (8.03% -> 10.43%) across
+these five batches, 513 methods total. Same ground truth binary
+throughout (`/home/share/Decomp/OA.ko_Decomp/OA.ko`), same scripted
+`objdump -dr` -> Python instruction-pattern decoder methodology
+established in the CSTGString pilot, extended per-batch rather than
+rewritten.
+
+**Batch 3 (commit `e59300a`): `CSTGAnalog4PoleBase` (74/76) +
+`CSTGPolysix` (71/71) + `CSTGAnalogSyncOsc` (63/65), 208 methods**,
+manifest 1741 -> 1949. New decoder shapes: a ctx-dynamic-index field load
+with an explicit ×4 SIB scale stacked on the usual stride-5 `lea`
+premultiply (`CSTGPolysix`'s `ExtMod*Intensity`/`ExtModSource` group,
+effective stride 20 -- third distinct SIB-scale value confirmed for the
+sub-family after CSTGString's ×1 and CSTGMS20's ×2); a boolean
+nonzero/zero integer test (`test reg,reg` + `setne`/`sete` + `movzx`)
+included as a real mechanical shape, not excluded, since it's a
+truth-value test rather than a numeric transform
+(`CSTGAnalogSyncOsc::GetRingModModulatorSelect`/`GetRingModCarrierSelect`/
+`GetSubOscAudioInModeSelect`). New signature-outlier check added and
+immediately validated: filtering the weak-symbol candidate list to
+mangled names ending `ER23CSTGPatchMessageContext` before decoding caught
+`CSTGAnalog4PoleBase::GetSubComponent(unsigned short)` up front -- same
+outlier class as CSTGString's own `GetSubComponent`, but weak/COMDAT
+linkage this time, so the plain W/T check alone would have missed it.
+4 outliers total: that `GetSubComponent`; `GetFilterALeakage`/
+`GetFilterBLeakage` (real x87 ordered-equal-to-1.0 float compare,
+`fucomip`-based); `GetNoiseSaturation` (`fyl2x`, same shape as
+CSTGString's own); `GetNoiseCutoff` (SSE `sqrtss`, a new numeric-transform
+outlier variant). `CSTGPolysix` was the family's first class with
+genuinely zero outliers across its full 71-candidate set.
+
+**Batch 4 (commit `515830e`): `CPianoOsc` (46/53) + `CSTGEPModelPatch`
+(42/42), 88 methods**, manifest 1949 -> 2037. `CSTGProgram` (65 pending,
+next by size on the prior priority list) was spot-checked first and
+confirmed already heavily modeled (real ctor, `Initialize`/`Copy`,
+vtable, ~97 references in `oa_global.h`) -- same already-modeled
+situation as `CSTGProgramSlot`, correctly skipped. `CPianoOsc` is the
+first non-`CSTG`-prefixed class shown to fully participate in the
+convention (same `sValueGetterTemp` sink, same signature, same
+weak/COMDAT sections). New ctx-index shape: its Level/MultisampleNum/
+BankType/BottomVelocity group uses effective stride 25 via TWO chained
+stride-5 `lea` premultiplies rather than a single `lea` plus an extra SIB
+scale -- the first stride variant in the family not built from a single
+premultiply-plus-scale. New outlier CLASS (not just a new outlier
+instance): `CPianoOsc`'s 7 `Get*BankSelect` methods compute a
+ctx-indexed sub-object pointer but then make a real `call` into the
+still-unreconstructed `CSTGMultisampleBankUUIDAndStereoFlag::
+GetBankIdAndStereoFlag` (348 bytes, itself calling the also-unreconstructed
+`FindBankUUID`) -- the first "delegates to another undecoded real member
+function" outlier, distinct from every prior outlier's own-data DSP math.
+`CSTGEPModelPatch`: simplest dialect yet, 42/42 candidates, zero
+outliers, zero ctx-index methods.
+
+**Batch 5 (commit `0863921`): `CSTGOrganOsc` (13/36) + `CSTGVPMOsc`
+(44/44) + `CSTGMS20ModelPatch` (19/19), 76 methods**, manifest 2037 ->
+2113. `CSTGOrganOsc` reconfirmed "T linkage = different mechanism" even
+when a mangled signature superficially matches: 23 of its 36 pending
+symbols end in the same `ER23CSTGPatchMessageContext` suffix but are
+global ('T') linkage; spot-checking `GetLowerNoteCount`'s own
+disassembly (rather than trusting linkage alone) showed a plain per-voice
+runtime note-count read straight into eax, zero `sValueGetterTemp` write
+-- real per-voice state, not a static patch-value accessor. New field
+shape: shift-then-mask bitfield extraction, `movzx` + `shr al,N` +
+`and eax,1` (N > 0), extending the existing mask-only (no-shift) bitfield
+shape -- confirmed on `CSTGVPMOsc` (4 independent booleans packed in byte
+0x1f) and `CSTGMS20ModelPatch` (2 booleans at offset 0x6f7). Both
+`CSTGVPMOsc` and `CSTGMS20ModelPatch` are zero-ctx-index dialects;
+`CSTGVPMOsc` has 1 pre-excluded outlier (`GetSubComponent`, same
+sub-object-accessor shape as always), `CSTGMS20ModelPatch` has zero.
+
+**Batch 6 (commit `8c97b38`): `CSTGPolysixModelPatch` (48/48) +
+`CWaveMotionOsc` (23/23) + `CSTGPianoModelPatch` (16/18, plus 2 real
+accessor helpers), 89 methods**, manifest 2113 -> 2202.
+`CSTGControllerInfo`/`CSTGVectorMotion` were also on the priority list by
+raw pending-count but correctly SKIPPED -- both already have real
+structs/ctors in `oa_global.h`/`program_ctor.cpp`, same already-modeled
+precedent as `CSTGProgramSlot`/`CSTGProgram`. `CSTGPolysixModelPatch`'s
+`GetArpeggiator*` group packs FOUR independent booleans into one byte at
+`+0x4ac` (Enable/KeySync/MIDITempoSync/Latch), one more bit than any
+prior class's bitfield shape. `CSTGPianoModelPatch` -- confirmed distinct
+from `CPianoOsc`, the higher-level patch component that owns a
+`CPianoOsc` -- is the batch's new-shape class: its 8-method
+SustainPedalDown-/SustainPedalUp-prefixed ctx-indexed group derives its
+base pointer from a virtual-dispatch call through `this`'s own vtable
+(slots `0x170`/`0x174`), not `this` directly. Rather than treating the
+whole group as an outlier, both vtable targets
+(`AccessSustainPedalDownVelocityZones`/`AccessSustainPedalUpVelocityZones`)
+were decompiled directly, found to be trivial constant-offset accessors
+(`this+0x14`/`this+0x78`), and reconstructed as real member functions
+called from the Get* bodies -- a new "virtual-call-mediated but
+mechanically trivial once decompiled" shape, distinct from `CPianoOsc`'s
+own BankSelect outlier where the delegate target is genuinely
+non-trivial and stays unreconstructed. `this+0x78 - this+0x14 =
+0x64 = 4 * stride(25)` cross-checked that each velocity-zone array holds
+exactly 4 records. `GetSustainPedalDownMultisampleBank`/
+`GetSustainPedalUpMultisampleBank` hit the same still-open
+`GetBankIdAndStereoFlag` dependency as `CPianoOsc`'s outlier and were
+excluded on the same grounds. New field-width variant: this class's own
+ctx-index field is read as a BYTE (`movzx ebx, BYTE [ctx+0x4]`) rather
+than the family's usual DWORD read, modeled via a new `CtxIndexByte`
+helper alongside `CtxIndex`.
+
+**Batch 7 (commit `22a5cf3`): `CSTGMultiFilter2Pole` (23/23) +
+`CSTGMS20EG` (20/20) + `CSTGPolysixMG` (18/18), 61 methods**, manifest
+2202 -> 2263. `CSPRSeqDataManager` (28 pending, next by size) was
+checked first and confirmed NOT part of this family at all -- entirely
+global ('T') linkage with a different, non-ctx signature
+(`GetSongSize`/`GetTrackSize`-style sequencer data-area accessors) --
+correctly skipped without writing any files. All three chosen classes
+came back fully or near-fully clean, the third batch running with zero
+excluded outliers. New ctx-index shape: `CSTGMultiFilter2Pole`'s
+`GetLFOIntensity`/`GetLFOJSminusYIntensity` use a bare SIB-scaled
+ctx-index load with NO `lea` premultiply at all (`mov edx,[edx+0x4]`
+straight into `[eax+edx*4+K]`, effective stride 4) -- the first confirmed
+case of a raw per-call index used directly as a plain array-of-dwords
+subscript. New plain-field variant: `CSTGPolysixMG::GetMIDITempoSyncTimes`
+is an UNSIGNED byte field (`movzx`, no shift/mask) rather than the
+family's near-universal signed `movsx` byte read on a non-bitfield field.
+`CSTGMS20EG`'s own naming was a false lead, not a new shape: its 4
+EG-time parameters each carry a 5-method AMS sibling group whose names
+suggest a second level of modulation nesting
+(`AMSIntensityAMSSource`/`AMSIntensityAMSIntensity`), but direct
+disassembly confirmed all 20 fields are plain fixed offsets off `this`
+with zero extra indirection.
+
+**Cross-batch tooling notes** (each logged in agent memory as it was
+found, consolidated here): the DEF_RE parenthesis-swallowing gotcha
+(batch 2's own finding) and the literal-`*/`-in-prose gotcha each
+recurred in nearly every batch's new file headers, in progressively
+subtler forms -- adjacent similarly-prefixed field names (`FilterA*/
+FilterB*`, `Tine*/Reed*`), bare `Get*/Set*` prose with no adjacent-word
+pairing needed, a `.h`-file instance whose runaway match reached a real
+inline function definition's own `{` (batch 6's `CtxIndexByte`) and,
+batch 7, a `.h`-file instance reaching a `struct Name {` opening brace,
+plus a genuinely new DEF_RE trigger shape (a bare capitalized word
+immediately followed by a parenthetical aside, e.g. `UNSIGNED (movzx,
+...)`). Every instance was caught before any build attempt via the
+2-check discipline that hardened over these batches: an exact `/*`/`*/`
+open-close COUNT balance check, plus an exact DEF_RE captured-name-set
+DIFF (not just a match-count check) against every declared method name,
+run on both `.h` and `.cpp` files. All five batches independently
+KAT-verified via a separate Python evaluator over the same parsed
+(offset, ctx-index*stride, width, signed, dual-write) facts rather than
+the C renderer's own output, and each closed with `make verify` green
+(0 FAIL lines) plus a real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build linking every new symbol into
+`OA.ko` cleanly.
+
+Real-HW test that would help: none identified across any of these five
+batches, same rationale as every prior entry in this family -- pure
+parameter-reflection plumbing with no direct front-panel/audio
+observable.
