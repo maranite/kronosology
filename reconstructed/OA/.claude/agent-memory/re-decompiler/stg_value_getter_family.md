@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 6 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc), 504 methods reconstructed, manifest 1441->1949
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 8 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch), 592 methods reconstructed, manifest 1441->2037
 type: project
 ---
 
@@ -217,9 +217,121 @@ after writing it, before ever attempting to build. Recommend running
 BOTH the DEF_RE-match-count check AND this brace-balance count check as
 one standard post-generation step from now on, not just the DEF_RE one.
 
+**Fourth batch (2026-07-28, commit `515830e`): `CPianoOsc` (46/53) +
+`CSTGEPModelPatch` (42/42) done**, manifest 1949 -> 2037. Same ground
+truth binary (`/home/share/Decomp/OA.ko_Decomp/OA.ko`). `CSTGProgram`
+(65 pending Get*/Set*, next on the prior batch's own priority list) was
+spot-checked FIRST via `grep -rn 'CSTGProgram' include/oa_global.h |
+wc -l` (97 hits) and confirmed already heavily modeled -- real ctor,
+`Initialize`/`Copy`, vtable, full struct at `oa_global.h:2227` -- same
+situation as `CSTGProgramSlot`, correctly skipped again in favor of
+`CPianoOsc`/`CSTGEPModelPatch`, the next two genuinely-fresh classes on
+the list. `CPianoOsc` is notable as the first class in this family that
+is NOT itself `CSTG`-prefixed (it's the acoustic-piano voice-model patch
+component) yet fully participates in the same convention -- same
+`sValueGetterTemp` sink, same `CSTGPatchMessageContext&` signature, same
+weak/COMDAT per-symbol sections. Its 61 total `Get*` symbols split as: 53
+real `ER23CSTGPatchMessageContext`-suffixed weak candidates (46 decoded +
+7 outliers), plus 8 pre-excluded up front (`GetRequiredVoiceInfo` T
+linkage/extra args, `GetTransposedNote` `__thiscall` unrelated helper,
+and 6 metadata/factory-table `__cdecl` stubs -- `GetId`/`GetName`/
+`GetNumParams`/`GetParamDescriptors`/`GetMessageHandlers`/
+`GetValueGetters`, all 6-byte trivial accessors, a NEW excluded-family
+shape worth recognizing on sight in future classes: `__cdecl`,
+tiny fixed size, name doesn't fit `Get<ParamName>`). No `Set*` methods
+exist for this class at all.
+
+**New ctx-dynamic-index shape**: `CPianoOsc`'s Level/MultisampleNum/
+BankType/BottomVelocity group (7 named parameter categories x 4 fields =
+28 methods) uses effective stride 25 -- `movzx edx,[edx+0x4]` then TWO
+back-to-back `lea edx,[edx+edx*4]` premultiplies (5*5), with a bare
+`[eax+edx*1+K]` addressing mode (no additional SIB scale). This is
+distinct from every prior stride variant in the family (CSTGString's
+bare x1, CSTGMS20's x2-via-SIB giving 10, CSTGPolysix's x4-via-SIB
+giving 20) -- all of which were a single `lea` premultiply plus an extra
+SIB scale factor on the final load. Modeled via the same `CtxIndex`
+helper, just passing 25 directly as the already-fully-reduced stride --
+no helper code changes needed, only the decoder's shape-recognition
+needed extending (chained double-`lea`, still no SIB scale, as its own
+distinct case alongside the existing single-`lea`-plus-SIB-scale cases).
+
+**New outlier class**: `CPianoOsc`'s 7 `Get*BankSelect` methods
+(`GetBankSelect`, `GetResonanceBankSelect`,
+`GetUnaCordaResonanceBankSelect`, `GetKeyOffNoiseBankSelect`,
+`GetReleaseSampleBankSelect`, `GetUnaCordaBankSelect`,
+`GetUnaCordaReleaseBankSelect`) compute a sub-object pointer via the same
+ctx-index arithmetic as the group above, but then make a REAL call
+(`call`, not a field load) into
+`CSTGMultisampleBankUUIDAndStereoFlag::GetBankIdAndStereoFlag()` --
+itself still unreconstructed (348 bytes, `.text+0x57be0`), which itself
+calls the also-unreconstructed `FindBankUUID` (503 bytes). Confirmed via
+`grep CSTGMultisampleBankUUIDAndStereoFlag manifest/oa_functions.csv` --
+both still `pending`. This is a genuinely NEW outlier class for the
+family: every prior outlier (CSTGString's `GetPluckDelay`/
+`GetNoiseSaturation`, CSTGOrganModelPatch's rotary-mic-distance pair,
+CSTGAnalog4PoleBase's leakage pair, CSTGAnalogSyncOsc's `GetNoiseCutoff`)
+was real DSP/math computation (fyl2x/sqrtss/x87 compare) against the
+object's OWN data; this is the first "delegates to another undecoded
+real member function on a different class" case. Recognize this shape
+by: ctx-index arithmetic feeding into `lea eax,[...]` (building a
+pointer, not dereferencing it) immediately followed by a `call` with an
+`R_386_PC32` relocation to a real mangled symbol, rather than a
+`mov`/`movzx`/`movsx` load.
+
+**New confirmed "32-bit does not always imply dual-write" exception**:
+`CPianoOsc::GetKeybedSize` -- fixed dword field, single `.value`-only
+write, no `.displayValue` -- same class of exception as prior batches'
+discrete/enum dword fields (CSTGString's PrePost/UseFilter/TableSelect,
+CSTGOrganModelPatch's VCType/RotaryHornStopPhase/RotaryRotorStopPhase).
+
+`CSTGEPModelPatch` dialect: the SIMPLEST yet in this family -- every one
+of its 42 real candidates is a fixed-K field read directly off `this`,
+zero ctx-dynamic-index methods of any kind (no AMS-slot-array
+sub-family at all, unlike CPianoOsc/CSTGPolysix/CSTGMS20). Zero outliers
+-- only the third class in the family with a full clean sweep (after
+CSTGPolysix and CSTGMS20). No exceptions to the width-vs-dual-write rule
+found here either -- every dword field dual-writes, every byte field
+(signed or unsigned) single-writes, no surprises.
+
+**Tooling note, reconfirmed and hardened this batch**: both new files'
+leading header comments hit BOTH known gotchas on the first draft --
+the DEF_RE parenthesis-swallowing bug (a plain "derivation notes (46 of
+53 ... see header)." aside with no semicolon before the next real
+function) AND the literal-`*/`-in-prose bug ("Tine*/Reed*" in
+`CSTGEPModelPatch`'s header). Caught BOTH via script before ever
+attempting to compile: (1) `text.count("/*") == text.count("*/")` on
+every new file, (2) an exact DEF_RE captured-name-set diff (`got == want`
+where `want` is `{f"{cls}::{name}" for name in declared_methods}`) rather
+than just checking the match COUNT -- a count-only check would have
+still passed at 46/42 even with the bug, since the swallowed real
+function's match got silently replaced by a same-count bogus "notes"/
+"kind" match with the wrong name, only a set-equality check catches this
+reliably. The eventual fix in both files was the SAME approach as the
+established convention: rewrite every parenthetical aside as an em-dash-
+or colon-delimited clause instead, so ZERO literal `(` characters appear
+in prose before the first real function/struct in either the `.h` or
+the `.cpp`. Recommend treating "zero parens in leading comments before
+the first code construct" as the default authoring style for all future
+batches' file headers, rather than writing parenthetical asides first
+and fixing them after the fact -- cheaper than the catch-and-fix cycle.
+
+**Next targets** (same technique, not yet done): ~160 more classes
+remain. `CSTGProgram` and `CSTGProgramSlot` both confirmed
+already-heavily-modeled, skip. Re-run the survey query (group pending
+`Set*`/`Get*` methods by class from `manifest/oa_functions.csv`, sort by
+count, then for each candidate: (1) word-boundary
+`grep -rn '\bClassName\b' src include` to rule out an already-modeled
+class or a name collision with an unrelated similarly-named class (the
+`CSTGPolysix`/`CSTGPolysixModel` and `CSTGProgramSlot` precedents), (2)
+`nm $KO | awk '{print $2,$3}' | grep -E ' _ZN<len><ClassName>[0-9]+(Get|
+Set)' | grep 'ER23CSTGPatchMessageContext$'` to get the exact real
+candidate set up front, filtered to weak linkage AND the exact ctx-only
+signature suffix before ever running the decoder.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
-"CSTGOrganModelPatch + CSTGMS20 value-getter families" and
+"CSTGOrganModelPatch + CSTGMS20 value-getter families",
 "CSTGAnalog4PoleBase + CSTGPolysix + CSTGAnalogSyncOsc value-getter
-families" entries for the full per-batch derivation notes.
+families" and "CPianoOsc + CSTGEPModelPatch value-getter families"
+entries for the full per-batch derivation notes.
