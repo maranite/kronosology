@@ -1,8 +1,161 @@
 ---
 name: ckg-module-param-msg-handler-family
-description: OA.ko's KARMA "checked write" message-dispatch family -- CKGModuleParamMsgHandler/CKGCommonParamMsgHandler/CKGGlobalParamMsgHandler, the NEXT dense cluster found after the STG value-getter family was exhausted (2026-07-28). CKGModuleParamMsgHandler now COMPLETE: 131/131 methods (batch 1: 113, manifest 2598->2711; batch 2: 18, manifest 2711->2730, commit 3c451f6) -- also fixed a systemic inverted-gate bug from batch 1 affecting all 85 Shape-B methods.
+description: OA.ko's KARMA "checked write" message-dispatch family -- CKGModuleParamMsgHandler/CKGCommonParamMsgHandler/CKGGlobalParamMsgHandler. ALL THREE NOW COMPLETE (2026-07-28). Module 131/131 (commit 3c451f6). Common 72/72 + Global 27/27 (commit 0f24e5e) -- Common shares Module's checked-write skeleton (cross-referenced against CKGSeqBackupCommonParam); Global is a THIRD, structurally distinct convention with no shared skeleton at all.
 type: project
 ---
+
+**UPDATE 2026-07-28 (Common + Global batch, commit 0f24e5e)**: closed out
+the family's last two siblings in one sitting.
+
+CKGCommonParamMsgHandler (72/72, src/engine/ckg_common_param_handler.cpp,
+include/oa_ckg_common_param_msg_handler.h): confirmed structurally
+identical to Module's own checked-write skeleton via direct disassembly
+(same ShouldAttemptSysExShadowWrite/SysExShadowWriteIsNeeded gate shape,
+same single-vs-dual-shadow rule -- dual iff the field's read-side
+counterpart is m_default-based, no longer gated on ctx-indexing too;
+Common's own fixed-offset SetScene field is m_default-based and DOES get
+dual shadow, showing the "AND ctx-indexed" qualifier in Module's own rule
+was incidental to that batch's field mix, not a real requirement). Field
+offsets cross-referenced against the already-reconstructed READ-side
+sibling CKGSeqBackupCommonParam (same file as CKGSeqBackupModuleParam,
+karma_seq_backup.cpp) -- confirmed the standing prediction from Module's
+own batch-1 note that this sibling would exist and the same technique
+would apply directly. 66 methods were fully mechanical (reused the
+Module-batch's own classify/gen_cpp Python pipeline, adapted for Common's
+own message-struct layout and Send-call convention); 6 were hand-traced
+standalones: GetKarmaPerfCommon (3-way switch on m_kind, but with a REAL
+explicit NULL fallback for any kind outside {0,1,2} -- unlike Module's own
+GetKarmaModule, which treats "anything else" as Combi), GetKarmaPerfCommon
+ForSeqBackup, ShouldStoreToBackup (all near-identical to their Module
+counterparts), SetChordMemVelocity (confirmed real no-op, 1-byte ret
+body), SetTempo (the one non-const message pointer in the whole 3-class
+family -- a real caller-visible mutation of msg->m_value to report back
+the OLD tempo on 2 of its 3 real branches; also the only method using a
+2-arg NotifyAfterEdit(bool,int) overload instead of the universal 0-arg
+one), and SetScene (dual-shadow on a fixed-offset field, then a real
+4-module linked-scene-id broadcast loop via CKGUIMsgProcessor::
+SendModuleSceneMessage consuming the SAME packed-nibble idiom
+CKGModuleParamMsgHandler::SetLinkedSceneId writes, just read here
+instead).
+
+Genuine Send-call convention deviation from Module (documented in the new
+header's own comment): Common's message struct has only ONE index field
+(m_index, +0xc) that does double duty as both the ctx-array index AND
+every Send call's own "index" argument -- no separate m_deviceIndex/
+GetRTParmBufferSelectId() indirection exists at all. Arity-driven Send-arg
+shape: 1 arg = value only (matches every non-ctx-indexed field), 2 args =
+(index, value), 3 args = (index, GROUP_CONST, value) where GROUP_CONST is
+a real confirmed 0-based ordinal (SendDynModule's A/B/C/D/Last quintet =
+0..4, SendRTPModule's A/B/C/D quartet = 0..3, SendChordMemNote/
+SendChordMemVelocity's Note1..8[Vel] octets = 0..7 -- every constant
+spot-checked against its own disassembly, not inferred from name
+ordering). SetKnob1-8Value/SetSw1-8Value are still the 5-arg SendKnob/
+SendAssignableSwitch shape but with a fixed constant 0 in arg0 (no RTParm
+indirection) and msg->m_index directly in arg1 -- no
+SKSTGGate_NotifyKarmaSliderPosition() tail call for either group here
+(Module's own Knob-only addition, absent throughout).
+
+CKGGlobalParamMsgHandler (27/27, src/engine/ckg_global_param_handler.cpp,
+include/oa_ckg_global_param_msg_handler.h): a THIRD, structurally
+distinct convention -- confirmed via direct disassembly of every single
+method that there is NO CSPREngine gate, NO m_liveRecord/m_defaultRecordA/
+m_defaultRecordB triple, NO KARMA-perf record lookup, and NO shared
+control-flow skeleton to factor out at all (unlike Module/Common, no
+ShouldAttemptSysExShadowWrite-style helper exists here). Global settings
+are session-wide (MIDI channel, velocity curve, external pad config...),
+not per-KARMA-module/per-Combi records. A single m_globalData pointer at
++0x4 is written directly at small fixed byte offsets (or a per-call
+msg->m_index-indexed byte/dword array within it). Shapes, all confirmed
+individually via disassembly, no cross-reference sibling exists (no
+CKGSeqBackupGlobalParam -- this class's own params are apparently not
+part of the KARMA seq-backup mechanism at all):
+  - plain field write only (8 methods)
+  - field write + one real CKGParamEdit::SendXxx()/free-function call,
+    with NO suppression check of any kind -- this class never reads
+    CKGEngine::ms_poInstance[0xb0] at all (6 methods)
+  - setne-style plain boolean field write only (7 methods)
+  - 2 confirmed real no-ops (SetLocalOn/SetNoteReceive, 1-byte ret
+    bodies each, same convention as Common's SetChordMemVelocity)
+  - SetLocalControllerMIDICh: no field write at all, just the same
+    2-call tail SetMIDIChannel makes
+  - SetMIDIFilter: real per-bit set/clear on one byte keyed by
+    msg->m_index, ground truth's own rol-of-0xfffffffe clear-side idiom
+    rendered as plain bit ops (semantically identical, not a distinct
+    behavior)
+  - SetMIDIClockSource: the ONE method with a real conditional gate -- a
+    nonzero clock-source value that maps to an unavailable MIDI port
+    (SKSTGGate_IsMidiPortAvailable) makes the entire method a no-op, no
+    field write, no Send, at all
+  - SetEnableMIDIInToKarmaModule: no field write, one real call to a
+    confirmed genuine naming exception -- CKGParamEdit::
+    SetEnableMIDIInToKarmaModule(), NOT prefixed "Send" like literally
+    every other CKGParamEdit target across this whole 3-class family
+    (verified directly via the real mangled symbol, not a typo introduced
+    here)
+HandleMessage()/ctor/dtor: deferred, same convention as every sibling.
+
+DEF_RE gotcha instances found+fixed this batch (6 total, 3 per file): the
+by-now-standard "bare word immediately before a (, with no ; before the
+next real function's own {" trigger (broader than the originally-
+documented "then a :: downstream" framing -- direct regex analysis this
+batch showed the :: isn't actually required, ANY unterminated ( in a
+comment before the next real definition triggers it, since comments
+essentially never contain a literal ;). Caught via the standard
+captured-name-set diff PLUS, this batch, direct experimental
+DEF_RE.finditer() runs against the new files with a match-span-length
+filter (>150 chars = suspect) -- a faster, more systematic detection
+method than eyeballing prose, worth reusing going forward. One instance
+(ckg_common_param_handler.cpp's own SetScene comment) genuinely cost
+SetScene its own manifest credit before being caught and fixed via the
+pre-build DEF_RE scan (not build/verify -- both stayed green throughout,
+this bug class is invisible to both). Two more in
+ckg_global_param_handler.cpp were caught the same way before ever
+reaching the manifest-diff step -- notably a bare `~(1<<n)`: the
+destructor-shaped leading `~` counts as a valid DEF_RE name char. A
+.h-file-only instance (oa_ckg_common_param_msg_handler.h's own struct-
+body-reaching runaway) was found but left unfixed since .h files in this
+project never contain a real {}-bodied function definition of their own
+(only ;-terminated declarations plus the two struct openings, neither
+DEF_RE-trackable) -- confirmed zero manifest impact, pure cosmetic noise.
+
+KAT technique: verify/test_ckg_common_param_handler.cpp (139 checks, 3
+parts mirroring Module's own convention) and
+verify/test_ckg_global_param_handler.cpp (60 checks, one block per method
+given the lack of a shared skeleton to isolate). Both computed expected
+values independently from the same ground-truth offset/shift/mask/arity
+facts the generator used, not from the generated C source itself. Caught
+2 real test-authoring bugs during this batch (both in the Common Part-2
+hand-written block, not the source): a missing ctx-index*stride term in a
+manually-computed byte address, and a scene-broadcast mock that
+overwrote its own participation-gate byte -- both documented as a general
+caution: hand-written KAT blocks for a representative-subset skeleton
+exercise need the SAME arithmetic care as the mechanically-generated
+Part-1 block, they are not exempt from the "derive from ground truth,
+don't eyeball it" rule just because there are fewer of them.
+
+Manifest quirk reconfirmed: CKGGlobalParamMsgHandler's own ctor picked up
+"reconstructed (address)" credit despite never being implemented -- the
+header's own opening .text+0x3c7660..text+0x3c79ba range citation
+happens to start exactly at the ctor's real address, which ADDR_RE
+doesn't distinguish from a real implementation. Same class of harmless
+false-credit already documented for Module's own
+SKSTGGate_NotifyKarmaSliderPosition stub-credit -- accepted per
+established precedent, not corrected (removing the range citation would
+lose real documentation value for zero benefit).
+
+Manifest: 2730 -> 2830/21,689 (13.048%), delta +100 (72 Common + 27
+Global real methods + 1 incidental Global-ctor address-credit), confirmed
+via full before/after reconstructed-name-set diff, 0 regressions. make
+verify: exit 0, 0 FAIL across the whole suite (10,245 checks total
+project-wide). Real make ko-clean && make ko KDIR=/home/build/linux-kronos
+Kbuild build: clean link, OA.ko produced (618056 bytes), zero errors,
+zero undefined references.
+
+This closes the whole CKG*ParamMsgHandler family -- all three siblings
+(Module 131, Common 72, Global 27 = 230 methods total across the family)
+are now fully reconstructed. No further targets within this specific
+family; next dense-cluster survey should start fresh.
+
 
 **UPDATE 2026-07-28 (batch 2, commit `3c451f6`)**: finished the 18
 deliberately-deferred methods from batch 1 -- `SetKnob1Value`..`SetKnob8Value`/
