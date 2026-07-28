@@ -90,6 +90,54 @@ int main()
 	check("StepSaw6(40,1000,60) == -300", CWaveformTemplate::EquationStepSaw6(40, 1000, 60) == -300);
 	check("StepSaw6(50,1000,60) == -500", CWaveformTemplate::EquationStepSaw6(50, 1000, 60) == -500);
 
+	/* ---- EquationRandomSH1 (z=61 => n=60, y=300; thresholds n/6=10,n/3=20,n>>1=30,
+	 * 2n/3=40,5n/6=50,n=60) ---- */
+	check("RandomSH1(5,300,61) == 70", CWaveformTemplate::EquationRandomSH1(5, 300, 61) == 70);
+	check("RandomSH1(15,300,61) == 150", CWaveformTemplate::EquationRandomSH1(15, 300, 61) == 150);
+	check("RandomSH1(25,300,61) == -30", CWaveformTemplate::EquationRandomSH1(25, 300, 61) == -30);
+	check("RandomSH1(35,300,61) == -100", CWaveformTemplate::EquationRandomSH1(35, 300, 61) == -100);
+	check("RandomSH1(45,300,61) == 120", CWaveformTemplate::EquationRandomSH1(45, 300, 61) == 120);
+	check("RandomSH1(55,300,61) == -150", CWaveformTemplate::EquationRandomSH1(55, 300, 61) == -150);
+	check("RandomSH1(60,300,61) == 40 (last bin, x>=n)", CWaveformTemplate::EquationRandomSH1(60, 300, 61) == 40);
+
+	/* ---- EquationRandomSH2 (z=61, y=300; thresholds n/12=5,17n/60=17,n/3=20,29n/60=29,
+	 * 3n/5=36,2n/3=40,5n/6=50,19n/20=57,n=60) ---- */
+	check("RandomSH2(0,300,61) == 70", CWaveformTemplate::EquationRandomSH2(0, 300, 61) == 70);
+	check("RandomSH2(10,300,61) == -30", CWaveformTemplate::EquationRandomSH2(10, 300, 61) == -30);
+	check("RandomSH2(25,300,61) == 60", CWaveformTemplate::EquationRandomSH2(25, 300, 61) == 60);
+	check("RandomSH2(45,300,61) == 100", CWaveformTemplate::EquationRandomSH2(45, 300, 61) == 100);
+	check("RandomSH2(50,300,61) == 30", CWaveformTemplate::EquationRandomSH2(50, 300, 61) == 30);
+	check("RandomSH2(59,300,61) == 150", CWaveformTemplate::EquationRandomSH2(59, 300, 61) == 150);
+	check("RandomSH2(60,300,61) == -50 (else bin, x>=n)", CWaveformTemplate::EquationRandomSH2(60, 300, 61) == -50);
+
+	/* ---- EquationRandomSH3 (z=61, y=300; alternating y>>1 / -(y>>1) ladder) ---- */
+	check("RandomSH3(2,300,61) == 150", CWaveformTemplate::EquationRandomSH3(2, 300, 61) == 150);
+	check("RandomSH3(10,300,61) == -150", CWaveformTemplate::EquationRandomSH3(10, 300, 61) == -150);
+	check("RandomSH3(25,300,61) == -150", CWaveformTemplate::EquationRandomSH3(25, 300, 61) == -150);
+	check("RandomSH3(40,300,61) == 150", CWaveformTemplate::EquationRandomSH3(40, 300, 61) == 150);
+	check("RandomSH3(59,300,61) == 150", CWaveformTemplate::EquationRandomSH3(59, 300, 61) == 150);
+	check("RandomSH3(60,300,61) == -150 (else bin, x>=n)", CWaveformTemplate::EquationRandomSH3(60, 300, 61) == -150);
+
+	/* ---- EquationRandomCnt1/2/3 (z=61, y=300): breakpoint-table LERP, values below are
+	 * ground truth derived from the x86 instruction-interpreter oracle (not
+	 * hand-computable at a glance, same convention as this file's header comment
+	 * describes for the rest of this family). x=60 (== z-1) exercises each function's
+	 * distinct edge special case. ---- */
+	check("RandomCnt1(0,300,61) == 130", CWaveformTemplate::EquationRandomCnt1(0, 300, 61) == 130);
+	check("RandomCnt1(20,300,61) == -10", CWaveformTemplate::EquationRandomCnt1(20, 300, 61) == -10);
+	check("RandomCnt1(40,300,61) == 60", CWaveformTemplate::EquationRandomCnt1(40, 300, 61) == 60);
+	check("RandomCnt1(60,300,61) == -20 (edge, x==n)", CWaveformTemplate::EquationRandomCnt1(60, 300, 61) == -20);
+
+	check("RandomCnt2(0,300,61) == 70", CWaveformTemplate::EquationRandomCnt2(0, 300, 61) == 70);
+	check("RandomCnt2(20,300,61) == 13", CWaveformTemplate::EquationRandomCnt2(20, 300, 61) == 13);
+	check("RandomCnt2(40,300,61) == -40", CWaveformTemplate::EquationRandomCnt2(40, 300, 61) == -40);
+	check("RandomCnt2(60,300,61) == -80 (edge, x==n)", CWaveformTemplate::EquationRandomCnt2(60, 300, 61) == -80);
+
+	check("RandomCnt3(0,300,61) == 150", CWaveformTemplate::EquationRandomCnt3(0, 300, 61) == 150);
+	check("RandomCnt3(20,300,61) == -150", CWaveformTemplate::EquationRandomCnt3(20, 300, 61) == -150);
+	check("RandomCnt3(40,300,61) == -7", CWaveformTemplate::EquationRandomCnt3(40, 300, 61) == -7);
+	check("RandomCnt3(60,300,61) == -150 (edge, x==n)", CWaveformTemplate::EquationRandomCnt3(60, 300, 61) == -150);
+
 	/* ---- GetData: m_pbData[idx mod m_wSize], both wrap directions ---- */
 	{
 		unsigned char data[5] = {10, 20, 30, 40, 50};

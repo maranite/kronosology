@@ -2616,14 +2616,18 @@ RECONSTRUCTED = {
     "08bd1af0",  # CListIter::operator++()
     "08bd1b40",  # CListIter::operator--()
 
-    # --- CWaveformTemplate, LFO waveform-shape generator (2026-07-28) -- partial
-    # batch, see waveform_template.h for the full scope-decision writeup (8 of 20
-    # Equation* bodies -- the pure-integer, no-runtime-table ones -- plus
-    # GetData()/Shape()/dtor; ctor/MakeShapeTable/EquationPolyline/RandomSH1-3/
-    # RandomCnt1-3/the 5 FPU Equation*/DrawWave deliberately NOT reconstructed
-    # this pass, each for a distinct documented reason). Divisors for every
-    # magic-multiply idiom confirmed via a scripted x86 interpreter used as a
-    # ground-truth oracle (see waveform_template.cpp's per-function comments).
+    # --- CWaveformTemplate, LFO waveform-shape generator (2026-07-28, two batches) --
+    # see waveform_template.h for the full scope-decision writeup. Batch 1: 8 of 20
+    # Equation* bodies (the pure-integer, no-runtime-table ones) plus GetData()/
+    # Shape()/dtor. Batch 2 (same day, follow-up): EquationRandomSH1-3/RandomCnt1-3,
+    # the multi-branch/table-driven breakpoint generators, reused the same x86
+    # instruction-interpreter oracle to derive AND regression-verify (thousands of
+    # randomized (x,y,z) per function, 0 mismatches). Still NOT reconstructed: ctor
+    # (needs the full 20-entry equation table wired up), MakeShapeTable (confirmed
+    # this batch to be inseparable from a real FPU curve-fit path in the same
+    # function body), EquationPolyline (confirmed this batch to be a genuine
+    # Duff's-device-unrolled variable-length polyline walk, its own dedicated-pass
+    # scope), the 5 FPU Equation* bodies, and DrawWave (Peg GUI dependency).
     "089847a0",  # CWaveformTemplate::EquationNone(int,int,int)
     "089847b0",  # CWaveformTemplate::EquationTriangle(int,int,int)
     "08984800",  # CWaveformTemplate::EquationSaw(int,int,int)
@@ -2632,6 +2636,12 @@ RECONSTRUCTED = {
     "089848a0",  # CWaveformTemplate::EquationStepTri6(int,int,int)
     "08984960",  # CWaveformTemplate::EquationStepSaw4(int,int,int)
     "089849d0",  # CWaveformTemplate::EquationStepSaw6(int,int,int)
+    "08984ae0",  # CWaveformTemplate::EquationRandomSH1(int,int,int)
+    "08984bf0",  # CWaveformTemplate::EquationRandomSH2(int,int,int)
+    "08984df0",  # CWaveformTemplate::EquationRandomSH3(int,int,int)
+    "089851a0",  # CWaveformTemplate::EquationRandomCnt3(int,int,int)
+    "08985330",  # CWaveformTemplate::EquationRandomCnt2(int,int,int)
+    "08985510",  # CWaveformTemplate::EquationRandomCnt1(int,int,int)
     "08985870",  # CWaveformTemplate::~CWaveformTemplate() (D1/D2 folded, same address)
     "089858e0",  # CWaveformTemplate::GetData(int) const
     "08985990",  # CWaveformTemplate::Shape(char) const

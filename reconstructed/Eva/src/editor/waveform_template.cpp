@@ -149,3 +149,156 @@ int CWaveformTemplate::EquationStepSaw6(int x, int y, int z)
 		return -((3 * y) / 10);
 	return -(y >> 1);
 }
+
+/* ---- 2026-07-28 follow-up batch: EquationRandomSH1-3 / EquationRandomCnt1-3 ----
+ * See include/waveform_template.h for full provenance. All 6 regression-verified against
+ * the x86-32 instruction-interpreter oracle (thousands of randomized (x,y,z), 0
+ * mismatches). Every threshold below is a real ground-truth `trunc(k*(z-1)/D)` --
+ * fractions have been reduced to lowest terms only where that reduction is mathematically
+ * exact for truncating division (`trunc(a/b) == trunc((a*k)/(b*k))` for any k != 0, so
+ * e.g. ground truth's literal `(12*y)/30` is written as `(2*y)/5` below), never
+ * approximated. `z - 1` is computed once per call as `n`, matching ground truth's own
+ * `sub ecx,0x1` on the raw `z` argument before any threshold work. */
+
+/* Real ground truth: all magic-multiply thresholds here use hardcoded integer
+ * coefficients baked into the instruction stream (0x2aaaaaab/0x55555556/0x88888889
+ * constants), NOT a .rodata table -- confirmed by their absence from the disassembly's
+ * relocation/data-reference column, unlike RandomCnt1-3 below. */
+int CWaveformTemplate::EquationRandomSH1(int x, int y, int z)
+{
+	int n = z - 1;
+	if (x < n / 6)
+		return (7 * y) / 30;
+	if (x < n / 3)
+		return y / 2;
+	if (x < (n >> 1))
+		return -(y / 10);
+	if (x < (2 * n) / 3)
+		return -(y / 3);
+	if (x < (5 * n) / 6)
+		return (2 * y) / 5;
+	if (x < n)
+		return -(y / 2);
+	return (2 * y) / 15;
+}
+
+int CWaveformTemplate::EquationRandomSH2(int x, int y, int z)
+{
+	int n = z - 1;
+	if (x < n / 12)
+		return (7 * y) / 30;
+	if (x < (17 * n) / 60)
+		return -(y / 10);
+	if (x < n / 3)
+		return y / 2;
+	if (x < (29 * n) / 60)
+		return y / 5;
+	if (x < (3 * n) / 5)
+		return y / 3;
+	if (x < (2 * n) / 3)
+		return -(y / 3);
+	if (x < (5 * n) / 6)
+		return y / 3;
+	if (x < (19 * n) / 20)
+		return y / 10;
+	if (x < n)
+		return y / 2;
+	return -(y / 6);
+}
+
+/* Reduces to a plain alternating-sign y>>1/-(y>>1) ladder once decoded -- real ground
+ * truth computes y>>1 via a genuine `sar`, not the truncating-division idiom, so it is
+ * written as `y >> 1` here (floors for negative y), not `y / 2`. */
+int CWaveformTemplate::EquationRandomSH3(int x, int y, int z)
+{
+	int n = z - 1;
+	int half = y >> 1;
+	if (x < n / 12)
+		return half;
+	if (x < (17 * n) / 60)
+		return -half;
+	if (x < n / 3)
+		return half;
+	if (x < (29 * n) / 60)
+		return -half;
+	if (x < (5 * n) / 6)
+		return half;
+	if (x < (19 * n) / 20)
+		return -half;
+	if (x < n)
+		return half;
+	return -half;
+}
+
+/* Shared LERP core for EquationRandomCnt1-3: real ground truth walks a small breakpoint
+ * table (`coeff[]`, `nCoeff` real threshold coefficients, all thresholds expressed as
+ * `trunc(coeff[i]*n/60)`) to pick a segment index, then linearly interpolates between
+ * that segment's start/end values. `tableA[]`/`tableB[]` are the real per-segment
+ * start/end VALUE tables (signed bytes, scaled in 30ths of `y`); `tableY[]` is the real
+ * per-segment start POSITION table (unsigned byte, scaled in 60ths of `n` -- ground
+ * truth's own `movzx`, genuinely zero-extended even though its idx-0 entry reads as a
+ * large positive value in every instance, a real dead/defensive-only branch for x<0 not
+ * exercised by any real caller, reproduced faithfully rather than "fixed").
+ * `edgeNumer` is the real fixed `y`-fraction (in 30ths) ground truth returns for the
+ * exact-last-sample (`x == n`) special case, which is NOT part of the table walk.
+ * The final `(valB-valA)*(x-valY)` product uses a real 2-operand x86 `imul` that keeps
+ * only the low 32 bits -- plain `int` arithmetic here reproduces that wraparound
+ * automatically on this target, deliberately not widened to a larger type. */
+static int RandomCntLerp(int x, int y, int n, const int *coeff, int nCoeff,
+			  const signed char *tableA, const signed char *tableB,
+			  const unsigned char *tableY, int edgeNumer)
+{
+	int idx, thr;
+
+	if (x == n)
+		return (edgeNumer * y) / 30;
+
+	if (x < 0) {
+		idx = 0;
+		thr = 0;
+	} else {
+		idx = nCoeff + 1;
+		thr = n;
+		for (int i = 0; i < nCoeff; ++i) {
+			int t = (coeff[i] * n) / 60;
+			if (x < t) {
+				idx = i + 1;
+				thr = t;
+				break;
+			}
+		}
+	}
+
+	int valY = (tableY[idx] * n) / 60;
+	int valA = (tableA[idx] * y) / 30;
+	int valB = (tableB[idx] * y) / 30;
+	int numer = (valB - valA) * (x - valY);
+	return valA + numer / (thr - valY);
+}
+
+int CWaveformTemplate::EquationRandomCnt1(int x, int y, int z)
+{
+	static const int kCoeff[5] = { 10, 20, 30, 40, 50 };
+	static const signed char kA[7] = { 60, 13, -11, -1, -5, 6, 8 };
+	static const signed char kB[7] = { 13, -11, -1, -5, 6, 8, -2 };
+	static const unsigned char kY[7] = { 254, 0, 10, 20, 30, 40, 50 };
+	return RandomCntLerp(x, y, z - 1, kCoeff, 5, kA, kB, kY, -2);
+}
+
+int CWaveformTemplate::EquationRandomCnt2(int x, int y, int z)
+{
+	static const int kCoeff[8] = { 5, 10, 25, 33, 37, 43, 50, 54 };
+	static const signed char kA[10] = { 60, 7, 15, -14, 9, 6, -12, 4, -3, 15 };
+	static const signed char kB[10] = { 7, 15, -14, 9, 6, -12, 4, -3, 15, -8 };
+	static const unsigned char kY[10] = { 248, 0, 5, 10, 25, 33, 37, 43, 50, 54 };
+	return RandomCntLerp(x, y, z - 1, kCoeff, 8, kA, kB, kY, -8);
+}
+
+int CWaveformTemplate::EquationRandomCnt3(int x, int y, int z)
+{
+	static const int kCoeff[6] = { 5, 17, 20, 29, 50, 57 };
+	static const signed char kA[8] = { 0, 15, -15, 15, -15, 15, -15, 15 };
+	static const signed char kB[8] = { 15, -15, 15, -15, 15, -15, 15, -15 };
+	static const unsigned char kY[8] = { 241, 0, 5, 17, 20, 29, 50, 57 };
+	return RandomCntLerp(x, y, z - 1, kCoeff, 6, kA, kB, kY, -15);
+}

@@ -20,35 +20,34 @@
  * where these recur.
  *
  * PARTIAL RECONSTRUCTION, real scope decision, not an oversight: of the class's 28 real
- * methods, this pass reconstructs the 8 pure-integer, no-runtime-table Equation* bodies
- * (`EquationNone`/`Triangle`/`Saw`/`Square`/`StepTri4`/`StepTri6`/`StepSaw4`/`StepSaw6`)
- * plus `GetData()`/`Shape()` (the two table-lookup accessors) and the destructor.
- * Deliberately NOT reconstructed this pass, each for a distinct, documented reason:
+ * methods, this pass (plus the follow-up batch below) reconstructs the 8 pure-integer,
+ * no-runtime-table Equation* bodies (`EquationNone`/`Triangle`/`Saw`/`Square`/`StepTri4`/
+ * `StepTri6`/`StepSaw4`/`StepSaw6`), the 6 multi-branch/table-driven `EquationRandomSH1-3`/
+ * `EquationRandomCnt1-3` bodies (see the 2026-07-28 follow-up note below), plus
+ * `GetData()`/`Shape()` (the two table-lookup accessors) and the destructor.
+ * Deliberately NOT reconstructed, each for a distinct, documented reason:
  *   - Constructor (`CWaveformTemplate(EWaveformType,u16,u16)`): allocates both m_pbData/
  *     m_pbShapeTable via two HAL_DisableInterrupts()/malloc()/HAL_EnableInterrupts()-
  *     bracketed loops that call THROUGH `sm_ifpWaveformEquations[type]` (a real function-
  *     pointer table at .data+0x091fb960) -- needs the full 20-entry equation table wired
- *     up (this pass only supplies 8 of them) to be meaningfully testable, not just
- *     compilable. A real future increment once the remaining Equation-family and
- *     MakeShapeTable bodies below are done.
- *   - `MakeShapeTable(EWavehapeType,int)`: mixes this pass's integer idiom with a SEPARATE
- *     real x87 floating-point curve-fit path (`fld`/`fmul`/`fdiv`/`fucomi` chains against
- *     runtime float constants at .rodata+0x8e871f0 etc) for a subset of shape types --
- *     genuine DSP curve math, not a quantization idiom, out of scope for this pass same as
- *     the Equation* FPU outliers below.
- *   - `EquationPolyline(int,int,int,int,const u8*,const char*)`: real multi-point linear
- *     interpolation across a caller-supplied polyline (not a single magic-divide idiom) --
- *     traced enough to confirm it reuses the same `0x88888889`/shift-5/div-60 idiom as
- *     `EquationRandomCnt3` and friends (see below) but the interpolation walk itself needs
- *     a dedicated pass.
- *   - `EquationRandomSH1/2/3`, `EquationRandomCnt1/2/3`: real multi-branch "random sample-
- *     and-hold" quantized-breakpoint generators (`RandomCnt1/2/3` table-driven off 3 small
- *     `.rodata` const-byte breakpoint tables at 0x08f1dd5c..0x08f1dd8d, confirmed read
- *     with `objdump -s`; `RandomSH1/2/3` use the same breakpoint fractions but as hardcoded
- *     immediates) with a real edge-wraparound averaging tail case on the last table entry
- *     -- traced far enough (via the same x86 interpreter, see `sweep()`-style breakpoint
- *     probing in the commit) to confirm the shape of the problem, not yet turned into a
- *     verified translation.
+ *     up (this pass supplies 14 of them) to be meaningfully testable, not just compilable.
+ *   - `MakeShapeTable(EWavehapeType,int)`: direct inspection (2026-07-28) confirms this is
+ *     NOT cleanly separable into an integer-only subset: the dispatch on its two params is
+ *     `type==0` -> integer byte-fill loop; `type==1 && amount==0` -> the SAME integer loop
+ *     (shared fallthrough, `cmp ebp,0x0; jne <fpu path>`); `type==1 && amount!=0`, or any
+ *     other `type` -> a real x87 curve-fit path (`fld1`/`fild`/`fdiv`/`fmul`/`fisttp`
+ *     against runtime float constants at .rodata+0x8e871f0) inside the SAME function body,
+ *     one straight-line fallthrough away from the integer loop. Reconstructing even the
+ *     integer-only branches faithfully would require either modeling the FPU branch too
+ *     (out of scope, same reason as the Equation* FPU outliers below) or silently
+ *     truncating real dispatch behavior -- deferred whole, not partially forced in.
+ *   - `EquationPolyline(int,int,int,int,const u8*,const char*)`: confirmed (2026-07-28) to
+ *     be a genuine Duff's-device-unrolled (mod-4 remainder handling) linear search over a
+ *     CALLER-SUPPLIED, variable-length polyline buffer, reusing the same `0x88888889`/
+ *     shift-5/div-60 magic-divide idiom as `EquationRandomCnt3` for the per-point
+ *     thresholds but with real loop-carried unrolling state (`edi = (count-1)&3`) that the
+ *     fixed-size-table `RandomCnt` LERP helper below does not need -- a genuinely separate,
+ *     larger reconstruction than this batch's scope, needs its own dedicated pass.
  *   - `EquationExpSawUp/ExpSawDown/ExpTriangle/Guitar/Sine`: genuine x87 FPU DSP curve
  *     math (`fsqrt`, real `sqrt@plt`/`sin@plt`/`cos@plt` calls against runtime float/double
  *     constants) -- same "real DSP computation, out of scope" exclusion this project has
@@ -59,6 +58,40 @@
  *     mov edx,[ecx]; call [edx+0x64]`) -- the Peg GUI framework (`PegThing`/`PegPoint`/
  *     `PegColor`) is not modeled anywhere in this project yet; real, out-of-scope external
  *     dependency, not a decoding difficulty.
+ *
+ * 2026-07-28 FOLLOW-UP BATCH: `EquationRandomSH1/2/3` and `EquationRandomCnt1/2/3`, left
+ * "traced but not verified" by the pass above, are now fully reconstructed and regression-
+ * verified (the same x86-32 instruction-interpreter oracle described above, ~5000-7000
+ * randomized (x,y,z) triples per function including negative/boundary values and small-z
+ * edge sweeps, 0 mismatches after fixing an off-by-one in the interpolation-index search
+ * caught only by the regression sweep, not by inspection).
+ *   - `EquationRandomSH1/2/3`: real multi-branch "sample-and-hold" quantized-breakpoint
+ *     generators. Breakpoints are `trunc(k*(z-1)/60)` (magic-multiply `0x88888889`,
+ *     shift 5) or `trunc((z-1)/D)` (`0x2aaaaaab`/`0x55555556`, `D` in {3,6,12}) for
+ *     hardcoded integer coefficients `k` -- NOT read from any `.rodata` table (that
+ *     distinguishes them from `RandomCnt1-3` below, despite sharing the same breakpoint
+ *     fractions). Per-bin VALUES are simple fixed fractions of `y` (`y/2`, `y/3`, `y/5`,
+ *     `y/6`, `y/10`, `y>>1`, sign-flipped per bin) -- SH3 in particular reduces to a plain
+ *     alternating-sign `y>>1`/`-(y>>1)` ladder across 8 bins once decoded.
+ *   - `EquationRandomCnt1/2/3`: real breakpoint-table-driven LINEAR INTERPOLATION (not a
+ *     plain step lookup) between per-segment start/end values, confirmed via direct byte
+ *     inspection of the 3 `.rodata` const-byte tables per function (7/10/8 entries for
+ *     Cnt1/Cnt2/Cnt3 respectively, at 0x08f1dd7f..0x08f1dd8d/0x08f1dd6b..0x08f1dd76/
+ *     0x08f1dd5b..0x08f1dd6a): an UNSIGNED byte "segment start position" table (in 60ths
+ *     of `z-1`, ground truth's own `movzx`), and two SIGNED byte "segment start/end value"
+ *     tables (in 30ths of `y`) where `tableEnd[i] == tableStart[i+1]` for every `i` --
+ *     i.e. consecutive segments share endpoints, confirmed from the raw bytes, not
+ *     assumed. `x == z-1` (the exact last sample) is a real special case, NOT part of the
+ *     table walk, computing a distinct fixed fraction of `y` per function (`-y/2` for
+ *     Cnt3, `-4y/15` for Cnt2, `-y/15` for Cnt1) -- the "edge-wraparound averaging tail
+ *     case" flagged but not yet decoded by the earlier pass. The final per-segment LERP
+ *     step (`(valEnd-valStart)*(x-segStart) / (segEnd-segStart)`) uses a real 2-operand
+ *     `imul` that keeps only the low 32 bits of that product (unlike every other multiply
+ *     in this family, which uses the 1-operand form and keeps the full 64-bit product in
+ *     edx:eax) -- this makes the LERP's numerator genuinely wrap at 32 bits for extreme
+ *     `y`, reproduced automatically by using plain 32-bit `int` arithmetic in the
+ *     translation below rather than anything wider, confirmed by regression-testing at
+ *     `y` magnitudes large enough to actually trigger the wraparound.
  *
  * REAL LAYOUT (confirmed by GetData()/Shape()/the destructor's own field accesses; no
  * padding needed, natural x86 alignment matches every offset):
@@ -116,6 +149,13 @@ public:
 	static int EquationStepTri6(int x, int y, int z);
 	static int EquationStepSaw4(int x, int y, int z);
 	static int EquationStepSaw6(int x, int y, int z);
+
+	static int EquationRandomSH1(int x, int y, int z);
+	static int EquationRandomSH2(int x, int y, int z);
+	static int EquationRandomSH3(int x, int y, int z);
+	static int EquationRandomCnt1(int x, int y, int z);
+	static int EquationRandomCnt2(int x, int y, int z);
+	static int EquationRandomCnt3(int x, int y, int z);
 
 private:
 	friend struct CWaveformTemplateTestHooks;
