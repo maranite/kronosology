@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention, decoded once for CSTGString (105/107)
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 6 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc), 504 methods reconstructed, manifest 1441->1949
 type: project
 ---
 
@@ -130,18 +130,96 @@ definition with a modeled vtable in `include/oa_global.h` (base class of
 `CSTGProgramModeProgramSlot`/`CSTGProgramModeDrumTrackSlot`), so adding
 ~85 Get* members there is a much bigger, riskier undertaking than
 declaring a fresh minimal opaque struct -- re-scope or hand off
-separately if tackled. Remaining fresh-opaque-class candidates:
-`CSTGAnalog4PoleBase` (80), `CSTGPolysix` (77), `CSTGAnalogSyncOsc` (71),
-`CSTGProgram` (65 -- verify this one isn't also already-modeled like
-CSTGProgramSlot before starting), `CPianoOsc` (59), `CSTGEPModelPatch`
-(58), and ~165 more classes -- see `manifest/oa_functions.csv` filtered
-for `qualified_name` matching `^(Set|Get)[A-Z0-9_]` grouped by class, or
-rerun the survey query (group pending Set*/Get* methods by class, sort by
-count). Always check `grep -rln <ClassName> src include` FIRST before
-picking a class, same lesson as CSTGProgramSlot above.
+separately if tackled. `CSTGAnalog4PoleBase`/`CSTGPolysix`/
+`CSTGAnalogSyncOsc` DONE this batch (see below). Remaining
+fresh-opaque-class candidates: `CSTGProgram` (65 -- verify this one isn't
+also already-modeled like CSTGProgramSlot before starting), `CPianoOsc`
+(59), `CSTGEPModelPatch` (58), and ~162 more classes -- see
+`manifest/oa_functions.csv` filtered for `qualified_name` matching
+`^(Set|Get)[A-Z0-9_]` grouped by class, or rerun the survey query (group
+pending Set*/Get* methods by class, sort by count). Always check
+`grep -rln <ClassName> src include` FIRST before picking a class -- and
+use a WORD-BOUNDARY grep (`\bClassName\b`), not a bare substring, since a
+similarly-named-but-unrelated class (e.g. `CSTGPolysixModel` vs
+`CSTGPolysix`) can produce a false "already referenced" positive with a
+naive substring match. Same lesson as CSTGProgramSlot above.
+
+**Third batch (2026-07-28, commit `e59300a`): `CSTGAnalog4PoleBase`
+(74/76) + `CSTGPolysix` (71/71) + `CSTGAnalogSyncOsc` (63/65) done**,
+manifest 1741 -> 1949. Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`). All three picked from the
+prior batch's own priority list; `grep -rln <ClassName> src include`
+confirmed all three genuinely fresh (zero pre-existing references) before
+starting -- note `CSTGPolysix` needs a *word-boundary* grep
+(`grep -rn 'CSTGPolysix\b' | grep -v CSTGPolysixModel`), a naive substring
+grep falsely flags it as already-referenced because of the unrelated,
+already-modeled `CSTGPolysixModel` wrapper class in `oa_engine_init.h`
+(voice-model factory, not the STG patch class).
+
+**New signature-outlier check, should now be standard**: filtering the
+`nm`-derived weak-symbol candidate list to mangled names ending in
+`ER23CSTGPatchMessageContext` (i.e. the real "takes a
+`CSTGPatchMessageContext&`" signature) BEFORE running the decoder caught
+`CSTGAnalog4PoleBase::GetSubComponent(unsigned short)` up front -- same
+outlier class as `CSTGString`'s own `GetSubComponent`, but this one is
+weak/COMDAT ('W'), not global-linkage ('T'), so the old "check the W/T
+column" heuristic alone would NOT have caught it. Do the mangled-suffix
+signature check as a first-class step, not just the W/T check.
+
+**3 new field-shapes this batch**:
+1. Ctx-index field load with an explicit ×4 SIB scale on top of the
+   usual stride-5 `lea edx,[edx+edx*4]` premultiply --
+   `[eax+edx*4+K]` -- effective stride 20 (`CSTGPolysix`'s
+   `ExtMod*Intensity`/`ExtModSource` group). Third distinct SIB-scale
+   value confirmed for this sub-family now (×1 bare, ×2 from CSTGMS20,
+   ×4 here) -- always derive the effective stride as
+   `premultiply_stride * SIB_scale` from the actual addressing mode,
+   never assume a fixed value.
+2. Boolean nonzero/zero integer test: `mov reg,[this+K]` (dword);
+   `test reg,reg`; `setne al` or `sete al`; `movzx eax,al`; single write.
+   Distinct from the earlier boolean-NOT shape (`xor eax,0x1` on an
+   already-loaded 0/1 value) -- this one derives the 0/1 result from an
+   arbitrary dword's truth value, not from flipping an existing bit.
+   `CSTGAnalogSyncOsc`'s `GetRingModModulatorSelect`/
+   `GetRingModCarrierSelect` (setne, "is nonzero") and
+   `GetSubOscAudioInModeSelect` (sete, "is exactly zero") all confirmed
+   real and mechanically decodable -- included in the batch, not treated
+   as outliers, since a truth-value test is not a numeric transform.
+3. (Not a new *decoder* shape, but a new outlier variant worth logging)
+   A real x87 ordered-equal-to-1.0 float compare via
+   `fld field; fld1; fucomip st,st(1); fstp st(0); setnp dl;
+   cmove eax,edx; xor eax,0x1; movzx eax,al` -- effectively
+   "field is not exactly 1.0" as a boolean.
+   `CSTGAnalog4PoleBase`'s `GetFilterALeakage`/`GetFilterBLeakage`, both
+   excluded. Also a NEW numeric-transform outlier variant: SSE `sqrtss`
+   (real square root, not the earlier classes' `fyl2x`/`fmul`+`fistp`
+   examples) on `CSTGAnalogSyncOsc::GetNoiseCutoff`, excluded for the
+   same "genuine DSP computation, out of scope" reason as
+   `CSTGString`'s `GetPluckDelay` pair.
+
+`CSTGPolysix` was the first class in this family with genuinely ZERO
+outliers of any kind across its full candidate set (matching
+`CSTGMS20`'s earlier zero-outlier result) -- 71 candidates, 71 decoded.
+
+Reused the exact same KAT-generation discipline (separate Python
+evaluator over the same parsed shape facts, deterministic
+`buf[i]=(i*0x9f+0x37)&0xff` pattern, ctx index fixed at 3) and the same
+DEF_RE parenthesis-balance post-generation check. Caught ANOTHER fresh
+instance of the "*/ literal in prose" gotcha this batch (distinct bug
+from the DEF_RE parenthesis one, previously only documented in
+[[ckg_seq_backup_technique]] for OA.ko's own family): adjacent
+`FilterA*/FilterB*` prose in `oa_stg_analog4pole_base.h`'s header comment
+formed a literal `*/` that silently closed the block comment early,
+turning the rest of the derivation prose into raw (uncompilable) source
+text -- caught immediately via an open-vs-close `/*`/`*/` count check
+(`text.count("/*") == text.count("*/")`) run on every new file right
+after writing it, before ever attempting to build. Recommend running
+BOTH the DEF_RE-match-count check AND this brace-balance count check as
+one standard post-generation step from now on, not just the DEF_RE one.
 
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
-`HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family" and
-"CSTGOrganModelPatch + CSTGMS20 value-getter families" entries for the
-full per-batch derivation notes.
+`HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
+"CSTGOrganModelPatch + CSTGMS20 value-getter families" and
+"CSTGAnalog4PoleBase + CSTGPolysix + CSTGAnalogSyncOsc value-getter
+families" entries for the full per-batch derivation notes.
