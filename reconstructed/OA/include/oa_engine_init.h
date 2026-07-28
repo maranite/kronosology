@@ -2286,6 +2286,14 @@ struct CTimerManager {
  * (comparable in scale to CSTGGlobal's own multi-hundred-KB layout), not
  * a normal small C++ object.
  */
+
+/* Minimal placeholder tags, see CKGBankManager::GetCombiKarmaPerfModule()/
+ * GetProgKarmaPerfModule()'s own comment below -- exist only so those two
+ * declarations mangle to the real symbol names, no real enumerator values
+ * known. */
+enum eSTGCombiBankId { eSTGCombiBankId_unknown = 0 };
+enum eSTGProgramBankId { eSTGProgramBankId_unknown = 0 };
+
 struct CKGBankManager {
 	static unsigned char *ms_poInstance;
 
@@ -2309,6 +2317,23 @@ struct CKGBankManager {
 	unsigned char *GetSeqKarmaPerfCommon(unsigned int index);
 	unsigned char *GetSeqKarmaPerfModule(unsigned int index);
 	unsigned char *GetSeqDefaultKarmaPerfCommon();
+
+	/*
+	 * Two more real methods, discovered while reconstructing
+	 * CKGModuleParamMsgHandler::GetKarmaModule() (src/engine/
+	 * ckg_module_param_handler.cpp) -- same "this IS the singleton"
+	 * call shape as the three above. Real mangled param types are
+	 * `15eSTGCombiBankId`/`17eSTGProgramBankId` -- the two minimal
+	 * placeholder enum tags right below exist ONLY so these two
+	 * declarations mangle to the exact real symbol names for the
+	 * linker; neither enum's real enumerator values are known (the
+	 * value is only ever passed through opaquely from
+	 * CKGModuleParamMsg::m_bankId, never compared against a literal in
+	 * any reconstructed caller) -- do not treat the single `= 0`
+	 * member as a confirmed enumerator name.
+	 */
+	unsigned char *GetCombiKarmaPerfModule(eSTGCombiBankId bankId, unsigned int index);
+	unsigned char *GetProgKarmaPerfModule(eSTGProgramBankId bankId, unsigned int index);
 };
 
 /*
