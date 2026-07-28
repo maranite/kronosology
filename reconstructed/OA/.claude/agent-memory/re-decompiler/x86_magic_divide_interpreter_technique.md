@@ -103,3 +103,48 @@ on the small hand-picked KAT literals a human would normally reach for first.
 See [[stg_value_getter_family]] for the STATIC-decoder family this dynamic technique
 complements, and Eva's own `include/waveform_template.h` (commit `de2591d`) for the
 worked example this was built for.
+
+**2026-07-28 follow-up (`EquationRandomSH1-3`/`RandomCnt1-3`, commit `476a0dd`, on top of
+`de2591d`): finished the 6 methods the batch above left "traced but not verified."**
+
+- **The scratchpad tool survived, unexpectedly.** The interpreter (`x86sim.py`), its
+  driver (`run_eq.py`), and the divisor-finder (`magicdiv.py`) were explicitly NOT checked
+  into the repo (host-side only, by design) but were still present in
+  `/tmp/claude-0/.../scratchpad/` at the start of this follow-up session despite the
+  scratchpad being nominally session-scoped — always check there before assuming a prior
+  batch's host-side tooling needs to be rebuilt from scratch; it's cheap to verify (re-run
+  a known-good KAT through it) and expensive to redo.
+- **The checked-in `Eva`/`Eva/Eva` binary in this repo is a small stub**, `.text` only
+  ~0x21758 bytes, does not cover the 0x0898xxxx address range the manifest's own addresses
+  live in at all (`objdump --start-address` silently returns nothing, no error). The real
+  full binary with debug info the manifest was built against is
+  `/home/share/Decomp/EVA_Decomp/Eva` — confirmed by disassembling `EquationNone`/
+  `EquationTriangle` there and matching byte-for-byte against `waveform_template.h`'s
+  already-established addresses/bytes. Worth checking this first on any future Eva batch
+  that hits a mysterious empty `objdump` result.
+- **A generic breakpoint-index search is easy to off-by-one, and the interpreter caught it
+  outright rather than subtly.** First draft of the shared `RandomCnt1-3` LERP model
+  checked `x < thr[i+1]` to select bin `i`; correct is `x < thr[i]` (`thr[0]==0` is itself
+  the idx-0 boundary, not a sentinel to skip past). Every single test failed once this was
+  wrong, which is actually the EASY case to catch — the SUBTLE case (below) is the one to
+  watch for.
+- **A 2-operand `imul` in ground truth means "keep only the low 32 bits" — a real,
+  different multiply shape from the 1-operand `imul` used throughout the rest of this
+  magic-divide family.** `RandomCnt1-3`'s final LERP step (`(valB-valA)*(x-valY)` before
+  the closing real `idiv`) is coded as `imul eax,ebx` (2-operand: `eax = s32(eax*ebx)`,
+  high bits silently discarded, NOT the `edx:eax = eax*src` full-64-bit-product form every
+  magic-divide correction elsewhere in this family uses). A Python verification model
+  using arbitrary-precision ints will look 100% correct at moderate test magnitudes and
+  then show large, ratio-nonsensical mismatches once `y`/`x` get large enough for that one
+  intermediate product to exceed +/-2^31 — LOOKS like a derivation bug (large garbled
+  numbers), but is actually the verification harness being MORE correct than 32-bit
+  hardware, not less. Fix: apply explicit `s32(u32(...))` truncation to that ONE
+  intermediate product in the Python oracle-comparison model before trusting a mismatch as
+  real; the eventual C++ translation needs no special handling at all, since plain `int`
+  (32-bit) arithmetic on this x86-32 target reproduces the same wraparound automatically —
+  just don't accidentally widen that one expression to `long`/`int64_t` while translating.
+- Confirmed real, table-driven LINEAR INTERPOLATION (not a step lookup) for `RandomCnt1-3`
+  by directly inspecting the 3 `.rodata` const-byte tables per function via
+  `objdump -s -j .rodata`: the "segment end value" table's entries equal the "segment
+  start value" table's entries shifted by one index (`tableEnd[i] == tableStart[i+1]`),
+  confirmed from the raw bytes rather than assumed from the shape of the code.
