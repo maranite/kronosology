@@ -1977,3 +1977,80 @@ batch discovered (spanning `CSTGOrganModelPatch`, `CSTGMS20`,
 `CSTGAnalog4PoleBase`, `CSTGPolysix`, `CSTGProgram`, `CPianoOsc`, and
 ~170 more classes) is a strong candidate for repeating this exact
 technique class-by-class in future batches.
+
+## CSTGOrganModelPatch + CSTGMS20 value-getter families -- 191 methods (batch, 2026-07-28)
+
+Second batch against the STG value-getter family discovered in the
+CSTGString pilot above. Picked the next two largest cleanly-scoped
+classes from that pilot's own priority list: `CSTGOrganModelPatch`
+(Hammond-style tonewheel-organ patch component, 101 methods) and
+`CSTGMS20` (Korg MS-20-style analog dual-VCO/VCF/ESP patch component, 90
+methods). Reused and extended the same scripted instruction-pattern
+decoder rather than writing a fresh one per class.
+
+`CSTGOrganModelPatch` turned out to use a SIMPLER dialect than
+CSTGString's: `this` stays in eax throughout, with zero ctx-dynamic-index
+sub-family methods at all (every AMSSource/AMSIntensity/AMSMode sibling
+reads a fixed per-field offset, confirmed empirically, not assumed from
+the name pattern). One field-shape not seen in the CSTGString pilot: a
+boolean NOT (`movzx eax,BYTE[eax+K]` + `xor eax,0x1` + `movzx eax,al`,
+single .value-only write) on `GetPercLevelSwitch`. 101 of 103 real
+weak-symbol candidates parsed cleanly; 2 genuine outliers correctly
+excluded: `GetRotaryHornMicDistance`/`GetRotaryRotorMicDistance` both
+compute a real `1.0f - field` via x87 (`fld1`; `fsub DWORD PTR
+[eax+K]`; `fst`/`fstp`) -- same rationale as CSTGString's
+`GetNoiseSaturation` outlier, a numeric transform excluded from a batch
+meant to be mechanically decoded rather than hand-verified per method.
+Also confirmed the same "32-bit does not always imply dual-write" quirk
+CSTGString established: `GetVCType`, `GetRotaryHornStopPhase`, and
+`GetRotaryRotorStopPhase` are discrete/enum 32-bit selector fields that
+write `.value` only, derived empirically (instruction presence), not
+assumed from width.
+
+`CSTGMS20` used a MIXED dialect: most methods match
+CSTGOrganModelPatch's simple eax-based shape, but this class also has a
+real ctx-dynamic-index sub-family (the Standard*/Mixer* AMSSource/
+AMSIntensity sibling group), which required extending the decoder with
+two new shapes not seen in either prior batch: (1) the usual stride-5
+`lea edx,[edx+edx*4]` premultiply followed by a field load that ALSO
+carries its own SIB scale factor in the addressing mode itself
+(`[eax+edx*2+K]`), giving an effective per-index stride of 10 rather
+than CSTGString's plain 5 or 32; (2) a bare, unscaled ctx-index load
+with no `lea` premultiply at all (`[eax+edx*1+K]`), used by
+`GetInputJack` alone. All 90 real weak-symbol candidates in this class's
+address range parsed cleanly -- zero outliers, a first for this family.
+
+Both classes' KATs (`verify/test_stg_organ_model_patch_valuegetters.cpp`,
+191 checks between them across 90+56 dual-write pairs and 55+34
+single-write cases) independently re-derive every expected value from
+the SAME parsed (offset, ctx-index*stride, width, signed, invert, dual)
+facts via a separate Python evaluator, not by re-using the C renderer's
+own output strings -- same independent-oracle discipline as CSTGString's
+batch. `make verify` stays green (0 FAIL lines across the whole suite);
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` links all 191
+new symbols into `OA.ko` cleanly (`nm OA.ko` confirms 101
+`_ZN19CSTGOrganModelPatch...` + 90 `_ZN8CSTGMS20...` symbols present).
+
+One real tooling gotcha found and fixed, distinct from the previously
+documented "`*/` inside a comment silently ends the block comment"
+issue: `manifest/gen_oa_manifest.py`'s NAME-heuristic regex
+(`DEF_RE`) does not balance parentheses in its captured parameter-list
+group, so an UNBALANCED-looking `(` triggered by ordinary English prose
+in a header comment -- e.g. a contraction like "didn't (Foo" or even a
+plain "pending (see ...)" aside with no semicolon anywhere between it
+and the next real function -- can cause the regex to swallow everything
+up to and including the FIRST real function definition's opening brace
+as bogus "parameter list" text, hiding that one function from the
+reconstructed count entirely (silently, no error) even though the C++
+compiles fine. Confirmed this cost exactly one method per file
+(`CSTGOrganModelPatch::GetAmpGain`, `CSTGMS20::GetAnalog`) before the
+header comments in both `.cpp` files were rewritten to avoid
+parenthetical asides ahead of the first function -- verified after the
+fix by running `DEF_RE` against both files directly and diffing the
+captured name set against every declared method name. `.h` files are
+immune to this specific failure mode (method declarations end in `;`,
+which resets the regex's runaway match immediately), so this only needs
+checking in `.cpp` files' leading comment block, not headers.
+
+Real-HW test that would help: none identified, same rationale as
+CSTGString and CKGSeqBackup above.
