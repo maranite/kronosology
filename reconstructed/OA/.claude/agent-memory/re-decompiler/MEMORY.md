@@ -1,5 +1,6 @@
 # Memory Index
 
+- [CKGMIDIOutMsgHandler SendExecToMIDIPortInCombi/InSong + GetId() bug fix, 2026-07-28](send_exec_midiport_combi_song_2026-07-28.md) — manifest 3204->3206/21689 (commit 186873e); found+fixed CKGKarmaAssignableSw::GetId() missing override (commit fb691d3); most of the switch/knob/pad widget family's "pending" manifest rows are a generator blind spot (inline bodies never credited), not real missing work — nm -C check before re-attempting any of it
 - [x86 magic-divide interpreter technique](x86_magic_divide_interpreter_technique.md) — dynamic/execution-based decoder (host-side x86-32 interpreter as ground-truth oracle) for dense branchy magic-divide functions; built for Eva's CWaveformTemplate, complements the static decoder below
 - [x86 direct-execution oracle technique](x86_direct_execution_oracle_technique.md) — mmap+PROT_EXEC raw extracted machine code as an even-stronger oracle than the interpreter, for self-contained functions (no external refs); built for Eva's EquationPolyline when the interpreter tooling didn't survive between sessions
 - [CKG seq-backup decoder technique](ckg_seq_backup_technique.md) — scripted instruction-pattern decoder for dense tiny-accessor clusters; reuse for similar Set*/Get* runs
