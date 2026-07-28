@@ -2215,3 +2215,89 @@ Real-HW test that would help: none identified across any of these five
 batches, same rationale as every prior entry in this family -- pure
 parameter-reflection plumbing with no direct front-panel/audio
 observable.
+
+## CSTGAMSMixerBase + CSTGStepSeq + CSTGPitchMod value-getter families -- 43 methods (batch 8, 2026-07-28)
+
+Eighth batch against the STG value-getter family. Before picking classes,
+resolved the `CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
+`CKGGlobalParamMsgHandler` question carried over unconfirmed across three
+prior batches: `nm`-queried all three directly (130/71/27 pending Get*/Set*
+symbols) and found every one is global ('T') linkage with a completely
+different signature, `Set*(CKGModuleParamMsg const*)` and its two
+siblings, zero matches against this family's own ctx-only mangled-suffix
+filter -- confirmed NOT part of this family despite the similar naming,
+closing out a question left open since batch 5. Also rejected `CMOSSAlgorithm`
+(29 pending, a MOSS DSP-algorithm parameter-descriptor mechanism with
+mixed calling conventions and extra arguments beyond ctx, not this
+family's shape) and confirmed `CSTGDrumKitData`/`CSTGWaveSequence`/
+`CSTGProgramModeDrumTrackSlot` are all already modeled elsewhere in the
+project (a 17MB raw-blob table, a vtable-only stub, and a real
+`CSTGProgramSlot` subclass respectively) -- correctly skipped.
+
+Picked `CSTGAMSMixerBase` (STG AMS two-input mixer base, 19 candidates),
+`CSTGStepSeq` (STG step-sequencer LFO component, 14 candidates, confirmed
+distinct from the unrelated already-declared `CSTGStepSeqBase` stub), and
+`CSTGPitchMod` (STG pitch-modulation component, 12 candidates, confirmed
+distinct from 5 similarly-prefixed unrelated classes --
+`CSTGPitchModBase`/`CSTGPitchModCommon`/`CSTGPitchModCommonPlusAMS`/
+`CSTGPitchModOsc`/`CSTGPitchModOscBase`). All three's remaining pending Get
+symbols beyond the chosen candidate sets were global ('T') linkage with a
+different signature (a `CSTGVoice*` argument or a plain `(int,int)`
+signature) and were excluded up front, not fed to the decoder.
+
+`CSTGAMSMixerBase` is the simplest dialect yet -- zero ctx-index methods
+despite the class's own "mixer" framing, every candidate a fixed-K field
+off `this`. 2 outliers, both the familiar `fyl2x` log2-style transform
+(`GetAttack`/`GetDecay`), same outlier class as `CSTGString`'s and
+`CSTGAnalogSyncOsc`'s own `GetNoiseSaturation`. `CSTGStepSeq` and
+`CSTGPitchMod` both came back zero-outlier. `CSTGStepSeq`'s per-step
+Value/Duration/Times group uses the bare stride-1 SIB shape (ctx's own
+`+0x4` field used directly, no `lea` premultiply, no extra SIB scale)
+first confirmed on `CSTGMS20`'s own `GetInputJack`. `CSTGPitchMod` mixes
+two ctx-index shapes in one class: bare stride-4 SIB with no `lea`
+premultiply on `GetLFOAmount`/`GetJSYToLFOAmount` (same shape as
+`CSTGMultiFilter2Pole`'s own LFO group), and the family's usual stride-5
+`lea` premultiply on `GetLFOAMSSource`/`GetLFOAMSIntensity`.
+
+Not a new field-shape but a real decoder improvement: the shared scripted
+decoder's SIB-operand handling previously had two separate, narrower
+cases and no direct bare-`ctxfield` case at all, meaning the bare
+stride-1/stride-4 shapes documented in batches 5 and 7 had actually been
+verified per-class by hand rather than mechanically decoded end to end.
+Generalized this batch to one unified rule -- a `scaled_index` base
+multiplies its own stride by the SIB scale, a bare `ctxfield` base uses
+the SIB scale directly as the stride -- covering every stride variant
+seen in the family so far (x1 bare, x1/x2/x4 lea-plus-scale, x4 bare, x5
+lea) through a single code path.
+
+Caught and fixed one genuinely new class of bug this batch, in the
+independent KAT oracle rather than in the reconstructed source: the
+Python evaluator's dword read initially only treated a width-4 field as
+signed when the decoder's own captured `signed` flag said so -- but that
+flag is always `False` for width-4 loads (a raw `mov eax,[...]` register
+load has no separate signed/unsigned form), while the C renderer always
+casts width-4 loads to plain `int` regardless of the flag, matching the
+original instruction. First KAT run failed every dual-write field with
+`got`/`want` differing by exactly 2**32, an immediately recognizable
+signed/unsigned encoding mismatch rather than a real logic bug. Fixed by
+making the evaluator treat every width-4 load as signed unconditionally,
+matching the C renderer's convention rather than the decoder's own
+(width-4-irrelevant) captured flag; re-ran clean. Both known `.cpp`
+leading-comment gotchas -- a `"decoder (extended ..."` bare-word-before-
+parenthetical DEF_RE trigger and an `"outlier(s)"` variant of the same --
+were caught and fixed in all 3 new files via the standard 2-check
+discipline (comment open/close-count balance, exact DEF_RE captured-name-
+set diff) before any build attempt, same as every prior batch.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 3 new
+KATs passing (43 checks). Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko` produced
+(488580 bytes), zero warnings or errors traceable to the 3 new files.
+`DECOMPILE_ERRORS.md` stays empty -- no compile/link blocker hit.
+`manifest/gen_oa_manifest.py` regenerated, OA.ko manifest
+2263 -> 2306/21,689 (10.632%), delta exactly +43 (0 regressions, verified
+by a full before/after reconstructed-name-set diff).
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.

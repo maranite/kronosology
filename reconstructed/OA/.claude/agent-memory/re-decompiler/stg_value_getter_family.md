@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 17 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG), 818 methods reconstructed, manifest 1441->2263
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 20 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod), 861 methods reconstructed, manifest 1441->2306
 type: project
 ---
 
@@ -623,18 +623,110 @@ not just `.cpp` files, regardless of how declaration-heavy the header
 looks -- a single trigger word anywhere before the struct's own `{` is
 enough.
 
-**Next targets** (same technique, not yet done): ~151 more classes
-remain. `CSPRSeqDataManager` confirmed NOT part of this family this
-batch (see above) -- do not re-add it to the candidate list. Re-run the
-survey query (group pending `Set*`/`Get*` methods by class from
-`manifest/oa_functions.csv`, sort by count) for the next batch's
-candidates, still always doing the word-boundary grep + weak-linkage +
-ctx-only-suffix `nm` filter BEFORE running the decoder on any of them --
-`CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
-`CKGGlobalParamMsgHandler` (130/71/25) remain UNCONFIRMED whether part
-of this family or a different CKG message-handler convention, carried
-over unconfirmed across three batches now -- worth actually checking
-next time rather than deferring again.
+**Eighth batch (2026-07-28, commit `TBD`): `CSTGAMSMixerBase` (17/19) +
+`CSTGStepSeq` (14/14) + `CSTGPitchMod` (12/12) done**, manifest
+2263 -> 2306, 43 methods. Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`). First act this batch: FINALLY
+resolved the `CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
+`CKGGlobalParamMsgHandler` question carried over unconfirmed across
+three prior batches -- `nm`-queried all three directly: 130/71/27
+methods respectively, ALL global ('T') linkage, ZERO matches against the
+`ER23CSTGPatchMessageContext` ctx-only-suffix filter. Their real
+signature is `Set*(CKGModuleParamMsg const*)`/`Set*(CKGCommonParamMsg
+const*)`/`Set*(CKGGlobalParamMsg*)` -- a different CKG message-dispatch
+convention entirely, unrelated to this family despite the superficially
+similar "CKG...ParamMsgHandler" naming. Confirmed NOT part of this
+family -- remove from all future candidate lists. Also spot-checked and
+rejected `CMOSSAlgorithm` (29 pending) this batch: its Get*/Set* methods
+are a MOSS DSP-algorithm parameter-descriptor mechanism (`GetParam`/
+`SetParam`/`GetMinMax`/`GetDefaultValue`, mixed `__cdecl`/`__regparm1`/
+`__regparm3`/`__thiscall`, extra args beyond ctx, zero ctx-only-suffix
+matches) -- a different mechanism, not this family. And confirmed
+`CSTGDrumKitData`/`CSTGWaveSequence`/`CSTGProgramModeDrumTrackSlot` all
+already have real ctors/structs in `oa_global.h` from earlier unrelated
+batches (a 17MB raw-blob table, a vtable-only stub, and a real
+`CSTGProgramSlot` subclass respectively) -- correctly skipped as
+already-modeled, same precedent as `CSTGProgramSlot`/`CSTGProgram`.
+
+All three chosen classes came back clean or near-clean. `CSTGAMSMixerBase`
+(STG AMS two-input mixer base) is the simplest dialect yet -- zero
+ctx-index methods despite the class's own "mixer" framing -- with 2
+outliers, both the familiar `fyl2x` log2-style transform (`GetAttack`/
+`GetDecay`, same outlier class as `CSTGString`'s/`CSTGAnalogSyncOsc`'s own
+`GetNoiseSaturation`). `CSTGStepSeq` (STG step-sequencer LFO component,
+confirmed distinct from the unrelated already-declared `CSTGStepSeqBase`
+stub) and `CSTGPitchMod` (STG pitch-modulation component, confirmed
+distinct from 5 similarly-prefixed unrelated classes --
+`CSTGPitchModBase`/`CSTGPitchModCommon`/`CSTGPitchModCommonPlusAMS`/
+`CSTGPitchModOsc`/`CSTGPitchModOscBase`) both came back zero-outlier.
+Both had 1-2 pending Get symbols that were global ('T') linkage with a
+different signature (`CSTGVoice*` or `(int,int)` args) -- excluded up
+front by the standard filter, not fed to the decoder.
+
+**Decoder generalization, not a new field-shape**: the shared scripted
+decoder's `load_value` sib-operand branch previously had two separate,
+narrower cases (`scaled_index` with `scale==1` only; no `ctxfield`-direct
+case at all), which meant the bare-stride-1 and bare-stride-4 shapes
+documented in batches 5 and 7 had actually been hand-verified per-class
+rather than mechanically decoded end-to-end. Generalized this batch to
+one unified rule: `sib` with a `scaled_index` base multiplies the SIB
+scale into the existing lea-premultiply stride (covers the family's x1/x2/x4
+lea-plus-SIB-scale variants from batches 2-3), and `sib` with a bare
+`ctxfield` base uses the SIB scale directly as the stride (covers the
+bare x1/x4 no-lea variants from batches 5 and 7). All of `CSTGStepSeq`'s
+bare-stride-1 group and `CSTGPitchMod`'s bare-stride-4 pair now decode
+through this single formula with no per-class special-casing.
+
+**KAT-evaluator bug found and fixed before shipping, distinct from every
+prior gotcha class**: the independent Python KAT oracle's own `eval_fact`
+initially treated a dword ('load', width=4) field as signed only when the
+decoder's own captured `signed` flag was true -- but the decoder ALWAYS
+captures `signed=False` for width-4 loads (there is no signed/unsigned
+distinction in a raw `mov eax,[...]` register load), while the C
+renderer's `render_expr` unconditionally casts every width-4 load to
+plain `int` regardless of that flag, matching the original instruction.
+This meant the first draft of all 3 new KATs failed on every dual-write
+(dword) field with values differing by exactly 2**32 -- a `got`/`want`
+mismatch pattern immediately recognizable as a signed/unsigned encoding
+bug, not a real logic error. Fixed by making the evaluator treat every
+width-4 load as signed unconditionally, matching the C renderer's own
+convention rather than the decoder's internal (irrelevant, at width 4)
+signed flag. Re-ran the full 43-check KAT set clean after the fix. Worth
+flagging for any future from-scratch KAT generator in this family: the
+`signed` field in the decoder's JSON output is only meaningful for
+width 1/2 loads, never width 4 -- do not gate a dword evaluator branch on
+it.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 3 new
+KATs passing. Real `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+Kbuild build: clean link, `OA.ko` produced (488580 bytes), zero warnings
+or errors traceable to the 3 new files (confirmed via a build-log grep
+scoped to each new filename). `DECOMPILE_ERRORS.md` stays empty -- no
+compile/link blocker hit. `manifest/gen_oa_manifest.py` regenerated, OA.ko
+manifest 2263->2306/21,689 (10.632%), delta exactly +43 confirmed via a
+full before/after reconstructed-name-set diff (0 regressions).
+
+**Next targets** (same technique, not yet done): ~148 more classes
+remain. `CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
+`CKGGlobalParamMsgHandler` and `CMOSSAlgorithm` both now CONFIRMED NOT
+part of this family -- do not re-add to future candidate lists.
+`CSTGDrumKitData`/`CSTGWaveSequence`/`CSTGProgramModeDrumTrackSlot`
+confirmed already-modeled -- also skip. Re-run the survey query (group
+pending `Set*`/`Get*` methods by class from `manifest/oa_functions.csv`,
+sort by count) for the next batch's candidates, still always doing the
+word-boundary grep + weak-linkage + ctx-only-suffix `nm` filter BEFORE
+running the decoder on any of them -- as of this batch, the next
+promising untried candidates by size were `CSTGControllerInfo` (31,
+SKIP -- already confirmed modeled in batch 6) and `CSTGVectorMotion` (29,
+SKIP -- already confirmed modeled in batch 6); genuinely fresh candidates
+still open below those in size include `CSTGVPMModelPatch` (10 weak
+ctx-only candidates, confirmed fresh this batch's own survey but not
+picked -- smaller than the 3 chosen), `CSTGPluckedModelPatch` (6 weak
+ctx-only candidates, confirmed fresh), plus the broader unswept tail of
+the pending-count list below `CSTGPatch`/`CSTGCommonLFO`/`CKGBankManager`/
+`CSTGEffectRack` (all 4 confirmed to have existing hits/already-modeled
+status this batch, re-verify before reusing that verdict if much time
+has passed).
 
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
@@ -644,6 +736,6 @@ sibling family this one's decoder was adapted from, and
 families", "CPianoOsc + CSTGEPModelPatch value-getter families",
 "CSTGOrganOsc + CSTGVPMOsc + CSTGMS20ModelPatch value-getter families",
 "CSTGPolysixModelPatch + CWaveMotionOsc + CSTGPianoModelPatch
-value-getter families", and "CSTGMultiFilter2Pole + CSTGMS20EG +
-CSTGPolysixMG value-getter families" entries for the full per-batch
-derivation notes.
+value-getter families", "CSTGMultiFilter2Pole + CSTGMS20EG +
+CSTGPolysixMG value-getter families", and "STG value-getter family,
+batches 3-7" entries for the full per-batch derivation notes.
