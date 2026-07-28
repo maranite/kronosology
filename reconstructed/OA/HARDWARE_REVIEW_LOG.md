@@ -1891,3 +1891,89 @@ convention as CSTGLFO's `ProcessSubRate`:
 Real-HW test that would help: none identified -- this is pure control-
 plane bookkeeping (no audio/DSP output, no front-panel I/O) with no
 obvious externally-observable effect to probe against a live unit.
+
+**Follow-up (2026-07-28): `GetValue()` case-index mapping investigated,
+NOT confirmed -- still deferred.** Extracted the real 69-entry jump table
+(`.rodata+0xacb94`, one `R_386_32`-against-`.text`-via-`.rel.rodata`
+relocation per 4-byte slot -- readelf's REL-not-RELA format means the
+target address is the raw stored bytes, not the `Sym.Value` column) and
+disassembled all 69 case bodies. Cases 0/1 DO match `SetTempo`/`SetTimeSig`
+in that exact order (word@0, byte@3) -- but case 2 is byte@2 `&0x7` (that's
+`SetModuleControl`'s shape), case 3 is byte@2 `>>6 &1` (`SetLatch`'s
+shape), case 4 is byte@2 `>>7` no mask (`SetOnOff`'s shape) -- i.e.
+`SetPadMode` (byte@2 `>>5 &1`) is genuinely SKIPPED over in this run of
+cases, proving `GetValue()`'s case order is NOT simply the Set* list order
+used in this file / the KAT / the header's own narrative ordering. Real
+mapping is therefore per-offset identity, not position -- would need a
+full (offset, index-scale, width, shift, mask) tuple match between all 69
+(Common) + 128 (Module) case bodies and the already-written Set* bodies,
+same rigor as the original decoder but as a two-sided matcher instead of
+a one-sided transcriber. Not attempted this pass (real risk of a wrong
+mapping being a silent behavioral bug, per this entry's own original
+caution) -- left for a dedicated future batch. The jump-table extraction
+method above (readelf -x .rodata + .rel.rodata cross-reference for REL-type
+relocations) is reusable as-is for that batch.
+
+## CSTGString value-getter family — 105 methods (batch, 2026-07-28)
+
+`CSTGString` (STG physical-modeled-string patch component) had zero prior
+reconstruction. Surveying the pending manifest for other dense Set*/Get*
+clusters (same technique as the CKGSeqBackup batch above) found a MUCH
+larger structural pattern spanning the entire STG synth engine: ~180
+classes share one generic `STGConvertedParam &Get*(CSTGPatchMessageContext
+&)` "value getter" convention (already partially known from
+`CSTGADSRBase`'s own 20 hand-reconstructed methods, `src/engine/
+adsr_base.cpp`) -- read one field into the shared static
+`CSTGParamsOwner::sValueGetterTemp` and return its address. Roughly 2300
+pending methods across that whole family live in one contiguous real
+`.text` range (`~0x5a0000`-`0x5c0000`), each as its own weak/COMDAT
+`.text._ZN...` section (the accessors are emitted as `inline`-linkage
+per-class instantiations, unlike ordinary member functions which land in
+the plain merged `.text`).
+
+Picked `CSTGString` (116 Get* candidates, largest cleanly-scoped single
+class in that region) as this batch's target. Built a fresh scripted
+instruction-pattern decoder (same methodology as CKGSeqBackup's, see that
+entry above) recognizing: `mov eax,[eax+K]` / `movsx`/`movzx eax,BYTE/WORD
+[eax+K]` direct field reads; `mov edx,[edx+0x4]` + `lea edx,[edx+edx*4]`
+(stride 5) or `shl edx,N` (stride 2^N) for the Pickup*/MixerPickup*
+sub-family's per-call dynamic index (read from `ctx`'s own +0x4 field,
+NOT `this`'s); `shr al,N` + `and eax,MASK` packed boolean bitfields; and
+the fixed `mov ds:0x0,eax` / optional `mov ds:0x18,eax` / `mov eax,0`
+epilogue. 105 of 107 real weak-symbol candidates in the class's address
+range (`.text+0x5b0e70`..`.text+0x5b1ae0`) parsed cleanly with zero
+unhandled instruction shapes -- see `include/oa_stg_string.h` and
+`src/engine/stg_string_valuegetters.cpp` for the full derivation and
+field-shape summary. `verify/test_stg_string_valuegetters.cpp`
+independently re-derives all 169 expected values (105 `.value` +
+64 `.displayValue`) via a separate Python evaluator over the same parsed
+facts, all passing; the real Kbuild build (`make ko KDIR=/home/build/
+linux-kronos`) links all 105 symbols into `OA.ko` cleanly.
+
+3 genuine outliers found and deliberately excluded (documented in the
+header, not silently dropped):
+1. **`GetSubComponent(unsigned short)`** -- confirmed real `__thiscall`
+   (not `__regparm3`), branchy, returns a sub-object pointer. A
+   completely different mechanism, not a value-getter at all.
+2. **`GetNoiseSaturation`** (in-range, `.text+0x5b0e40`) -- a real
+   `fyl2x`-based log2/dB-style conversion, not a plain field copy.
+3. **`GetPluckDelay`/`GetPluckDelayAMSIntensity`** (`.text+0x187b70`/
+   `.text+0x187bd0`, NOT in the weak/COMDAT cluster -- ordinary
+   global-linkage symbols in the merged plain `.text`) -- genuine
+   audio-DSP: converts a delay parameter to a sample count via
+   `CSTGAudioBusManager`'s live sample rate (`fmul`/`fistp` against a
+   runtime float). Out of scope per this project's established
+   DSP-fidelity policy.
+
+Also left pending (different mechanism, not part of this family):
+`GetId`/`GetName`/`GetNumParams`/`GetParamDescriptors`/
+`GetMessageHandlers`/`GetValueGetters`/`GetNumSubComponents` -- the
+generic `CSTGParamsOwner` reflection-API virtual-slot overrides.
+
+Real-HW test that would help: none identified -- same as CKGSeqBackup
+above, pure parameter-reflection plumbing with no direct front-panel/
+audio observable. The much larger ~2300-method "value getter" family this
+batch discovered (spanning `CSTGOrganModelPatch`, `CSTGMS20`,
+`CSTGAnalog4PoleBase`, `CSTGPolysix`, `CSTGProgram`, `CPianoOsc`, and
+~170 more classes) is a strong candidate for repeating this exact
+technique class-by-class in future batches.
