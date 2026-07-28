@@ -2911,6 +2911,69 @@ RECONSTRUCTED = {
     "089c32b0",  # CKontaktScript::SetDescription(char const*)
     "089c32f0",  # CKontaktScript::SetPassword(char const*)
     "089c3240",  # CKontaktScript::SetSourceText(char const*)
+
+    # --- 2026-07-28 "Parameters" factory-family follow-up batch: the plural
+    # CKontaktParameters/CKontaktIndexedParameters/CKontaktDynamicParameters
+    # wrapper family (resolves the previously-flagged "dead single-entry V
+    # list" finding), CKontaktXml::UnpackPath (previously deferred), the 3
+    # singular family Identifier() overrides ("V" -- resolves CKontaktXml's
+    # own previously-unidentified pure virtual), and every UnpackPath-
+    # unblocked/owner-setter-unblocked sibling this newly tractable ---
+    "089c5340",  # CKontaktXml::UnpackPath(unsigned char const*, char*, unsigned int)
+    "089d9390",  # CKontaktParameter::Identifier() const
+    "089d9360",  # CKontaktIndexedParameter::Identifier() const
+    "089d93b0",  # CKontaktDynamicParameter::Identifier() const
+    "089c0d70",  # CKontaktParameters::CKontaktParameters()
+    "089c0d20",  # CKontaktParameters::~CKontaktParameters() (complete-object)
+    "089c0d40",  # CKontaktParameters::~CKontaktParameters() (deleting)
+    "089c0cc0",  # CKontaktParameters::AddObject(_xmlTextReader*, unsigned char const*)
+    "089d93a0",  # CKontaktParameters::Identifier() const
+    "089be950",  # CKontaktIndexedParameters::CKontaktIndexedParameters()
+    "089be900",  # CKontaktIndexedParameters::~CKontaktIndexedParameters() (complete-object)
+    "089be920",  # CKontaktIndexedParameters::~CKontaktIndexedParameters() (deleting)
+    "089be8a0",  # CKontaktIndexedParameters::AddObject(_xmlTextReader*, unsigned char const*)
+    "089d9370",  # CKontaktIndexedParameters::Identifier() const
+    "089bbfc0",  # CKontaktDynamicParameters::CKontaktDynamicParameters()
+    "089bbf70",  # CKontaktDynamicParameters::~CKontaktDynamicParameters() (complete-object)
+    "089bbf90",  # CKontaktDynamicParameters::~CKontaktDynamicParameters() (deleting)
+    "089bbf10",  # CKontaktDynamicParameters::AddObject(_xmlTextReader*, unsigned char const*)
+    "089d93c0",  # CKontaktDynamicParameters::Identifier() const
+    "089be230",  # CKontaktGroupParameters::CKontaktGroupParameters(CKontaktGroup*)
+    "089be1e0",  # CKontaktGroupParameters::~CKontaktGroupParameters() (complete-object)
+    "089be200",  # CKontaktGroupParameters::~CKontaktGroupParameters() (deleting)
+    "089be190",  # CKontaktGroupParameters::MakeIndexedParameter()
+    "089c0230",  # CKontaktOutputParameters::CKontaktOutputParameters(CKontaktOutput*)
+    "089c01e0",  # CKontaktOutputParameters::~CKontaktOutputParameters() (complete-object)
+    "089c0200",  # CKontaktOutputParameters::~CKontaktOutputParameters() (deleting)
+    "089c0190",  # CKontaktOutputParameters::MakeParameter()
+    "089c9470",  # CKontaktZoneParameters::CKontaktZoneParameters(CKontaktZone*)
+    "089c9420",  # CKontaktZoneParameters::~CKontaktZoneParameters() (complete-object)
+    "089c9440",  # CKontaktZoneParameters::~CKontaktZoneParameters() (deleting)
+    "089c93d0",  # CKontaktZoneParameters::MakeParameter()
+    "089bbcf0",  # CKontaktContainerParameters::CKontaktContainerParameters(CKontaktContainer*)
+    "089bbca0",  # CKontaktContainerParameters::~CKontaktContainerParameters() (complete-object)
+    "089bbcc0",  # CKontaktContainerParameters::~CKontaktContainerParameters() (deleting)
+    "089bbc50",  # CKontaktContainerParameters::MakeParameter()
+    "089c0ad0",  # CKontaktOutputsParameters::CKontaktOutputsParameters(CKontaktOutputs*)
+    "089c0a80",  # CKontaktOutputsParameters::~CKontaktOutputsParameters() (complete-object)
+    "089c0aa0",  # CKontaktOutputsParameters::~CKontaktOutputsParameters() (deleting)
+    "089c0a30",  # CKontaktOutputsParameters::MakeIndexedParameter()
+    "089bbc20",  # CKontaktContainerParameter::CKontaktContainerParameter(CKontaktContainer*)
+    "089bbbd0",  # CKontaktContainerParameter::~CKontaktContainerParameter() (complete-object)
+    "089bbbf0",  # CKontaktContainerParameter::~CKontaktContainerParameter() (deleting)
+    "089bb9f0",  # CKontaktContainerParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c3000",  # CKontaktSampleParameter::CKontaktSampleParameter(CKontaktSample*)
+    "089c2fb0",  # CKontaktSampleParameter::~CKontaktSampleParameter() (complete-object)
+    "089c2fd0",  # CKontaktSampleParameter::~CKontaktSampleParameter() (deleting)
+    "089c2d80",  # CKontaktSampleParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c0a00",  # CKontaktOutputsParameter::CKontaktOutputsParameter(CKontaktOutputs*)
+    "089c09b0",  # CKontaktOutputsParameter::~CKontaktOutputsParameter() (complete-object)
+    "089c09d0",  # CKontaktOutputsParameter::~CKontaktOutputsParameter() (deleting)
+    "089c0940",  # CKontaktOutputsParameter::AddIndexedParameter(unsigned int, unsigned int, unsigned char const*)
+    "089bb9b0",  # CKontaktContainer::SetOriginalSubDirectory(char const*)
+    "089c2ad0",  # CKontaktSample::SetFile(char const*)
+    "089c2b30",  # CKontaktSample::SetFilePbn(char const*)
+    "089c0710",  # CKontaktOutputs::SetPhysicalOutputMapping(unsigned int, unsigned int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

@@ -30,13 +30,33 @@
  *   +0x00  vtable ptr (real vtable @.rodata+0x08f798d8, dumped directly:
  *          slot+0x0/+0x4 = the virtual dtor pair (complete-object D2 @
  *          0x089c4b20, deleting D0 @ 0x089c4b40); slot+0x8 =
- *          `__cxa_pure_virtual@plt` -- CKontaktXml declares a THIRD pure
- *          virtual this pass never identified a name/signature for (no real
- *          caller inside CKontaktXml's own methods reaches it) -- declared
- *          below as an unnamed placeholder, TODO; slot+0xc = AddObject,
- *          slot+0x10 = AddAttribute, both confirmed by matching these exact
- *          vtable addresses against the real CKontaktXml::AddObject/
- *          AddAttribute symbols).
+ *          `__cxa_pure_virtual@plt` in THIS class's own vtable -- RESOLVED
+ *          2026-07-28 (Kontakt "Parameters" factory-family follow-up pass):
+ *          the slot is `Identifier() const` -- a pure-virtual returning a
+ *          plain `const char*` "self-identifying tag" string, confirmed by
+ *          disassembling every override found (`mov eax,&literal; ret`, one
+ *          instruction each) and cross-referencing the returned literals:
+ *          the singular `CKontaktParameter`/`CKontaktIndexedParameter`/
+ *          `CKontaktDynamicParameter` family (kontakt_parameter_base.h) all
+ *          override it to return "V"; the plural `CKontaktParameters`/
+ *          `CKontaktIndexedParameters`/`CKontaktDynamicParameters` wrapper
+ *          family (also kontakt_parameter_base.h) all override it to return
+ *          "Parameters"; assorted container classes (CKontaktContainer,
+ *          CKontaktEffect, CKontaktEnvelope, ...) override it with their own
+ *          class-specific tag. This is what ties the whole "Parameters"
+ *          factory finding together end to end: a plural wrapper identifies
+ *          itself AS "Parameters" and its own AddObject() only recurses into
+ *          children whose tag is "V" -- exactly the tag the SINGULAR family
+ *          identifies itself as. Not yet found: the generic caller (still
+ *          out-of-scope container-family code) that is presumably the
+ *          reason this exists at all (matching an XML tag name against
+ *          candidate classes' own Identifier() to pick which one to
+ *          construct) -- everything reconstructed in this file/
+ *          kontakt_parameter_base.h/kontakt_parameter_family.h calls
+ *          Identifier() nowhere itself, it is only ever the TARGET of a
+ *          vtable slot; slot+0xc = AddObject, slot+0x10 = AddAttribute,
+ *          both confirmed by matching these exact vtable addresses against
+ *          the real CKontaktXml::AddObject/AddAttribute symbols).
  *   +0x04  KontaktState mState  ctor-inits to eOutside(0). StateString's own
  *          3-entry jump table (@.rodata+0x08f771b0, dumped directly)
  *          confirms the enum's real string values: 0="Outside", 1="Inside",
@@ -75,9 +95,55 @@
  * or -1. The (char*, unsigned int) overload is the same idea but copies the
  * (non-numeric-constrained) suffix text instead of parsing a number.
  *
- * SCOPE NOTE: four real methods are DEFERRED, each for a documented reason
- * (not a blanket "ran out of time") -- declared here for linkage only (no
- * body in kontakt_xml.cpp; `make link`'s expected-unresolved-symbol
+ * UnpackPath(unsigned char const*, char*, unsigned int) -- .text+0x089c5340
+ * -- IMPLEMENTED 2026-07-28 (was previously deferred as "mechanically
+ * traceable but token meaning not pinned down"; a fresh, careful pass
+ * through the disassembly resolved every byte-consumption/production detail
+ * with full confidence -- no semantic guessing was actually needed, only
+ * faithful transcription). Real algorithm: no-ops (leaves outBuf empty)
+ * unless path[0]=='@'; otherwise walks a marker-byte state machine starting
+ * at path[1], one iteration per marker:
+ *   'F' (0x46): skip 5 unused bytes, read a 3-ASCII-digit length at
+ *     marker+6..+8 (sscanf "%u"), strncpy up to min(length,63) bytes from
+ *     marker+0xc into a scratch buffer, NUL-terminate at `length`, strncat
+ *     the scratch onto outBuf (bounded by outBufSize-strlen(outBuf)), force
+ *     outBuf[outBufSize-1]=0, then STOP (this token always ends the walk --
+ *     it is the terminal "filename" component; bytes marker+1..+5 are read
+ *     by nothing, a confirmed real gap, not a translation omission).
+ *   'b' (0x62): consumes only the 1 marker byte. Appends the literal "..."
+ *     then "/" onto outBuf (each strncat-bounded/clamped as above), then
+ *     continues the walk at marker+1.
+ *   'd' (0x64): reads a 3-ASCII-digit length at marker+1..+3 (sscanf "%u"),
+ *     strncpy up to min(length,63) bytes from marker+4 into scratch,
+ *     NUL-terminate at `length`, strncat the scratch then "/" onto outBuf,
+ *     continues the walk at marker+4+length (i.e. past the consumed name).
+ *   'v' (0x76): reads a 3-ASCII-digit field at marker+1..+3 and parses it
+ *     via sscanf("%u",...) -- CONFIRMED the parsed value is never read
+ *     afterward (dead computation in ground truth, reproduced as a genuine
+ *     no-effect sscanf call, not omitted) -- appends only "/" onto outBuf
+ *     (i.e. behaves like 'b' except it consumes 4 bytes instead of 1 and
+ *     does not append the "..." literal), continues the walk at marker+4.
+ *   anything else: unrecognized marker -- STOP the walk immediately,
+ *     leaving whatever has been appended to outBuf so far (real code: no
+ *     error indication of any kind).
+ * Real callers (all 3 confirmed via `objdump -dr` xref, all decode a "@..."
+ * packed path straight into a fixed on-stack char[0x100] buffer then hand it
+ * to a tiny owner-class string setter): CKontaktContainerParameter::
+ * AddParameter case "origSubDir" -> CKontaktContainer::
+ * SetOriginalSubDirectory(); CKontaktProgramParameter::AddParameter (still
+ * itself deferred, see kontakt_parameter_family.h); CKontaktSampleParameter::
+ * AddParameter cases "file_ex2"/"file_pbn" -> CKontaktSample::SetFile()/
+ * SetFilePbn(). NOTE the real `outBufSize - strlen(outBuf)` remaining-
+ * capacity computation used at every strncat site is an unsigned subtraction
+ * that underflows to a huge value if strlen(outBuf) ever exceeded outBufSize
+ * -- a real latent hazard in ground truth, reproduced as-is (not defensively
+ * clamped), matching this project's real-binary-behavior-over-"fixed"-code
+ * convention; every real caller passes a 0x100-byte buffer and short marker
+ * strings so this is not believed reachable in practice.
+ *
+ * SCOPE NOTE: three real methods remain DEFERRED, each for a documented
+ * reason (not a blanket "ran out of time") -- declared here for linkage only
+ * (no body in kontakt_xml.cpp; `make link`'s expected-unresolved-symbol
  * convention applies same as every other class in this project):
  *   `TruncateName(char const*, char*, unsigned int)` -- .text+0x089c5920,
  *     9731 bytes (functions.csv), by FAR the largest method in this class
@@ -85,13 +151,6 @@
  *     algorithm (name-shortening/ellipsis logic judging by its many nested
  *     branches over character classes) that warrants its own dedicated pass
  *     rather than a rushed, low-confidence transcription.
- *   `UnpackPath(unsigned char const*, char*, unsigned int)` -- .text+
- *     0x089c5340, a packed-path token-decoder state machine (dispatches on
- *     marker bytes 'F'/'b'/'d'/'v' after a leading '@', each case reading a
- *     fixed run of trailing digit bytes via sscanf("%u",...) and rebuilding
- *     a path string) -- mechanically traceable but the real-world meaning of
- *     each token type is not yet pinned down with enough confidence for a
- *     byte-exact port; a closer look is a clean, self-contained follow-up.
  *   `RemoveTrailingCharacters(char*, char, char)` -- .text+0x089c8110, a
  *     backward byte-range scan (`minChar <= c <= maxChar`) that resolves to
  *     exactly ONE `strcpy`-shift-left-by-one at the end regardless of scan
@@ -106,7 +165,7 @@
  *     disambiguated this pass -- AND it tail-calls the also-deferred
  *     TruncateName() at the very end regardless, so a from-scratch
  *     redo makes more sense as a single follow-up covering both.
- * All four are declared here for linkage only (no bodies in kontakt_xml.cpp);
+ * All three are declared here for linkage only (no bodies in kontakt_xml.cpp);
  * none of them are called by any other method reconstructed in this file.
  */
 
@@ -136,9 +195,12 @@ public:
 	static const char *StateString(KontaktState state);
 
 	/* vtable slot +0x8, __cxa_pure_virtual in this class's own vtable --
-	 * name/signature not identified this pass (no real caller inside
-	 * CKontaktXml's own reconstructed methods reaches it). TODO. */
-	virtual void UnidentifiedPureVirtual_slot8() = 0;
+	 * see file header note above for the full resolution (a self-
+	 * identifying tag string, overridden "V" by the singular Parameter
+	 * family and "Parameters" by the plural Parameters family). No caller
+	 * inside anything reconstructed in this project invokes it -- only
+	 * ever the TARGET of a vtable slot. */
+	virtual const char *Identifier() const = 0;
 
 	/* vtable slot +0xc, .text+0x089c4b60 (this class's default impl).
 	 * Byte-identical body to SkipNode() below: advances the reader one
@@ -264,6 +326,11 @@ public:
 	 * silently guessed), then strncat()s `rel` onto the result -- always
 	 * force-NUL-terminating outBuf[outBufSize-1] at the very end. */
 	static void AbsolutePath(const char *base, const char *rel, char *outBuf, unsigned int outBufSize);
+
+	/* .text+0x089c5340. Packed-path token decoder -- see file header for
+	 * the full per-marker algorithm ('F'/'b'/'d'/'v'). No-op (outBuf left
+	 * empty) unless path[0]=='@'. */
+	static void UnpackPath(const unsigned char *path, char *outBuf, unsigned int outBufSize);
 
 	/* .text+0x089c58f0. strrchr(name,'.') -> NUL it out if found. The
 	 * `unsigned int` 2nd parameter is genuinely unused in the real body

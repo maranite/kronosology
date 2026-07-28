@@ -397,3 +397,111 @@ void CKontaktXml::RemoveNameExtension(char *name, unsigned int /*unusedMaxLen*/)
 	if (dot != 0)
 		*dot = 0;
 }
+
+void CKontaktXml::UnpackPath(const unsigned char *path, char *outBuf, unsigned int outBufSize)
+{
+	outBuf[0] = 0;
+
+	unsigned int pathLen = (unsigned int)strlen((const char *)path);
+	if (path[0] != '@')
+		return; /* real: only "@..."-prefixed packed paths are processed at all */
+	if (pathLen <= 1)
+		return;
+
+	unsigned int i = 1;
+	while (i < pathLen) {
+		unsigned char marker = path[i];
+
+		if (marker == 'F') {
+			/* i+1..i+5 (5 bytes) are read by nothing -- confirmed real gap.
+			 * 3-ASCII-digit length at i+6..i+8, name text starts at i+0xc. */
+			char lenBuf[4];
+			lenBuf[0] = (char)path[i + 6];
+			lenBuf[1] = (char)path[i + 7];
+			lenBuf[2] = (char)path[i + 8];
+			lenBuf[3] = 0;
+			unsigned int nameLen;
+			sscanf(lenBuf, "%u", &nameLen);
+
+			char nameBuf[64];
+			strncpy(nameBuf, (const char *)path + i + 0xc, 0x40);
+			nameBuf[0x3f] = 0;
+			nameBuf[nameLen] = 0; /* real: written unconditionally, overruns nameBuf if nameLen>=64 -- see header */
+
+			size_t destLen = strlen(outBuf);
+			strncat(outBuf, nameBuf, outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+			return; /* real: 'F' always terminates the walk -- the terminal filename component */
+		}
+
+		if (marker == 'b') {
+			/* 1-byte token: no length field, just append the literal
+			 * "..." then "/" -- confirmed real .rodata literal, not a
+			 * placeholder/ellipsis chosen by this reconstruction. */
+			size_t destLen = strlen(outBuf);
+			strncat(outBuf, "...", outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+
+			destLen = strlen(outBuf);
+			strncat(outBuf, "/", outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+
+			i += 1;
+			continue;
+		}
+
+		if (marker == 'd') {
+			/* 3-ASCII-digit length at i+1..i+3, name text starts at i+4
+			 * (no gap, unlike 'F' above). */
+			char lenBuf[4];
+			lenBuf[0] = (char)path[i + 1];
+			lenBuf[1] = (char)path[i + 2];
+			lenBuf[2] = (char)path[i + 3];
+			lenBuf[3] = 0;
+			unsigned int nameLen;
+			sscanf(lenBuf, "%u", &nameLen);
+
+			char nameBuf[64];
+			strncpy(nameBuf, (const char *)path + i + 4, 0x40);
+			nameBuf[0x3f] = 0;
+			nameBuf[nameLen] = 0; /* real: written unconditionally, see 'F' note above */
+
+			size_t destLen = strlen(outBuf);
+			strncat(outBuf, nameBuf, outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+
+			destLen = strlen(outBuf);
+			strncat(outBuf, "/", outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+
+			i += 4 + nameLen; /* skip past the consumed name text too */
+			continue;
+		}
+
+		if (marker == 'v') {
+			/* 3-ASCII-digit field at i+1..i+3 -- CONFIRMED the parsed
+			 * value is never read afterward in ground truth (dead
+			 * computation, reproduced as a genuine no-effect sscanf
+			 * call, not omitted). Only "/" is appended -- same as 'b'
+			 * but consumes 4 bytes and skips the "..." literal. */
+			char digitsBuf[4];
+			digitsBuf[0] = (char)path[i + 1];
+			digitsBuf[1] = (char)path[i + 2];
+			digitsBuf[2] = (char)path[i + 3];
+			digitsBuf[3] = 0;
+			unsigned int unusedValue;
+			sscanf(digitsBuf, "%u", &unusedValue);
+
+			size_t destLen = strlen(outBuf);
+			strncat(outBuf, "/", outBufSize - destLen);
+			outBuf[outBufSize - 1] = 0;
+
+			i += 4;
+			continue;
+		}
+
+		/* unrecognized marker byte: stop the walk, leave outBuf as built
+		 * so far -- real code has no error indication of any kind. */
+		return;
+	}
+}

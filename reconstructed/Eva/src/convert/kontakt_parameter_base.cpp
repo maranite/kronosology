@@ -1,7 +1,9 @@
 /*
  * kontakt_parameter_base.cpp  -  CKontaktParameter / CKontaktIndexedParameter
- * / CKontaktDynamicParameter. See include/kontakt_parameter_base.h for the
- * full derivation and object layout.
+ * / CKontaktDynamicParameter, plus (2026-07-28) the sibling plural
+ * CKontaktParameters / CKontaktIndexedParameters / CKontaktDynamicParameters
+ * wrapper family. See include/kontakt_parameter_base.h for the full
+ * derivation and object layout.
  */
 
 #include "kontakt_parameter_base.h"
@@ -19,12 +21,24 @@ unsigned char *xmlStrdup(const unsigned char *cur);
  * identical content). Declared once here rather than 3 times. */
 static const char *kNameValueList[] = { "name", "value", 0 };
 
+/* real .data literal: {"V", 0}, shared byte-for-byte across all 3 plural
+ * classes' own AddObject bodies (confirmed via direct .data dump at all 3
+ * real call sites -- 0x91fbaec/0x91fbea0/0x91fc014, all identical content).
+ * See kontakt_parameter_base.h's file header for the full "V"/Identifier()
+ * resolution. */
+static const char *kVList[] = { "V", 0 };
+
 /* ============================== CKontaktParameter ======================= */
 
 CKontaktParameter::CKontaktParameter(const char **list)
 	: mList(list)
 	, mAllocatedName(0)
 {
+}
+
+const char *CKontaktParameter::Identifier() const
+{
+	return "V";
 }
 
 CKontaktParameter::~CKontaktParameter()
@@ -69,6 +83,11 @@ CKontaktIndexedParameter::CKontaktIndexedParameter(const char **list)
 	: mList(list)
 	, mAllocatedName(0)
 {
+}
+
+const char *CKontaktIndexedParameter::Identifier() const
+{
+	return "V";
 }
 
 CKontaktIndexedParameter::~CKontaktIndexedParameter()
@@ -117,6 +136,11 @@ CKontaktDynamicParameter::CKontaktDynamicParameter(const char **list)
 {
 }
 
+const char *CKontaktDynamicParameter::Identifier() const
+{
+	return "V";
+}
+
 CKontaktDynamicParameter::~CKontaktDynamicParameter()
 {
 	if (mAllocatedName) {
@@ -153,4 +177,82 @@ void CKontaktDynamicParameter::AddDynamicParameter(const unsigned char *value)
 void CKontaktDynamicParameter::AddDynamicParameter(unsigned int /*index*/, const char * /*suffix*/, const unsigned char * /*value*/)
 {
 	/* real: literal `ret` no-op default */
+}
+
+/* ========================= plural "Parameters" wrapper family ============
+ * See kontakt_parameter_base.h's file header for the full derivation. */
+
+CKontaktParameters::CKontaktParameters()
+{
+}
+
+CKontaktParameters::~CKontaktParameters()
+{
+}
+
+const char *CKontaktParameters::Identifier() const
+{
+	return "Parameters";
+}
+
+bool CKontaktParameters::AddObject(_xmlTextReader *reader, const unsigned char *name)
+{
+	if (CKontaktXml::StringIndex(kVList, name) != 0)
+		return false;
+
+	CKontaktParameter *child = MakeParameter();
+	bool result = child->Parse(reader); /* real: called unconditionally, no NULL guard -- harmless, see header */
+	if (child)
+		delete child;
+	return result;
+}
+
+CKontaktIndexedParameters::CKontaktIndexedParameters()
+{
+}
+
+CKontaktIndexedParameters::~CKontaktIndexedParameters()
+{
+}
+
+const char *CKontaktIndexedParameters::Identifier() const
+{
+	return "Parameters";
+}
+
+bool CKontaktIndexedParameters::AddObject(_xmlTextReader *reader, const unsigned char *name)
+{
+	if (CKontaktXml::StringIndex(kVList, name) != 0)
+		return false;
+
+	CKontaktIndexedParameter *child = MakeIndexedParameter();
+	bool result = child->Parse(reader);
+	if (child)
+		delete child;
+	return result;
+}
+
+CKontaktDynamicParameters::CKontaktDynamicParameters()
+{
+}
+
+CKontaktDynamicParameters::~CKontaktDynamicParameters()
+{
+}
+
+const char *CKontaktDynamicParameters::Identifier() const
+{
+	return "Parameters";
+}
+
+bool CKontaktDynamicParameters::AddObject(_xmlTextReader *reader, const unsigned char *name)
+{
+	if (CKontaktXml::StringIndex(kVList, name) != 0)
+		return false;
+
+	CKontaktDynamicParameter *child = MakeDynamicParameter();
+	bool result = child->Parse(reader);
+	if (child)
+		delete child;
+	return result;
 }

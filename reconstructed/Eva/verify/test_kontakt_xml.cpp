@@ -24,14 +24,15 @@
  * the Makefile; see that file for why. None of the checks below reach those
  * methods anyway -- see this file's own header comment. */
 
-/* CKontaktXml declares one pure virtual (vtable slot+0x8, unidentified this
- * pass -- see kontakt_xml.h) so it can't be instantiated directly; this
- * test-only stub supplies a no-op override purely so test [11] below can
- * exercise the base class's own default AddAttribute()/AddObject() bodies
- * through a real instance. */
+/* CKontaktXml declares one pure virtual, Identifier() (vtable slot+0x8 --
+ * see kontakt_xml.h for the 2026-07-28 "Parameters" factory-family
+ * resolution) so it can't be instantiated directly; this test-only stub
+ * supplies a no-op override purely so test [11] below can exercise the
+ * base class's own default AddAttribute()/AddObject() bodies through a
+ * real instance. */
 class CTestableKontaktXml : public CKontaktXml {
 public:
-	virtual void UnidentifiedPureVirtual_slot8() {}
+	virtual const char *Identifier() const { return "Testable"; }
 };
 
 static int g_fail;
@@ -168,6 +169,64 @@ int main(void)
 		CTestableKontaktXml x;
 		x.AddAttribute(0, (const unsigned char *)"n", (const unsigned char *)"v");
 		check("default AddAttribute() no-op completes", true);
+	}
+
+	printf("[12] UnpackPath() -- packed-path token decoder, 2026-07-28 batch\n");
+	{
+		char outBuf[0x100];
+
+		CKontaktXml::UnpackPath((const unsigned char *)"not-packed", outBuf, sizeof(outBuf));
+		check("no leading '@' -> outBuf left empty", outBuf[0] == 0);
+
+		CKontaktXml::UnpackPath((const unsigned char *)"@", outBuf, sizeof(outBuf));
+		check("bare \"@\" (len<=1) -> outBuf left empty", outBuf[0] == 0);
+
+		/* 'F' (marker byte itself is 'F', at path[1]): 5 unused bytes at
+		 * i+1..i+5, 3-digit length at i+6..i+8, 3 MORE unused bytes at
+		 * i+9..i+11, name text starting at i+0xc -- "@F" + "XXXXX"(5
+		 * unused) + "003"(length) + "YYY"(3 unused) + "abc"(name). */
+		CKontaktXml::UnpackPath((const unsigned char *)"@FXXXXX003YYYabc", outBuf, sizeof(outBuf));
+		check("'F' appends the name and stops (no trailing '/')", strcmp(outBuf, "abc") == 0);
+
+		/* 'F' name longer than its own 3-digit length is truncated to that length. */
+		CKontaktXml::UnpackPath((const unsigned char *)"@FXXXXX003YYYabcdef", outBuf, sizeof(outBuf));
+		check("'F' truncates name to the parsed length", strcmp(outBuf, "abc") == 0);
+
+		/* 'b': literal "...", then "/", 1 byte consumed, walk continues. */
+		CKontaktXml::UnpackPath((const unsigned char *)"@bb", outBuf, sizeof(outBuf));
+		check("'b' appends \".../\" twice", strcmp(outBuf, ".../.../") == 0);
+
+		/* 'd': 3-digit length at i+1..i+3, name at i+4 (no gap), then "/",
+		 * then the walk continues at i+4+length (here: index 8, 'R' --
+		 * an unrecognized marker, so the walk stops there too). */
+		CKontaktXml::UnpackPath((const unsigned char *)"@d003xyzREST", outBuf, sizeof(outBuf));
+		check("'d' appends name + '/' then continues past consumed name",
+		      strcmp(outBuf, "xyz/") == 0);
+
+		/* 'v': 3-digit field consumed but its value is never used -- only
+		 * "/" is appended, 4 bytes consumed total. */
+		CKontaktXml::UnpackPath((const unsigned char *)"@v123", outBuf, sizeof(outBuf));
+		check("'v' appends only '/' (parsed value unused)", strcmp(outBuf, "/") == 0);
+
+		/* unrecognized marker: stop immediately, whatever was built so far
+		 * (nothing, here) is left as-is -- no error indication. */
+		CKontaktXml::UnpackPath((const unsigned char *)"@Zrest", outBuf, sizeof(outBuf));
+		check("unrecognized marker stops the walk with no crash", outBuf[0] == 0);
+
+		/* combination: 'd' (a directory component, 3-char name "dir")
+		 * followed by 'F' (the terminal filename, 5 unused bytes + 3-digit
+		 * length "004" + 3 more unused bytes + 4-char name "leaf") --
+		 * confirms both markers' own index-advance math lands exactly on
+		 * the right byte in sequence, not just in isolation. */
+		CKontaktXml::UnpackPath((const unsigned char *)"@d003dirFXXXXX004YYYleaf", outBuf, sizeof(outBuf));
+		check("'d' then 'F' composes \"dir/leaf\"", strcmp(outBuf, "dir/leaf") == 0);
+	}
+
+	printf("[13] CKontaktXml::Identifier() pure virtual -- vtable slot resolved\n");
+	{
+		CTestableKontaktXml x;
+		check("test stub's own Identifier() override reachable through a real instance",
+		      strcmp(x.Identifier(), "Testable") == 0);
 	}
 
 	printf("\n%s\n", g_fail == 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED");

@@ -39,7 +39,6 @@ static const char *kFields[] = { "volume", "pan", "outRouting_", 0 };
 class CTestableParameter : public CKontaktParameter {
 public:
 	CTestableParameter() : CKontaktParameter(kFields), lastIndex(999), lastValue(0) {}
-	virtual void UnidentifiedPureVirtual_slot8() {}
 	virtual void AddParameter(unsigned int index, const unsigned char *value)
 	{
 		lastIndex = index;
@@ -53,7 +52,6 @@ public:
 class CTestableIndexedParameter : public CKontaktIndexedParameter {
 public:
 	CTestableIndexedParameter() : CKontaktIndexedParameter(kFields), lastIndex(999), lastSuffix(999), lastValue(0) {}
-	virtual void UnidentifiedPureVirtual_slot8() {}
 	virtual void AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value)
 	{
 		lastIndex = index;
@@ -70,7 +68,6 @@ static const char *kDynFields[] = { "sourceText", "persistent_var_", 0 };
 class CTestableDynamicParameter : public CKontaktDynamicParameter {
 public:
 	CTestableDynamicParameter() : CKontaktDynamicParameter(kDynFields), lastIndex(999), lastValue(0) { lastSuffix[0] = 0; }
-	virtual void UnidentifiedPureVirtual_slot8() {}
 	virtual void AddDynamicParameter(unsigned int index, const char *suffix, const unsigned char *value)
 	{
 		lastIndex = index;
@@ -156,6 +153,99 @@ int main(void)
 		 * base class's own 1-byte no-op default body */
 		p.CKontaktParameter::AddParameter(0, (const unsigned char *)"ignored");
 		check("CKontaktParameter::AddParameter default completes", true);
+	}
+
+	printf("[5] Identifier() -- singular family all return \"V\" (2026-07-28 batch)\n");
+	{
+		CTestableParameter p;
+		CTestableIndexedParameter ip;
+		CTestableDynamicParameter dp;
+		check("CKontaktParameter::Identifier() == \"V\"", strcmp(p.Identifier(), "V") == 0);
+		check("CKontaktIndexedParameter::Identifier() == \"V\"", strcmp(ip.Identifier(), "V") == 0);
+		check("CKontaktDynamicParameter::Identifier() == \"V\"", strcmp(dp.Identifier(), "V") == 0);
+	}
+
+	printf("[6] plural CKontaktParameters/IndexedParameters/DynamicParameters -- \"V\"-gated AddObject\n");
+	{
+		/* Real body: MakeXxx()'s child is Parse()'d UNCONDITIONALLY (real
+		 * code has no NULL guard there, see kontakt_parameter_base.h) then
+		 * deleted if non-NULL. With a NULL reader, Parse() hits the same
+		 * real ProcessNodes() state machine test_kontakt_xml.cpp already
+		 * exercises indirectly -- xmlTextReaderRead() stub returns 0
+		 * ("failed"), so Parse() returns true immediately with no crash;
+		 * that observable return value is what AddObject propagates back. */
+		static bool s_childDestroyed;
+		s_childDestroyed = false;
+
+		class CFakeParameter : public CKontaktParameter {
+		public:
+			CFakeParameter() : CKontaktParameter(0) {}
+			virtual ~CFakeParameter() { s_childDestroyed = true; }
+		};
+		class CTestablePlural : public CKontaktParameters {
+		public:
+			CTestablePlural() : makeCalls(0) {}
+			virtual CKontaktParameter *MakeParameter() { makeCalls++; return new CFakeParameter(); }
+			int makeCalls;
+		};
+
+		CTestablePlural p;
+		check("CKontaktParameters::Identifier() == \"Parameters\"", strcmp(p.Identifier(), "Parameters") == 0);
+
+		bool wrongTag = p.AddObject(0, (const unsigned char *)"NotV");
+		check("wrong child tag -> false, MakeParameter() never called", wrongTag == false && p.makeCalls == 0);
+
+		bool rightTag = p.AddObject(0, (const unsigned char *)"V");
+		check("tag \"V\" -> MakeParameter() called once, child Parse()'d then deleted",
+		      p.makeCalls == 1 && s_childDestroyed);
+		check("AddObject() returns the child's own Parse() result", rightTag == true);
+
+		bool caseInsensitive = p.AddObject(0, (const unsigned char *)"v");
+		check("tag match is case-insensitive (\"v\")", caseInsensitive == true && p.makeCalls == 2);
+	}
+	{
+		static bool s_childDestroyed;
+		s_childDestroyed = false;
+
+		class CFakeIndexedParameter : public CKontaktIndexedParameter {
+		public:
+			CFakeIndexedParameter() : CKontaktIndexedParameter(0) {}
+			virtual ~CFakeIndexedParameter() { s_childDestroyed = true; }
+		};
+		class CTestableIndexedPlural : public CKontaktIndexedParameters {
+		public:
+			CTestableIndexedPlural() : makeCalls(0) {}
+			virtual CKontaktIndexedParameter *MakeIndexedParameter() { makeCalls++; return new CFakeIndexedParameter(); }
+			int makeCalls;
+		};
+
+		CTestableIndexedPlural p;
+		check("CKontaktIndexedParameters::Identifier() == \"Parameters\"", strcmp(p.Identifier(), "Parameters") == 0);
+		check("wrong tag -> no MakeIndexedParameter() call", p.AddObject(0, (const unsigned char *)"X") == false && p.makeCalls == 0);
+		check("tag \"V\" -> MakeIndexedParameter() called, child destroyed",
+		      p.AddObject(0, (const unsigned char *)"V") == true && p.makeCalls == 1 && s_childDestroyed);
+	}
+	{
+		static bool s_childDestroyed;
+		s_childDestroyed = false;
+
+		class CFakeDynamicParameter : public CKontaktDynamicParameter {
+		public:
+			CFakeDynamicParameter() : CKontaktDynamicParameter(0) {}
+			virtual ~CFakeDynamicParameter() { s_childDestroyed = true; }
+		};
+		class CTestableDynamicPlural : public CKontaktDynamicParameters {
+		public:
+			CTestableDynamicPlural() : makeCalls(0) {}
+			virtual CKontaktDynamicParameter *MakeDynamicParameter() { makeCalls++; return new CFakeDynamicParameter(); }
+			int makeCalls;
+		};
+
+		CTestableDynamicPlural p;
+		check("CKontaktDynamicParameters::Identifier() == \"Parameters\"", strcmp(p.Identifier(), "Parameters") == 0);
+		check("wrong tag -> no MakeDynamicParameter() call", p.AddObject(0, (const unsigned char *)"X") == false && p.makeCalls == 0);
+		check("tag \"V\" -> MakeDynamicParameter() called, child destroyed",
+		      p.AddObject(0, (const unsigned char *)"V") == true && p.makeCalls == 1 && s_childDestroyed);
 	}
 
 	printf("\n%s\n", g_fail == 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED");

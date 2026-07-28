@@ -26,17 +26,15 @@ static void check(const char *label, bool ok)
 
 #define U (const unsigned char *)
 
-/* Every CKontaktXxxParameter class inherits CKontaktXml's still-unidentified
- * pure virtual (vtable slot +0x8, see kontakt_xml.h) unresolved -- same
- * situation test_kontakt_xml.cpp's own CTestableKontaktXml already handles
- * for CKontaktXml itself. One trivial test-only override per concrete class
- * here, purely so each can be instantiated on the host; no behavior under
- * test touches this slot. */
+/* Every CKontaktXxxParameter class's own family base (CKontaktParameter/
+ * IndexedParameter/DynamicParameter) now supplies a real, non-pure
+ * Identifier() override (returns "V" -- see kontakt_parameter_base.h's
+ * 2026-07-28 "Parameters" factory-family resolution), so none of these
+ * concrete classes are abstract any more; no test-only override needed. */
 #define TESTABLE(ClassName, OwnerType) \
 	class T##ClassName : public ClassName { \
 	public: \
 		T##ClassName(OwnerType *owner) : ClassName(owner) {} \
-		virtual void UnidentifiedPureVirtual_slot8() {} \
 	}
 
 TESTABLE(CKontaktGroupParameter, CKontaktGroup);
@@ -50,6 +48,9 @@ TESTABLE(CKontaktEnvelopeParameter, CKontaktEnvelope);
 TESTABLE(CKontaktPlaybackModeParameter, CKontaktPlaybackMode);
 TESTABLE(CKontaktStartCriteriaParameter, CKontaktStartCriteria);
 TESTABLE(CKontaktScriptParameter, CKontaktScript);
+TESTABLE(CKontaktOutputsParameter, CKontaktOutputs);
+TESTABLE(CKontaktContainerParameter, CKontaktContainer);
+TESTABLE(CKontaktSampleParameter, CKontaktSample);
 
 int main(void)
 {
@@ -207,6 +208,108 @@ int main(void)
 		p.AddDynamicParameter(6, "0", U"ignored"); /* confirmed real no-op */
 		check("case 6 (persistent_var_) is a confirmed real no-op", true);
 		delete[] s.sourceText; /* test-only cleanup (real allocator mismatch documented in the header, not reproduced here) */
+	}
+
+	printf("[12] CKontaktOutputsParameter (indexed family, 1 field, UnpackPath-unblocked owner setter)\n");
+	{
+		CKontaktOutputs outs;
+		memset(&outs, 0, sizeof(outs));
+		TCKontaktOutputsParameter p(&outs);
+		p.AddIndexedParameter(0, 5, U"3");
+		check("case 0 (physOutMapping_N) -> physicalOutputMapping[suffix] = value",
+		      outs.physicalOutputMapping[5] == 3);
+		p.AddIndexedParameter(99, 0, U"ignored");
+		check("out-of-range index falls through to base no-op without crashing", true);
+	}
+
+	printf("[13] CKontaktContainerParameter (15 fields, 1 UnpackPath case -- 2026-07-28 UnpackPath follow-up)\n");
+	{
+		CKontaktContainer c;
+		memset(&c, 0, sizeof(c));
+		TCKontaktContainerParameter p(&c);
+		p.AddParameter(0, U"yes");
+		check("case 0 (loadPurged) -> bool true", c.loadPurged == true);
+		p.AddParameter(4, U"12345");
+		check("case 4 (libraryID) -> unsigned 12345", c.libraryID == 12345);
+		p.AddParameter(5, U"-2");
+		check("case 5 (loadingFlags) -> signed -2", c.loadingFlags == -2);
+		p.AddParameter(8, U"0.6");
+		check("case 8 (volume) -> float 0.6", c.volume > 0.599f && c.volume < 0.601f);
+		/* case 13 (origSubDir): UnpackPath()'d into a stack buffer, then
+		 * CKontaktContainer::SetOriginalSubDirectory() -- exercise the
+		 * real 'd' packed-path token end to end. */
+		p.AddParameter(13, U"@d007SubDir");
+		check("case 13 (origSubDir) -> UnpackPath \"@d007SubDir\" -> \"SubDir/\"",
+		      strcmp(c.origSubDir, "SubDir/") == 0);
+		p.AddParameter(14, U"yes");
+		check("case 14 (hasBeenSaved, last field, contiguity-confirmed offset) -> bool true", c.hasBeenSaved == true);
+	}
+
+	printf("[14] CKontaktSampleParameter (17 fields, 2 UnpackPath cases -- 2026-07-28 UnpackPath follow-up)\n");
+	{
+		CKontaktSample smp;
+		memset(&smp, 0, sizeof(smp));
+		TCKontaktSampleParameter p(&smp);
+		/* case 0 (file_ex2): UnpackPath()'d then CKontaktSample::SetFile(). */
+		p.AddParameter(0, U"@FXXXXX008YYYSample1");
+		check("case 0 (file_ex2) -> UnpackPath 'F' name -> SetFile(\"Sample1\")",
+		      strcmp(smp.file_ex2, "Sample1") == 0);
+		/* case 1 (file_pbn): same idea, SetFilePbn(). */
+		p.AddParameter(1, U"@FXXXXX008YYYSample2");
+		check("case 1 (file_pbn) -> UnpackPath 'F' name -> SetFilePbn(\"Sample2\")",
+		      strcmp(smp.file_pbn, "Sample2") == 0);
+		p.AddParameter(8, U"44100");
+		check("case 8 (sampleRate) -> unsigned 44100", smp.sampleRate == 44100);
+		p.AddParameter(14, U"1.0");
+		check("case 14 (tuning) -> float 1.0", smp.tuning > 0.999f && smp.tuning < 1.001f);
+		p.AddParameter(16, U"999999");
+		check("case 16 (expectedDataSize, last field, contiguity-confirmed offset) -> unsigned 999999",
+		      smp.expectedDataSize == 999999);
+	}
+
+	printf("[15] concrete plural \"Parameters\" wrappers -- MakeXxx() factory bodies (5 classes)\n");
+	{
+		CKontaktGroup g;
+		memset(&g, 0, sizeof(g));
+		CKontaktGroupParameters gp(&g);
+		CKontaktIndexedParameter *child1 = gp.MakeIndexedParameter();
+		check("CKontaktGroupParameters::MakeIndexedParameter() returns non-NULL", child1 != 0);
+		child1->AddIndexedParameter(0, 0, U"0.25");
+		check("...and it's a real, working CKontaktGroupParameter(owner=&g)", g.volume > 0.249f && g.volume < 0.251f);
+		delete child1;
+
+		CKontaktOutput o;
+		memset(&o, 0, sizeof(o));
+		CKontaktOutputParameters op(&o);
+		CKontaktParameter *child2 = op.MakeParameter();
+		child2->AddParameter(0, U"7");
+		check("CKontaktOutputParameters::MakeParameter() -> real CKontaktOutputParameter(owner=&o)", o.numChannels == 7);
+		delete child2;
+
+		CKontaktZone z;
+		memset(&z, 0, sizeof(z));
+		CKontaktZoneParameters zp(&z);
+		CKontaktParameter *child3 = zp.MakeParameter();
+		child3->AddParameter(0, U"2000");
+		check("CKontaktZoneParameters::MakeParameter() -> real CKontaktZoneParameter(owner=&z)", z.sampleStart == 2000);
+		delete child3;
+
+		CKontaktContainer c;
+		memset(&c, 0, sizeof(c));
+		CKontaktContainerParameters cp(&c);
+		CKontaktParameter *child4 = cp.MakeParameter();
+		child4->AddParameter(4, U"42");
+		check("CKontaktContainerParameters::MakeParameter() -> real CKontaktContainerParameter(owner=&c)", c.libraryID == 42);
+		delete child4;
+
+		CKontaktOutputs outs;
+		memset(&outs, 0, sizeof(outs));
+		CKontaktOutputsParameters ovp(&outs);
+		CKontaktIndexedParameter *child5 = ovp.MakeIndexedParameter();
+		child5->AddIndexedParameter(0, 2, U"9");
+		check("CKontaktOutputsParameters::MakeIndexedParameter() -> real CKontaktOutputsParameter(owner=&outs)",
+		      outs.physicalOutputMapping[2] == 9);
+		delete child5;
 	}
 
 	printf("\n%s\n", g_fail == 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED");

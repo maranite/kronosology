@@ -17,9 +17,10 @@
  * that calls out to CKontaktGroup::SetOutputRouting() instead of a plain
  * field store -- confirmed alignment, not assumed.
  *
- * 10 classes this pass (all confirmed self-contained -- zero calls to any
- * class outside {CKontaktXml, libc, this class's own tiny owner-struct
- * setters below} via a full per-function objdump -dr call-target sweep):
+ * 10 classes in the original 2026-07-28 pass (all confirmed self-contained
+ * -- zero calls to any class outside {CKontaktXml, libc, this class's own
+ * tiny owner-struct setters below} via a full per-function objdump -dr
+ * call-target sweep):
  *   CKontaktGroupParameter    (CKontaktIndexedParameter family -- the named
  *                              lead target; 32-entry list, 1 special case)
  *   CKontaktZoneParameter     (CKontaktParameter family; 33-entry list, only
@@ -32,20 +33,38 @@
  *   CKontaktScriptParameter   (CKontaktDynamicParameter family -- the 3rd
  *                              dispatch shape, text-suffix based)
  *
- * DELIBERATELY NOT in this pass (each needs the still-deferred
- * CKontaktXml::UnpackPath, or a materially bigger owner class):
- * CKontaktSampleParameter, CKontaktProgramParameter,
- * CKontaktContainerParameter. Also not in this pass: CKontaktBankParameter,
- * CKontaktOutputsParameter, CKontaktSendLevelsParameter,
- * CKontaktIntModulatorParameter, CKontaktExtModulatorParameter,
- * CKontaktVoiceGroupParameter, CKontaktTargetParameter -- each is equally
- * self-contained and mechanical (confirmed via the same call-target sweep)
- * but needs 1-5 additional tiny owner-class setters not yet reconstructed
- * (CKontaktBank::SetSlotMute/SetSlotSolo/SetSlotMidiChannel/
- * SetSlotReorderIndex/SetSlotAuxSendLevel, CKontaktOutputs::
- * SetPhysicalOutputMapping, CKontaktSendLevels::SetLevel, and 4 plain
+ * SAME-DAY FOLLOW-UP BATCH (2026-07-28, "Parameters" factory-family
+ * investigation): `CKontaktXml::UnpackPath` -- previously deferred as
+ * "token meaning not pinned down" -- turned out fully tractable on a fresh
+ * pass (see kontakt_xml.h); that unblocked the 2 of the original batch's 3
+ * UnpackPath-dependent siblings that don't also need a materially bigger
+ * owner class: CKontaktContainerParameter (15-entry list, 1 UnpackPath
+ * case) and CKontaktSampleParameter (17-entry list, 2 UnpackPath cases).
+ * CKontaktProgramParameter (55-entry list, the largest in the family) is
+ * NOW also unblocked the same way but was left for a dedicated follow-up
+ * pass purely for size, not a blocker -- see its own TODO further down.
+ * CKontaktOutputsParameter (needed just 1 tiny owner setter,
+ * CKontaktOutputs::SetPhysicalOutputMapping -- a 1-line array store, no
+ * bounds check) is also done this batch. Still not done, for the same
+ * "needs 1-5 more tiny owner-class setters not yet reconstructed" reason as
+ * before: CKontaktBankParameter (CKontaktBank::SetSlotMute/SetSlotSolo/
+ * SetSlotMidiChannel/SetSlotReorderIndex/SetSlotAuxSendLevel),
+ * CKontaktSendLevelsParameter (CKontaktSendLevels::SetLevel),
+ * CKontaktIntModulatorParameter/CKontaktExtModulatorParameter/
+ * CKontaktVoiceGroupParameter/CKontaktTargetParameter (4 plain
  * CKontaktXxx::SetName(const char*) strncpy setters) -- real, traced,
- * flagged as a clean, low-risk follow-up batch, just deferred for scope.
+ * still flagged as a clean, low-risk follow-up batch.
+ *
+ * This same follow-up batch also resolved the sibling plural
+ * "CKontaktXxxParameters" factory-wrapper family (see kontakt_parameter_
+ * base.h's file header for the full investigation) and modeled the 5
+ * concrete plural subclasses whose owner class this file already declares
+ * (or now declares): CKontaktGroupParameters, CKontaktOutputParameters,
+ * CKontaktZoneParameters, CKontaktContainerParameters,
+ * CKontaktOutputsParameters. CKontaktBankParameters and
+ * CKontaktProgramParameters (the plural counterparts of the still-deferred
+ * CKontaktBankParameter and the size-deferred CKontaktProgramParameter)
+ * are left for the same follow-up.
  *
  * OWNER STRUCTS: every concrete class stores a raw pointer to its owning
  * "container" object (CKontaktGroup*, CKontaktZone*, ...) at offset +0x10
@@ -344,6 +363,92 @@ public:
 	void SetSourceText(const char *text);
 };
 
+/* CKontaktContainer -- 2026-07-28 "Parameters" factory-family follow-up
+ * batch. Fields confirmed via CKontaktContainerParameter's own 15-entry
+ * jump table (read directly out of .rodata @0x8f76dac, NOT assumed to match
+ * declaration order -- see CKontaktContainerParameter's own class comment).
+ * `origSubDir` is set via the real owner setter SetOriginalSubDirectory()
+ * (NULL value -> empty string; otherwise strncpy, NOT guaranteed
+ * NUL-terminated), and `hasBeenSaved` sits immediately after that buffer --
+ * contiguity (+0x56 + 0x100 == +0x156) independently confirms both offsets. */
+class CKontaktContainer {
+public:
+	unsigned char _unknown_prefix[0x34];
+
+	bool loadPurged;                  /* +0x34 */
+	bool tableOpen;                   /* +0x35 */
+	bool smallRackUnit;               /* +0x36 */
+	bool auxSendsVisible;             /* +0x37 */
+	unsigned int libraryID;            /* +0x38 */
+	int loadingFlags;                 /* +0x3c, SignedValue() */
+	unsigned int curProgramChangeNum;  /* +0x40 */
+	unsigned int outputMask;           /* +0x44 */
+	float volume;                      /* +0x48 */
+	float pan;                         /* +0x4c */
+	unsigned int origSaveMode;         /* +0x50 */
+	bool origAbsolutePaths;           /* +0x54 */
+	bool origCompressedSamples;       /* +0x55 */
+	char origSubDir[0x100];           /* +0x56, see SetOriginalSubDirectory() */
+	unsigned char _gap_156[0x100];     /* not written by any dispatched case */
+	bool hasBeenSaved;                 /* +0x156 -- see class header note */
+
+	/* .text+0x089bb9b0. NULL text -> origSubDir[0]=0; else strncpy(origSubDir, text, 0x100). */
+	void SetOriginalSubDirectory(const char *text);
+};
+
+/* CKontaktSample -- 17 fields, perfectly contiguous (each setter/case's own
+ * offset independently confirms the one before it -- see
+ * CKontaktSampleParameter's own class comment). `file_ex2`/`file_pbn` are
+ * set via real owner setters (plain strncpy, 0x100 bytes each). */
+class CKontaktSample {
+public:
+	unsigned char _unknown_prefix[0x8];
+
+	char file_ex2[0x100];              /* +0x8, see SetFile() */
+	char file_pbn[0x100];              /* +0x108, see SetFilePbn() */
+	bool isVolatile;                   /* +0x208 */
+	bool purged;                       /* +0x209 */
+	unsigned char _pad_20a[2];
+	unsigned int lastFileModified;      /* +0x20c */
+	unsigned int uniqueId;              /* +0x210 */
+	unsigned int lastPlayed;            /* +0x214 */
+	unsigned int sampleDataType;        /* +0x218 */
+	unsigned int sampleRate;            /* +0x21c */
+	unsigned int numChannels;           /* +0x220 */
+	unsigned int numFrames;             /* +0x224 */
+	unsigned int fileOffsetAudio;       /* +0x228 */
+	unsigned int fileOffsetContainer;   /* +0x22c */
+	unsigned int rootNote;              /* +0x230 */
+	float tuning;                       /* +0x234 */
+	bool littleEndian;                  /* +0x238 */
+	unsigned char _pad_239[3];
+	unsigned int expectedDataSize;      /* +0x23c */
+
+	/* .text+0x089c2ad0. strncpy(file_ex2, text, 0x100). */
+	void SetFile(const char *text);
+	/* .text+0x089c2b30. strncpy(file_pbn, text, 0x100). */
+	void SetFilePbn(const char *text);
+};
+
+/* CKontaktOutputs (NOT to be confused with the already-reconstructed
+ * singular CKontaktOutput above) -- the "container" class CKontaktOutputs
+ * Parameters wraps. Only 1 field confirmed this pass (the array
+ * SetPhysicalOutputMapping() writes into): a real, unrolled SIMD zero-fill
+ * loop in this class's own ctor (.text+0x089c0370) confirms the array spans
+ * exactly [+0x8, +0x108) -- 0x100 bytes / 4 = 64 entries -- before a
+ * TVector-shaped begin/end pointer pair at +0x108/+0x10c (itself
+ * unmodeled). */
+class CKontaktOutputs {
+public:
+	unsigned char _unknown_prefix[0x8];
+
+	unsigned int physicalOutputMapping[64]; /* +0x8..+0x107, see class header + setter below */
+
+	/* .text+0x089c0710. `this[0x8 + outputIndex*4] = value` -- no bounds
+	 * check at all in the real code, reproduced as-is. */
+	void SetPhysicalOutputMapping(unsigned int outputIndex, unsigned int value);
+};
+
 /* ============================ concrete Parameter classes ================= */
 
 /* .text+0x089bdd80 (AddIndexedParameter) / +0x089be160 (ctor) /
@@ -362,6 +467,19 @@ protected:
 	CKontaktGroup *mOwner;
 };
 
+/* .text+0x089c0940 (AddIndexedParameter) / +0x089c0a00 (ctor) /
+ * +0x089c09b0,+0x089c09d0 (dtor). List: 1 entry @0x91fc000
+ * ("physOutMapping_"). Case 0 -- UnsignedValue(value), then
+ * SetPhysicalOutputMapping(suffix, parsedValue). */
+class CKontaktOutputsParameter : public CKontaktIndexedParameter {
+public:
+	CKontaktOutputsParameter(CKontaktOutputs *owner);
+	virtual void AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value);
+
+protected:
+	CKontaktOutputs *mOwner;
+};
+
 /* .text+0x089c9230 (AddParameter) / +0x089c93a0 (ctor) / +0x089c9350,
  * +0x089c9370 (dtor). List: 33 entries @0x91fc460, but only indices 0-15 are
  * actually dispatched -- see CKontaktZone's own class header above. */
@@ -373,6 +491,67 @@ public:
 protected:
 	CKontaktZone *mOwner;
 };
+
+/* .text+0x089bb9f0 (AddParameter) / +0x089bbc20 (ctor) / +0x089bbbd0,
+ * +0x089bbbf0 (dtor). List: 15 entries @0x91fbaa0. Every case is a direct
+ * value-parser call into a CKontaktContainer field EXCEPT index 13
+ * ("origSubDir"), which instead UnpackPath()s the value into a 0x100-byte
+ * stack buffer and calls CKontaktContainer::SetOriginalSubDirectory() on
+ * it -- confirmed via a real call in the disassembly, not a plain field
+ * store. Real jump table read directly out of .rodata @0x8f76dac (15
+ * entries) and cross-referenced against the list positionally -- case
+ * order does NOT match list declaration order (e.g. list index 0
+ * "loadPurged" dispatches through jump-table slot 13's code, not slot 0's)
+ * -- confirmed alignment, not assumed. */
+class CKontaktContainerParameter : public CKontaktParameter {
+public:
+	CKontaktContainerParameter(CKontaktContainer *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktContainer *mOwner;
+};
+
+/* .text+0x089c2d80 (AddParameter) / +0x089c3000 (ctor) / +0x089c2fb0,
+ * +0x089c2fd0 (dtor). List: 17 entries @0x91fc220. Indices 0 ("file_ex2")
+ * and 1 ("file_pbn") UnpackPath() the value into a 0x100-byte stack buffer
+ * and call the matching CKontaktSample::SetFile()/SetFilePbn() owner
+ * setter; every other case is a direct value-parser call into a
+ * CKontaktSample field. Real jump table read directly out of .rodata
+ * @0x8f77100 (17 entries, no default fallback needed -- every index 0-16
+ * dispatched). */
+class CKontaktSampleParameter : public CKontaktParameter {
+public:
+	CKontaktSampleParameter(CKontaktSample *owner);
+	virtual void AddParameter(unsigned int index, const unsigned char *value);
+
+protected:
+	CKontaktSample *mOwner;
+};
+
+/* TODO (deferred purely for size, NOT blocked -- see file header): the
+ * remaining UnpackPath-dependent sibling, CKontaktProgramParameter, is not
+ * declared in this file yet. Facts gathered this pass for whoever picks it
+ * up next: AddParameter .text+0x089c1ec0 (311 bytes); ctor +0x089c2070
+ * takes CKontaktProgram*; list of 55 entries @0x91fc120 (dumped, starts
+ * "numBytesSamplesTotal","transpose","volume","pan","tune",...,"wallpaperFile",
+ * "batteryCellColor","muted","soloed"); jump table @0x8f77030, but the real
+ * guard is `cmp eax,0x33; ja <fallback>` -- ONLY indices 0-0x33 (0-51) go
+ * through the table. Confirmed one of those 52 in-table cases is a
+ * UnpackPath()+CKontaktProgram::SetWallpaperFile(...) call (matching
+ * "wallpaperFile" at list index 51 by name, but its real jump-table SLOT
+ * was NOT independently dumped/cross-referenced this pass -- do NOT assume
+ * table order matches list declaration order without doing that dump, see
+ * CKontaktContainerParameter's own class comment for why that assumption
+ * would be wrong here). Indices 52-54 ("batteryCellColor"/"muted"/"soloed",
+ * past the `ja` guard) all fall through to ONE shared fallback block that
+ * shared fallback block that ignores which of the 3 actually matched and
+ * unconditionally does StringIndex(list@0x91fc100, value) -> owner[0x68]=
+ * result (a real, confirmed ground-truth quirk -- almost certainly GCC
+ * identical-case-body folding, not a translation artifact -- worth
+ * confirming with a byte-level jump-table dump before committing to that
+ * theory). CKontaktProgram itself is not declared as an owner struct here
+ * yet either. */
 
 /* .text+0x089bc2c0 / +0x089bc3e0 / +0x089bc390,+0x089bc3b0. List: 6 entries @0x91fbb68. */
 class CKontaktEffectParameter : public CKontaktParameter {
@@ -469,5 +648,85 @@ public:
 protected:
 	CKontaktScript *mOwner;
 };
+
+/* ====================== concrete plural "Parameters" wrappers ============
+ * See kontakt_parameter_base.h's file header for the full "V"/"Parameters"
+ * factory-family resolution. Every Make*() body below is mechanically
+ * identical in shape (confirmed via objdump -dr on all 7 real concrete
+ * plural classes found in the binary, 5 of which are modeled here):
+ *   `T *o = mOwner; return new CKontaktXxxParameter(o);`
+ * -- a plain heap allocation of the matching SINGULAR sibling, passing this
+ * wrapper's own owner pointer straight through. The owner pointer itself is
+ * stored at +0x8 (immediately after CKontaktXml's own 8 bytes -- the plural
+ * ABSTRACT bases add zero fields of their own, unlike the singular bases
+ * which add mList/mAllocatedName; confirmed identical across every
+ * concrete plural ctor checked). */
+
+/* .text+0x089be230 (ctor) / +0x089be1e0,+0x089be200 (dtor D1/D0) /
+ * +0x089be190 (MakeIndexedParameter). Real, live call site: CKontaktGroup::
+ * AddObject's own child-tag dispatch (still out-of-scope) has a case for
+ * tag "Automation" that stack-constructs one of these, Parse()s it, and
+ * destroys it -- i.e. real XML shape is `<Group0>...<Automation><V>
+ * <Parameter name=.. value=../>...</V>...</Automation></Group0>`. */
+class CKontaktGroupParameters : public CKontaktIndexedParameters {
+public:
+	CKontaktGroupParameters(CKontaktGroup *owner);
+	virtual CKontaktIndexedParameter *MakeIndexedParameter();
+
+protected:
+	CKontaktGroup *mOwner;
+};
+
+/* .text+0x089c0230 (ctor) / +0x089c01e0,+0x089c0200 (dtor D1/D0) /
+ * +0x089c0190 (MakeParameter). */
+class CKontaktOutputParameters : public CKontaktParameters {
+public:
+	CKontaktOutputParameters(CKontaktOutput *owner);
+	virtual CKontaktParameter *MakeParameter();
+
+protected:
+	CKontaktOutput *mOwner;
+};
+
+/* .text+0x089c9470 (ctor) / +0x089c9420,+0x089c9440 (dtor D1/D0) /
+ * +0x089c93d0 (MakeParameter). */
+class CKontaktZoneParameters : public CKontaktParameters {
+public:
+	CKontaktZoneParameters(CKontaktZone *owner);
+	virtual CKontaktParameter *MakeParameter();
+
+protected:
+	CKontaktZone *mOwner;
+};
+
+/* .text+0x089bbcf0 (ctor) / +0x089bbca0,+0x089bbcc0 (dtor D1/D0) /
+ * +0x089bbc50 (MakeParameter). */
+class CKontaktContainerParameters : public CKontaktParameters {
+public:
+	CKontaktContainerParameters(CKontaktContainer *owner);
+	virtual CKontaktParameter *MakeParameter();
+
+protected:
+	CKontaktContainer *mOwner;
+};
+
+/* .text+0x089c0ad0 (ctor) / +0x089c0a80,+0x089c0aa0 (dtor D1/D0) /
+ * +0x089c0a30 (MakeIndexedParameter). */
+class CKontaktOutputsParameters : public CKontaktIndexedParameters {
+public:
+	CKontaktOutputsParameters(CKontaktOutputs *owner);
+	virtual CKontaktIndexedParameter *MakeIndexedParameter();
+
+protected:
+	CKontaktOutputs *mOwner;
+};
+
+/* TODO (deferred alongside their singular counterparts, see file header):
+ * CKontaktBankParameters (ctor +0x089bb370 takes CKontaktBank*, MakeIndexed
+ * Parameter +0x089bb2d0 -> new CKontaktBankParameter) and
+ * CKontaktProgramParameters (ctor +0x089c2140 takes CKontaktProgram*,
+ * MakeParameter +0x089c20a0 -> new CKontaktProgramParameter) are real, live,
+ * confirmed call sites (same mechanical Make*() shape as the 5 above) but
+ * not declared here since their singular counterparts aren't either. */
 
 #endif /* KONTAKT_PARAMETER_FAMILY_H */

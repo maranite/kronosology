@@ -16,6 +16,30 @@ void CKontaktGroup::SetOutputRouting(unsigned int outputIndex, unsigned int valu
 	outRouting[outputIndex] = value;
 }
 
+void CKontaktContainer::SetOriginalSubDirectory(const char *text)
+{
+	if (text) {
+		strncpy(origSubDir, text, sizeof(origSubDir));
+	} else {
+		origSubDir[0] = 0;
+	}
+}
+
+void CKontaktSample::SetFile(const char *text)
+{
+	strncpy(file_ex2, text, sizeof(file_ex2));
+}
+
+void CKontaktSample::SetFilePbn(const char *text)
+{
+	strncpy(file_pbn, text, sizeof(file_pbn));
+}
+
+void CKontaktOutputs::SetPhysicalOutputMapping(unsigned int outputIndex, unsigned int value)
+{
+	physicalOutputMapping[outputIndex] = value; /* real: no bounds check at all, reproduced as-is */
+}
+
 void CKontaktScript::SetDescription(const char *text)
 {
 	if (text)
@@ -110,6 +134,24 @@ void CKontaktGroupParameter::AddIndexedParameter(unsigned int index, unsigned in
 	}
 }
 
+/* ================================ CKontaktOutputsParameter =============== */
+
+static const char *kOutputsParamList[] = { "physOutMapping_", 0 };
+
+CKontaktOutputsParameter::CKontaktOutputsParameter(CKontaktOutputs *owner)
+	: CKontaktIndexedParameter(kOutputsParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktOutputsParameter::AddIndexedParameter(unsigned int index, unsigned int suffix, const unsigned char *value)
+{
+	switch (index) {
+	case 0: mOwner->SetPhysicalOutputMapping(suffix, CKontaktXml::UnsignedValue(value)); break;
+	default: CKontaktIndexedParameter::AddIndexedParameter(index, suffix, value); break;
+	}
+}
+
 /* ================================ CKontaktZoneParameter ===================== */
 
 static const char *kZoneParamList[] = {
@@ -153,6 +195,97 @@ void CKontaktZoneParameter::AddParameter(unsigned int index, const unsigned char
 			mOwner->gridMode = m;
 		break;
 	}
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktContainerParameter ============= */
+
+static const char *kContainerParamList[] = {
+	"loadPurged", "tableOpen", "smallRackUnit", "auxSendsVisible", "libraryID",
+	"loadingFlags", "curProgramChangeNum", "outputMask", "volume", "pan",
+	"origSaveMode", "origAbsolutePaths", "origCompressedSamples", "origSubDir",
+	"hasBeenSaved", 0
+};
+
+CKontaktContainerParameter::CKontaktContainerParameter(CKontaktContainer *owner)
+	: CKontaktParameter(kContainerParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktContainerParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0:  mOwner->loadPurged = CKontaktXml::BooleanValue(value); break;
+	case 1:  mOwner->tableOpen = CKontaktXml::BooleanValue(value); break;
+	case 2:  mOwner->smallRackUnit = CKontaktXml::BooleanValue(value); break;
+	case 3:  mOwner->auxSendsVisible = CKontaktXml::BooleanValue(value); break;
+	case 4:  mOwner->libraryID = CKontaktXml::UnsignedValue(value); break;
+	case 5:  mOwner->loadingFlags = CKontaktXml::SignedValue(value); break;
+	case 6:  mOwner->curProgramChangeNum = CKontaktXml::UnsignedValue(value); break;
+	case 7:  mOwner->outputMask = CKontaktXml::UnsignedValue(value); break;
+	case 8:  mOwner->volume = CKontaktXml::FloatValue(value); break;
+	case 9:  mOwner->pan = CKontaktXml::FloatValue(value); break;
+	case 10: mOwner->origSaveMode = CKontaktXml::UnsignedValue(value); break;
+	case 11: mOwner->origAbsolutePaths = CKontaktXml::BooleanValue(value); break;
+	case 12: mOwner->origCompressedSamples = CKontaktXml::BooleanValue(value); break;
+	case 13: {
+		char buf[0x100];
+		CKontaktXml::UnpackPath(value, buf, sizeof(buf));
+		mOwner->SetOriginalSubDirectory(buf);
+		break;
+	}
+	case 14: mOwner->hasBeenSaved = CKontaktXml::BooleanValue(value); break;
+	default: CKontaktParameter::AddParameter(index, value); break;
+	}
+}
+
+/* ================================ CKontaktSampleParameter ================= */
+
+static const char *kSampleParamList[] = {
+	"file_ex2", "file_pbn", "isVolatile", "purged", "lastFileModified", "uniqueId",
+	"lastPlayed", "sampleDataType", "sampleRate", "numChannels", "numFrames",
+	"fileOffsetAudio", "fileOffsetContainer", "rootNote", "tuning", "littleEndian",
+	"expectedDataSize", 0
+};
+
+CKontaktSampleParameter::CKontaktSampleParameter(CKontaktSample *owner)
+	: CKontaktParameter(kSampleParamList)
+	, mOwner(owner)
+{
+}
+
+void CKontaktSampleParameter::AddParameter(unsigned int index, const unsigned char *value)
+{
+	switch (index) {
+	case 0: {
+		char buf[0x100];
+		CKontaktXml::UnpackPath(value, buf, sizeof(buf));
+		mOwner->SetFile(buf);
+		break;
+	}
+	case 1: {
+		char buf[0x100];
+		CKontaktXml::UnpackPath(value, buf, sizeof(buf));
+		mOwner->SetFilePbn(buf);
+		break;
+	}
+	case 2:  mOwner->isVolatile = CKontaktXml::BooleanValue(value); break;
+	case 3:  mOwner->purged = CKontaktXml::BooleanValue(value); break;
+	case 4:  mOwner->lastFileModified = CKontaktXml::UnsignedValue(value); break;
+	case 5:  mOwner->uniqueId = CKontaktXml::UnsignedValue(value); break;
+	case 6:  mOwner->lastPlayed = CKontaktXml::UnsignedValue(value); break;
+	case 7:  mOwner->sampleDataType = CKontaktXml::UnsignedValue(value); break;
+	case 8:  mOwner->sampleRate = CKontaktXml::UnsignedValue(value); break;
+	case 9:  mOwner->numChannels = CKontaktXml::UnsignedValue(value); break;
+	case 10: mOwner->numFrames = CKontaktXml::UnsignedValue(value); break;
+	case 11: mOwner->fileOffsetAudio = CKontaktXml::UnsignedValue(value); break;
+	case 12: mOwner->fileOffsetContainer = CKontaktXml::UnsignedValue(value); break;
+	case 13: mOwner->rootNote = CKontaktXml::UnsignedValue(value); break;
+	case 14: mOwner->tuning = CKontaktXml::FloatValue(value); break;
+	case 15: mOwner->littleEndian = CKontaktXml::BooleanValue(value); break;
+	case 16: mOwner->expectedDataSize = CKontaktXml::UnsignedValue(value); break;
 	default: CKontaktParameter::AddParameter(index, value); break;
 	}
 }
@@ -435,4 +568,58 @@ void CKontaktScriptParameter::AddDynamicParameter(unsigned int index, const char
 	case 6: break;
 	default: CKontaktDynamicParameter::AddDynamicParameter(index, "", value); break;
 	}
+}
+
+/* ====================== concrete plural "Parameters" wrappers ============
+ * See kontakt_parameter_family.h's own file-header note for how these tie
+ * into the resolved "V"/"Parameters" factory-family finding. */
+
+CKontaktGroupParameters::CKontaktGroupParameters(CKontaktGroup *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktIndexedParameter *CKontaktGroupParameters::MakeIndexedParameter()
+{
+	return new CKontaktGroupParameter(mOwner);
+}
+
+CKontaktOutputParameters::CKontaktOutputParameters(CKontaktOutput *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktParameter *CKontaktOutputParameters::MakeParameter()
+{
+	return new CKontaktOutputParameter(mOwner);
+}
+
+CKontaktZoneParameters::CKontaktZoneParameters(CKontaktZone *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktParameter *CKontaktZoneParameters::MakeParameter()
+{
+	return new CKontaktZoneParameter(mOwner);
+}
+
+CKontaktContainerParameters::CKontaktContainerParameters(CKontaktContainer *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktParameter *CKontaktContainerParameters::MakeParameter()
+{
+	return new CKontaktContainerParameter(mOwner);
+}
+
+CKontaktOutputsParameters::CKontaktOutputsParameters(CKontaktOutputs *owner)
+	: mOwner(owner)
+{
+}
+
+CKontaktIndexedParameter *CKontaktOutputsParameters::MakeIndexedParameter()
+{
+	return new CKontaktOutputsParameter(mOwner);
 }
