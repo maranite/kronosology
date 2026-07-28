@@ -302,3 +302,36 @@ int CWaveformTemplate::EquationRandomCnt3(int x, int y, int z)
 	static const unsigned char kY[8] = { 241, 0, 5, 17, 20, 29, 50, 57 };
 	return RandomCntLerp(x, y, z - 1, kCoeff, 6, kA, kB, kY, -15);
 }
+
+/* ---- 2026-07-28 second follow-up: EquationPolyline ---- */
+
+/*
+ * Real ground truth: a Duff's-device-unrolled linear search for the smallest idx in
+ * [0, count) with trunc(pPos[idx]*period/60) > x, falling back to idx == count if none
+ * found; then the same LERP shape as RandomCntLerp above between segment [idx-1, idx].
+ * The unrolling is a pure perf optimization -- this plain scan is behaviorally identical,
+ * confirmed via a direct-execution oracle (the real extracted machine code run directly,
+ * not just statically read) across every branch shape. See include/waveform_template.h
+ * for the full writeup, including the real ground-truth quirk (preserved, not "fixed")
+ * that idx==0 reads pPos[-1]/pVal[-1] and idx==count reads pPos[count]/pVal[count] --
+ * every real caller must supply one extra valid element on each side of the nominal
+ * [0, count) range.
+ */
+int CWaveformTemplate::EquationPolyline(int x, int y, int period, int count,
+					 const unsigned char *pPos, const signed char *pVal)
+{
+	int idx = count;
+	for (int i = 0; i < count; ++i) {
+		if ((pPos[i] * period) / 60 > x) {
+			idx = i;
+			break;
+		}
+	}
+
+	int xValCur  = (pPos[idx] * period) / 60;
+	int xValPrev = (pPos[idx - 1] * period) / 60;
+	int valA     = (pVal[idx - 1] * y) / 30;
+	int valB     = (pVal[idx] * y) / 30;
+	int numer    = (valB - valA) * (x - xValPrev);
+	return valA + numer / (xValCur - xValPrev);
+}

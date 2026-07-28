@@ -7,7 +7,12 @@
  * x86-32 instruction interpreter (host-side tooling, not part of this repo) replayed the
  * REAL disassembly instruction-by-instruction for thousands of randomized (x,y,z) triples
  * per Equation* function (this file's literals are a small, hand-picked, human-checkable
- * subset of that much larger regression sweep, which stayed at 0 mismatches).
+ * subset of that much larger regression sweep, which stayed at 0 mismatches). The
+ * EquationPolyline checks below use a different but stronger oracle from the same
+ * 2026-07-28 session: the real extracted machine code (self-contained, no external
+ * refs) run directly via mmap'd PROT_EXEC rather than a reimplemented interpreter,
+ * regression-tested against ~6900 randomized cases (0 mismatches) before these KATs
+ * were selected from it.
  */
 
 #include <cstdio>
@@ -137,6 +142,54 @@ int main()
 	check("RandomCnt3(20,300,61) == -150", CWaveformTemplate::EquationRandomCnt3(20, 300, 61) == -150);
 	check("RandomCnt3(40,300,61) == -7", CWaveformTemplate::EquationRandomCnt3(40, 300, 61) == -7);
 	check("RandomCnt3(60,300,61) == -150 (edge, x==n)", CWaveformTemplate::EquationRandomCnt3(60, 300, 61) == -150);
+
+	/* ---- EquationPolyline: caller-supplied polyline LERP, see waveform_template.h for
+	 * the full ground-truth writeup (direct-execution oracle against the real extracted
+	 * machine code, not just a static/interpreter read). pPos/pVal arrays below are
+	 * indexed from -1 (the real ground-truth idx==0 boundary quirk) through count (the
+	 * real not-found/idx==count boundary quirk) -- both preserved exactly, not clamped.
+	 * period=61, count=4:
+	 *   pPos[-1..4] = { 5, 0, 15, 30, 45, 60 }, pVal[-1..4] = { 60, 0, 20, -20, 10, -10 }
+	 * Expected values below are ground truth (direct-execution oracle against the real
+	 * machine code at .text+0x08985f80), not hand-computable at a glance, same convention
+	 * as this file's RandomCnt1-3 checks. ---- */
+	{
+		unsigned char pPosPad[6] = { 5, 0, 15, 30, 45, 60 };
+		signed char   pValPad[6] = { 60, 0, 20, -20, 10, -10 };
+		const unsigned char *pPos = pPosPad + 1;
+		const signed char   *pVal = pValPad + 1;
+
+		check("Polyline(-3,300,61,4) == -360 (idx==0 boundary, reads pPos[-1]/pVal[-1])",
+		      CWaveformTemplate::EquationPolyline(-3, 300, 61, 4, pPos, pVal) == -360);
+		check("Polyline(5,300,61,4) == 66",
+		      CWaveformTemplate::EquationPolyline(5, 300, 61, 4, pPos, pVal) == 66);
+		check("Polyline(10,300,61,4) == 133",
+		      CWaveformTemplate::EquationPolyline(10, 300, 61, 4, pPos, pVal) == 133);
+		check("Polyline(20,300,61,4) == 67",
+		      CWaveformTemplate::EquationPolyline(20, 300, 61, 4, pPos, pVal) == 67);
+		check("Polyline(25,300,61,4) == -66",
+		      CWaveformTemplate::EquationPolyline(25, 300, 61, 4, pPos, pVal) == -66);
+		check("Polyline(35,300,61,4) == -100",
+		      CWaveformTemplate::EquationPolyline(35, 300, 61, 4, pPos, pVal) == -100);
+		check("Polyline(40,300,61,4) == 0",
+		      CWaveformTemplate::EquationPolyline(40, 300, 61, 4, pPos, pVal) == 0);
+		check("Polyline(55,300,61,4) == -25",
+		      CWaveformTemplate::EquationPolyline(55, 300, 61, 4, pPos, pVal) == -25);
+		check("Polyline(100,300,61,4) == -587 (not-found boundary, reads pPos[4]/pVal[4])",
+		      CWaveformTemplate::EquationPolyline(100, 300, 61, 4, pPos, pVal) == -587);
+	}
+	{
+		/* count==1 special case: period=61, pPos[-1..1] = {2,0,40}, pVal[-1..1] = {50,0,-30} */
+		unsigned char pPosPad[3] = { 2, 0, 40 };
+		signed char   pValPad[3] = { 50, 0, -30 };
+		const unsigned char *pPos = pPosPad + 1;
+		const signed char   *pVal = pValPad + 1;
+
+		check("Polyline(5,300,61,1) == -37 (count==1, not-found path)",
+		      CWaveformTemplate::EquationPolyline(5, 300, 61, 1, pPos, pVal) == -37);
+		check("Polyline(-10,300,61,1) == -2500 (count==1, idx==0 path)",
+		      CWaveformTemplate::EquationPolyline(-10, 300, 61, 1, pPos, pVal) == -2500);
+	}
 
 	/* ---- GetData: m_pbData[idx mod m_wSize], both wrap directions ---- */
 	{

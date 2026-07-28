@@ -20,11 +20,12 @@
  * where these recur.
  *
  * PARTIAL RECONSTRUCTION, real scope decision, not an oversight: of the class's 28 real
- * methods, this pass (plus the follow-up batch below) reconstructs the 8 pure-integer,
- * no-runtime-table Equation* bodies (`EquationNone`/`Triangle`/`Saw`/`Square`/`StepTri4`/
- * `StepTri6`/`StepSaw4`/`StepSaw6`), the 6 multi-branch/table-driven `EquationRandomSH1-3`/
- * `EquationRandomCnt1-3` bodies (see the 2026-07-28 follow-up note below), plus
- * `GetData()`/`Shape()` (the two table-lookup accessors) and the destructor.
+ * methods, this pass (plus the two follow-up batches below) reconstructs the 8
+ * pure-integer, no-runtime-table Equation* bodies (`EquationNone`/`Triangle`/`Saw`/
+ * `Square`/`StepTri4`/`StepTri6`/`StepSaw4`/`StepSaw6`), the 6 multi-branch/table-driven
+ * `EquationRandomSH1-3`/`EquationRandomCnt1-3` bodies (2026-07-28 follow-up #1),
+ * `EquationPolyline` (2026-07-28 follow-up #2, see further below), plus `GetData()`/
+ * `Shape()` (the two table-lookup accessors) and the destructor.
  * Deliberately NOT reconstructed, each for a distinct, documented reason:
  *   - Constructor (`CWaveformTemplate(EWaveformType,u16,u16)`): allocates both m_pbData/
  *     m_pbShapeTable via two HAL_DisableInterrupts()/malloc()/HAL_EnableInterrupts()-
@@ -41,13 +42,6 @@
  *     integer-only branches faithfully would require either modeling the FPU branch too
  *     (out of scope, same reason as the Equation* FPU outliers below) or silently
  *     truncating real dispatch behavior -- deferred whole, not partially forced in.
- *   - `EquationPolyline(int,int,int,int,const u8*,const char*)`: confirmed (2026-07-28) to
- *     be a genuine Duff's-device-unrolled (mod-4 remainder handling) linear search over a
- *     CALLER-SUPPLIED, variable-length polyline buffer, reusing the same `0x88888889`/
- *     shift-5/div-60 magic-divide idiom as `EquationRandomCnt3` for the per-point
- *     thresholds but with real loop-carried unrolling state (`edi = (count-1)&3`) that the
- *     fixed-size-table `RandomCnt` LERP helper below does not need -- a genuinely separate,
- *     larger reconstruction than this batch's scope, needs its own dedicated pass.
  *   - `EquationExpSawUp/ExpSawDown/ExpTriangle/Guitar/Sine`: genuine x87 FPU DSP curve
  *     math (`fsqrt`, real `sqrt@plt`/`sin@plt`/`cos@plt` calls against runtime float/double
  *     constants) -- same "real DSP computation, out of scope" exclusion this project has
@@ -93,6 +87,54 @@
  *     translation below rather than anything wider, confirmed by regression-testing at
  *     `y` magnitudes large enough to actually trigger the wraparound.
  *
+ * 2026-07-28 FOLLOW-UP BATCH #2: `EquationPolyline`, deferred whole by the first pass as
+ * needing its own dedicated batch, is now fully reconstructed. Unlike the rest of this
+ * file, verified with a DIFFERENT oracle technique: the prior batches' x86-32 Python
+ * interpreter did not survive between sessions, and this function's real machine code
+ * (0x08985f80..0x089861a7 in the real `Eva` binary, 560 bytes, confirmed self-contained --
+ * no absolute-address memory operands, no external calls, only stack-relative and
+ * immediate operands) was extracted verbatim and executed DIRECTLY (mmap'd
+ * `PROT_EXEC`, called with real cdecl args from a small host harness) as a strictly
+ * stronger ground-truth oracle than any reimplemented interpreter -- regression-tested
+ * against a Python reference model of the C++ translation below across ~6900 randomized
+ * `(x,y,period,count,pPos[],pVal[])` tuples (including a dedicated large-|y| sweep to
+ * exercise 32-bit multiply wraparound), 0 mismatches.
+ *   - Real signature: `EquationPolyline(int x, int y, int period, int count,
+ *     const unsigned char *pPos, const signed char *pVal)`. NOT part of the
+ *     `sm_ifpWaveformEquations[]` 3-arg family below -- a distinct 6-arg static helper
+ *     evaluating a caller-supplied polyline (parallel `pPos[]`/`pVal[]` breakpoint arrays)
+ *     at query position `x`. `period` is used directly (unlike the RandomSH/RandomCnt
+ *     family's `z-1`, this function never subtracts 1 from it).
+ *   - Algorithm: real ground truth is a Duff's-device-unrolled (mod-4 remainder preamble +
+ *     groups-of-4 main loop) linear scan for the smallest `idx` in `[0, count)` with
+ *     `trunc(pPos[idx]*period/60) > x` (the same `0x88888889`/shift-5/div-60 magic-divide
+ *     idiom as `EquationRandomCnt3`'s position table), falling back to `idx == count` if
+ *     no such index exists. The unrolling is a pure perf optimization with no semantic
+ *     effect -- reproduced below as an equivalent plain scan, confirmed behaviorally
+ *     identical to the real unrolled code via the direct-execution oracle across every
+ *     branch shape (immediate `idx==0` hit, mid-scan hit, not-found/`idx==count`, and the
+ *     `count==1` single-element special case). Once `idx` is found, it LERPs between
+ *     segment `[idx-1, idx]` exactly like `RandomCntLerp` above (`valA`/`valB` from
+ *     `pVal[]` scaled in 30ths of `y`, numerator `(valB-valA)*(x-xValPrev)`, real signed
+ *     truncating `idiv` by `(xValCur-xValPrev)`).
+ *   - GROUND-TRUTH QUIRK, preserved exactly, not "fixed": both `pPos[idx-1]`/`pVal[idx-1]`
+ *     accesses are real and land OUTSIDE the nominal `[0, count)` range at the two
+ *     boundaries -- `idx==0` reads index `-1` (one slot BEFORE the buffer the caller
+ *     nominally supplies), and `idx==count` (not-found) reads index `count` (one slot
+ *     PAST the last nominal valid index). Confirmed via the direct-execution oracle, not
+ *     assumed: any real caller of this function must supply `pPos`/`pVal` with one extra
+ *     valid element on each side for these accesses to be defined. `EquationPolyline` has
+ *     zero call sites anywhere in ground truth's own `.text`/`.rodata`/`.data` (confirmed
+ *     by an exhaustive byte-pattern scan for its own address -- the one hit found is the
+ *     function's own `.symtab` entry, not a reference), so this quirk cannot be
+ *     cross-checked against a real caller; most likely reached only from Peg-editor UI
+ *     code (matching this file's `src/editor/` placement) outside this project's scope,
+ *     same as `DrawWave` above.
+ *   - The `pVal[i]*y` and `pPos[i]*period` premultiplies are real 2-operand (32-bit
+ *     truncating) `imul`s, matching plain C `int*int` overflow semantics -- like
+ *     `RandomCntLerp`'s numerator, plain `int` arithmetic in the translation reproduces
+ *     this automatically, confirmed by the large-|y| wraparound sweep above.
+ *
  * REAL LAYOUT (confirmed by GetData()/Shape()/the destructor's own field accesses; no
  * padding needed, natural x86 alignment matches every offset):
  *   +0x00 (u8*)  m_pbData        malloc'd sample-index table, GetData()'s source
@@ -100,7 +142,8 @@
  *   +0x08 (u16)  m_wSize         GetData()'s modulus (period length of m_pbData)
  *   +0x0a (u16)  m_wCount        Shape()'s clamp bound (length of m_pbShapeTable)
  *
- * EQUATION FAMILY CALLING CONVENTION: all `Equation*` methods are plain (non-regparm)
+ * EQUATION FAMILY CALLING CONVENTION: all `Equation*` methods EXCEPT `EquationPolyline`
+ * (a distinct 6-arg helper, see its own writeup above) are plain (non-regparm)
  * `static` member functions taking exactly `(int x, int y, int z)` on the stack --
  * confirmed by every body reading its 3 args from `[esp+4]`/`[esp+8]`/`[esp+0xc]` (no
  * `this`). Called only indirectly through `sm_ifpWaveformEquations[]` in ground truth
@@ -156,6 +199,9 @@ public:
 	static int EquationRandomCnt1(int x, int y, int z);
 	static int EquationRandomCnt2(int x, int y, int z);
 	static int EquationRandomCnt3(int x, int y, int z);
+
+	static int EquationPolyline(int x, int y, int period, int count,
+				     const unsigned char *pPos, const signed char *pVal);
 
 private:
 	friend struct CWaveformTemplateTestHooks;

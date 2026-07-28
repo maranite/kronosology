@@ -148,3 +148,14 @@ worked example this was built for.
   `objdump -s -j .rodata`: the "segment end value" table's entries equal the "segment
   start value" table's entries shifted by one index (`tableEnd[i] == tableStart[i+1]`),
   confirmed from the raw bytes rather than assumed from the shape of the code.
+
+**2026-07-28 second follow-up (`EquationPolyline`, self-contained functions only): this
+interpreter tool did NOT survive to the next session** (scratchpad presence is not
+guaranteed despite the earlier note saying it survived once). Rather than rebuild it,
+switched to a stronger technique for this specific function since it has zero external
+refs (no `.rodata`/`.data`/`this` access, only stack+immediates): extract its raw bytes
+straight from the binary and execute them directly via `mmap(PROT_EXEC)` from a small C
+harness, instead of reimplementing an interpreter. See
+[[x86-direct-execution-oracle-technique]] for the full recipe -- reach for that one first
+whenever the target function is self-contained; fall back to this interpreter only when it
+touches globals/tables/tables the direct-exec approach can't safely reproduce standalone.

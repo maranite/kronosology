@@ -2645,6 +2645,7 @@ RECONSTRUCTED = {
     "08985870",  # CWaveformTemplate::~CWaveformTemplate() (D1/D2 folded, same address)
     "089858e0",  # CWaveformTemplate::GetData(int) const
     "08985990",  # CWaveformTemplate::Shape(char) const
+    "08985f80",  # CWaveformTemplate::EquationPolyline(int,int,int,int,const u8*,const char*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
