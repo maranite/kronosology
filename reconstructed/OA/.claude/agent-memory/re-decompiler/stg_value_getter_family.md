@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 8 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch), 592 methods reconstructed, manifest 1441->2037
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 11 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch), 668 methods reconstructed, manifest 1441->2113
 type: project
 ---
 
@@ -328,10 +328,108 @@ Set)' | grep 'ER23CSTGPatchMessageContext$'` to get the exact real
 candidate set up front, filtered to weak linkage AND the exact ctx-only
 signature suffix before ever running the decoder.
 
+**Fifth batch (2026-07-28, commit `0863921`): `CSTGOrganOsc` (13/36) +
+`CSTGVPMOsc` (44/44) + `CSTGMS20ModelPatch` (19/19) done**, manifest
+2037 -> 2113. Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`). All three picked from the
+prior batch's own "~160 more classes remain" backlog by size after the
+usual pre-checks: word-boundary `grep -rn '\bClassName\b' src include`
+(both `CSTGVPMOsc`/`CSTGOrganOsc` genuinely fresh -- zero hits;
+`CSTGMS20ModelPatch` also fresh and explicitly confirmed DISTINCT from
+the already-done `CSTGMS20`, same precedent as
+`CSTGPolysix`/`CSTGPolysixModel`) and the `nm`-derived weak-linkage +
+`ER23CSTGPatchMessageContext`-suffix candidate-set filter before ever
+running the decoder.
+
+`CSTGOrganOsc` (tonewheel-organ oscillator patch) is notable for how
+FEW of its 36 pending symbols turned out to be real candidates: only 13.
+The other 23 are global ('T') linkage. Most of those are an obvious
+different shape (Set* with an extra bool/enum argument beyond ctx), but
+8 of them -- `GetLowerNoteCount`, `GetUpperNoteCount`,
+`GetLowerDrawbarSum`, `GetUpperDrawbarSum`, `GetEXPercDrawbarSum`,
+`GetLowerNoteCountCompression`, `GetUpperNoteCountCompression`,
+`GetVoiceLevelEstimate` -- superficially match the family's own
+`Get*(CSTGPatchMessageContext&)`-shaped mangled suffix. Spot-checked
+`GetLowerNoteCount`'s own disassembly rather than trusting the linkage
+check blind: it's `mov eax,[eax+8]; mov edx,[edx+0x28]; movsx
+eax,[eax+8]; mov eax,[edx+eax+0xd8]; ret` -- a plain per-voice runtime
+note-count read returned directly in eax, ZERO `sValueGetterTemp` write,
+ZERO `STGConvertedParam&` return. Real per-voice runtime state, not a
+static patch-value accessor, despite the matching mangled suffix. This
+reconfirms "T linkage = different mechanism" is trustworthy even when a
+candidate's signature alone looks like a match -- linkage beats
+signature shape when they disagree.
+
+`CSTGVPMOsc` (FM/ring-mod/waveshaper phase-modulation oscillator patch):
+44/44 real ctx-only candidates, 1 pre-excluded outlier
+(`GetSubComponent(unsigned short)`, the same different-signature
+sub-object-accessor shape as CSTGString's/CSTGAnalog4PoleBase's own).
+SIMPLEST-dialect class again -- zero ctx-dynamic-index methods, every
+candidate a fixed-offset field read directly off `this`.
+
+`CSTGMS20ModelPatch` (the model-generator/voice-allocator-EG patch
+component that OWNS a `CSTGMS20`, not the same class): 19/19, zero
+outliers, also zero ctx-dynamic-index methods.
+
+**New field-shape this batch**: shift-then-mask bitfield extraction --
+`movzx eax,[base+K]; shr al,N; and eax,1` (N > 0), modeled directly as
+`(*(unsigned char *)(base+K) >> N) & 0x1`. This extends the family's
+existing MASK-ONLY bitfield shape (no shift instruction at all, e.g.
+CPianoOsc's `& 0x3` two-bit field) with an explicit shift for bit
+positions other than 0. Confirmed on two separate classes this batch:
+`CSTGVPMOsc` packs FOUR independent single-bit booleans into byte 0x1f
+(`GetOscOnOff` bit 0 -- no shift instruction, `GetUseCommonPitchMod` bit
+1, `GetWaveshaperDriveKeySlopeHighOnly` bit 2, `GetFeedbackPrePost` bit
+3); `CSTGMS20ModelPatch` packs two into offset 0x6f7 (`GetMGKeySync` bit
+0, `GetMGMIDITempoSync` bit 1). No new helper needed -- same `CtxIndex`
+helper still covers the (unrelated) ctx-index cases, this is purely a
+field-read-expression change.
+
+Reused the exact same KAT-generation discipline (separate Python
+evaluator over the same parsed shape facts, deterministic
+`buf[i]=(i*0x9f+0x37)&0xff` pattern, ctx index fixed at 3) plus BOTH
+established post-generation checks -- comment open/close-count balance
+and an exact DEF_RE captured-name-set diff (`got == want`, not just a
+count match) -- run on every new `.cpp` BEFORE any build attempt. Caught
+3 fresh instances of the literal-`*/`-in-prose gotcha this batch, a new
+variant not seen before: plain "Get*/Set*" prose (used in all 3 new
+headers' derivation comments to describe the pending-symbol split) forms
+a literal `*/` all on its own, no adjacent word pairing needed like the
+prior batches' "FilterA*/FilterB*"/"Tine*/Reed*" examples -- ANY
+`X*/Y*`-shaped prose is now a known trigger, not just two similarly-named
+fields. Fixed by rewording to "Get*- and Set*-prefixed" throughout (also
+fixes the same pattern for future headers describing a Get*/Set* split).
+Also caught 2 fresh instances of the DEF_RE parenthesis-swallowing bug in
+2 of the 3 new `.cpp` leading comments (a "13 of 36 pending candidates
+(the other 23 are ...)." aside and a "(see header for the ... detail)."
+aside, both with no semicolon before the next real function) -- fixed by
+rewriting both as em-dash-delimited clauses, same established convention.
+
+**Next targets** (same technique, not yet done): ~157 more classes
+remain. Re-run the survey query (group pending `Set*`/`Get*` methods by
+class from `manifest/oa_functions.csv`, sort by count) -- the next
+largest fresh candidates as of this batch, by raw pending count, were
+`CKGModuleParamMsgHandler`/`CKGCommonParamMsgHandler`/
+`CKGGlobalParamMsgHandler` (130/71/25 -- NOTE: unconfirmed whether these
+are actually part of THIS family or a different CKG message-handler
+convention; check the `ER23CSTGPatchMessageContext` mangled-suffix filter
+and a sample disassembly before assuming), `CSTGPolysixModelPatch` (62),
+`CSTGOrganOsc`/`CSTGMS20ModelPatch` already done this batch,
+`CSTGPianoModelPatch` (34, confirmed fresh via grep -- only appears in an
+unrelated stub-file comment, no real struct), `CSTGMultisampleBank` (33
+-- SKIP, already a real heavily-referenced class per `CPianoOsc`'s own
+`GetBankIdAndStereoFlag` outlier note, same "already modeled" situation
+as `CSTGProgramSlot`/`CSTGProgram`), `CWaveMotionOsc` (33, confirmed
+fresh), `CSTGControllerInfo` (31), `CSTGVectorMotion` (29),
+`CSTGMultiFilter2Pole` (29). Always do the word-boundary grep +
+weak-linkage + ctx-only-suffix `nm` filter BEFORE running the decoder on
+any of these, per the by-now-standard checklist.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
 "CSTGOrganModelPatch + CSTGMS20 value-getter families",
 "CSTGAnalog4PoleBase + CSTGPolysix + CSTGAnalogSyncOsc value-getter
-families" and "CPianoOsc + CSTGEPModelPatch value-getter families"
+families", "CPianoOsc + CSTGEPModelPatch value-getter families" and
+"CSTGOrganOsc + CSTGVPMOsc + CSTGMS20ModelPatch value-getter families"
 entries for the full per-batch derivation notes.
