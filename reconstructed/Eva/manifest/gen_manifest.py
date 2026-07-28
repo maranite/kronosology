@@ -2503,6 +2503,53 @@ RECONSTRUCTED = {
     "08150e30",  # CResEntryEx::CopyEx(CResEntry const&)
     "081903d0",  # CResEntryEx::~CResEntryEx() D1 (weak)
     "081903c0",  # CResEntryEx::~CResEntryEx() D2 (weak)
+
+    # 2026-07-28 fresh nm -C class-inventory sweep, round 4: CSeqEvent (slice)
+    # / CSeqPat / CPatternDataHolder / CDrumTrackPatternDataHolder
+    # (seq_pattern_data.h/.cpp) -- a real, fully self-contained sequencer
+    # pattern-event-storage family. Two other candidates traced and REJECTED
+    # first: the CFATEntry/CFatMap/CShortDirEntry/CVFATEntry FAT/VFAT
+    # directory-entry family (89 functions -- looked ideal but real call-xref
+    # tracing found several members depend on CZ's real growable container
+    # primitives, `Insert`/`RFind`/`Remove`/`Sprintf`/growable
+    # `operator=(const char*)`, the exact deep out-of-scope surface
+    # cz_util.h already documents), and the CLoadSoundFontMgr/
+    # CLoadKontaktBankMgr/CLoadKontaktMultiMgr/CLoadKontaktInstrumentMgr/
+    # CLoadKontaktSampleMgr family (97 functions -- dense web of
+    # CFMBrowseForm/CPCMManager/CDiskUtil/CFileOperation/CStorage
+    # collaborators, classic god-object-network business logic). This
+    # cluster's own objdump call-xref scan found ZERO external call targets
+    # anywhere in CSeqPat/CPatternDataHolder -- strictly better match for
+    # "mechanical, not entangled with unmodeled classes" than the rejected
+    # FAT family.
+    "08e17c90",  # CSeqPat::Initialize()
+    "08e17cd0",  # CSeqPat::Initialize(char const*)
+    "08e18070",  # CSeqPat::SetName(char const*)
+    "08e183e0",  # CSeqPat::SetName()
+    "08e18420",  # CSeqPat::SetEventOffset(unsigned long)
+    "08e18450",  # CSeqPat::GetEventOffset()
+    "08e18480",  # CSeqPat::SetEvent(unsigned long, CSeqEvent*)
+    "08e184d0",  # CSeqPat::GetEvent(unsigned long)
+    "08e18510",  # CSeqPat::GetEvent(unsigned long, int)
+    "08e18590",  # CDrumTrackPatternDataHolder::Initialize()
+    "08e185c0",  # CPatternDataHolder::CPatternDataHolder()
+    "08e185d0",  # CPatternDataHolder::SetInfo()
+    "08e18780",  # CPatternDataHolder::ClearUnusedArea()
+    "08e18a20",  # CPatternDataHolder::GetPat(int)
+    "08e18a40",  # CPatternDataHolder::GetEvent(int)
+    "08e18a80",  # CPatternDataHolder::GetEvent(int, int)
+    "08e18ad0",  # CPatternDataHolder::GetEventDirect(int)
+    "08e18ae0",  # CPatternDataHolder::SetEvent(int, CSeqEvent*)
+    "08e18b20",  # CPatternDataHolder::GetNumOfEvent(CSeqEvent*, bool)
+    "08e18d50",  # CPatternDataHolder::GetNumOfEvent(int)
+    "08e18e90",  # CPatternDataHolder::GetNumOfEventsToEnd(int)
+    "08e18ff0",  # CPatternDataHolder::GetTotalNumOfEvents()
+    "08e19150",  # CPatternDataHolder::GetNextTopEvent(int)
+    "08e191b0",  # CPatternDataHolder::GetEventAreaTop()
+    "08e191c0",  # CPatternDataHolder::GetEventAreaEnd()
+    "08e191e0",  # CPatternDataHolder::GetFreeEventTop()
+    "08e191f0",  # CPatternDataHolder::GetPatternTop()
+    "08e19200",  # CPatternDataHolder::GetPatternEventTop()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
