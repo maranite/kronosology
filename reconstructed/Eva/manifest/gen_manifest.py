@@ -2830,6 +2830,87 @@ RECONSTRUCTED = {
     "089c5760",  # CKontaktXml::Append(unsigned char const*, unsigned int&, unsigned int, char*, unsigned int)
     "089c57f0",  # CKontaktXml::AbsolutePath(char const*, char const*, char*, unsigned int)
     "089c58f0",  # CKontaktXml::RemoveNameExtension(char*, unsigned int)
+
+    # --- CKontaktParameter/CKontaktIndexedParameter/CKontaktDynamicParameter +
+    # first batch of concrete CKontaktXxxParameter siblings (kontakt_parameter_base.h/
+    # kontakt_parameter_family.h, 2026-07-28) -- direct follow-up to the standing lead
+    # in kontakt_xml.h's own header ("CKontaktGroupParameter dispatches through
+    # CKontaktXml's value parsers, out of scope that pass"). All 3 abstract bases +
+    # 10 concrete "Parameter" siblings (Group/Zone/Effect/Filter/Output/Lfo/Loop/
+    # Envelope/PlaybackMode/StartCriteria) + CKontaktScriptParameter (the Dynamic
+    # family's own first sibling) + the 4 tiny owner-struct setters those bodies
+    # call into (CKontaktGroup::SetOutputRouting, CKontaktScript::SetDescription/
+    # SetPassword/SetSourceText). Every attribute-name list and jump table was read
+    # directly out of .rodata, not guessed. The sibling "CKontaktXxxParameters"
+    # (plural) factory family and CKontaktSample/Program/Container Parameter (need
+    # the still-deferred CKontaktXml::UnpackPath) are NOT in this pass -- see
+    # kontakt_parameter_base.h/kontakt_parameter_family.h's own file headers. ---
+    "089c0c50",  # CKontaktParameter::CKontaktParameter(char const**)
+    "089c0b10",  # CKontaktParameter::~CKontaktParameter() (complete-object)
+    "089c0b60",  # CKontaktParameter::~CKontaktParameter() (deleting)
+    "089c0bc0",  # CKontaktParameter::AddAttribute(unsigned int, unsigned char const*, unsigned char const*)
+    "089c0c80",  # CKontaktParameter::AddParameter(unsigned char const*)
+    "089c0b00",  # CKontaktParameter::AddParameter(unsigned int, unsigned char const*) (1-byte no-op default)
+    "089be810",  # CKontaktIndexedParameter::CKontaktIndexedParameter(char const**)
+    "089be6c0",  # CKontaktIndexedParameter::~CKontaktIndexedParameter() (complete-object)
+    "089be710",  # CKontaktIndexedParameter::~CKontaktIndexedParameter() (deleting)
+    "089be770",  # CKontaktIndexedParameter::AddAttribute(unsigned int, unsigned char const*, unsigned char const*)
+    "089be840",  # CKontaktIndexedParameter::AddIndexedParameter(unsigned char const*)
+    "089be6b0",  # CKontaktIndexedParameter::AddIndexedParameter(unsigned int, unsigned int, unsigned char const*) (1-byte no-op default)
+    "089bbe80",  # CKontaktDynamicParameter::CKontaktDynamicParameter(char const**)
+    "089bbd30",  # CKontaktDynamicParameter::~CKontaktDynamicParameter() (complete-object)
+    "089bbd80",  # CKontaktDynamicParameter::~CKontaktDynamicParameter() (deleting)
+    "089bbde0",  # CKontaktDynamicParameter::AddAttribute(unsigned int, unsigned char const*, unsigned char const*)
+    "089bbeb0",  # CKontaktDynamicParameter::AddDynamicParameter(unsigned char const*)
+    "089bbd20",  # CKontaktDynamicParameter::AddDynamicParameter(unsigned int, char const*, unsigned char const*) (1-byte no-op default)
+    "089be160",  # CKontaktGroupParameter::CKontaktGroupParameter(CKontaktGroup*)
+    "089be110",  # CKontaktGroupParameter::~CKontaktGroupParameter() (complete-object)
+    "089be130",  # CKontaktGroupParameter::~CKontaktGroupParameter() (deleting)
+    "089bdd80",  # CKontaktGroupParameter::AddIndexedParameter(unsigned int, unsigned int, unsigned char const*)
+    "089c93a0",  # CKontaktZoneParameter::CKontaktZoneParameter(CKontaktZone*)
+    "089c9350",  # CKontaktZoneParameter::~CKontaktZoneParameter() (complete-object)
+    "089c9370",  # CKontaktZoneParameter::~CKontaktZoneParameter() (deleting)
+    "089c9230",  # CKontaktZoneParameter::AddParameter(unsigned int, unsigned char const*)
+    "089bc3e0",  # CKontaktEffectParameter::CKontaktEffectParameter(CKontaktEffect*)
+    "089bc390",  # CKontaktEffectParameter::~CKontaktEffectParameter() (complete-object)
+    "089bc3b0",  # CKontaktEffectParameter::~CKontaktEffectParameter() (deleting)
+    "089bc2c0",  # CKontaktEffectParameter::AddParameter(unsigned int, unsigned char const*)
+    "089bd320",  # CKontaktFilterParameter::CKontaktFilterParameter(CKontaktFilter*)
+    "089bd2d0",  # CKontaktFilterParameter::~CKontaktFilterParameter() (complete-object)
+    "089bd2f0",  # CKontaktFilterParameter::~CKontaktFilterParameter() (deleting)
+    "089bd100",  # CKontaktFilterParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c0160",  # CKontaktOutputParameter::CKontaktOutputParameter(CKontaktOutput*)
+    "089c0110",  # CKontaktOutputParameter::~CKontaktOutputParameter() (complete-object)
+    "089c0130",  # CKontaktOutputParameter::~CKontaktOutputParameter() (deleting)
+    "089c0090",  # CKontaktOutputParameter::AddParameter(unsigned int, unsigned char const*)
+    "089bf470",  # CKontaktLfoParameter::CKontaktLfoParameter(CKontaktLfo*)
+    "089bf420",  # CKontaktLfoParameter::~CKontaktLfoParameter() (complete-object)
+    "089bf440",  # CKontaktLfoParameter::~CKontaktLfoParameter() (deleting)
+    "089bf370",  # CKontaktLfoParameter::AddParameter(unsigned int, unsigned char const*)
+    "089bf930",  # CKontaktLoopParameter::CKontaktLoopParameter(CKontaktLoop*)
+    "089bf8e0",  # CKontaktLoopParameter::~CKontaktLoopParameter() (complete-object)
+    "089bf900",  # CKontaktLoopParameter::~CKontaktLoopParameter() (deleting)
+    "089bf7f0",  # CKontaktLoopParameter::AddParameter(unsigned int, unsigned char const*)
+    "089bc750",  # CKontaktEnvelopeParameter::CKontaktEnvelopeParameter(CKontaktEnvelope*)
+    "089bc700",  # CKontaktEnvelopeParameter::~CKontaktEnvelopeParameter() (complete-object)
+    "089bc720",  # CKontaktEnvelopeParameter::~CKontaktEnvelopeParameter() (deleting)
+    "089bc600",  # CKontaktEnvelopeParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c10c0",  # CKontaktPlaybackModeParameter::CKontaktPlaybackModeParameter(CKontaktPlaybackMode*)
+    "089c1070",  # CKontaktPlaybackModeParameter::~CKontaktPlaybackModeParameter() (complete-object)
+    "089c1090",  # CKontaktPlaybackModeParameter::~CKontaktPlaybackModeParameter() (deleting)
+    "089c0f60",  # CKontaktPlaybackModeParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c4100",  # CKontaktStartCriteriaParameter::CKontaktStartCriteriaParameter(CKontaktStartCriteria*)
+    "089c40b0",  # CKontaktStartCriteriaParameter::~CKontaktStartCriteriaParameter() (complete-object)
+    "089c40d0",  # CKontaktStartCriteriaParameter::~CKontaktStartCriteriaParameter() (deleting)
+    "089c3fd0",  # CKontaktStartCriteriaParameter::AddParameter(unsigned int, unsigned char const*)
+    "089c3450",  # CKontaktScriptParameter::CKontaktScriptParameter(CKontaktScript*)
+    "089c3400",  # CKontaktScriptParameter::~CKontaktScriptParameter() (complete-object)
+    "089c3420",  # CKontaktScriptParameter::~CKontaktScriptParameter() (deleting)
+    "089c3330",  # CKontaktScriptParameter::AddDynamicParameter(unsigned int, char const*, unsigned char const*)
+    "089bda60",  # CKontaktGroup::SetOutputRouting(unsigned int, unsigned int)
+    "089c32b0",  # CKontaktScript::SetDescription(char const*)
+    "089c32f0",  # CKontaktScript::SetPassword(char const*)
+    "089c3240",  # CKontaktScript::SetSourceText(char const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
