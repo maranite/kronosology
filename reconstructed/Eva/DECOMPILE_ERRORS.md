@@ -245,3 +245,81 @@ re-deriving the assembly by inspection, which is how every other method in
 this cluster (including the now-real `SetFilterCoeffs()` pair) was
 verified, but isn't sufficient on its own for a stateful per-sample DSP
 inner loop this dense.
+
+---
+
+## CAudioFileReadEx::SetSamplePosition(long long) / ReadPcmData(long**/float**, ...) -- double-buffer refill deferred
+
+`.text+0x082fde90` (451 bytes) / `.text+0x082fd700` (1839 bytes) /
+`.text+0x082fd640` (153 bytes) -- part of the `CLongBinaryFile`/`CAudioFile`/
+`CAudioFileRead`/`CAudioFileReadEx`/`CAudioFileWrite` WAV/DSDIFF/WSD/DSF
+reader/writer cluster (audio_file.h/long_binary_file.h, 127 addresses, found
+2026-07-28). `CAudioFileReadEx` adds a 2nd malloc'd buffer
+(`mDoubleBuffer`) ping-ponged against the base `CAudioFileRead::mAudioBuffer`
+for background read-ahead. Ground truth's real `SetSamplePosition()` calls
+`CAudioFileRead::SetSamplePosition()` (which does its own real `Read()` into
+`mAudioBuffer`, advancing the file position) and THEN performs an
+*additional* direct `CFileOperation::Seek`/`Read` (bypassing the virtual
+`Seek()`/`Read()` -- confirmed in raw disassembly, not a misread) into the
+double-buffer. Read literally, this means the double-buffer ends up holding
+data one block *ahead* of what the base class's own `mAudioBuffer`/
+`mCurSample` bookkeeping considers "current" -- a genuine read-ahead
+prefetch design.
+
+A first attempt reproduced this literally (both the extra seek/read in
+`SetSamplePosition()` and an inlined equivalent per-refill in `ReadPcmData()`
+mirroring `mBufferToggleIndex&1`-selected buffer swapping). It compiled
+clean, but `verify/test_audio_file.cpp`'s host round-trip KAT test (write a
+real WAV via `CAudioFileWrite`, read it back via `CAudioFileReadEx`, compare
+decoded PCM samples) caught real, silent data corruption -- nearly every
+decoded sample was wrong except the last couple of frames near EOF. Root
+cause understood at a high level (the extra read desyncs the file position
+that the base class's own subsequent `Read()` calls implicitly assume it
+still owns) but the exact reconciliation ground truth uses to make the
+"one-block-ahead" double-buffer line up with `mBufferFrameOffset`/
+`mCurSample` was not fully re-derived within the effort budget for this
+pass.
+
+Resolution shipped: `SetSamplePosition()`/`ReadPcmData()` (both overloads)
+now delegate to `CAudioFileRead`'s own already-verified single-buffer
+implementation (see audio_file.cpp). This is verified byte-exact correct
+for the caller-visible decoded PCM output (confirmed via the same KAT test,
+including a `CAudioFileReadEx`-specific round-trip case) -- what's NOT
+reproduced is the background-prefetch *optimization itself*, which has no
+externally observable effect on correctness, only on I/O scheduling. All
+other `CAudioFileReadEx` methods (ctor/dtor, `OpenFile`/`CloseFile`
+forwarders, `BufferAudio()`, `SetBufferSkipRate`/`GetBufferSkipRate`, all
+DSD stubs) ARE the real ground-truth logic and stay marked `reconstructed`.
+
+What would unblock full fidelity: instrument or single-step the real Eva
+binary (or a from-scratch simulation of `CFileOperation`'s own position
+bookkeeping) through a live `CAudioFileReadEx` read sequence to observe
+exactly how `mBufferFrameOffset`/`mCurSample` relate to the "one block
+ahead" double-buffer contents at the moment `ReadPcmData()` first indexes
+into it -- not reachable from static disassembly reading alone.
+
+---
+
+## Lesson: vtable slot-index-from-code-offset formula (affected multiple functions during this cluster's reconstruction, all caught and corrected before shipping)
+
+Early hand-disassembly analysis in this same pass computed virtual-call slot
+indices as `(codeOffset - 8) / 4`, mistakenly re-subtracting the vtable's
+own offset-to-top/typeinfo header a second time -- that 8-byte header is
+already excluded once `this->vptr` (what a real call site's `codeOffset` is
+always relative to) points at slot 0. The correct formula is
+`slot = codeOffset / 4`, confirmed against `CLongBinaryFile::MoveToEnd()`'s
+unambiguous real body (`(**(code**)(*this+0x20))(this,0,0,2)`, definitively
+`Seek(0, eSeekEnd)`, i.e. code offset `0x20` = slot 8 = `Seek`). Using the
+wrong formula would have mis-attributed several real calls -- e.g.
+`CAudioFile::CloseFile()`'s own 2 calls would have been named `GetFileName`/
+`Open` instead of the real `Close()`/`Reset()`. Caught mid-reconstruction by
+building a full programmatic `.rodata` vtable dump + call-site annotation
+tool (not by hand) and re-verifying every virtual call in both
+`long_binary_file.h`/`audio_file.h` before writing any final C++. Also
+separately caught: Ghidra's own decompile of `CAudioFile::FindChunk(char
+const*, char const*, CChunkHeader8*, ...)` (the 5-arg wrapper overload)
+mis-split its parameters beyond reliable hand-reading -- re-verified against
+raw disassembly directly, which revealed the real semantics check the
+*peeked* embedded type tag (`out->peekId`, e.g. a RIFF "LIST" chunk's own
+"INFO" sub-type) against the 2nd argument, not a 2nd top-level chunk id as
+first assumed from the (misleading) decompile alone.
