@@ -211,6 +211,19 @@ public:
 	/* .text+0x0804cf80, 8 bytes. */
 	long Tell() const volatile { return mPosition; }
 
+	/* Added 2026-07-28 for chunk_family.h's own CChunkBase family -- the real
+	 * consumer this file's own header comment anticipated ("only CFinal/
+	 * CImageStr/CSubBuff... might consume it"). CChunkBase::ReadHeader()/
+	 * WriteHeader()/ReadBinary()/WriteBinary()/Init() all read mUnknown10
+	 * (through the same this-adjusted CStream-view pointer used everywhere
+	 * else in that cluster) as an "I/O error occurred" flag after a Read()/
+	 * Write() call, and mLastOpLen as the byte count that operation actually
+	 * moved -- both confirmed via direct field-offset cross-check against this
+	 * class's own already-documented layout above (+0x0c/+0x10), not guessed.
+	 */
+	unsigned long GetLastOpLen() const volatile { return mLastOpLen; }
+	bool HasIoError() const volatile { return mUnknown10 != 0; }
+
 protected:
 	CStream() : mPosition(0), mLength(0), mLastOpLen(0), mUnknown10(0), mState(0),
 		mAccessMode(0) {}

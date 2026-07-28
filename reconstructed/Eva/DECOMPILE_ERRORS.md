@@ -323,3 +323,48 @@ raw disassembly directly, which revealed the real semantics check the
 *peeked* embedded type tag (`out->peekId`, e.g. a RIFF "LIST" chunk's own
 "INFO" sub-type) against the 2nd argument, not a 2nd top-level chunk id as
 first assumed from the (misleading) decompile alone.
+
+---
+
+## Lesson: CChunkBase/CChunk chunk-family batch — multiple errors caught and fixed by the KAT test itself, not by re-reading disassembly first (2026-07-28)
+
+`include/chunk_family.h` / `src/base/chunk_family.cpp` (89 methods: CChunkBase/
+CChunk/CChunkBlock/CChunkOrphan/CChunkInfoItem/CChunkInfoList). No unresolved
+blocker — final state compiles, links, and `verify/test_chunk_family.cpp`
+passes 0 failed — but three real bugs slipped past careful hand-transcription
+and were only caught once the round-trip KAT test actually ran:
+
+1. `LinkSubChunk()`'s bit-0x8 polarity: mis-transcribed on first pass as
+   "same polarity as Get()/Put()" by pattern-matching the instruction shape
+   (`test $0x8,...; je <target>`) instead of checking what the je-taken
+   branch actually does at each site. Re-reading the raw targets showed the
+   TWO call sites have opposite polarity (leaf-chunk methods require the bit
+   SET to proceed; `LinkSubChunk()`/`CChunkBlock`'s own ctor require it
+   CLEAR) — caught by careful re-reading, not by running code, but only
+   after the test file's `CChunkBlock` ctor kept asserting unexpectedly.
+2. `WriteHeader()` dropped the 4th individual `flags` byte-write entirely on
+   first transcription (wrote type/subtype/id then jumped straight to the
+   4-byte length write) AND its own success check only looked at the LAST
+   `Write()` call's byte count instead of accumulating across all 5 calls.
+   Both bugs together silently produced 7-byte headers that LOOKED
+   plausible in isolation. Caught immediately by the KAT test segfaulting
+   (`GetBasePos()` returning a value 1 byte short) — this specific class of
+   bug (right shape, wrong byte count) is exactly what a byte-exact
+   round-trip test catches and a code-read alone easily misses.
+3. `AddSubChunk()`/`GetNextSubChunk()` both omitted a real, disassembly-
+   confirmed `sub->Init()` call after linking a new sub-chunk (vtable offset
+   0x30) — without it `mBasePos` is never snapshotted and every later
+   Read/Write/Get/Put on the new sub-chunk clamps against a bogus 0
+   baseline. Silent in isolation (no crash on the Init()-less path itself);
+   caught only because the KAT test's own read-back logic dereferenced the
+   wrong baseline and produced an out-of-range/zero remaining-bytes result.
+
+General lesson (echoing the vtable-slot-formula entry above, from a
+different angle this time): for a class this size with heavy internal
+self-calls between its own methods, a real byte-level round-trip KAT test
+is not just a nice-to-have verification step — it is currently the ONLY
+reconstruction technique in this project's toolkit that reliably catches
+"plausible but subtly wrong" byte-count and call-omission errors of this
+specific shape. All three bugs above were found and fixed in a single
+debug/fix/rebuild cycle once the KAT test existed; none were visible from a
+second or third pass of pure code reading.
