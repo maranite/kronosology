@@ -2301,3 +2301,67 @@ by a full before/after reconstructed-name-set diff).
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+## CSTGSimple2Pole + CSTGVPMModelPatch + CSTGVPMTG92Osc value-getter families -- 32 methods (batch 9, 2026-07-28)
+
+Ninth batch in the STG value-getter family (see the `stg-value-getter-
+family` agent memory entry for the full running derivation notes).
+`CSTGSimple2Pole` (13/13), `CSTGVPMModelPatch` (10/10), and
+`CSTGVPMTG92Osc` (9/9) all reconstructed clean -- zero outliers across
+the whole batch, the third batch in a row with none excluded. All three
+picked from the eighth batch's own backlog via the standard checklist:
+word-boundary grep confirming each genuinely fresh, then an `nm`-derived
+weak-linkage + `ER23CSTGPatchMessageContext`-suffix filter to get the
+exact real candidate set before ever running the decoder.
+`CSTGPCMModelPatch` (7 raw pending) was checked and correctly rejected
+this batch -- both its real symbols are global ('T') linkage with extra
+arguments beyond `ctx` (`GetMultisampleIds`, `SetupComponentOffsets`),
+zero overlap with this family's convention.
+
+`CSTGSimple2Pole` and `CSTGVPMTG92Osc` are both the family's familiar
+simplest dialect -- every candidate a fixed-K field read directly off
+`this`, zero ctx-dynamic-index methods. `CSTGSimple2Pole`'s own
+`FreqAMS1IntensityAMSSource`/`FreqAMS1IntensityAMSIntensity` naming
+implies a second level of modulation nesting but resolves to a plain
+fixed offset once disassembled -- same lesson as `CSTGMS20EG`'s own
+naming quirk from batch 7, never infer structure from a method's name
+alone.
+
+`CSTGVPMModelPatch` contributes a genuinely new ctx-index shape:
+`GetInterMixerLink`/`GetOscMacroClass` load ctx's own `+0x4`
+dynamic-index field not as an array/record base offset (the family's
+usual `CtxIndex` convention) but as a variable SHIFT COUNT --
+`mov ecx,[ctx+0x4]; movzx eax,BYTE[this+K]; sar eax,cl; and eax,0x1` --
+selecting one single bit of an otherwise-fixed byte field per call.
+Since the byte is loaded via `movzx` (top 24 bits always zero), the
+`sar` is equivalent to a logical `shr`; modeled as a plain unsigned
+right-shift via a new `CtxShift(ctx, off)` helper that applies an
+explicit `& 0x1f` mask, matching x86's own 32-bit shift-count masking.
+`GetAlgorithm` is also a new-ish plain-field variant: an UNSIGNED byte
+(movzx, no shift/mask, not ctx-indexed) -- single-write only, same
+"unsigned non-bitfield byte" case first confirmed on
+`CSTGPolysixMG::GetMIDITempoSyncTimes` in batch 7, now seen a second
+time.
+
+Tooling: hit and fixed one fresh instance of the established
+parenthesis-swallow `DEF_RE` gotcha in `oa_stg_vpm_model_patch.h`'s
+first-draft header comment -- "the VPM (FM/ring-mod/waveshaper) engine's"
+had the bare word `VPM` immediately before a space-then-`(`, which
+matched `DEF_RE`'s trigger and swallowed the real `CtxIndex` function
+definition into a bogus match. Caught via the standard exact-name-set
+diff before ever attempting to build; fixed by removing every
+bare-word-then-paren instance in that header's prose in favor of
+em-dash-delimited clauses, the established convention.
+
+`make verify`: exit 0, 0 FAIL lines across the whole suite, all 3 new
+KATs passing. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko`
+produced (493116 bytes), zero warnings or errors traceable to the 3 new
+files. `DECOMPILE_ERRORS.md` stays empty -- no compile/link blocker
+hit. `manifest/gen_oa_manifest.py` regenerated, OA.ko manifest
+2306 -> 2338/21,689 (10.780%), delta exactly +32 (0 regressions,
+verified by a full before/after reconstructed-name-set diff).
+
+Real-HW test that would help: none identified, same rationale as every
+prior entry in this family -- pure parameter-reflection plumbing with no
+direct front-panel/audio observable.

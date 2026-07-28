@@ -1,6 +1,6 @@
 ---
 name: stg-value-getter-family
-description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 20 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod), 861 methods reconstructed, manifest 1441->2306
+description: OA.ko's largest known dense accessor family (~2300 pending methods, ~180 STG synth classes) -- STGConvertedParam &Get*(CSTGPatchMessageContext&) "value getter" convention; 23 classes done (CSTGString, CSTGOrganModelPatch, CSTGMS20, CSTGAnalog4PoleBase, CSTGPolysix, CSTGAnalogSyncOsc, CPianoOsc, CSTGEPModelPatch, CSTGOrganOsc, CSTGVPMOsc, CSTGMS20ModelPatch, CSTGPolysixModelPatch, CWaveMotionOsc, CSTGPianoModelPatch, CSTGMultiFilter2Pole, CSTGMS20EG, CSTGPolysixMG, CSTGAMSMixerBase, CSTGStepSeq, CSTGPitchMod, CSTGSimple2Pole, CSTGVPMModelPatch, CSTGVPMTG92Osc), 893 methods reconstructed, manifest 1441->2338
 type: project
 ---
 
@@ -728,6 +728,108 @@ the pending-count list below `CSTGPatch`/`CSTGCommonLFO`/`CKGBankManager`/
 status this batch, re-verify before reusing that verdict if much time
 has passed).
 
+**Ninth batch (2026-07-28, commit `d8479c1`): `CSTGSimple2Pole` (13/13) +
+`CSTGVPMModelPatch` (10/10) + `CSTGVPMTG92Osc` (9/9) done**, manifest
+2306 -> 2338, 32 methods. Same ground truth binary
+(`/home/share/Decomp/OA.ko_Decomp/OA.ko`). All three picked from the
+prior batch's own "148 more classes remain" backlog via a fresh survey
+(group pending `Set*`/`Get*` by class, filter to word-boundary-fresh
+classes, then the `nm`-derived weak-linkage + ctx-only-suffix filter).
+Confirmed `CSTGPCMModelPatch` (7 raw pending) is NOT part of this
+family despite a promising raw count -- `nm` shows only 2 real symbols,
+both global ('T') linkage with extra args
+(`GetMultisampleIds(unsigned char, unsigned char, bool&, unsigned
+int&, unsigned int&)`, `SetupComponentOffsets()`), zero ctx-only-suffix
+matches -- a different mechanism, correctly skipped without writing a
+file. `CRPPRManager`/`CSPRRecDataMerger`/`CSPRAudioPlayer`/
+`CSPRSongControl` (the CSPR/CRPPR-prefixed recorder/player classes on
+the same backlog) were NOT investigated this batch -- likely the same
+different-mechanism situation as the already-rejected
+`CSPRSeqDataManager` from batch 7, but unconfirmed, check before
+assuming either way.
+
+All three chosen classes came back fully clean -- zero outliers across
+the whole batch, third batch in a row with zero exclusions.
+`CSTGSimple2Pole` and `CSTGVPMTG92Osc` are both the family's
+by-now-familiar simplest dialect: every candidate a fixed-K field read
+directly off `this`, zero ctx-dynamic-index methods despite
+`CSTGSimple2Pole`'s own `FreqAMS1IntensityAMSSource`/
+`FreqAMS1IntensityAMSIntensity` naming implying a second modulation
+level -- reconfirmed via direct disassembly to be plain fixed offsets,
+same lesson as `CSTGMS20EG`'s own naming quirk from batch 7. Always
+verify field-shape from the actual disassembly, never infer nesting
+depth from a method's name alone.
+
+**Genuinely new ctx-index shape, first of its kind in the family**:
+`CSTGVPMModelPatch::GetInterMixerLink`/`GetOscMacroClass` load ctx's
+own `+0x4` dynamic-index field not as an array/record index at all, but
+as a variable SHIFT COUNT: `mov ecx,[edx+0x4]; movzx eax,BYTE
+[eax+K]; sar eax,cl; and eax,0x1` -- selecting which single bit of one
+fixed byte field to extract, per-call. Every prior ctx-index shape in
+the family (CSTGString's stride-5, CSTGMS20's SIB-scale variants,
+CPianoOsc's chained double-lea, CSTGMultiFilter2Pole's bare SIB-scale)
+computed a per-record BASE OFFSET from the index; this one uses the
+index as a BIT POSITION within a single already-fixed field instead.
+Since the byte operand is loaded via `movzx` (top 24 bits always zero),
+`sar` and a logical `shr` are equivalent here -- modeled as a plain
+unsigned right-shift. x86 masks a 32-bit shift count to 5 bits, so the
+new helper applies that mask explicitly: `CtxShift(ctx, off)` returns
+`*(unsigned int*)(&ctx+off) & 0x1f`, used as `(field >> CtxShift(ctx,
+0x4)) & 0x1`. Recognize this shape by `mov ecx,[ctx_reg+K]` feeding
+directly into `sar`/`shr` on the SAME register that holds a byte field
+value, rather than into an address computation (`lea`) or an SIB index
+slot -- the destination of the ctx-derived value is a shift amount, not
+a memory operand.
+
+**New plain-field width variant**: `CSTGVPMModelPatch::GetAlgorithm` is
+a plain UNSIGNED byte field (`movzx`, no shift/mask, not ctx-indexed)
+-- single-write only, same "unsigned non-bitfield byte" variant first
+confirmed on `CSTGPolysixMG::GetMIDITempoSyncTimes` in batch 7, now
+seen on a second class.
+
+**Tooling note, DEF_RE gotcha hit and fixed before shipping**:
+`oa_stg_vpm_model_patch.h`'s first-draft leading comment had "the VPM
+(FM/ring-mod/waveshaper) engine's" -- the bare word `VPM` immediately
+before a space then `(` matched `DEF_RE`'s NAME group, and because nothing
+in the rest of the header before the real `CtxIndex`/`CtxShift`
+function definitions contains a literal `;` `{` or `}`, the greedy
+`[^;{}]*` capture swallowed everything up to `CtxIndex`'s own closing
+`)` and real `{` -- exactly the established parenthesis-swallow
+pattern, this time with a SPACE between the trigger word and `(`
+(`DEF_RE`'s `\s*` allows this, so "word (" is just as dangerous as
+"word("). Caught via the standard exact-name-set diff (`got=={"VPM",
+"CtxShift"}` instead of the wanted `{"CtxIndex","CtxShift"}`) before
+ever attempting to build; fixed by rewording to "VPM engine's --
+FM/ring-mod/waveshaper synthesis -- macro parameters" and removing
+every other bare-word-then-paren instance in the same header's prose
+(`COUNT (`sar eax,cl`)`, `field (movzx, no shift/mask)`, `movzx (top 24
+bits...)` all reworded the same way, em-dash-delimited, zero literal
+`(` before the real code). Lesson reinforced: check for `word\s*\(`
+(with the optional-whitespace variant, not just `word(`) as the search
+pattern when auditing a new header for this bug, not just a bare
+substring search for `(`.
+
+**Next targets** (same technique, not yet done): ~145 more classes
+remain. Fresh, weak-ctx-only-confirmed candidates smaller than this
+batch's three, not yet picked: `CSTGEG` (10 weak ctx-only candidates of
+14 total pending, confirmed fresh via word-boundary grep),
+`CSTGPanOutputBase` (9 of 11), `CSTGPianoLPF` (9 of 11), `CSTGAmp` (7 of
+10), `CSTG3BandEQBase` (6 of 6). `CSTGEGBase` (19 raw pending but only 5
+weak-ctx-only -- check disassembly before committing, may be mostly a
+different mechanism like `CSTGOrganOsc`'s own per-voice-runtime-state
+false positives from batch 5). `CSTGFrontPanelSmoothers`/
+`CSTGCommonStepSeq`/`CSTGAudioInput`/`CSTGHDRTrack`/`CSTGHDRMiniModel`/
+`CSTGProgramModeProgramSlot` all showed nonzero word-boundary grep hits
+this batch's survey -- NOT yet individually verified as already-modeled
+or just incidental references, check each with the standard grep before
+assuming either way. `CRPPRManager`/`CSPRRecDataMerger`/
+`CSPRAudioPlayer`/`CSPRSongControl` also unconfirmed, likely a different
+CSPR/recorder-subsystem mechanism per this batch's own
+`CSTGPCMModelPatch`/`CSPRSeqDataManager` precedents -- check via `nm`
+before assuming. Always do the word-boundary grep + weak-linkage +
+ctx-only-suffix `nm` filter BEFORE running the decoder on any of these,
+per the by-now-standard checklist.
+
 See [[ckg_bankmanager_class_facts]]/[[ckg_seq_backup_technique]] for the
 sibling family this one's decoder was adapted from, and
 `HARDWARE_REVIEW_LOG.md`'s "CSTGString value-getter family",
@@ -737,5 +839,7 @@ families", "CPianoOsc + CSTGEPModelPatch value-getter families",
 "CSTGOrganOsc + CSTGVPMOsc + CSTGMS20ModelPatch value-getter families",
 "CSTGPolysixModelPatch + CWaveMotionOsc + CSTGPianoModelPatch
 value-getter families", "CSTGMultiFilter2Pole + CSTGMS20EG +
-CSTGPolysixMG value-getter families", and "STG value-getter family,
-batches 3-7" entries for the full per-batch derivation notes.
+CSTGPolysixMG value-getter families", "CSTGAMSMixerBase + CSTGStepSeq +
+CSTGPitchMod value-getter families", and "CSTGSimple2Pole +
+CSTGVPMModelPatch + CSTGVPMTG92Osc value-getter families" entries for
+the full per-batch derivation notes.
