@@ -2040,6 +2040,17 @@ RECONSTRUCTED = {
     "08dfd640",  # CSongControlConverter::Int0000toExt0000(CConvertStorageParam const&) const
     "08e03200",  # CSongConverter::Ext0003toInt0003(CConvertStorageParam const&) const
     "08df42f0",  # CProgCombiSongCommonConverter::ConvertToCurrent(CProgCombiSongCommon*, CProgCombiSongCommon0000 const*)
+
+    # 2026-07-28 second follow-up batch: resolved all 3 of the prior pass's
+    # documented deferrals (storage_format_converters.h's own top comment has
+    # the full derivation -- CDrumKitConverter/CWaveSeqConverter's deferrals
+    # turned out to share one dependency, now traced; CProgAncestorConverter
+    # was a scope choice, not a blocker, and is now in scope).
+    "08dfc620",  # ConvertPartTo0003(CInstPart*, CInstPart0000 const*) -- local/static helper
+    "08dfce50",  # CDrumKitConverter::Ext0002toInt0003(CConvertStorageParam const&) const
+    "08dfcfe0",  # CWaveSeqConverter::Ext0000toInt0001(CConvertStorageParam const&) const
+    "08df4360",  # CProgAncestorConverter::ConvertToCurrent(CProgAncestor*, CProgAncestor0000 const*)
+    "08df44c0",  # CProgAncestorConverter::ConvertToCurrent(CProgAncestor*, CProgAncestor0003OASYS const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

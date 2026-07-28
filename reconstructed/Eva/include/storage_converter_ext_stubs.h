@@ -136,6 +136,22 @@ public:
 	static unsigned long GetItemCode(EType, unsigned char *, unsigned long) { return 0; }
 };
 
+// ---- EProgParamBankID / CProgDrumTrackData: called by CProgAncestorConverter::
+// ConvertToCurrent (storage_format_converters.cpp), 2026-07-28 follow-up
+// batch. `EProgParamBankID` is ALSO independently declared, file-scoped, in
+// stg_unsol_msg_handler.cpp (same enumerator-less "reserved=0" shape, same
+// real dependency discovered independently there) -- same "only one full
+// definition may survive if these TUs are ever merged" caveat already
+// flagged on CCombi above; the two never appear in the same translation unit
+// today. Ground truth's own call passes the literal immediate 0x10 for the
+// bank argument; no real enumerator name recovered for it.
+enum EProgParamBankID { eProgParamBankIDReserved = 0 };
+
+class CProgDrumTrackData {
+public:
+	void Initialize(EProgParamBankID, unsigned char) {}
+};
+
 // ---- CMemoryAccessor: a big-endian raw-memory-write utility used by the
 // same CGEConverter/CGETemplateConverter Int0000toExt0000 pair above to
 // append the CFileKge item code after the copied payload. Real body (a

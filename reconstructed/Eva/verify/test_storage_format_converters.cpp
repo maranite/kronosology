@@ -594,6 +594,180 @@ void TestExtIntPayload()
 		check("ProgCombiSongCommon::ConvertToCurrent copies 0x50c bytes",
 		      std::memcmp(dst, src, N) == 0);
 	}
+
+	// -- CDrumKitConverter::Ext0002toInt0003: MIGRATE, RESOLVED 2026-07-28
+	// follow-up (was deferred pending the ConvertPartTo0003 helper). Full-size
+	// buffers: SRC_N (0x18 header + 128*0xac keys) == 0x5618, which is the
+	// EXACT magic ValidateExt0002 checks for; DST_N (0x18 + 128*0x12c) ==
+	// 0x9618, the exact magic ValidateExt0003 checks for -- strong independent
+	// corroboration that the header/stride derivation is correct (these sizes
+	// were derived purely from the loop bounds/strides seen in the
+	// disassembly, not from the already-known ValidateExt magic constants).
+	{
+		const unsigned oldStride = 0xac, newStride = 0x12c;
+		const unsigned oldPartOff[8] = { 0x18, 0x2a, 0x3c, 0x4e, 0x60, 0x72, 0x84, 0x96 };
+		const unsigned newPartOff[8] = { 0x18, 0x3a, 0x5c, 0x7e, 0xa0, 0xc2, 0xe4, 0x106 };
+		const unsigned SRC_N = 0x18 + 128u * oldStride;
+		const unsigned DST_N = 0x18 + 128u * newStride;
+		check("DrumKit::Ext0002toInt0003 derived SRC_N matches ValidateExt0002 magic 0x5618",
+		      SRC_N == 0x5618);
+		check("DrumKit::Ext0002toInt0003 derived DST_N matches ValidateExt0003 magic 0x9618",
+		      DST_N == 0x9618);
+
+		unsigned char *src = new unsigned char[SRC_N];
+		unsigned char *dst = new unsigned char[DST_N];
+		FillPattern(src, SRC_N, 0x11);
+		std::memset(dst, 0xCC, DST_N);
+
+		CConvertStorageParam p = MakeParam();
+		p.m_internalBuf = dst; p.m_externalBuf = src;
+		CDrumKitConverter().Ext0002toInt0003(p);
+
+		check("DrumKit::Ext0002toInt0003 copies the 0x18-byte header",
+		      std::memcmp(dst, src, 0x18) == 0);
+
+		for (unsigned key = 0; key < 128; key += 127) { // spot-check first and last key
+			// NOTE: oldPartOff[0]/newPartOff[0] == 0x18 already embeds the
+			// header-skip baseline (ground truth's own literal `[edi+ebx+0x18]`
+			// addressing) -- do NOT add 0x18 again here.
+			const unsigned char *srcKey = src + key * oldStride;
+			unsigned char *dstKey = dst + key * newStride;
+
+			for (int part = 0; part < 8; part += 7) { // spot-check first and last part
+				const unsigned char *sp = srcKey + oldPartOff[part];
+				unsigned char *dp = dstKey + newPartOff[part];
+
+				check("DrumKit::Ext0002toInt0003 InstPart dst+0x00 1-bit merge",
+				      dp[0x00] == (static_cast<unsigned char>(0xCC) | (sp[0x00] & 0x01)));
+				check("DrumKit::Ext0002toInt0003 InstPart inserts 'KORG'",
+				      dp[0x01] == 'K' && dp[0x02] == 'O' && dp[0x03] == 'R' && dp[0x04] == 'G');
+				check("DrumKit::Ext0002toInt0003 InstPart zeroes +0x05..+0x0c",
+				      dp[0x05] == 0 && dp[0x08] == 0 && dp[0x09] == 0 && dp[0x0c] == 0);
+				check("DrumKit::Ext0002toInt0003 InstPart inserts 'MS'+0",
+				      dp[0x0d] == 'M' && dp[0x0e] == 'S' && dp[0x0f] == 0);
+				check("DrumKit::Ext0002toInt0003 InstPart dst+0x10 <- src+0x01",
+				      dp[0x10] == sp[0x01]);
+				check("DrumKit::Ext0002toInt0003 InstPart dst+0x12..0x13 <- src+0x02..0x03",
+				      dp[0x12] == sp[0x02] && dp[0x13] == sp[0x03]);
+				check("DrumKit::Ext0002toInt0003 InstPart dst+0x14 <- src+0x04",
+				      dp[0x14] == sp[0x04]);
+				{
+					unsigned char tmp = (static_cast<unsigned char>(0xCC) & 0xf0) | (sp[0x05] & 0x0f);
+					unsigned char expect = (tmp & 0x7f) | (sp[0x05] & 0x80);
+					check("DrumKit::Ext0002toInt0003 InstPart dst+0x15 bitfield merge",
+					      dp[0x15] == expect);
+				}
+				check("DrumKit::Ext0002toInt0003 InstPart dst+0x16..0x20 <- src+0x06..0x10",
+				      std::memcmp(dp + 0x16, sp + 0x06, 0x0b) == 0);
+			}
+
+			check("DrumKit::Ext0002toInt0003 trailing 0x18-byte block copy",
+			      std::memcmp(dstKey + 0x120 + 8, srcKey + 0xa0 + 8, 0x18) == 0);
+		}
+
+		delete[] src;
+		delete[] dst;
+	}
+
+	// -- CWaveSeqConverter::Ext0000toInt0001: MIGRATE, RESOLVED 2026-07-28
+	// follow-up (same "KORG"/"MS" constants as ConvertPartTo0003 above).
+	// SRC_N (0x28 + 64*0x12) == 0x4a8 (ValidateExt0000's own magic), DST_N
+	// (0x28 + 64*0x22) == 0x8a8 (ValidateExt0001's own magic) -- same
+	// independent corroboration as the DrumKit case above.
+	{
+		const unsigned oldStride = 0x12, newStride = 0x22;
+		const unsigned SRC_N = 0x28 + 64u * oldStride;
+		const unsigned DST_N = 0x28 + 64u * newStride;
+		check("WaveSeq::Ext0000toInt0001 derived SRC_N matches ValidateExt0000 magic 0x4a8",
+		      SRC_N == 0x4a8);
+		check("WaveSeq::Ext0000toInt0001 derived DST_N matches ValidateExt0001 magic 0x8a8",
+		      DST_N == 0x8a8);
+
+		unsigned char *src = new unsigned char[SRC_N];
+		unsigned char *dst = new unsigned char[DST_N];
+		FillPattern(src, SRC_N, 0x21);
+		std::memset(dst, 0xCC, DST_N);
+
+		CConvertStorageParam p = MakeParam();
+		p.m_internalBuf = dst; p.m_externalBuf = src;
+		CWaveSeqConverter().Ext0000toInt0001(p);
+
+		check("WaveSeq::Ext0000toInt0001 copies the 0x28-byte header",
+		      std::memcmp(dst, src, 0x28) == 0);
+
+		for (unsigned step = 0; step < 64; step += 63) { // spot-check first and last step
+			const unsigned char *s = src + 0x28 + step * oldStride;
+			unsigned char *d = dst + 0x28 + step * newStride;
+
+			check("WaveSeq::Ext0000toInt0001 step dst+0x00 2-bit merge",
+			      d[0x00] == (static_cast<unsigned char>(0xCC) | (s[0x00] & 0x03)));
+			check("WaveSeq::Ext0000toInt0001 step inserts 'KORG'/'MS'",
+			      d[0x01] == 'K' && d[0x04] == 'G' && d[0x0d] == 'M' && d[0x0e] == 'S' && d[0x0f] == 0);
+			check("WaveSeq::Ext0000toInt0001 step dst+0x10 <- src+0x01",
+			      d[0x10] == s[0x01]);
+			check("WaveSeq::Ext0000toInt0001 step dst+0x12..0x13 <- src+0x02..0x03",
+			      d[0x12] == s[0x02] && d[0x13] == s[0x03]);
+			check("WaveSeq::Ext0000toInt0001 step dst+0x14 <- src+0x04",
+			      d[0x14] == s[0x04]);
+			{
+				unsigned char tmp = (static_cast<unsigned char>(0xCC) & 0xf0) | (s[0x05] & 0x0f);
+				unsigned char expect = (tmp & 0x7f) | (s[0x05] & 0x80);
+				check("WaveSeq::Ext0000toInt0001 step dst+0x15 bitfield merge", d[0x15] == expect);
+			}
+			check("WaveSeq::Ext0000toInt0001 step dst+0x16..0x17 <- src+0x06..0x07",
+			      d[0x16] == s[0x06] && d[0x17] == s[0x07]);
+			check("WaveSeq::Ext0000toInt0001 step dst+0x18..0x1b <- src+0x08..0x0b",
+			      std::memcmp(d + 0x18, s + 0x08, 4) == 0);
+			check("WaveSeq::Ext0000toInt0001 step dst+0x1d..0x21 <- src+0x0d..0x11",
+			      std::memcmp(d + 0x1d, s + 0x0d, 5) == 0);
+		}
+
+		delete[] src;
+		delete[] dst;
+	}
+
+	// -- CProgAncestorConverter::ConvertToCurrent (both overloads): MIGRATE,
+	// RESOLVED 2026-07-28 follow-up (was deliberately out of scope, not
+	// blocked). Common-block delegation + 3 fixed-size +0xc-shifted memcpy
+	// blocks; CProgDrumTrackData::Initialize() (unmodeled no-op stub) is not
+	// independently checkable.
+	{
+		const unsigned N = 0xa80;
+		unsigned char *src = new unsigned char[N];
+		unsigned char *dst = new unsigned char[N];
+		FillPattern(src, N, 0x77);
+		std::memset(dst, 0xCC, N);
+
+		CProgAncestorConverter::ConvertToCurrent(
+			reinterpret_cast<CProgAncestor *>(dst),
+			reinterpret_cast<const CProgAncestor0000 *>(src));
+
+		check("ProgAncestor::ConvertToCurrent(0000) copies the 0x50c common block",
+		      std::memcmp(dst, src, 0x50c) == 0);
+		check("ProgAncestor::ConvertToCurrent(0000) migrates block1 (0x50c->0x518, 0x1fe)",
+		      std::memcmp(dst + 0x518, src + 0x50c, 0x1fe) == 0);
+		check("ProgAncestor::ConvertToCurrent(0000) migrates block2 (0x70a->0x716, 0x2e8)",
+		      std::memcmp(dst + 0x716, src + 0x70a, 0x2e8) == 0);
+		check("ProgAncestor::ConvertToCurrent(0000) migrates block3 (0x9f2->0x9fe, 0x82)",
+		      std::memcmp(dst + 0x9fe, src + 0x9f2, 0x82) == 0);
+
+		std::memset(dst, 0xCC, N);
+		CProgAncestorConverter::ConvertToCurrent(
+			reinterpret_cast<CProgAncestor *>(dst),
+			reinterpret_cast<const CProgAncestor0003OASYS *>(src));
+
+		check("ProgAncestor::ConvertToCurrent(0003OASYS) copies the 0x50c common block",
+		      std::memcmp(dst, src, 0x50c) == 0);
+		check("ProgAncestor::ConvertToCurrent(0003OASYS) migrates block1 (0x50c->0x518, 0x1fe)",
+		      std::memcmp(dst + 0x518, src + 0x50c, 0x1fe) == 0);
+		check("ProgAncestor::ConvertToCurrent(0003OASYS) migrates block2 (0x70a->0x716, 0x2e8)",
+		      std::memcmp(dst + 0x716, src + 0x70a, 0x2e8) == 0);
+		check("ProgAncestor::ConvertToCurrent(0003OASYS) migrates block3 (0x9f2->0x9fe, 0x82)",
+		      std::memcmp(dst + 0x9fe, src + 0x9f2, 0x82) == 0);
+
+		delete[] src;
+		delete[] dst;
+	}
 }
 
 // ---- CProgConverter::Close() forwarding + dtors ----

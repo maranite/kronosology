@@ -107,24 +107,27 @@
  * ValidateExtXXXX-only work, is the first code to use both fields together in
  * one call).
  *
- * NOT reconstructed this pass (real, precisely-scoped deferrals):
- *   - CDrumKitConverter::Ext0002toInt0003 (.text+0x08dfce50, 292B): a genuine
- *     128-iteration loop over 8 CInstPart sub-structures per iteration,
- *     converted via a not-yet-reconstructed static helper `ConvertPartTo0003`
- *     (.text+0x08dfc620, local/non-exported symbol) -- needs that helper
- *     reconstructed first.
- *   - CWaveSeqConverter::Ext0000toInt0001 (.text+0x08dfcfe0, 355B): a real
- *     field migration whose tail references 4 unidentified static default-
- *     value words/dwords at .rodata+0x8fd3ff4..0x8fd4002 -- needs those
- *     identified first (likely a default-oscillator preset table).
- *   - CProgAncestorConverter::ConvertToCurrent (2 overloads, .text+0x08df4360/
- *     0x08df44c0, 345B each): real, tractable (3 fixed-size memcpy blocks with
- *     a consistent +0xc-byte-per-field forward shift between old/new layout,
- *     same shape as CRegionConverter's MIGRATE bodies below, plus a
- *     CProgDrumTrackData::Initialize(EProgParamBankID, unsigned char)
- *     tailcall) but kept out of this batch to bound scope around the
- *     CConvertStorageParam-based Ext/Int family specifically.
- *   - CSongConverter::AdvanceDestination(long) (.text+0x08e00c50, 23B): a real,
+ * 2026-07-28 second follow-up batch (deferral resolution pass): all 3 of the
+ * "needs an unidentified dependency" deferrals below turned out to be the
+ * SAME dependency, resolved together:
+ *   - CDrumKitConverter::Ext0002toInt0003's helper `ConvertPartTo0003`
+ *     (.text+0x08dfc620, local symbol, 218B) is now fully traced -- it is a
+ *     small, self-contained field migrator, not a large opaque routine.
+ *   - CWaveSeqConverter::Ext0000toInt0001's "4 unidentified static
+ *     default-value table entries" turned out to be the EXACT SAME 4
+ *     `.rodata` constants ConvertPartTo0003 reads (.rodata+0x8fd3ff4 = ASCII
+ *     "KORG", +0x8fd3ff8 = 0, +0x8fd3ffc = 0, +0x8fd4000 = ASCII "MS",
+ *     +0x8fd4002 = 0) -- confirmed identical addresses, identical bytes,
+ *     used the same way (a 16-byte inserted default "KORG"/zero-pad/"MS"/
+ *     zero field with one real trailing source byte folded in) in both
+ *     functions. Both are now reconstructed below; see each method's own
+ *     comment for the full per-field derivation.
+ *   - CProgAncestorConverter::ConvertToCurrent (2 overloads) is also now
+ *     reconstructed below (it was always tractable, just previously kept out
+ *     of scope -- see its own class comment for the 3-memcpy-plus-Initialize
+ *     shape).
+ *
+ * CSongConverter::AdvanceDestination(long) (.text+0x08e00c50, 23B): a real,
  *     small (this[0]-=n; this[4]+=n; return this[0]>=0) cursor-advance helper,
  *     but operates on CSongConverter's OWN instance state (2 fields never
  *     otherwise used/needed by anything reconstructed in this project) rather
@@ -209,8 +212,12 @@ public:
 	void Int0003toExt0003(const CConvertStorageParam &param) const;
 	// .text+0x08dfc770, 47B. IDENTITY: memcpy(internal,external,size) then CDrumKit::ClipParams().
 	void Ext0003toInt0003(const CConvertStorageParam &param) const;
-	// Ext0002toInt0003 (.text+0x08dfce50, 292B) -- DEFERRED, needs the
-	// not-yet-reconstructed static ConvertPartTo0003 helper (see header comment).
+	// .text+0x08dfce50, 292B. MIGRATE, RESOLVED 2026-07-28 follow-up (see
+	// header comment): 24-byte header copy, then 128 "keys" each converting
+	// 8 CInstPart sub-structures via the local `ConvertPartTo0003` helper
+	// (storage_format_converters.cpp) plus a 24-byte trailing block copy,
+	// then CDrumKit::ClipParams().
+	void Ext0002toInt0003(const CConvertStorageParam &param) const;
 };
 
 class CWaveSeqConverter : public CStorageConverterBase {
@@ -221,8 +228,12 @@ public:
 	void Int0001toExt0001(const CConvertStorageParam &param) const;
 	// .text+0x08dfcfb0, 47B. IDENTITY: memcpy(internal,external,size) then CWaveSeq::ClipParams().
 	void Ext0001toInt0001(const CConvertStorageParam &param) const;
-	// Ext0000toInt0001 (.text+0x08dfcfe0, 355B) -- DEFERRED, needs 4 unidentified
-	// static default-value table entries identified first (see header comment).
+	// .text+0x08dfcfe0, 355B. MIGRATE, RESOLVED 2026-07-28 follow-up (see
+	// header comment): 40-byte header copy, then 64 "steps" each migrating
+	// one step record (old stride 0x12, new stride 0x22) with the same
+	// "KORG"/"MS" default-name-field insertion shape as CDrumKitConverter's
+	// ConvertPartTo0003, then CWaveSeq::ClipParams().
+	void Ext0000toInt0001(const CConvertStorageParam &param) const;
 };
 
 class CGlobalConverter : public CStorageConverterBase {
@@ -380,6 +391,42 @@ public:
 	// Initialize() on the sub-object placed immediately after it (dst+0x50c).
 	static void ConvertToCurrent(CProgCombiSongCommon *dst,
 	                              const CProgCombiSongCommon0000 *src);
+};
+
+// -- CProgAncestorConverter -- RESOLVED 2026-07-28 follow-up batch (was
+// deliberately kept out of the prior pass's scope, not blocked; see this
+// header's own top comment). Two overloads for two legacy "ancestor" program
+// formats (CProgAncestor0000 and CProgAncestor0003OASYS) that share
+// byte-identical layout at every offset either overload touches -- confirmed
+// via both bodies' own disassembly being structurally identical except for
+// the mangled source-parameter type.
+class CProgAncestor;
+class CProgAncestor0000;
+class CProgAncestor0003OASYS;
+
+class CProgAncestorConverter {
+public:
+	// .text+0x08df4360, 345B. MIGRATE: calls CProgCombiSongCommonConverter::
+	// ConvertToCurrent(dst, src) first (both ancestor formats embed a
+	// CProgCombiSongCommon/CProgCombiSongCommon0000 block at their own offset
+	// 0 -- confirmed via the call taking dst/src unmodified), then 3
+	// fixed-size memcpy blocks with a consistent +0xc-byte forward shift
+	// between old (src) and new (dst) offsets: 0x50c->0x518 (size 0x1fe),
+	// 0x70a->0x716 (size 0x2e8), 0x9f2->0x9fe (size 0x82) -- ground truth
+	// inlines each as a hand-unrolled rep-movsw/rep-movsd-plus-alignment-
+	// fixup sequence, reproduced here as plain std::memcpy, behavior-
+	// identical. Finishes with CProgDrumTrackData::Initialize(bank=0x10, 0)
+	// on the sub-object placed right after the last copied block (dst+0xa80)
+	// -- the 0xc-byte gap inserted at each shift point is filled by
+	// Initialize() rather than copied, same "insert zero'd/initialized
+	// fields" MIGRATE shape as CRegionConverter::Ext0000toInt0001
+	// (storage_format_converters.cpp).
+	static void ConvertToCurrent(CProgAncestor *dst, const CProgAncestor0000 *src);
+	// .text+0x08df44c0, 345B. Byte-identical shape/offsets to the overload
+	// above (confirmed via fresh disassembly, not assumed) -- only the source
+	// type differs; even the CProgCombiSongCommonConverter::ConvertToCurrent
+	// call target is the literal same address in both overloads.
+	static void ConvertToCurrent(CProgAncestor *dst, const CProgAncestor0003OASYS *src);
 };
 
 #endif // STORAGE_FORMAT_CONVERTERS_H
