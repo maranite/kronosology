@@ -2550,6 +2550,71 @@ RECONSTRUCTED = {
     "08e191e0",  # CPatternDataHolder::GetFreeEventTop()
     "08e191f0",  # CPatternDataHolder::GetPatternTop()
     "08e19200",  # CPatternDataHolder::GetPatternEventTop()
+
+    # --- CObject/CAbstList/CUsrList/CList/CStaticList/CListIter foundational
+    # circular doubly-linked-list container family (2026-07-28) -- see list.h.
+    "08bd1b90",  # CObject::~CObject() D1
+    "08bd1ba0",  # CObject::~CObject() D0
+    "08bd04e0",  # CAbstList::~CAbstList() D1
+    "08bd0500",  # CAbstList::~CAbstList() D0
+    "08bd0890",  # CAbstList::makenode(CObject*)
+    "08bd08c0",  # CAbstList::deletenode(SListNode*)
+    "08bd08f0",  # CAbstList::deleteallnode()
+    "08bd0980",  # CAbstList::findnode(CObject*) const
+    "08bd09b0",  # CAbstList::findnode(long) const
+    "08bd0ab0",  # CAbstList::remove(SListNode*)
+    "08bd0ae0",  # CAbstList::CAbstList()
+    "08bd0b00",  # CAbstList::append(CObject*)
+    "08bd0b60",  # CAbstList::prepend(CObject*)
+    "08bd0bc0",  # CAbstList::insertafter(CObject*, CObject*)
+    "08bd0c30",  # CAbstList::insertat(CObject*, long)
+    "08bd0e30",  # CAbstList::remove(CObject*)
+    "08bd0eb0",  # CAbstList::removefirst()
+    "08bd0f00",  # CAbstList::removelast()
+    "08bd0f60",  # CAbstList::dispose(CObject*)
+    "08bd0fe0",  # CAbstList::prev(CObject*)
+    "08bd1020",  # CAbstList::next(CObject*)
+    "08bd1060",  # CAbstList::bringfront(CObject*)
+    "08bd10f0",  # CAbstList::sendback(CObject*)
+    "08bd1170",  # CAbstList::moveup(CObject*)
+    "08bd11d0",  # CAbstList::movedown(CObject*)
+    "08bd1230",  # CAbstList::disposeall()
+    "08bd12a0",  # CAbstList::removeallnode()
+    "08bd1330",  # CAbstList::getnumitems()
+    "08bd1340",  # CAbstList::firstitem()
+    "08bd1360",  # CAbstList::lastitem()
+    "08bd1380",  # CAbstList::nthitem(long)
+    "08bd1480",  # CAbstList::findindex(CObject*)
+    "08bd14c0",  # CAbstList::includes(CObject*)
+    "08bd0440",  # CUsrList::deletenode_sub(SListNode*)
+    "08bd0480",  # CUsrList::makenode_sub(CObject*)
+    "08bd0530",  # CUsrList::~CUsrList() D1
+    "08bd06d0",  # CUsrList::~CUsrList() D0
+    "08bd1520",  # CUsrList::CUsrList()
+    "08bd0460",  # CList::deletenode_sub(SListNode*)
+    "08bd04b0",  # CList::makenode_sub(CObject*)
+    "08bd05b0",  # CList::~CList() D1
+    "08bd0760",  # CList::~CList() D0
+    "08bd1500",  # CList::CList()
+    "08bd03d0",  # CStaticList::makenode_sub(CObject*)
+    "08bd0400",  # CStaticList::deletenode_sub(SListNode*)
+    "08bd0630",  # CStaticList::~CStaticList() D1
+    "08bd07f0",  # CStaticList::~CStaticList() D0
+    "08bd1540",  # CStaticList::CStaticList(int)
+    "08bd16b0",  # CListIter::inititer(CAbstList const*)
+    "08bd16d0",  # CListIter::CListIter()
+    "08bd16f0",  # CListIter::CListIter(CAbstList const&, EIteratorPos)
+    "08bd1730",  # CListIter::CListIter(CAbstList const&, CObject*)
+    "08bd1780",  # CListIter::CListIter(CAbstList const&, long)
+    "08bd18a0",  # CListIter::~CListIter()
+    "08bd18b0",  # CListIter::init(CAbstList const&, EIteratorPos)
+    "08bd18f0",  # CListIter::init(CAbstList const&, CObject*)
+    "08bd1940",  # CListIter::init(CAbstList const&, long)
+    "08bd1a60",  # CListIter::totop()
+    "08bd1a90",  # CListIter::totail()
+    "08bd1ac0",  # CListIter::operator()()
+    "08bd1af0",  # CListIter::operator++()
+    "08bd1b40",  # CListIter::operator--()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
