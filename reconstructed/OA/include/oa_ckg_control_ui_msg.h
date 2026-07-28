@@ -135,6 +135,32 @@ struct CKGRTCHandler {
 	static unsigned char *ms_poInstance;
 	void ChangePerformance();
 	void ResetAllScene();
+
+	/*
+	 * 5 more real instance methods, discovered while reconstructing
+	 * the CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy (oa_ckg_switch_family.h) -- same
+	 * cast-through-`ms_poInstance` idiom as above. GetBackupScene()/
+	 * GetBackupControlBuffer() both return a raw byte-array pointer
+	 * into this singleton's own backup-buffer storage (real callers
+	 * read individual bits/bytes out of the returned pointer, own
+	 * buffer layout otherwise out of scope). `+0xd4`
+	 * (GetBackupScene()'s own field), `+0xdc` (a plain `int` current-
+	 * scene-number field, NOT a pointer -- confirmed distinct from
+	 * +0xd4 by CKGSceneSw::GetCurrentValue() reading it directly with
+	 * no further dereference), `+0xe0`/`+0xe1` (2 real flag bytes,
+	 * read directly as raw offsets by several AnalizeAndProcessXxx
+	 * overrides in oa_ckg_switch_family.h, same convention as
+	 * CKGEngine::ms_poInstance[0xb0] elsewhere in this project) are
+	 * accessed via `ms_poInstance[N]` at each real call site rather
+	 * than modeled as named fields here.
+	 */
+	unsigned char *GetBackupScene();
+	int GetBackupSceneNumber(int module);
+	unsigned char *GetBackupControlBuffer();
+	void ResetCurrentScene();
+	void ResetCurrentControlBuffer();
+	void ResetChordAssignSwitch();
 };
 
 /*
@@ -159,6 +185,21 @@ struct CKGMIDIMsgProcessor {
 struct CSKMIDIMsgProcessor {
 	static unsigned char *ms_poInstance;
 	void ProcessLocalControlChannelMessage(int status, unsigned char channel, char a, char b);
+
+	/*
+	 * One more real overload, discovered while reconstructing the
+	 * CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy (oa_ckg_switch_family.h) --
+	 * CKGController::SendCC()/CKGChordTrigger::SendNoteOrCC()'s own
+	 * KARMA-controller-generated-MIDI dispatch. Real 1st parameter is
+	 * `CMIDIMessage::EStatus`, a type declared in the (transitively
+	 * including) `oa_ckg_switch_family.h` -- an `asm()` linkage-name
+	 * override avoids the circular #include, same technique used for
+	 * CKGParamEdit::SendChordMemory (oa_ckg_param_edit_send_decls.inc).
+	 * Real mangled name read directly off the ground-truth binary.
+	 */
+	void ProcessKarmaControllerGeneratedChannelMessage(int status, unsigned char channel, char ccNumber, char ccValue)
+		asm("_ZN19CSKMIDIMsgProcessor45ProcessKarmaControllerGeneratedChannelMessageEN12CMIDIMessage7EStatusEhcc");
 };
 
 /*

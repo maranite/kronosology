@@ -450,6 +450,17 @@ struct CKGEngine {
 	void CloseGECategoryPopup(bool arg);
 	void UpdateRTCDisplay(int arg);
 	void UpdateRTCModelName(int arg);
+
+	/*
+	 * 4 more real instance methods, discovered while reconstructing
+	 * the CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy (oa_ckg_switch_family.h) -- same
+	 * cast-through-`ms_poInstance` idiom as every other method above.
+	 */
+	int GetLocalControllerChannel();
+	void ResetKRTCSwitch(int ccNumber);
+	void ResetKRTCSlider(int id);
+	int GetNumOfModule();
 };
 
 /*
@@ -493,6 +504,18 @@ struct CKGUIMsgProcessor {
 	 */
 	void NotifyAfterEdit(bool immediate, int value);
 	void SendModuleSceneMessage(int moduleIndex, int sceneId);
+
+	/*
+	 * 2 more real overloads, discovered while reconstructing the
+	 * CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy (oa_ckg_switch_family.h) -- every concrete
+	 * switch/knob/scene leaf's own Process() forwards through one of
+	 * these two (4-arg vs 5-arg, real mangled `Eiiib`/`Eiiiib`) to
+	 * push its own current state to the front-panel UI. Own body out
+	 * of scope.
+	 */
+	void ProcessRTControllersValue(int msgId, int arg2, int arg3, bool changed);
+	void ProcessRTControllersValue(int msgId, int arg2, int arg3, int arg4, bool changed);
 };
 
 /*

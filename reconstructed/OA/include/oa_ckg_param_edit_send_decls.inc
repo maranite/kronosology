@@ -143,3 +143,22 @@
 	 */
 	void SendNoteMapOctaveReplicate(bool);
 	void SendNoteMapTableReset(bool);
+
+	/*
+	 * 4 more real methods, discovered while reconstructing the
+	 * CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy (oa_ckg_switch_family.h). SendChordMemory's
+	 * real 3rd parameter is `CKGController::EChangeSource`, a type
+	 * declared in a header that (transitively) includes THIS one --
+	 * an `asm()` linkage-name override is used instead of the real
+	 * enum type to avoid a circular #include, same "explicit real
+	 * mangled name, plain-int surface type" technique used any time a
+	 * cross-header enum dependency would otherwise be circular. The
+	 * real mangled name was read directly off the ground-truth
+	 * binary's own relocation, not guessed.
+	 */
+	void SendFF(bool on);
+	void SendRewind(bool on);
+	void SendAssign(bool on);
+	void SendChordMemory(int index, unsigned char value, int changeSource)
+		asm("_ZN12CKGParamEdit15SendChordMemoryEihN13CKGController13EChangeSourceE");

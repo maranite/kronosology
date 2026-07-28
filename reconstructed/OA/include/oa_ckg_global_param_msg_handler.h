@@ -120,6 +120,19 @@ enum eSTGMidiPort { eSTGMidiPort_Placeholder = 0 };
 
 struct CKarmaGlobal {
 	static eSTGMidiPort GetMIDIClockPortForSource(ESyncClockSource source);
+
+	/*
+	 * One more real static method, discovered while reconstructing
+	 * CKGChordTrigger::SendNoteOrCCInExternalMode() (the
+	 * CKGController/CKGSwitch/CKGKnob/CKGPad diamond-inheritance
+	 * widget hierarchy, oa_ckg_switch_family.h) -- same
+	 * single-register-in/single-register-out static-method shape as
+	 * GetMIDIClockPortForSource() above. 1st arg is a raw
+	 * CKGBankManager-relative table pointer (per-chord-trigger-pad
+	 * MIDI-channel config, `ms_poInstance + 0x97c744`), 2nd is the
+	 * pad's own 0-7 index.
+	 */
+	static int GetExternalPadRealChannel(unsigned char *channelTable, int index);
 };
 bool SKSTGGate_IsMidiPortAvailable(eSTGMidiPort port) __attribute__((regparm(3)));
 void SPRMain_RenewMIDIChannel(void) __attribute__((regparm(3)));
