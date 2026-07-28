@@ -165,6 +165,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/front_panel_handlers.o \
            src/engine/karma_chord_trigger.o \
            src/engine/karma_seq_backup.o \
+           src/engine/rtparm_ge_table.o \
            src/engine/stg_string_valuegetters.o \
            src/engine/stg_organ_model_patch_valuegetters.o \
            src/engine/stg_ms20_valuegetters.o \
@@ -636,7 +637,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/param_convertor.cpp \
        src/engine/am_exp2_ess.cpp \
        src/engine/adsr_base.cpp \
-       src/engine/lfo_component.cpp
+       src/engine/lfo_component.cpp \
+       src/engine/rtparm_ge_table.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -812,7 +814,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_ckg_ui_msg_sender \
          verify/test_ckg_switch_family \
          verify/test_ckg_midi_msg_handler \
-         verify/test_ckg_engine
+         verify/test_ckg_engine \
+         verify/test_rtparm_ge_table
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -1199,6 +1202,13 @@ verify/test_ckg_engine: verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp inc
 	# truncate to a garbage pointer on FromU32() -- same gotcha and same
 	# fix as test_tone_adjust_descriptors.
 	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp -o $@
+
+verify/test_rtparm_ge_table: verify/test_rtparm_ge_table.cpp src/engine/rtparm_ge_table.cpp verify/rtparm_ge_func_stubs.cpp include/oa_rtparm_ge_table.h
+	# rtparm_ge_func_stubs.cpp supplies TEST-ONLY empty bodies for the 313
+	# real-but-still-pending RT_* functions this table stores pointers to,
+	# so the host executable can link and compare funcPtr identity -- see
+	# that file's own header comment. Never linked into OA.ko itself.
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtparm_ge_table.cpp src/engine/rtparm_ge_table.cpp verify/rtparm_ge_func_stubs.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
