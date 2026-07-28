@@ -404,6 +404,11 @@ struct CKGModuleParamMsgHandler {
  * meaning not confirmed beyond the byte offset). `ms_poKGParamEdit` is the
  * real `CKGParamEdit` instance every SendXxx() call dispatches through.
  */
+/* eSTGMsgPerfType is declared in oa_engine_init.h (included above) --
+ * both CKGBankManager::ChangeMode() and CKGEngine::ChangePerformance()
+ * below need it, and oa_engine_init.h is the lower header in this
+ * include chain. */
+
 struct CKGParamEdit;
 struct CKGEngine {
 	static unsigned char *ms_poInstance;
@@ -417,6 +422,34 @@ struct CKGEngine {
 	 * idiom as every other singleton here). Own body out of scope.
 	 */
 	void ResetLocalController();
+
+	/*
+	 * More real instance methods, discovered while reconstructing
+	 * CKGControlMsgHandler (src/engine/ckg_control_msg_handler.cpp,
+	 * oa_ckg_control_ui_msg.h) -- same cast-through-`ms_poInstance`
+	 * idiom as ResetLocalController() above. `+0xb0` is the SAME
+	 * "edit suppressed" byte the ParamMsgHandler family's own
+	 * ShouldAttemptSysExShadowWrite() gates on; Start()/Stop() write
+	 * it directly (0/1) rather than reading it.
+	 */
+	void WritePerformance();
+	void DoCurrentDump();
+	void DoCompare();
+	void ChangePerformance(eSTGMsgPerfType type, bool arg2);
+	void UpdateGEInfo(int a);	/* single-int overload -- distinct
+					 * from CKGUIMsgSender's own 2-int
+					 * UpdateGEInfo(int,int) */
+	void SendShutUp();
+	void UpdateUserGE(int a, int b);
+	void DoInitModule(int arg);
+	void DoAutoAssignRTName(int arg);
+	void DoRandomCapture(long arg);
+	void DoClearRTCSetup(long arg);
+	void DoAutoRTCSetup(long arg);
+	void OpenGECategoryPopup();
+	void CloseGECategoryPopup(bool arg);
+	void UpdateRTCDisplay(int arg);
+	void UpdateRTCModelName(int arg);
 };
 
 /*

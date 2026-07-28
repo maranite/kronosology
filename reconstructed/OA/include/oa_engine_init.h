@@ -2294,6 +2294,24 @@ struct CTimerManager {
 enum eSTGCombiBankId { eSTGCombiBankId_unknown = 0 };
 enum eSTGProgramBankId { eSTGProgramBankId_unknown = 0 };
 
+/*
+ * eSTGMsgPerfType -- Combi/Program/Song selector, real 3-value enum
+ * confirmed from CKGControlMsgHandler::ChangeCombi/ChangeProgram/
+ * ChangeSong's own literal `CKGEngine::ChangePerformance(eSTGMsgPerfType,
+ * bool)` call-site arguments (0/1/2 respectively,
+ * oa_ckg_control_ui_msg.h) and independently cross-checked against
+ * CKGControlMsgHandler::SetMode()'s own .rodata lookup table. Declared
+ * here (the lowest header in this include chain) since both
+ * CKGBankManager::ChangeMode() below and CKGEngine::ChangePerformance()
+ * (oa_ckg_module_param_msg_handler.h, which includes this header) need
+ * it.
+ */
+enum eSTGMsgPerfType {
+	eSTGMsgPerfType_Combi = 0,
+	eSTGMsgPerfType_Program = 1,
+	eSTGMsgPerfType_Song = 2,
+};
+
 struct CKGBankManager {
 	static unsigned char *ms_poInstance;
 
@@ -2349,6 +2367,18 @@ struct CKGBankManager {
 	 */
 	unsigned char *GetProgKarmaPerfCommon(eSTGProgramBankId bankId, unsigned int index);
 	unsigned char *GetCombiKarmaPerfCommon(eSTGCombiBankId bankId, unsigned int index);
+
+	/*
+	 * Three more real methods, discovered while reconstructing
+	 * CKGControlMsgHandler (src/engine/ckg_control_msg_handler.cpp,
+	 * oa_ckg_control_ui_msg.h) -- same "this IS the singleton" call
+	 * shape as the others above. `eSTGMsgPerfType` (declared in
+	 * oa_ckg_module_param_msg_handler.h) is the same Combi/Program/
+	 * Song selector CKGEngine::ChangePerformance() takes.
+	 */
+	void ChangeMode(eSTGMsgPerfType type);
+	void FinishLoadingGEsAndTemplates(int a, int b);
+	void SetupTemplateAfterLoading(int index);
 };
 
 /*

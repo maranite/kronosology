@@ -2956,3 +2956,127 @@ this project's shared-repo commit hygiene convention.
 Real-HW test that would help: none identified, same rationale as every
 prior entry in this family -- pure parameter-reflection plumbing with no
 direct front-panel/audio observable.
+
+---
+
+## CKGControlMsgHandler + CKGUIMsgSender — new cluster after STG value-getter/CKG*ParamMsgHandler closure, 53 methods (batch, 2026-07-28)
+
+Fresh broad survey per the standing "find the next dense cluster" directive
+(the STG value-getter family and all three `CKG*ParamMsgHandler` classes
+were confirmed fully closed as of the prior batch). Grouped every pending
+manifest row by class and sorted by count; investigated and correctly ruled
+out several large-looking candidates first: `CKGParamEdit` (133 pending --
+the checked-write family's own SendXxx() call target, not itself
+decoder-friendly, already flagged in an earlier batch), the whole
+`CSPR`/`CRPPR`-prefixed sequencer-record family (`CSPRRecorder`,
+`CRPPRManager`, `CSPRControlMsgHandler`, etc. -- sample disassembly at
+several of their own manifest addresses landed MID-FUNCTION inside
+`CSingleRPPR::settrkno`/`CSPRRecorder::RenewSongPlayParamAfterRec`, i.e. the
+Ghidra static export's function-boundary detection is unreliable across this
+whole family, not a real distinct-function set worth attempting), and the
+`CKGSwitch`/`CKGKnob`/`CKGPad` front-panel-control widget hierarchy (~19
+classes, ~194 methods, a genuine diamond-multiple-inheritance tree rooted at
+an abstract `CKGController` virtual base -- real, tractable in principle
+(same technique as Eva's `CStream` family), but each method needs
+individual semantic tracing of real branchy vtable-dispatch logic rather
+than a mechanical field-offset transcription; investigated in depth
+(full vtable relocation dump, construction-vtable inheritance graph,
+several methods' real field layout) but deliberately NOT attempted this
+batch given the effort-per-method ratio -- left as a well-scoped, evidence-
+rich next target, see re-decompiler agent memory for the full findings).
+
+Landed on `CKGControlMsgHandler` (UI-triggered action dispatch,
+`.text+0x3c79c0`..) + `CKGUIMsgSender` (UI-notification send-side,
+`.text+0x3c84e0`..`.text+0x3c90a0`) -- a genuinely new, third convention
+(neither the STG value-getter shape nor the CKG*ParamMsgHandler checked-
+write skeleton): plain UI actions forwarding into `CKGEngine`/
+`CKGBankManager`/`CKGRTCHandler`/`CKGParamEdit`, and a message-builder that
+packs a fixed-shape `CSKMessage` payload and calls `KGOutGate_SendMessageToUI()`.
+53 methods reconstructed (24 `CKGControlMsgHandler` + 29 `CKGUIMsgSender`,
+both including their ctors), all disassembly-verified individually --
+`CKGUIMsgSender`'s two message shapes needed particularly careful per-field
+offset extraction since two visually-similar wrapper families
+(`{SetModuleParamMax,SetModuleParamMin,UpdateModuleParam,DimOnModuleParam}`
+vs `SendModuleParamMessage`) turned out to place their shared "value"
+parameter at DIFFERENT byte offsets (`+0x1c` vs `+0x24`) despite otherwise
+identical-looking field layouts -- caught only by disassembling each one
+individually rather than trusting the first one as a template for the rest.
+
+Deliberately deferred, NOT counted as done: `CKGControlMsgHandler::
+HandleMessage(CSKMessage*)` (1181 bytes, a ~40-case jump-table dispatcher
+over `msg[+0x8]` whose case bodies mostly INLINE logic duplicating --
+not calling -- this class's own separately-addressed methods; a clean,
+self-contained standalone target, full disassembly already transcribed) and
+its 3 siblings `SharedMemProgramDump`/`SharedMemCombiDump`/
+`SharedMemSongDump` (each calls `CKGProgramDownloader::
+HandleProgramDownload`/`CKGCombiDownloader::HandleCombiDownload` with
+`this` reinterpreted directly from `CKGControlMsg::m_mode` -- a real,
+confirmed pointer-smuggled-through-an-int-field idiom, ruling out an
+initial `ms_poInstance`-singleton-call assumption -- and, for the Combi/
+Song variants, a 3rd `eSTGMsgPerfType` argument whose register/stack
+position could not be pinned down with confidence: regparm(3) has only 3
+GP registers total, already consumed by `this`+2 explicit args, yet no
+stack spill is visible in either observed call site's disassembly window).
+Not logged in `DECOMPILE_ERRORS.md` (that file is for compile/link
+failures on an attempted reconstruction, not scope deferrals) -- documented
+here and in `oa_ckg_control_ui_msg.h`'s own header comment instead, per
+this project's established convention.
+
+**New manifest-generator gotcha found and fixed, same session (no
+regressions shipped)**: the generator's own address heuristic
+(`ADDR_RE = \.text\+0x[0-9a-fA-F]{4,8}`) matches ANY `.text+0xXXXXXX`
+literal appearing anywhere under `src/`/`include/`, including inside prose
+comments describing a DEFERRED function's real address for documentation
+purposes -- writing `HandleMessage`'s own real offset in a header comment
+(purely to help a future session find it) caused the generator to
+false-credit `HandleMessage` as reconstructed, purely from the mention. A
+second, independent false-credit hit `CKGModuleParamMsgHandler`'s own ctor,
+caused by an unrelated header comment citing `CKGUIMsgSender`'s class-region
+END address, which happened to coincide with the START of
+`CKGModuleParamMsgHandler`'s own (different, untouched-this-batch) region.
+Separately, a THIRD gotcha: several real, correctly-implemented
+`CKGUIMsgSender` methods (`UpdateChordAssignLED`, `ChangeGE`, etc.) were
+NOT credited by the generator's name heuristic despite matching real
+ground-truth bodies, because a trailing same-line comment
+(`void Foo(...)	/* .text+0x... */\n{`) between the closing `)` and the
+opening `{` breaks `DEF_RE`'s own `\)\s*...\{` tail pattern (a `/*...*/`
+comment is not whitespace to the regex). Fixed by (1) describing
+`HandleMessage`'s deferral without a literal `.text+0x` address citation,
+(2) rewording the `CKGUIMsgSender` class-region-end comment to cite an
+address this batch DID implement instead of the next class's boundary, and
+(3) moving every trailing same-line address comment in `ckg_ui_msg_sender.cpp`
+to its own line above the signature (the convention already used
+everywhere else in both new files, which is why only THIS block was
+affected). All three confirmed via a full reconstructed qualified-name-set
+diff against the true committed baseline (`git stash -u` trick, not the
+on-disk CSV) both before and after each fix -- final delta exactly +53,
+0 regressions. Recorded in re-decompiler agent memory as three new,
+distinct entries in the DEF_RE/ADDR_RE gotcha catalogue for this project.
+
+`make verify`: exit 0, 0 FAIL lines (10385 ok lines across the whole
+suite, 2 new KAT binaries, `test_ckg_control_msg_handler`/
+`test_ckg_ui_msg_sender`, checking real byte offsets/values against a
+mocked `KGOutGate_SendMessageToUI()` rather than trusting the
+implementation's own field-offset choices). Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` Kbuild build: clean link, `OA.ko` produced
+(630032 bytes, up from the prior batch's 573632/530868 range), zero
+warnings or errors traceable to any of the 2 new files.
+`manifest/gen_oa_manifest.py` regenerated against the TRUE prior committed
+state via the `git stash -u` trick: OA.ko manifest 2830 -> 2883/21,689
+(13.292%), delta exactly +53, confirmed via a full reconstructed
+qualified-name-set diff -- 0 regressions.
+
+Next targets for this same family: `CKGControlMsgHandler::HandleMessage` +
+the 3 `SharedMem*Dump` methods (both fully scoped above); the
+`CKGSwitch`/`CKGKnob`/`CKGPad`/`CKGController` front-panel-widget diamond-
+inheritance hierarchy (~194 methods, investigated in depth this batch, see
+re-decompiler agent memory for the full vtable-slot/field-offset findings);
+and the broader `CSK`/`CKG` KARMA UI/MIDI family surfaced by the same
+survey (`CSKMIDIInMsgHandler`, `CSKMIDILocalCtrlMsgHandler`,
+`CSKSysExMsgHandler`, `CKGRTCHandler`'s own remaining 27 methods,
+`CKGUIMsgProcessor`'s remaining 17, etc. -- ~845 methods across ~64 classes
+total in this broader family, per this batch's own survey; only 53 done so
+far).
+
+Real-HW test that would help: none identified -- pure UI-notification/
+message-dispatch plumbing with no direct front-panel/audio observable.

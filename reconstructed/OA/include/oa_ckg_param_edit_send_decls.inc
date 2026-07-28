@@ -135,3 +135,11 @@
 	void SendMIDIClockSource(bool);
 	void SendForceKarmaOff(bool);
 	void SetEnableMIDIInToKarmaModule(bool);
+
+	/*
+	 * Two more real methods, discovered while reconstructing
+	 * CKGControlMsgHandler (src/engine/ckg_control_msg_handler.cpp,
+	 * oa_ckg_control_ui_msg.h).
+	 */
+	void SendNoteMapOctaveReplicate(bool);
+	void SendNoteMapTableReset(bool);
