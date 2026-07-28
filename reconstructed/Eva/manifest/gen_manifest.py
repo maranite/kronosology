@@ -3675,6 +3675,77 @@ RECONSTRUCTED = {
     "089d1b90",  # CKorgRiff::Swap(unsigned short&)
     "089d1ba0",  # CKorgRiff::Swap(unsigned int&)
     "089da490",  # CKorgRiff::IsBigEndian() const
+
+    # --- CKorgKmp/CKorgKsf/CKorgKsc partial reconstruction (2026-07-28, same-day
+    # follow-up on the CKorgRiff batch above). Re-investigated korg_file.h's own
+    # deferred-sibling note ("all 3 take a CSTGMultisampleBank*, out of scope") with
+    # fresh objdump -d -C tracing of this whole family's entire .text range
+    # (0x089ca550..0x089d1780, all 62 methods) -- found ZERO calls to
+    # CSTGMultisampleBank or any other out-of-scope class. That claim was a
+    # class-NAME collision with an unrelated, genuinely-MOSS-dependent
+    # CMultisampleChunk/CSampleChunk/CSampleDataChunk family at .text
+    # 0x08e30a50-0x08e31c00 (real signatures take CSTGMultisample*/CSTGSample*/
+    # CSTGDrumSample*/CSTGSampleZone*/CSTGPCMBlock*) that happens to share short
+    # nested-class names with THIS family's own (different, MOSS-free) nested
+    # types of the same name -- see include/korg_kmp.h's file header for the full
+    # correction. The REAL reason this family isn't fully reconstructed in one
+    # pass: it's a genuinely deep on-disk chunked binary format (CKorgKmp's own
+    # ReadChunk() alone dispatches 5+ distinct real chunk tags -- "RLP1"/"RLP2"/
+    # "RLP3"/"MNO1"/"MSP1", each with its own fixed-size on-disk record and GCC
+    # magic-constant division for record counts), disproportionate to a batch.
+    # Reconstructed here: the tractable simple-accessor surface across all 3
+    # classes' real ctors, dtors, TypeString()/IsBigEndian()/MakeFolder()/
+    # GetUUID()/SetUUID()/GetName()/IsStereoCounterpart()/CanAddSample()/
+    # MakeSampleFileName()/SetSampleDataSize(), plus 5 nested value-type
+    # accessors (CMultisampleChunk, CMultisampleRelativeChunk, CSampleChunk,
+    # CSampleFileNameChunk, CSampleDataChunk) -- 33 addresses below, each
+    # verified present in the static export via a direct functions.csv address
+    # lookup before being added. Deferred (real next lead, same "genuinely deep"
+    # reason): Read()/Write()/ReadChunk()/WriteFile()/ReadFile() on all 3
+    # classes, AddSample()/GetSample()/SortSamples()/AddSkippedSamples()/
+    # MakeMultisampleFileName() (CKorgKmp), AddProgram()/AddMultisample()(x6)/
+    # GetMultisample()(x5)/GetSample()/ReadLine()/SetPath() (CKorgKsc), and
+    # CKorgProgram entirely (COscillator::Sort()/::Add() alone 946/1197 bytes).
+    # verify/test_korg_kmp.cpp (12 checks incl. a real host mkdir() round-trip
+    # and 2 CanAddSample overlap/non-overlap KATs against manually-populated
+    # test-hook lists), verify/test_korg_ksf.cpp (7 checks incl. a real
+    # sprintf-based MakeSampleFileName KAT and a real malloc/free
+    # SetSampleDataSize sequence), verify/test_korg_ksc.cpp (5 checks incl. a
+    # real host mkdir() round-trip). Full `make verify` (89 binaries) stays
+    # green (0 FAIL).
+    "089ccaa0",  # CKorgKmp::CKorgKmp(char const*, char const*, unsigned int, CKorgKmp::KorgType, unsigned int, unsigned int, unsigned int, unsigned int, unsigned char, unsigned char)
+    "089cc590",  # CKorgKmp::~CKorgKmp() [D1]
+    "089cca80",  # CKorgKmp::~CKorgKmp() [D0, deleting]
+    "089cc570",  # CKorgKmp::TypeString(CKorgKmp::KorgType)
+    "089d9dd0",  # CKorgKmp::IsBigEndian() const
+    "089cb720",  # CKorgKmp::MakeFolder()
+    "089cc480",  # CKorgKmp::GetName(char*, unsigned int) const
+    "089cc4b0",  # CKorgKmp::IsStereoCounterpart(CKorgKmp const*) const
+    "089cb770",  # CKorgKmp::CanAddSample(unsigned char, unsigned char)
+    "089cb660",  # CKorgKmp::CMultisampleChunk::GetName(char*, unsigned int) const
+    "089cb690",  # CKorgKmp::CMultisampleChunk::SetName(char const*)
+    "089cb6c0",  # CKorgKmp::CMultisampleRelativeChunk::GetName(char*, unsigned int) const
+    "089cb6f0",  # CKorgKmp::CMultisampleRelativeChunk::SetName(char const*)
+    "089d0580",  # CKorgKsf::CKorgKsf(char const*, char const*, unsigned int, CKorgKsf::KorgType, bool)
+    "089cff50",  # CKorgKsf::~CKorgKsf() [D1]
+    "089cff90",  # CKorgKsf::~CKorgKsf() [D0, deleting]
+    "089d09a0",  # CKorgKsf::TypeString(CKorgKsf::KorgType)
+    "089da350",  # CKorgKsf::IsBigEndian() const
+    "089d0950",  # CKorgKsf::MakeSampleFileName(unsigned int, unsigned int, unsigned int, char*, unsigned int)
+    "089d0850",  # CKorgKsf::SetSampleDataSize(unsigned int, bool)
+    "089d07b0",  # CKorgKsf::CSampleChunk::GetName(char*, unsigned int) const
+    "089d07e0",  # CKorgKsf::CSampleChunk::SetName(char const*)
+    "089d0810",  # CKorgKsf::CSampleChunk::GetStartOffsetSamples(unsigned int) const
+    "089d0830",  # CKorgKsf::CSampleChunk::SetStartOffsetSamples(unsigned int, unsigned int)
+    "089d08c0",  # CKorgKsf::CSampleFileNameChunk::GetSampleFileName(char*, unsigned int) const
+    "089d08f0",  # CKorgKsf::CSampleFileNameChunk::SetSampleFileName(char const*)
+    "089d0930",  # CKorgKsf::CSampleDataChunk::SetOneShot(bool)
+    "089cef70",  # CKorgKsc::CKorgKsc(char const*, char const*, bool, bool)
+    "089ceb40",  # CKorgKsc::~CKorgKsc() [D1]
+    "089cef50",  # CKorgKsc::~CKorgKsc() [D0, deleting]
+    "089ce100",  # CKorgKsc::GetUUID(char*, unsigned int) const
+    "089ce150",  # CKorgKsc::SetUUID(char const*)
+    "089ce1a0",  # CKorgKsc::MakeFolder()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
