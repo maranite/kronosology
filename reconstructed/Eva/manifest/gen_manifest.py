@@ -2340,6 +2340,139 @@ RECONSTRUCTED = {
     "08428310",  # CRamSampleRelative::SetAttack(int)
     "08428320",  # CRamSampleRelative::GetDecay()
     "08428330",  # CRamSampleRelative::SetDecay(int)
+
+    # 2026-07-28 fresh nm -C class-inventory sweep, round 3: CSector /
+    # CLittleEndObj / CPartitionData / CMBR / CPBR / CPBRex / CPBRFat12Fat16 /
+    # CPBRFat12 / CPBRFat16 / CPBRFat32 (partition_table.h/.cpp) -- real MBR
+    # (Master Boot Record) and PBR (BIOS Parameter Block / FAT12-16-32
+    # Extended BPB) on-disk-format value classes. Two other candidates traced
+    # and REJECTED first: the ~40-class CSysExProg/CSysExCombi/... "SysEx dump
+    # digest object" family (no real caller anywhere in a full objdump call-
+    # xref sweep -- only plausible owner is the already-documented-elsewhere
+    # "deep, entirely unmodeled" SysEx sniffer/tree-builder subsystem) and the
+    # CD-ROM/Joliet virtual-driver cluster (CCDEntry/CDirCD/CVDrvCD/
+    # CCDConfigDir/CVirtualDriverBase/CDriverTaskBase -- CBigEndObj's only
+    # real callers are all inside file_io_base.h's own already-documented
+    # "OUT OF SCOPE" optical-media driver family). Real callers for THIS
+    # cluster (traced via the same objdump xref method): CFileMan::
+    # ScanPartitionTable/FDisk/DelLastPartitionsNoCheck (via CMBR::CMBR) and
+    # CConfigVD::ConfigVD2/ConfigVD3/IsDOSFormat/IsPartitionBootSector (via
+    # CPBR::CPBR and subclasses) -- CFileMan itself is file_man.h's own
+    # documented out-of-scope god object, but same "out-of-scope CALLER,
+    # in-scope DATA class" split already established for CSpecialFuncCCMap's
+    # CESGlobalTask caller. Every sm_wXxxOffset static byte-offset constant
+    # independently confirmed (direct .data read) to match the real, public
+    # MBR/BPB specification exactly. See partition_table.h for full detail.
+    # CMBR's D0 (deleting-destructor) address included per the CDumpTask/
+    # CSysExMsgTaskBase precedent (gen_manifest.py entries above) -- a
+    # trivial, fully-understood "call D1 then operator delete" wrapper, not
+    # separately hand-transcribed as its own C++ method.
+    "080a0e80",  # CLittleEndObj::GetWord(unsigned char const*)
+    "080a0ea0",  # CLittleEndObj::GetDWord(unsigned char const*)
+    "080a0ed0",  # CLittleEndObj::SetWord(unsigned char*, unsigned short)
+    "080a0ef0",  # CLittleEndObj::SetDWord(unsigned char*, unsigned long)
+    "080a0f20",  # CLittleEndObj::GetInt(unsigned char const*)
+    "080a0f50",  # CLittleEndObj::GetShort(unsigned char const*)
+    "080a0f70",  # CLittleEndObj::GetLong(unsigned char const*)
+    "080a0fa0",  # CLittleEndObj::GetUInt(unsigned char const*)
+    "080a0fd0",  # CLittleEndObj::GetUShort(unsigned char const*)
+    "080a0ff0",  # CLittleEndObj::GetULong(unsigned char const*)
+    "080a1020",  # CLittleEndObj::SetUInt(unsigned char*, unsigned int)
+    "080a1050",  # CLittleEndObj::GetU3Byte(unsigned char const*)
+    "080d3a30",  # CMBR::~CMBR() (D1, non-deleting)
+    "080d3a40",  # CMBR::~CMBR() (D0, deleting)
+    "080d3a60",  # CSector::GetMinSize()
+    "080d3a70",  # CPartitionData::CPartitionData(unsigned char const*)
+    "080d3b60",  # CPartitionData::CPartitionData(CPartitionData const&)
+    "080d3bb0",  # CPartitionData::Reset()
+    "080d3c00",  # CPartitionData::operator=(CPartitionData const&)
+    "080d3c60",  # CPartitionData::SetStatus(unsigned char*, EStatus)
+    "080d3c80",  # CPartitionData::SetType(unsigned char*, EType)
+    "080d3ca0",  # CPartitionData::IsEmpty(unsigned char const*)
+    "080d3cc0",  # CPartitionData::IsExtended(unsigned char const*)
+    "080d3cf0",  # CPartitionData::IsExtended(EType)
+    "080d3d20",  # CPartitionData::IsEmpty(EType)
+    "080d3d30",  # CPartitionData::IsSupported(EType)
+    "080d3d80",  # CPartitionData::Reset(unsigned char*)
+    "080d3e20",  # CPartitionData::GetMaxMediaGeometry()
+    "080d3e30",  # CPartitionData::SetStartCHS(unsigned char*, ushort, ushort, ushort)
+    "080d3eb0",  # CPartitionData::SetEndCHS(unsigned char*, ushort, ushort, ushort)
+    "080d3f30",  # CPartitionData::SetLBAStartLocation(unsigned char*, unsigned long)
+    "080d3f50",  # CPartitionData::GetLBAStartLocation(unsigned char const*)
+    "080d3f70",  # CPartitionData::GetType(unsigned char const*)
+    "080d3f80",  # CPartitionData::SetPartitionSize(unsigned char*, unsigned long)
+    "080d3fa0",  # CPartitionData::IsExtended() const
+    "080d3fd0",  # CPartitionData::IsSupported() const
+    "080d4020",  # CPartitionData::IsEmpty() const
+    "080d4030",  # CPartitionData::CHStoLBA(ushort, ushort, ushort, SMediaGeometry const&)
+    "080d4160",  # CPartitionData::LBAtoCHS(uint, ushort&, ushort&, ushort&, SMediaGeometry const&)
+    "080d4290",  # CPartitionData::GetSectCeilLBA(uint, unsigned long, SMediaGeometry const&)
+    "080d42d0",  # CPartitionData::GetMaxCHS(ushort&, ushort&, ushort&, SMediaGeometry const&)
+    "080d4310",  # CPartitionData::AdjustCHS(ushort&, ushort&, ushort&, SMediaGeometry const&)
+    "080d43c0",  # CMBR::CMBR(unsigned char const*, ushort, ushort, unsigned long)
+    "080d49d0",  # CMBR::GetFirstValidPrimaryPartitionData() const
+    "080d4a90",  # CMBR::GetFirstValidPartitionData() const
+    "080d4b10",  # CMBR::GetFirstValidPartitionData(int) const
+    "080d4c80",  # CMBR::IsValid() const
+    "080d4ca0",  # CPBR::CPBR(unsigned char const*)
+    "080d4dd0",  # CPBR::SetBytePerSector(unsigned char*, unsigned short)
+    "080d4e00",  # CPBR::SetSectPerCluster(unsigned char*, unsigned char)
+    "080d4e20",  # CPBR::SetFatOffset(unsigned char*, unsigned short)
+    "080d4e50",  # CPBR::SetFatNum(unsigned char*, unsigned char)
+    "080d4e70",  # CPBR::SetMaxNumRootEntries(unsigned char*, unsigned short)
+    "080d4ea0",  # CPBR::SetNumSectors(unsigned char*, unsigned short)
+    "080d4ed0",  # CPBR::SetMediaType(unsigned char*, unsigned char)
+    "080d4ef0",  # CPBR::SetNumFatSectors(unsigned char*, unsigned short)
+    "080d4f20",  # CPBR::SetSectorPerTrack(unsigned char*, unsigned short)
+    "080d4f50",  # CPBR::SetNumHeads(unsigned char*, unsigned short)
+    "080d4f80",  # CPBR::SetNumHiddenSectors(unsigned char*, unsigned long)
+    "080d4fa0",  # CPBR::SetNumSectorsHuge(unsigned char*, unsigned long)
+    "080d4fc0",  # CPBR::GetDefaultFatNum()
+    "080d4fd0",  # CPBRex::CPBRex(unsigned char const*)
+    "080d4fe0",  # CPBRex::GetDefaultVolumeName()
+    "080d4ff0",  # CPBRex::GetVolumeNameSize()
+    "080d5000",  # CPBRex::GetNewPartitionSerialNum()
+    "080d5020",  # CPBRFat12Fat16::CPBRFat12Fat16(unsigned char const*)
+    "080d50c0",  # CPBRFat12Fat16::SetBeginSectSignature(unsigned char*)
+    "080d5100",  # CPBRFat12Fat16::GetDefaultFatOffset()
+    "080d5110",  # CPBRFat12Fat16::GetVolumeNameOffset()
+    "080d5120",  # CPBRFat12Fat16::SetVolumeName(unsigned char*, char const*)
+    "080d5160",  # CPBRFat12::CPBRFat12(unsigned char const*)
+    "080d5200",  # CPBRFat12::SetFileSystemName(unsigned char*)
+    "080d5240",  # CPBRFat12::GetDefaultFileSystemName()
+    "080d5250",  # CPBRFat12::GetDefaultFileSystemNameLen()
+    "080d5270",  # CPBRFat12::GetSectorPerFat(...)
+    "080d52d0",  # CPBRFat16::CPBRFat16(unsigned char const*)
+    "080d5370",  # CPBRFat16::SetFileSystemName(unsigned char*)
+    "080d53b0",  # CPBRFat16::SetDriveNumber(unsigned char*)
+    "080d53e0",  # CPBRFat16::SetExtSignature(unsigned char*)
+    "080d53f0",  # CPBRFat16::SetPartitionSerialNum(unsigned char*)
+    "080d5430",  # CPBRFat16::GetDefaultFileSystemName()
+    "080d5440",  # CPBRFat16::GetDefaultFileSystemNameLen()
+    "080d5460",  # CPBRFat16::GetDefaultMaxNumRootEntries()
+    "080d5470",  # CPBRFat16::GetSectorPerFat(...)
+    "080d54d0",  # CPBRFat32::CPBRFat32(unsigned char const*)
+    "080d55f0",  # CPBRFat32::GetFirstRootClusterOffset()
+    "080d5600",  # CPBRFat32::GetBackupPBROffsetDefault()
+    "080d5610",  # CPBRFat32::GetNumCluster() const
+    "080d5630",  # CPBRFat32::SetBeginSectSignature(unsigned char*)
+    "080d5670",  # CPBRFat32::SetFileSystemName(unsigned char*)
+    "080d56b0",  # CPBRFat32::SetNumFatSectorsHuge(unsigned char*, unsigned long)
+    "080d56d0",  # CPBRFat32::SetFatFlag(unsigned char*, unsigned char, int)
+    "080d5710",  # CPBRFat32::SetFat32Version(unsigned char*, unsigned char, unsigned char)
+    "080d5750",  # CPBRFat32::SetFirstRootCluster(unsigned char*, unsigned long)
+    "080d5770",  # CPBRFat32::SetFSISOffset(unsigned char*, unsigned short)
+    "080d57a0",  # CPBRFat32::SetBackupPBROffset(unsigned char*)
+    "080d57d0",  # CPBRFat32::SetDriveNumber(unsigned char*)
+    "080d5800",  # CPBRFat32::SetExtSignature(unsigned char*)
+    "080d5810",  # CPBRFat32::SetPartitionSerialNum(unsigned char*)
+    "080d5850",  # CPBRFat32::SetVolumeName(unsigned char*, char const*)
+    "080d5890",  # CPBRFat32::GetDefaultFileSystemName()
+    "080d58a0",  # CPBRFat32::GetDefaultFileSystemNameLen()
+    "080d58c0",  # CPBRFat32::GetDefaultFatOffset()
+    "080d58d0",  # CPBRFat32::GetVolumeNameOffset()
+    "080d58e0",  # CPBRFat32::GetSectorPerFat(...)
+    "0818ab90",  # CSector::SetEndSectSignature(unsigned char*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
