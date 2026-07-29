@@ -2893,3 +2893,37 @@ parameters). `make verify` full suite green (107 test binaries, exit
 No real-HW test needed -- both "Forbidden"/"NoCallBack" bodies are
 fixed-constant returns in ground truth itself, no hardware-dependent
 behavior to confirm.
+
+## Round 63 (2026-07-29, solo): CLocaleManager's real dtor
+
+Found via the same done>0/pending>0 manifest scan. `CEditTask`'s own
+2-entry dtor pair topped the scan again but is the same non-virtual-
+thunk multiple-inheritance shape already ruled out for `CDumpTask`/
+`CAlphaKeybCtrlTask`/`CBatchDiskMan` (round 61) -- confirmed via a
+fresh decompile read (`~CEditTask(this + -8); return;`), not re-landed.
+`CLocaleManager` (single pending dtor, 13 bytes) was next: ground
+truth's real body forwards to `CKeyboardLayoutManager::~
+CKeyboardLayoutManager()` -- and since `include/locale_manager.h`
+already documents that `CLocaleManager` stands in DIRECTLY for the
+combined `CKeyboardLayoutManager` object (no separate class modeled),
+the correct landing is `CLocaleManager`'s own real dtor body: reset
+`mVtbl` to the TVector vtable placeholder, then unconditionally
+`operator delete` the embedded `TVector<CKeyboardLayout const*,1>`'s
+`mBegin` backing array (ground truth doesn't null-check first --
+`operator delete(NULL)` is a defined no-op either way).
+
+Added `PTR__TVector_08e81c48` to `omega_vtables.h`/`.cpp` (the class's
+own real vtable symbol, previously left unmodeled since nothing
+dispatched through it and the ctor had never installed it either --
+this round updates the CTOR too, so a real `CLocaleManager` instance's
+`mVtbl` now genuinely matches ground truth instead of staying null).
+Real host KAT (`verify/test_locale_manager.cpp` extended: calls the
+new dtor on the same raw block the existing growth-test check already
+uses, confirms `mVtbl` resets to the placeholder -- also usefully frees
+that check's own `::operator new()` allocation, previously left
+dangling per the file's own prior "no dtor modeled" note, now
+corrected). `make verify` full suite green (107 test binaries, exit
+0), zero regressions. Eva manifest 3182 -> 3183/37,795 (8.422%).
+
+No real-HW test needed -- `mVtbl` confirmed never dispatched through
+anywhere in this project.

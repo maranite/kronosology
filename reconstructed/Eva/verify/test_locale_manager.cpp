@@ -39,6 +39,7 @@
 #include <cstring>
 
 #include "locale_manager.h"
+#include "omega_vtables.h"
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -153,13 +154,17 @@ int main()
 		      "copy-on-grow preserved every element's identity",
 		      allPresentAfterGrow);
 
-		/* Real: neither method ever calls the real global operator delete on
-		 * anything but the OLD backing array during a grow, and this test's
-		 * own final backing array is a genuine ::operator new() allocation
-		 * that outlives the test (never freed) -- same "happy path only,
-		 * no dtor modeled" convention this project's other TVector-based
-		 * classes already use (e.g. CPoller's own mClients).
+		/* round 63 (2026-07-29, solo): real dtor now modeled -- resets
+		 * mVtbl and frees mBegin (the genuine ::operator new() allocation
+		 * from the growth check above, otherwise left dangling). The
+		 * private ctor was never called on this raw block (see the
+		 * comment above), but the dtor only ever touches mVtbl/mBegin,
+		 * matching this test's own established "raw zeroed block stands
+		 * in for a fresh instance" convention.
 		 */
+		mgr->~CLocaleManager();
+		check("dtor resets mVtbl to PTR__TVector_08e81c48",
+		      *reinterpret_cast<void ***>(raw) == PTR__TVector_08e81c48);
 	}
 
 	printf("\n%s\n", g_fail ? "FAILED" : "all checks passed");

@@ -223,6 +223,7 @@ extern void *PTR__CDumpManMod_08e85ca8[7];
 extern void *PTR__CTask_08e82128[7];
 extern void *PTR__TNamedPtrArray_08e82198[3];
 extern void *PTR__TVector_08e82188[2];
+extern void *PTR__TVector_08e81c48[2]; /* CLocaleManager's embedded TVector<CKeyboardLayout const*,1>, round 63 */
 extern void *PTR__CLimiterMan_08e81ee8[4];
 extern void *PTR__TVector_08e81f78[2];
 extern int   EvaDataPlaceholder_08e82144;

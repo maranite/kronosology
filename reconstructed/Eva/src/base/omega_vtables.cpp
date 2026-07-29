@@ -363,6 +363,9 @@ void *PTR__TNamedPtrArray_08e82198[3] = {
 void *PTR__TVector_08e82188[2] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub,
 };
+void *PTR__TVector_08e81c48[2] = {
+	(void *)EvaVTableStub, (void *)EvaVTableStub,
+};
 void *PTR__CLimiterMan_08e81ee8[4] = {
 	(void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub, (void *)EvaVTableStub,
 };

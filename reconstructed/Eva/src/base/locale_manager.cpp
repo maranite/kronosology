@@ -3,6 +3,7 @@
  */
 
 #include "locale_manager.h"
+#include "omega_vtables.h"
 
 #include <cstring>
 #include <new>
@@ -11,14 +12,20 @@ CLocaleManager *CLocaleManager::sm_poInstance = 0;
 
 CLocaleManager::CLocaleManager()
 {
-	/* Real: *(void***)this = &PTR__TVector_08e81c48; begin=end=cap=0. The real
-	 * vtable identity is never dispatched through by either stub method below,
-	 * so it is left null here rather than adding an unused omega_vtables entry.
-	 */
-	mVtbl = 0;
+	/* Real: *(void***)this = &PTR__TVector_08e81c48; begin=end=cap=0. */
+	mVtbl = PTR__TVector_08e81c48;
 	mBegin = 0;
 	mEnd = 0;
 	mCap = 0;
+}
+
+CLocaleManager::~CLocaleManager()
+{
+	/* Real (ground truth's CKeyboardLayoutManager::~CKeyboardLayoutManager(),
+	 * see header comment): reset the vtable slot, then free mBegin
+	 * unconditionally (operator delete(NULL) is a defined no-op). */
+	mVtbl = PTR__TVector_08e81c48;
+	::operator delete(mBegin);
 }
 
 CLocaleManager *CLocaleManager::GetInstance()

@@ -4502,6 +4502,9 @@ RECONSTRUCTED = {
     "08243e10",  # CEditable::SetForbidden(uchar, void const*, EEditSource)
     "08243e20",  # CEditable::NoGetCallBack(uchar, void*)
     "08243e30",  # CEditable::NoSetCallBack(uchar, void const*, EEditSource)
+    # -- round 63 (2026-07-29, solo): CLocaleManager's real dtor (ground
+    # truth's CKeyboardLayoutManager::~CKeyboardLayoutManager()).
+    "08079ac0",  # CLocaleManager::~CLocaleManager()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

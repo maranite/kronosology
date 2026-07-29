@@ -106,6 +106,19 @@ private:
 	 */
 	CLocaleManager();
 
+public:
+	/* round 63 (2026-07-29, solo): real dtor, found via a done>0/pending>0
+	 * manifest scan. Ground truth's `~CKeyboardLayoutManager()` (.text+0x08079b80,
+	 * 30 bytes) -- `CLocaleManager` stands in directly for it, see this class's
+	 * own header comment -- resets the vtable slot to `PTR__TVector_08e81c48`
+	 * (same symbol the ctor now installs) then `operator delete`s `mBegin`
+	 * (the TVector's own backing array, freed unconditionally -- ground truth
+	 * does not null-check it first, matching `operator delete(NULL)`'s own
+	 * defined no-op behavior when the array was never grown).
+	 */
+	~CLocaleManager();
+
+private:
 	static CLocaleManager *sm_poInstance;
 
 	void  *mVtbl;
