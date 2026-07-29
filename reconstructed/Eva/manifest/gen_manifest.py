@@ -3944,6 +3944,30 @@ RECONSTRUCTED = {
     "080b4460",  # CChunkRootWithSeekWithCRC::HasCRCSubChunk() const
     "080b4890",  # CCrc32::CCrc32(unsigned long, unsigned long)
     "080b4930",  # CCrc32::PutBuffer(unsigned char*, unsigned long)
+
+    # 2026-07-29 (solo, no subagents): CFileKscList (file_ksc_list.h/.cpp) --
+    # KSC-list config-record reader/writer, sibling of CKscSampleManager.
+    # 18/26 methods (ctor/dtor + the "string"/"byte" field accessors +
+    # record framing) -- ReadFilePath/SaveFilePath/RefreshFilePath/
+    # GetDeviceInfo/Load()/Save() deferred (see file_ksc_list.h).
+    "08420350",  # CFileKscList::CFileKscList()
+    "08420360",  # CFileKscList::~CFileKscList()
+    "084203f0",  # CFileKscList::ReadVendorId(char*)
+    "08420440",  # CFileKscList::ReadProductId(char*)
+    "08420490",  # CFileKscList::ReadSerialNumber(char*)
+    "084204e0",  # CFileKscList::ReadAutoLoad(char*)
+    "08420530",  # CFileKscList::ReadBitDepth(char*)
+    "08420580",  # CFileKscList::ReadLoadMethod(char*)
+    "08420370",  # CFileKscList::ReadHeaderId()
+    "08420fc0",  # CFileKscList::ReadDot()
+    "08421030",  # CFileKscList::WriteDot()
+    "08420c50",  # CFileKscList::SaveHeaderId()
+    "08420ca0",  # CFileKscList::SaveVendorId(char const*)
+    "08420cf0",  # CFileKscList::SaveProductId(char const*)
+    "08420d40",  # CFileKscList::SaveSerialNumber(char const*)
+    "08420d90",  # CFileKscList::SaveAutoLoad(char const*)
+    "08420df0",  # CFileKscList::SaveBitDepth(char const*)
+    "08420e50",  # CFileKscList::SaveLoadMethod(char const*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

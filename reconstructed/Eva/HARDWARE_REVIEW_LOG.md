@@ -1463,4 +1463,45 @@ should know they exist and are untested/unmodeled, not silently absent.
   point, presumably somewhere in the still out-of-scope
   `CLoadSoundFontMgr`/`CPCMManager`/`CDiskUtil` cluster or a sibling) not
   independently traced this session either. Eva manifest 2652 -> 2700/37,795
-  (7.144%), commit pending.
+  (7.144%), commit 1cb22b2.
+
+- **CFileKscList, 18/26 methods (`file_ksc_list.h`/`.cpp`), 2026-07-29 (solo,
+  no subagents -- session-wide 200-subagent dispatch cap hit)**. Sibling of
+  the much larger `CKscSampleManager` (68-method singleton, own separate
+  survey, not attempted this pass) -- confirmed via a real `Load()` call
+  into `CKscSampleManager::GetInstance()`/`AddAutoLoadKsc()`. This class's
+  own per-field accessors are self-contained: every one marshals args and
+  calls through the project-wide `FMApi` god-object's vtable, slot `+0x1bc`
+  ("read a positional field") / `+0x1c0` ("write a positional field"), both
+  `int(*)(void*, void* handle, void* buf, unsigned int* len)`. `mHandle`
+  (offset 0, the only field this pass models) is passed as `handle` on
+  EVERY call -- not a per-field key, a shared identifier for one already-open
+  KSC-list record. Combined with `ReadDot`/`WriteDot` consuming/emitting a
+  literal `"\r\n"` and `ReadHeaderId` comparing against a literal `"#KSC"`
+  4-byte magic (both confirmed via a direct `.rodata` byte dump at
+  `0x8ef2e20`: `0d 0a 00 23 4b 53 43 00` = `"\r\n\0#KSC\0"`), this is a
+  CRLF-delimited flat text record read/written sequentially through an
+  already-open handle, not a keyed random-access profile API -- `mHandle`'s
+  own real type/how it's opened is NOT modeled (that's `Load()`/`Save()`'s
+  job, deferred below), every accessor here just forwards it through
+  faithfully, matching this project's established "god-object opaque
+  forwarding" convention (`config_manager.cpp`'s own `FMApiGetDriverFactory`/
+  `FMApiRegisterDriver` wrappers, reused/extended with the same style for
+  these 2 new slots).
+
+  Deferred, documented, not fabricated: `ReadFilePath`/`SaveFilePath` (a
+  length-prefixed-string protocol with a real odd/even padding-byte branch
+  via `CMemoryAccessor::ReadLittle16Bit` -- understood from disassembly but
+  not landed this pass, budget reasons), `RefreshFilePath`/`GetDeviceInfo`
+  (both call further into `CDeviceMgr`, unmodeled), and `Load()`/`Save()`
+  themselves (call into `CKscSampleManager` AND the project-wide
+  out-of-scope growable `CZ` container -- the exact same trap
+  `korg_file.h`'s own header comment already documents for the rejected
+  `CFileKge`). Real host KAT (`verify/test_file_ksc_list.cpp`, 9 sections)
+  uses a fake FMApi vtable backing a tiny in-memory flat-record buffer
+  (same established fake-vtable-object convention as
+  `test_config_manager_create_modules.cpp`), including a full sequential
+  multi-field record round-trip (`#KSC`, `\r\n`, VendorId, `\r\n`,
+  AutoLoad, `\r\n`) to exercise the CRLF-framing hypothesis end-to-end, not
+  just field-by-field. Eva manifest 2700 -> 2718/37,795 (7.191%), commit
+  pending.
