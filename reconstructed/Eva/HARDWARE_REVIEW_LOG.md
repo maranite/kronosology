@@ -2927,3 +2927,52 @@ corrected). `make verify` full suite green (107 test binaries, exit
 
 No real-HW test needed -- `mVtbl` confirmed never dispatched through
 anywhere in this project.
+
+## Round 64 (2026-07-29, solo): manifest inline-body blind spot, CIn/COut/CInOut/CNullStr/CMemory (38 addresses)
+
+Found via the same done>0/pending>0 manifest scan. `CSysExGlobal::
+GetTotalSizeForExport`/`CSysExRegion::GetNumObjectsForDigest` (each
+the sole pending method on an otherwise-complete class) were checked
+first and correctly ruled OUT: both decompiles carry Ghidra's own
+"Could not recover jumptable" warning (red flag #1), matching the
+ALREADY-documented "GetNumObjectsForDigest() deliberately not
+credited... real body is a genuinely unresolved indirect call"
+precedent from the `CSysExSong` family (sysex_objects.h) -- not a new
+finding, correctly deferred, not re-litigated.
+
+The real find: `stream_family.h`'s `CIn`/`COut`/`CInOut`/`CNullStr`/
+`CMemory` cluster (already 100% reconstructed as ordinary C++ virtual
+multiple inheritance, per that file's own extensive header comment)
+had 38 "pending" manifest addresses left over. Read a representative
+sample directly from ground truth -- EVERY one of them is Ghidra's own
+decompile literally commenting itself `/* virtual thunk to X::Method()
+*/` or `/* non-virtual thunk to X::~X() */`: compiler-generated
+vbase-offset-adjustment stubs for the SAME already-implemented methods,
+not new code. Independently CONFIRMED (not just theorized) by running
+`nm -C` on the already-built `objs/verify/test_stream_family` binary:
+every one of these exact thunk shapes is already genuinely emitted by
+the existing header source with zero changes needed. Classic "manifest
+inline-body blind spot" (same class of gap as the round-58/task-120
+manifest fixes) -- a manifest-completeness correction, not new RE work.
+
+**Near miss correctly avoided**: 6 OTHER "CStream::"-prefixed pending
+addresses (`SetPositionRelative`/`ReadLine`/two `~CStream`/
+`SetEndianness`/`Rewind`/`Forward`, `0x08e2a4a0` etc.) looked like they
+belonged to the SAME already-reconstructed `CStream` at first glance --
+`nm -C` on the real ground-truth binary reveals they actually belong to
+a completely different, NAMESPACE-QUALIFIED `STGStream::CStream`, an
+unrelated class this project has never touched. This project's manifest
+qualified-name matching strips namespace prefixes, which is exactly
+the kind of name-collision this project has hit before (the Eva/OA.ko
+"mangled-name grep dead-code bug" class, tasks #178/#180). Correctly
+identified and left pending -- NOT added to this round's batch.
+
+Added all 38 confirmed-thunk addresses to `gen_manifest.py`'s
+`RECONSTRUCTED` set. `make verify` full suite green (107 test
+binaries, exit 0), zero regressions (no source changed, manifest-only
+fix). Eva manifest 3183 -> 3221/37,795 (8.522%) -- the single largest
+manifest jump this session, all from a pure documentation-completeness
+fix rather than new reconstruction.
+
+No real-HW test needed -- purely a manifest bookkeeping fix, zero
+behavior change.

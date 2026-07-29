@@ -4505,6 +4505,33 @@ RECONSTRUCTED = {
     # -- round 63 (2026-07-29, solo): CLocaleManager's real dtor (ground
     # truth's CKeyboardLayoutManager::~CKeyboardLayoutManager()).
     "08079ac0",  # CLocaleManager::~CLocaleManager()
+    # -- round 64 (2026-07-29, solo): manifest inline-body blind spot, CIn/
+    # COut/CInOut/CNullStr/CMemory (stream_family.h). All 38 of these are
+    # compiler-generated "virtual thunk to X::Method()" / "non-virtual
+    # thunk to X::~X()" vbase-offset-adjustment stubs -- confirmed via
+    # ground-truth decompile (every single one literally comments itself
+    # "virtual thunk to ..."), and independently confirmed already
+    # genuinely EMITTED by the existing header's own ordinary C++ virtual
+    # multiple inheritance (`nm -C objs/verify/test_stream_family` shows
+    # the identical thunk set already present in the built binary -- no
+    # new source needed, this is a manifest-completeness fix only, same
+    # class of gap as the round-58/-120 manifest fixes).
+    #
+    # NEAR MISS avoided: 6 other "CStream::" pending addresses
+    # (SetPositionRelative/ReadLine/~CStream x2/SetEndianness/Rewind/
+    # Forward, 08e2a4a0 etc.) are NOT this class -- `nm -C` on the real
+    # binary shows they belong to a completely different, unrelated
+    # `STGStream::CStream` (namespace-qualified), not the plain
+    # `::CStream` already reconstructed here. Left pending, not added.
+    "0804cfb0", "0804d1f0", "080a1ea0",              # CIn
+    "0804d010", "0804d110", "080a1f40",              # COut
+    "080a1fb0", "080a1fc0", "080a2060", "080a2080", "080a20e0", "080a20f0",  # CInOut
+    "080a1910", "080a1a40", "080a1aa0", "080a1ac0", "080a1ae0", "080a1b00",
+    "080a1b70", "080a1b80", "080a1be0", "080a1c40", "080a1c50", "080a1cc0",
+    "080a1cd0",                                       # CNullStr
+    "080a1090", "080a10f0", "080a1110", "080a1130", "080a1150", "080a11f0",
+    "080a1210", "080a1340", "080a1500", "080a1580", "080a1590", "080a1610",
+    "080a1620",                                       # CMemory
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
