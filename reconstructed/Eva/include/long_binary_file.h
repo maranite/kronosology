@@ -112,6 +112,93 @@ public:
 	 * Write/Seek/Tell above) -- see file_operation_stub.cpp for the host
 	 * KAT-test stand-in. */
 	static const char *GetLinuxRemapPath(EDevice_Id id);
+
+	/*
+	 * Round 54 batch (2026-07-29, solo, 24 methods -- 23 landed here,
+	 * `GetLinuxRemapPath` above already had a slot): a fresh `nm -C`
+	 * sweep found `CFileOperation` is a REAL class with 126 methods in
+	 * the actual binary, not merely the 7-method "out-of-scope slice"
+	 * this header originally modeled. These 23 are genuine, fully
+	 * reconstructed bodies (not host stand-ins) -- pure static-member
+	 * reads/writes, no calls into unreconstructed code. See
+	 * src/init/file_operation.cpp for the bodies.
+	 *
+	 * DEFERRED, 3 reasons (102 of 126 methods, not implemented this
+	 * pass): `ConvertError`/`ConvertFilesysError` index into real
+	 * compiler-generated switch/jump tables (`CSWTCH_423`/`CSWTCH_426`)
+	 * whose actual `.rodata` contents aren't cheaply recoverable;
+	 * `GetNumOfBlockOnMedium` forwards to `CDDriverIO::
+	 * GetNumOfBlockOnMedium`, itself not reconstructed (outside
+	 * CDDriverIO round 52's own safe subset); and ~87 more (including
+	 * `SortDir`/`OpenNextpath`/`CloseLastSession`/`Finalize`/
+	 * `TestDeviceChg`/`TestDiskChg`/`Unmount`/`Flush`/`Chmod`/`Chsize`/
+	 * `GetMaxClusterno`/`TotalFreeCluster`) all funnel into
+	 * `CFileOperation::Execute()`, a genuinely massive 23,258-byte
+	 * central dispatcher -- by far the largest single method seen in
+	 * either binary this session -- not attempted this pass; a
+	 * dedicated future effort on `Execute()` itself would unblock this
+	 * whole family at once.
+	 */
+	static unsigned char *Get1MMemory();
+	static unsigned char *Get900KMemory();
+	static int IsDirectExecCommand();
+	static void EnableDirectIOCall(int enable);
+	static void SetForceDiskChangeTestMode(int enable);
+	static void EnableWaitPIDSignal(int enable);
+	static void SetWaitTimeAfterSync(int seconds);
+	static void SetForceDiskChangeTestEvent();
+	static int GetForceDiskChangeTestEvent();
+
+	static int Readblk(int deviceId);
+	static int Writeblk(int deviceId);
+
+	static void SetAsUsedScsiGenericNo(int deviceId, int value);
+	static void SetAsUsedUSBDirectDeviceId(int deviceId, int value);
+	static void SetAsUsedUSBDirectDeviceIndex(int deviceId, int value);
+	static int GetUSBDirectAccessDeviceIndex(int deviceId);
+	static int GetCDDeviceIndex(int deviceId);
+	static void SetDiskInfoDirty(int deviceId);
+	static int GetDiskInfoDirty(int deviceId);
+	static int GetUSBDiskNumber(int index);
+	static void SetUSBDiskNumber(int index, int value);
+	static const char *GetLinuxMountPoint(int deviceId);
+	static unsigned int GetResultBlocknoGetcurpos(int *audioStatus, unsigned char *trackNo);
+	static void EnableFileCache(int enable);
+
+	/* Public (not private) so host KAT tests can set up/observe state
+	 * directly -- same convention as CDDriverIO round 52's own public
+	 * statics. Sizes/bounds are INFERRED from confirmed usage in the 23
+	 * landed methods (explicit bounds checks where present, e.g.
+	 * `sm_bIsDiskInfoDirty`'s `param_1 < 10`), not proven by exhaustive
+	 * caller analysis. Several arrays (`sm_iScsiGenericNoMap`,
+	 * `sm_iUSBDirectDeviceIdMap`, `sm_iUSBDirectAccessDeviceIndex`,
+	 * `sm_iCDDeviceIndex`) have NO explicit bounds check in the methods
+	 * that write them; sized at 10 to match the already-established
+	 * `EDevice_Id` 0..9 device-count convention confirmed via
+	 * `CDDriverIO::Initialize()`'s own real construction loop (round
+	 * 52).
+	 */
+	static unsigned char s_ucMem;
+	static unsigned char s_900kMem;
+	static int sm_bExecDirectCom;
+	static int directIOCall;
+	static int sm_bForceDiskChangeTestMode;
+	static int s_bWaitPIDSignal;
+	static int sSecondToWait;
+	static int sm_bForceDiskChangeTestEventNotify;
+	static int sm_iScsiGenericNoMap[10];
+	static int sm_iUSBDirectDeviceIdMap[10];
+	static int sm_iUSBDirectAccessDeviceIndex[10];
+	static int sm_iCDDeviceIndex[10];
+	static int sm_bIsDiskInfoDirty[10];
+	static int sm_iUSBDiskNumber[127];
+	static int s_iPrevUSBDiskNumber[127];
+	static char s_akcLinuxMountPoint[10][15];
+	static int s_eAudioSts;
+	static unsigned char s_ucTrackNo;
+	static unsigned int s_ulBlockNo;
+	static unsigned char *sm_poFileCache;
+	static int sm_bIsFileCacheEnable;
 };
 
 class CLongBinaryFile {

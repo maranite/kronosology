@@ -2400,3 +2400,67 @@ regressions. Eva manifest 3091 -> 3104/37,795 (8.213%).
 
 Real-HW test that would help: none identified -- pure in-memory
 bitmask accessor logic, no hardware I/O surface of its own.
+
+## Round 54 (Eva, solo, 2026-07-29): CFileOperation 23-method batch
+-- a real bug in an EARLIER round's "out of scope" call, caught and
+fixed
+
+**Genuine bug found and fixed this round**: a fresh `nm -C` sweep for
+CPcgSaveInfo/CDDriverIO follow-ups found that `CFileOperation` --
+already declared in `long_binary_file.h` and explicitly documented
+there as "the out-of-scope global file manager... not reconstructed
+here" -- is actually a REAL class with 126 methods in the binary, not
+merely the 7-method extern-only slice (`Open`/`Close`/`Read`/`Write`/
+`Seek`/`Tell`/`GetLinuxRemapPath`) that earlier rounds modeled for
+`CLongBinaryFile`/`CAudioFile`/`CKorgPath`'s own needs. Started this
+round by writing a BRAND NEW header (`include/file_operation.h`)
+declaring a second, incompatible `class CFileOperation` -- caught
+before committing (the build "succeeded" only because no single
+translation unit ever included both headers together, but this was
+still a live One-Definition-Rule violation waiting to break the
+first time some future TU included both) via `nm -C`-driven
+suspicion that a symbol this common couldn't possibly be untouched.
+Fixed by deleting the duplicate header and instead EXTENDING the
+existing `CFileOperation` declaration in `long_binary_file.h` with
+the 23 newly-reconstructed methods, leaving the original 7-method
+extern-only slice (including its own already-deferred
+`GetLinuxRemapPath`, backed by a documented host-stub in
+`file_operation_stub.cpp`) completely untouched.
+
+Landed 23 of 126 methods -- pure static-member reads/writes, no
+calls into unreconstructed code (matching the exact scope discipline
+already used for `CDDriverIO`/`CPcgSaveInfo`). Real struct/array
+sizes are INFERRED from confirmed usage (explicit bounds checks
+where present, e.g. `sm_bIsDiskInfoDirty`'s `param_1 < 10`); 4 device-
+indexed arrays with no explicit bounds check sized at 10 to match
+the already-established `EDevice_Id` 0..9 convention (`CDDriverIO::
+Initialize()`, round 52).
+
+DEFERRED, 3 reasons (102 of 126 methods): `ConvertError`/
+`ConvertFilesysError` index into real compiler-generated switch/jump
+tables (`CSWTCH_423`/`CSWTCH_426`) whose actual `.rodata` contents
+aren't cheaply recoverable -- same reason as `CPcgSaveInfo` round
+53's 16 CSWTCH-dependent methods. `GetNumOfBlockOnMedium` forwards
+to `CDDriverIO::GetNumOfBlockOnMedium`, itself outside round 52's
+own safe subset. The remaining ~87 methods (including `SortDir`/
+`OpenNextpath`/`CloseLastSession`/`Finalize`/`TestDeviceChg`/
+`TestDiskChg`/`Unmount`/`Flush`/`Chmod`/`Chsize`/`GetMaxClusterno`/
+`TotalFreeCluster`) all funnel into `CFileOperation::Execute()`, a
+genuinely massive 23,258-byte central dispatcher -- by far the
+largest single method seen in either binary this session -- not
+attempted this pass; landing these thin wrappers would need
+`Execute()` to exist at link time for the full-binary
+`eva_boot_test` target, and faking its body would misrepresent
+unreconstructed code as real. A dedicated future effort on
+`Execute()` itself (likely several rounds on its own) would unblock
+this whole family at once.
+
+Real host KAT (32 checks, new `verify/test_file_operation.cpp`).
+`make verify` full suite green (real `-m32` build) -- including the
+pre-existing `test_long_binary_file`/`test_audio_file`/
+`test_korg_path` targets that already link `CFileOperation`'s
+extern-only slice, confirmed unaffected by this round's additions.
+Eva manifest 3104 -> 3127/37,795 (8.274%).
+
+Real-HW test that would help: none identified -- pure field-read/
+write accessor logic, no hardware I/O surface of its own.
