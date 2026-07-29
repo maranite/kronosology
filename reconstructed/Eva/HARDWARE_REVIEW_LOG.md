@@ -2274,3 +2274,74 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified beyond what round 49
   already flagged.
+
+## Round 52 (Eva, solo, 2026-07-29): CDDriverIO 13-method batch +
+  USTGAPIControl::SysLogPrintf
+
+  New fresh cluster: `CDDriverIO`, the static (no-instance) optical/
+  ATA-media driver-dispatch class beneath `CScsiDriverBase`
+  (`scsi_driver_base.h`'s own "the deeper optical-media driver
+  cluster" note -- the natural next target flagged by that round).
+  85 `nm -C` methods total; this round lands the 13 that are
+  genuinely unambiguous after individual per-method review.
+
+  Every dispatching method reads an unreconstructed `CAtaApi`/
+  `CScsiApi` instance's own +0x0 vtable pointer, indexes a fixed
+  byte offset into that vtable, and calls through it -- same raw-
+  indirect-dispatch treatment already established for OA.ko's
+  `CSTGProgramSlot` vtable slot 7, reused here for the first time in
+  Eva (`DispatchExecuteCommand()` in `dd_driver_io.cpp`).
+  `sm_poDriverApi[10]`/`devstat_tab[10]` confirmed as real 10-entry
+  arrays via `CDDriverIO::Initialize()`'s own construction loop
+  (`CDiskUtil::GetNumActiveSATADrives()`-bounded, indices 0..9; not
+  itself reconstructed this pass -- needs both `CAtaApi`/`CScsiApi`
+  first).
+
+  `scsi_req_sense()` is a genuine self-recursive SCSI REQUEST SENSE
+  retry state machine (senseKey/ASC/ASCQ against 3 contiguous real
+  `.bss` bytes) -- transcribed faithfully including its "recurse for
+  side effects only, discard the return value" shape (the outer
+  frame's own response-buffer local is never touched by the
+  recursive call, so ground truth's own comma-expression re-check is
+  a tautology every time it's reached; reproduced as-is rather than
+  "simplified").
+
+  Needed `USTGAPIControl::SysLogPrintf` (new class, 1 of 55 methods)
+  to unblock `scsi_req_sense`'s own logging calls -- a trivial
+  `va_list`/`vsyslog(LOG_WARNING, ...)` wrapper.
+
+  DEFERRED, 3 distinct reasons (see dd_driver_io.h's own header
+  comment for full detail):
+  1. Ghidra itself flags the call site as unrecovered ("Could not
+     recover jumptable... Too many branches", a trailing indirect
+     call with NO visible arguments -- not a plausible real virtual
+     call): `GetTypeOfDevice`, `GetTargetId`, `SetTargetId`,
+     `SetTimeout`, `EnableAsyncMode`, `IsAsyncCommandCompleted`.
+  2. The response buffer passed to the vtable dispatch has a
+     Ghidra-split local that is READ after the call but never
+     WRITTEN anywhere in the visible body (e.g. `test_wp`'s
+     `local_27`), meaning the real callee writes further into the
+     buffer than the call site alone can confirm: `scsi_removal_lock`,
+     `test_wp`, `scsi_sleep`, `WakeupDevice`.
+  3. Depends on constructing an unreconstructed `CDeviceInfo` object
+     whose result is then never read in the visible body:
+     `test_devicechg`.
+  Also deferred: 6 methods (`InitProcessBar`/`UpdateMsg`/
+  `EnableProgress`/`DoneProgress`/`SetProcessBar`/`EnableCancelBtn`)
+  that forward straight to an unreconstructed `CFMBrowseForm` (205
+  pending methods of its own).
+
+  Real host KAT (28 checks, new `verify/test_dd_driver_io.cpp`) --
+  mocks the CAtaApi/CScsiApi target via a fake object + vtable buffer,
+  with a bounded "first N calls of this opcode return 0" mock so the
+  genuinely-recursive `scsi_req_sense` paths terminate instead of
+  recursing without bound (uniform mock responses would make several
+  branches recurse exponentially -- documented in the test file
+  itself). `make verify` full suite green (real target-ABI `-m32`
+  build), zero regressions. Eva manifest 3077 -> 3091/37,795 (8.178%).
+
+  Real-HW test that would help: dump `sm_poDriverApi[i]`'s actual
+  vtable layout via a live SATA/optical read to confirm the fixed
+  byte offsets (`+0x8`/`+0xc`.../`+0x20`) used throughout this whole
+  cluster, and to properly recover the 6 "Could not recover
+  jumptable" methods deferred above.

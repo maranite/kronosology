@@ -4382,6 +4382,21 @@ RECONSTRUCTED = {
     "08942ae0",  # CControlSurface::EditPan(int, int)
     "0894eb70",  # CControlSurface::EditChannelStripKnob(int, int, EKnobFader)
     "0895c5c0",  # CControlSurface::SetEnabledMIDITrack()
+    # -- round 52 (2026-07-29, solo): CDDriverIO 13-method batch + USTGAPIControl::SysLogPrintf --
+    "08314860",  # CDDriverIO::HasInternalCDRW()
+    "0830d5c0",  # CDDriverIO::EnableDevInfoCache(int)
+    "08314650",  # CDDriverIO::SetFMBrowseToReport(void*)
+    "08314660",  # CDDriverIO::ClearFMBrowseToReport()
+    "0830d6c0",  # CDDriverIO::warmupdrive(EDevice_Id)
+    "0830d6d0",  # CDDriverIO::cooldowndrive(EDevice_Id)
+    "083133c0",  # CDDriverIO::rate2speed(unsigned short)
+    "08313330",  # CDDriverIO::speed2rate(unsigned char)
+    "0830e710",  # CDDriverIO::scsi_mode_sel(EDevice_Id, unsigned short)
+    "0830d940",  # CDDriverIO::prechkdiskchg(EDevice_Id)
+    "08313870",  # CDDriverIO::GetProgress(EDevice_Id, int*)
+    "0830d990",  # CDDriverIO::ExecuteCommand(EMsgTypScsi, SDriverIOPbuf*)
+    "0830d6e0",  # CDDriverIO::scsi_req_sense(EDevice_Id)
+    "08e1c120",  # USTGAPIControl::SysLogPrintf(char const*, ...)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
