@@ -1823,3 +1823,52 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified -- same rationale as
   the sibling families above.
+
+- **CESDiskCommandTask, 84/95 tractable methods
+  (`es_disk_command_task.h`/`stg_disk_command_task.cpp`), round 44,
+  2026-07-29 (solo, no subagents)**. Fresh manifest survey filtered to
+  pending methods with no `in_stack_ffffffXX`/`unaff_`/"Could not
+  recover jumptable" warnings, grouped by class, sorted by average
+  method size -- surfaced `CESDiskCommandTask` (95 pending methods,
+  avg 89 bytes) as an unclaimed cluster.
+
+  84 of its 95 methods share one exact 44-byte shape (confirmed by
+  reading every one of the 84 ground-truth decompiles individually,
+  not pattern-guessed): write a literal opcode constant to `this+0xa8`,
+  call the already-real `CTask::SetMask(0)` (task.h/task.cpp, round-49
+  batch), return 1. Modeled as real single inheritance from `CTask`
+  (matching every other `CTask`-derived class in this project, e.g.
+  `edit_task.h`) with an opaque 0x2c-byte gap at `+0x7c..+0xa8`
+  standing in for an unmodeled `CEditable` base plus
+  `CESDiskCommandTaskBase`'s own fields, then `mCommandOpcode` at
+  `+0xa8`.
+
+  Deliberately NOT attempted this round: the other 11 methods (2 ctor
+  entries, 3 dtor variants, `ExecuteLoadMultiFile`/
+  `ExecuteMakeAudioCommand`/`ExecuteUtilityCommand`/
+  `ExecuteSaveCommand`/`ExecuteLoadCommand`/`Exec`). The real ctor
+  chains through `CESDiskCommandTaskBase::CESDiskCommandTaskBase`
+  (178 bytes, its own 8-method base class, not yet reconstructed) and
+  `CEditable::AddDescriptorsMap` against a real `descCESDiskCommandTask`
+  SDescriptor table whose contents are unrecovered -- out of scope for
+  a single round, left for a future dedicated pass.
+
+  Test-only default-constructible via `CTask`'s own protected Tier-B
+  ctor (task.h, established for exactly this "CTask-derived class,
+  real ctor not reconstructed yet" scenario by `CPanelIfcTask`'s
+  earlier precedent) -- none of these 84 methods touch the unmodeled
+  gap or any vtable, so this is safe.
+
+  Real host KAT (`verify/test_es_disk_command_task.cpp`, 12 checks,
+  spot-checking first/last/all-zero/out-of-sequence opcodes across the
+  full address range plus the shared `CTask::SetMask` side effect).
+  `make verify` full suite green (all pre-existing tests unaffected --
+  new class links cleanly with zero new externs, notable given Eva's
+  `make verify` links every test against the full `$(OBJ)` tree). Eva
+  manifest 2864 -> 2948/37,795 (7.800%).
+
+  Real-HW test that would help: none identified -- pure host-side
+  literal-table + already-real `CTask::SetMask` logic, no
+  hardware-observable behavior beyond what the disk-command dispatcher
+  (deferred `ExecuteLoadCommand`/`ExecuteSaveCommand`) would eventually
+  consume.
