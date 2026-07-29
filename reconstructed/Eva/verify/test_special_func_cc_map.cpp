@@ -143,6 +143,46 @@ int main()
 		check("CGlobal RTKnobFunc[2] round trip (6)", chan == 6);
 	}
 
+	printf("[5] CGlobal round 57 batch: InitializeSetListParams/InitializeDrumTrackParams/\n"
+	       "    InitializeSpecialCCMapping/DumpSpecialFuncCCMapSettings\n");
+	{
+		CGlobal g;
+		unsigned char *raw = reinterpret_cast<unsigned char *>(&g);
+
+		/* real: mOpaqueHead[0x602a]/[0x602b] low 5 bits set, high 3 bits
+		 * preserved -- verify both the set-bits and the preserve-high-bits
+		 * halves of the real bitwise-OR-with-mask body.
+		 */
+		raw[0x602a] = 0xA5; /* 1010 0101 -- high 3 bits 101, low 5 bits arbitrary */
+		g.InitializeSetListParams();
+		check("InitializeSetListParams: low 5 bits set to 6, high 3 preserved",
+		      raw[0x602a] == ((0xA5 & 0xe0) | 6));
+
+		raw[0x602b] = 0x40; /* 0100 0000 -- high 3 bits 010 */
+		g.InitializeDrumTrackParams();
+		check("InitializeDrumTrackParams: low 5 bits set to 9, high 3 preserved",
+		      raw[0x602b] == ((0x40 & 0xe0) | 9));
+
+		/* Dirty the embedded CSpecialFuncCCMap, then confirm
+		 * InitializeSpecialCCMapping() resets it to the same real
+		 * (0x10, 0xff) default already confirmed in [1] above.
+		 */
+		char dirtyCc = 0x7f;
+		g.SetProgramUpCCAssign(&dirtyCc);
+		g.InitializeSpecialCCMapping();
+		unsigned char chan2;
+		char cc2;
+		g.GetProgramUpMIDIChannel(&chan2);
+		g.GetProgramUpCCAssign(&cc2);
+		check("InitializeSpecialCCMapping resets embedded map to defaults",
+		      chan2 == 0x10 && (unsigned char)cc2 == 0xff);
+
+		g.DumpSpecialFuncCCMapSettings(); /* real: pushes every slot via
+		                                    * USTGAPIGlobal::UpdateGlobalParameter
+		                                    * -- confirm it doesn't crash */
+		check("DumpSpecialFuncCCMapSettings doesn't crash", true);
+	}
+
 	printf("\n%s (%d check%s failed)\n", g_fail ? "FAILED" : "PASSED",
 	       g_fail, g_fail == 1 ? "" : "s");
 	return g_fail ? 1 : 0;

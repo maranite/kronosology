@@ -2572,3 +2572,62 @@ green. Eva manifest 3138 -> 3153/37,795 (8.342%).
 
 Real-HW test that would help: none identified -- confirmed no-ops,
 no hardware I/O surface of their own.
+
+## Round 57 (Eva, solo, 2026-07-29): CGlobal 4-method batch
+
+`CGlobal` (101 forwarder methods already reconstructed onto its
+embedded `CSpecialFuncCCMap` sub-object) had 4 real pending methods
+surfaced by this round's survey: `InitializeSetListParams`/
+`InitializeDrumTrackParams` (each a real self-contained bitfield
+write into `mOpaqueHead` -- **were already inline-declared in
+`cglobal.h` as empty `{}` no-op stand-ins**, migrated there from
+`storage_converter_ext_stubs.h`'s own "declare the minimum viable
+slice, no-op body" family purely so `CGlobalConverter::
+Ext0000toInt0002()` could compile/link; new ground truth this round
+gave their real bodies, PROMOTED from placeholder to real rather than
+left alone -- `mOpaqueHead[0x602c]` already spans far enough to cover
+both offsets, no size change needed), plus `InitializeSpecialCCMapping`/
+`DumpSpecialFuncCCMapSettings` (both thin forwards to the already-
+reconstructed `CSpecialFuncCCMap::Initialize()`/`DownloadAllToSTG()`).
+`CGlobal::HasMatchingMapping` stays deferred -- its callee,
+`CSpecialFuncCCMap::HasMatchingMapping` (1785B), is itself still
+unreconstructed.
+
+**Discrepancy found, NOT resolved this round, flagged for dedicated
+follow-up**: `CControllerTracer::_GLOBAL__I_CControllerTracer`
+(.text+0x08093030, a real global-constructor function, same
+`__attribute__((constructor))` idiom as `mains.cpp`'s own
+`global.constructors.keyed.to.*` family) writes `kInvalidBytePair =
+{0xff, 0xff}` and `kPitchBendDefault = {0x40, 0}`. This directly
+contradicts `param_tracer.h`'s own existing, explicitly-verified
+claim that `kInvalidBytePair` is `.bss` (NOBITS) with "no static
+initializer exists anywhere in the binary for this symbol," giving a
+real runtime value of `{0,0}` -- and `param_tracer.cpp` currently
+DEFINES it as `const SBytePair kInvalidBytePair = { 0, 0 };`, a
+`const` object a constructor could not legally write to as modeled.
+Two real, independently-confirmed ground-truth facts about the same
+global disagree. Also independently, `mains.cpp`'s own
+`ConstructRTRouterApiInstance()` (a DIFFERENT constructor,
+.text+0x080878a0) was ALREADY found in an earlier round to write
+these same 2 globals too and was deliberately left unmodeled ("not
+modeled since nothing in this reconstruction reads either") -- so
+this may be the true count of REAL redundant writers is 2 (not 1),
+or one of the two prior findings mis-attributed a byte range. Not
+guessed at or silently reconciled here -- needs a dedicated pass that
+re-reads the real `.bss`/`.data` layout at that address directly
+before touching either `kInvalidBytePair`'s `const`-ness or adding a
+3rd static initializer. `CControllerTracer::
+_GLOBAL__I_CControllerTracer` itself stays pending.
+
+Real host KAT (4 new checks appended to the existing
+`verify/test_special_func_cc_map.cpp`'s section [4], including a
+before/after high-bits-preserved check for both promoted bitfield
+writes via a raw-offset `reinterpret_cast`, matching this project's
+established raw-offset-check convention). `make verify` full suite
+green (105 targets), zero regressions (no heisenbug flake this run).
+`make objs` (real `-m32` target-ABI compile) green. Eva manifest
+3153 -> 3157/37,795 (8.353%).
+
+Real-HW test that would help: none identified -- pure bitfield
+writes + already-verified forwarders, no hardware I/O surface of
+their own.

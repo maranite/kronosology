@@ -4463,6 +4463,11 @@ RECONSTRUCTED = {
     "08de9150",  # CStorageConverterBase::Int000DtoExt000D(CConvertStorageParam const&) const
     "08de9160",  # CStorageConverterBase::Int000EtoExt000E(CConvertStorageParam const&) const
     "08de9170",  # CStorageConverterBase::Int000FtoExt000F(CConvertStorageParam const&) const
+    # -- round 57 (2026-07-29, solo): CGlobal 4-method batch --
+    "08a0abb0",  # CGlobal::InitializeSetListParams() (promoted from no-op stub to real body)
+    "08a0abd0",  # CGlobal::InitializeDrumTrackParams() (promoted from no-op stub to real body)
+    "08a0abf0",  # CGlobal::InitializeSpecialCCMapping()
+    "08a0f380",  # CGlobal::DumpSpecialFuncCCMapSettings() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

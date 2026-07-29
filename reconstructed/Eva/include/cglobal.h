@@ -31,19 +31,29 @@
 
 class CGlobal {
 public:
-	/* Stubs consolidated here from storage_converter_ext_stubs.h (2026-07-28, same
+	/* Originally stubbed here from storage_converter_ext_stubs.h (2026-07-28, same
 	 * batch as this file) to keep a single, ODR-legal `class CGlobal` definition --
 	 * `CGlobalConverter::Ext0000toInt0002()` (storage_format_converters.cpp) calls
-	 * both on a freshly-migrated object. Their own real bodies are not modeled here
-	 * either (same "no-op, clearly flagged" status as before the consolidation).
+	 * both on a freshly-migrated object. PROMOTED TO REAL BODIES, round 57
+	 * (2026-07-29, solo): both are real, self-contained bitfield writes into
+	 * `mOpaqueHead` (well within its already-modeled `[0..0x602c)` range, no size
+	 * change needed) -- `InitializeSetListParams` sets `mOpaqueHead[0x602a]`'s
+	 * low 5 bits to 6 (keeping the high 3), `InitializeDrumTrackParams` sets
+	 * `mOpaqueHead[0x602b]`'s low 5 bits to 9, both preserving the high 3 bits.
 	 * NICE CROSS-CHECK: that converter's own header comment independently found the
 	 * next real CGlobal field starts at `+0x607b` -- exactly `0x602c + CSpecialFunc
 	 * CCMap::kSize (0x4f)`, i.e. this file's own `mSpecialFuncCCMap` sub-object and
 	 * that unrelated reconstruction's own byte-offset find agree on the boundary to
 	 * the byte, from two completely independent decompiles.
 	 */
-	void InitializeSetListParams() {}
-	void InitializeDrumTrackParams() {}
+	void InitializeSetListParams() { mOpaqueHead[0x602a] = (unsigned char)((mOpaqueHead[0x602a] & 0xe0) | 6); }
+	void InitializeDrumTrackParams() { mOpaqueHead[0x602b] = (unsigned char)((mOpaqueHead[0x602b] & 0xe0) | 9); }
+
+	/* round 57: thin forwards to the already-reconstructed CSpecialFuncCCMap
+	 * methods of the same name on `mSpecialFuncCCMap`.
+	 */
+	void InitializeSpecialCCMapping() { mSpecialFuncCCMap.Initialize(); }
+	void DumpSpecialFuncCCMapSettings() const { mSpecialFuncCCMap.DownloadAllToSTG(); }
 
 	void GetMappingName(ESpecialCCMapFunction fn, const char *&out) const;
 
