@@ -265,7 +265,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/adsr_base.o \
            src/engine/lfo_component.o \
            src/engine/stg_key_track.o \
-           src/engine/stg_patch.o
+           src/engine/stg_patch.o \
+           src/engine/stg_multiband_delay.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -659,6 +660,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/lfo_component.cpp \
        src/engine/stg_key_track.cpp \
        src/engine/stg_patch.cpp \
+       src/engine/stg_multiband_delay.cpp \
        src/engine/rtparm_ge_table.cpp \
        src/engine/rtparm_pe_table.cpp \
        src/engine/rtparm_family.cpp \
@@ -771,6 +773,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_adsr_base \
          verify/test_stg_key_track \
          verify/test_stg_patch \
+         verify/test_stg_multiband_delay \
          verify/test_lfo_component \
          verify/test_ckg_seq_backup \
          verify/test_stg_string_valuegetters \
@@ -1021,6 +1024,9 @@ verify/test_stg_key_track: verify/test_stg_key_track.cpp src/engine/stg_key_trac
 
 verify/test_stg_patch: verify/test_stg_patch.cpp src/engine/stg_patch.cpp include/oa_stg_patch.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_patch.cpp src/engine/stg_patch.cpp -o $@
+
+verify/test_stg_multiband_delay: verify/test_stg_multiband_delay.cpp src/engine/stg_multiband_delay.cpp include/oa_stg_multiband_delay.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_multiband_delay.cpp src/engine/stg_multiband_delay.cpp -o $@
 
 verify/test_lfo_component: verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp include/oa_lfo.h include/oa_adsr_base.h include/oa_global.h include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp -o $@

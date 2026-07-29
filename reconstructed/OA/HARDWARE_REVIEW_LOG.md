@@ -4046,3 +4046,70 @@ reconstructing one of the concrete "XModelPatch" siblings and
 confirming these defaults are genuinely never reached on a live
 instance (every real patch presumably always uses a concrete
 override).
+
+## OA.ko: CSTGMultibandDelay (4-band modulated delay effect), solo round 54 (2026-07-29)
+
+Continuation of solo mode. Scripted survey of manifest/oa_functions.csv
+for small, "no in_stack_/unaff_/Could-not-recover" pending clusters
+found `CSTGMultibandDelay` (88 pending methods, avg 58.6 bytes --
+smallest average among the top 35 largest pending classes; 3/88
+flagged by the decompiler itself, 85/88 clean). Landed 60/85 clean
+methods; the remaining 25 (24 clean + 3 flagged) deferred across 2
+DISTINCT, independently-verified reasons.
+
+Key structural discovery driving almost the entire round: EVERY landed
+`UpdateBandXxx`/`UpdateBand{1,2,3,4}Xxx` method's own `this` register
+is NOT a real object pointer -- ALL real per-instance effect state
+lives in `*(CSTGEffectMessageContext*+0x18)` (confirmed via `in_EDX +
+0x18` in every single landed method), and `this` instead carries
+either nothing at all (the 4 hardcoded per-band variants, fully
+specialized by the compiler with a literal baked-in offset) or the
+runtime band index as a plain `int` (the generic `UpdateBandXxx(ctx,
+val, band)` 4-arg overloads computing `base + band*stride`) -- the
+SAME "this-smuggled extra argument" idiom already established for
+CKGParamEdit (round 52), just with a per-band index instead of a
+small enum/bool. Confirmed this shape holds identically across 10
+distinct field families (Feedback/FeedbackDModIntensity/LFOType/
+LFOFreq/Level/LevelDModIntensity/Pan/InputSource/HighDamping/
+FeedbackSource), each with its own stride (4 bytes for everything
+except the 2 DModIntensity families' own 8-byte stride) -- landed via
+a small Python code-generator (not hand-transcribed per-method) given
+the pattern's mechanical regularity, with every generated body
+spot-checked against 2-3 independent ground-truth bands before
+trusting the generator's own offset arithmetic.
+
+`GetMessageHandlers()` is the one odd framework accessor: its real
+body returns `sMessageHandlers + 0xc`, not the bare `sMessageHandlers`
+CSTGKeyTrack's own version returns -- this class's own entries
+evidently start 0xc bytes into the shared table, a genuinely different
+but equally mechanical real behavior, not a bug.
+
+Deferred, 2 distinct reasons: (1) 3 methods flagged by the decompiler
+itself (the real 1267-byte ctor, 129-byte `Init`, 1322-byte `Run` --
+almost certainly the actual per-sample DSP process function). (2) 24
+methods with fully concrete control flow but each reads one of 6 real,
+named-but-unrecovered `.rodata` float-literal symbols
+(`_DAT_006bbda0..dc`, `_DAT_006bbdc0`) -- the SAME "missing-literal-
+value" deferral class already established for CSTGKeyTrack's own
+`ConvertIntRampToSlope`/`ConvertSlopeToIntRamp` (round 51):
+LowDamping/Time/LFOPhase/LFODepth (5 each, band1-4 + generic) plus the
+3 `UpdateCrossoverFreq{12,23,34}` and `CalculateCrossoverCoefficients`
+(the latter confirmed via its OWN `this` register carrying a smuggled
+`float` argument -- the SAME idiom as the `int band` smuggling, just a
+different value type).
+
+Real host KAT (`verify/test_stg_multiband_delay.cpp`, 30 checks
+spanning every distinct field-family shape: plain u32-copy at both
+strides, bool-negate, float-1-minus, 4-way piecewise int-constant, the
+2 non-banded singles, the 2 broadcast-to-4-fixed-offsets singles, and
+a spot-check sweep of the remaining plain-copy families). `make
+verify` full suite green (209+ targets, zero regressions). Real `make
+ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3745 -> 3806/21,689 (+61, 0 regressions).
+
+Real-HW test that would help: none identified -- pure per-instance
+field-write logic operating on an opaque effect-context data blob, no
+hardware I/O surface of its own; the deferred `Run()` (the actual
+per-sample DSP loop) would be the natural next target if audio-DSP
+fidelity were ever brought into this project's scope (currently
+explicitly out of scope, see kronos_project_scope_boundaries).
