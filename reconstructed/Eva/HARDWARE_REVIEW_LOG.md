@@ -1597,3 +1597,47 @@ should know they exist and are untested/unmodeled, not silently absent.
   matters when a real Akai-format data CD is mounted, and only 10 of its
   ~40 methods (none of the actual directory-traversal ones) are even
   reconstructed yet.
+
+- **CSysEx*Name/CSysExSetListSlotComment family, 32/32 tractable methods
+  (`sysex_object_names.h`/`.cpp`), 2026-07-29 (solo, no subagents --
+  session-wide 200-subagent dispatch cap hit)**. An 8-class family of
+  trivial SysEx-transferable named-object accessors --
+  `CSysExSetListSlotComment`/`CSysExSetListSlotName`/`CSysExCombiName`/
+  `CSysExProgName`/`CSysExSongName`/`CSysExWaveSeqName`/
+  `CSysExDrumKitName`/`CSysExSetListName` -- found via a fresh `nm -C`
+  class-inventory sweep. Each class has the identical 4-method shape,
+  confirmed via ground-truth decompile: `GetStorageId()` (a sequential
+  per-class literal, `0x1c` through `0x23`), `GetVersion()` (always
+  literal `0`), `GetObjectSize()`/`GetObjectSizeForExport()` (identical
+  literal object size -- `0x200` for the Comment class only, `0x18` for
+  all 7 name-record classes).
+
+  Notable finding while ground-truthing the destructors: every one of
+  the 8 real dtors resets its vtable pointer to the exact SAME shared
+  symbol, `PTR__CSysExObjectBase_08f7a908` -- confirmed via
+  `/home/share/Decomp/EVA_Decomp/eva_export/symbols.csv` (no per-class
+  `PTR__CSysEx*Name` vtable object exists anywhere). This means the 4
+  accessor methods above are NOT virtual overrides (no per-class vtable
+  slots exist to hold distinct implementations) -- a plain,
+  non-polymorphic class shape for each of the 8 classes is faithful to
+  ground truth, not a simplification. The real base class
+  `CSysExObjectBase` itself (`HasDigests()`/`GetObjectSize(void const*)`)
+  is deliberately NOT modeled -- nothing in this project's current call
+  graph calls through it. Each dtor pair (11-byte "reset vtable ptr" +
+  39-byte "reset vtable ptr then `free(this)` inside a real
+  `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` bracket") gets the
+  SAME "D0's `free(this)` not reproduced" treatment already established
+  project-wide (`long_binary_file.cpp` et al.) -- a plain empty
+  `~ClassName() {}`; the 32 accessor methods are the only ones credited
+  in the manifest, dtors intentionally excluded (matching
+  `CLongBinaryFile`'s own precedent).
+
+  Real host KAT (`verify/test_sysex_object_names.cpp`, 32 checks, one
+  per method per class) confirms every literal constant against the
+  ground-truth decompile independently (not re-derived from this same
+  reconstruction). `make verify` full suite green. Eva manifest 2730 ->
+  2762/37,795 (7.308%).
+
+  Real-HW test that would help: none identified -- these are pure
+  constant accessors with no observable I/O or state, called only as
+  part of a larger not-yet-reconstructed SysEx object-transfer framework.

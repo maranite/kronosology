@@ -3989,6 +3989,45 @@ RECONSTRUCTED = {
     "080db190",  # CDirCD::GetTotalSectors() const
     "080dbad0",  # CDirCD::FindPartition(unsigned long, CDirCD::SAkaiPartition const*&) const
     "080db790",  # CDirCD::GetPTRecord(unsigned int) const
+
+    # 2026-07-29 (solo, no subagents): CSysEx*Name/CSysExSetListSlotComment
+    # family (sysex_object_names.h/.cpp) -- 8 classes x 4 trivial constant
+    # accessors each (GetStorageId/GetVersion/GetObjectSize/
+    # GetObjectSizeForExport). Destructors deliberately NOT credited here
+    # (same "D0's free(this) not reproduced" convention as
+    # long_binary_file.h -- see this header's own note).
+    "089ecd10",  # CSysExSetListSlotComment::GetStorageId() const
+    "089ecd20",  # CSysExSetListSlotComment::GetVersion() const
+    "089ecd30",  # CSysExSetListSlotComment::GetObjectSize() const
+    "089ecd40",  # CSysExSetListSlotComment::GetObjectSizeForExport() const
+    "089ecd50",  # CSysExSetListSlotName::GetStorageId() const
+    "089ecd60",  # CSysExSetListSlotName::GetVersion() const
+    "089ecd70",  # CSysExSetListSlotName::GetObjectSize() const
+    "089ecd80",  # CSysExSetListSlotName::GetObjectSizeForExport() const
+    "089ecd90",  # CSysExCombiName::GetStorageId() const
+    "089ecda0",  # CSysExCombiName::GetVersion() const
+    "089ecdb0",  # CSysExCombiName::GetObjectSize() const
+    "089ecdc0",  # CSysExCombiName::GetObjectSizeForExport() const
+    "089ecdd0",  # CSysExProgName::GetVersion() const
+    "089ecde0",  # CSysExProgName::GetStorageId() const
+    "089ecdf0",  # CSysExProgName::GetObjectSize() const
+    "089ece00",  # CSysExProgName::GetObjectSizeForExport() const
+    "089ece10",  # CSysExSongName::GetStorageId() const
+    "089ece20",  # CSysExSongName::GetVersion() const
+    "089ece30",  # CSysExSongName::GetObjectSize() const
+    "089ece40",  # CSysExSongName::GetObjectSizeForExport() const
+    "089ece50",  # CSysExWaveSeqName::GetStorageId() const
+    "089ece60",  # CSysExWaveSeqName::GetVersion() const
+    "089ece70",  # CSysExWaveSeqName::GetObjectSize() const
+    "089ece80",  # CSysExWaveSeqName::GetObjectSizeForExport() const
+    "089ece90",  # CSysExDrumKitName::GetStorageId() const
+    "089ecea0",  # CSysExDrumKitName::GetVersion() const
+    "089eceb0",  # CSysExDrumKitName::GetObjectSize() const
+    "089ecec0",  # CSysExDrumKitName::GetObjectSizeForExport() const
+    "089eced0",  # CSysExSetListName::GetStorageId() const
+    "089ecee0",  # CSysExSetListName::GetVersion() const
+    "089ecef0",  # CSysExSetListName::GetObjectSize() const
+    "089ecf00",  # CSysExSetListName::GetObjectSizeForExport() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
