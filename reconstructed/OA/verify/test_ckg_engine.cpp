@@ -56,11 +56,17 @@ unsigned char *CKGEngine::ms_poKGEventDisplayManager;
 /* ==================== extern "C" KARMA-library mocks ==================== */
 static int g_lastArg0, g_lastArg1;
 static bool g_lastBoolArg;
+/* RT_run: real extern "C++" linkage (oa_rtparm_pe_table.h, round 52,
+ * 2026-07-29 -- that header's own declaration is independently verified
+ * against ground truth's own mangled relocation, unlike this block's
+ * deliberate extern "C" convention for its enum-widened neighbors), so
+ * defined here OUTSIDE the extern "C" block below to match. */
+static int g_rtRunCalls;
+void RT_run(unsigned char, unsigned char) { g_rtRunCalls++; }
+
 extern "C" {
 void RT_pe_select_KorgX2100(void *, unsigned char, int, bool) {}
 void KS_get_rtcm_name_for_ge(short, char *out) { if (out) out[0] = 0; }
-static int g_rtRunCalls;
-void RT_run(unsigned char, unsigned char) { g_rtRunCalls++; }
 void RT_timbre_thru(unsigned char, unsigned char) {}
 void BirthOfKarma(void) {}
 void KS_set_ge_load_options(unsigned char v) { g_lastArg0 = v; }

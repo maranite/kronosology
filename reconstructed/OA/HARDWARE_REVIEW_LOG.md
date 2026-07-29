@@ -3863,3 +3863,94 @@ Manifest 3593 -> 3608/21,689 (+15, 0 regressions).
 
 Real-HW test that would help: none identified -- pure DSP parameter-
 modulation math, no observable hardware I/O surface.
+
+- **CKGParamEdit, 101/132 tractable methods
+  (`oa_kg_param_edit_rt_externs.h`/`kg_param_edit.cpp`/
+  `kg_param_edit_ctor.cpp`), round 52, 2026-07-29 (solo, no
+  subagents)**. Fresh manifest survey filtered to pending methods with
+  no `in_stack_ffffffXX`/`unaff_EBX`/"Could not recover jumptable"
+  warnings, sorted by class average size -- surfaced `CKGParamEdit`
+  (132 pending methods, avg 56.7 bytes) as an unclaimed cluster. Nearly
+  every method is a thin relay: forward its own arguments straight to
+  an already-named `RT_*`/`KS_*` free function -- this is the "real
+  caller" `oa_rtparm_pe_table.h`'s own header comment had flagged as a
+  TODO ("verify meaning once a real caller of one of these RT_pe_...,
+  RT_run, RT_qtz_..., ... is reconstructed").
+
+  Only 5 methods touch real per-instance state (confirmed via
+  `ClearSoloStatus`/`ResendSoloStatus`/`SendSolo`/`GetPadChangeSource`,
+  plus a new explicit ctor replacing the compiler-provided trivial
+  one): `mSoloStatus[4]` (+0x00, one status byte per KARMA module) and
+  `mPadChangeSource` (+0x04, never written by any reconstructed
+  method). Every other method's own `this` (delivered in EAX per this
+  project's established regparm/thiscall-EAX convention) is cast
+  DIRECTLY to a value and passed as the call's own 3rd/4th real
+  argument (`(char)this`, `(uchar)this`) -- never dereferenced;
+  translated faithfully by using the reconstructed method's own last
+  explicit parameter in that slot.
+
+  **Pre-existing forward declarations, not a fresh class**: a
+  `struct CKGParamEdit` already existed in
+  `oa_ckg_module_param_msg_handler.h` (round 27, CKGModuleParamMsgHandler
+  family) -- caller-side-only method DECLARATIONS with bodies
+  deliberately left unimplemented. This round fills in real bodies
+  matching those EXISTING signatures (not this round's own
+  freshly-read ground-truth ones, where they differ -- e.g.
+  `SendChordMemNote` keeps the pre-existing `(int,int,int)` signature,
+  not `(uchar,uchar,char)`) since already-compiled callers rely on
+  them; 4 genuinely new methods with no pre-existing caller
+  (`SendStartSeed`'s OWN 2-arg overload -- a different real address
+  from the already-declared 3-arg one -- `DrumSwitchOn`,
+  `DrumSwitchMode`, `RefreshLinkedSceneDisplay`) were added fresh.
+
+  **Real latent bug found and fixed at the root, not worked around
+  again**: `oa_ckg_module_param_msg_handler.h`'s own ~50-callee
+  CKGEngine externs block declares `RT_run` with `extern "C"` linkage
+  (deliberate, for its enum-widened neighbors) while
+  `oa_rtparm_pe_table.h` declares the SAME real function with
+  `extern "C++"` (independently verified against ground truth's own
+  mangled relocation by that earlier round's table work) -- a genuine
+  conflict, previously never triggered because no prior TU included
+  both headers together (`src/engine/rtparm_ckgparamedit.cpp` had
+  documented this exact conflict and deliberately sidestepped it
+  rather than fixing it). This round's own `CKGParamEdit` needs both
+  header domains simultaneously, so the conflict was unavoidable --
+  fixed by having `oa_ckg_module_param_msg_handler.h` `#include
+  oa_rtparm_pe_table.h` and drop its own duplicate `RT_run` decl,
+  consolidating on the real, independently-verified linkage. Required
+  updating 2 pre-existing test targets (`test_ckg_engine`,
+  `test_rtparm_ckgparamedit`) whose own `RT_run` mocks were inside an
+  `extern "C"` block matching the OLD declaration.
+
+  The ctor was split into its own translation unit
+  (`kg_param_edit_ctor.cpp`) since it is the ONLY method needing none
+  of the ~35 new `RT_*`/`KS_*` externs -- `test_ckg_engine`/
+  `test_rtparm_ckgparamedit` only need the ctor to link (neither calls
+  any `SendXxx()`), and linking the FULL `kg_param_edit.cpp` into them
+  would require mocking all ~35 new externs those tests don't
+  otherwise touch.
+
+  Deferred, 2 distinct reasons: (1) 21 methods with genuine
+  `in_stack_`/`unaff_`/jumptable-recovery blockers; (2) 10
+  "ForModuleControl"-adjacent GE methods, fully concrete with NO
+  decompiler warning, but each writes through 2 unconfirmed
+  `.data`/`.bss` symbols (`CSWTCH_69`, a 4-entry lookup table, and one
+  of 2 giant per-model front-panel-variable arrays whose own names are
+  clearly Ghidra's best-guess label for a much larger unrelated
+  structure) this pass has no independent confirmation for -- left
+  undeclared/uncredited rather than guessed at.
+
+  Real host KAT (`verify/test_kg_param_edit.cpp`, 41 checks spanning
+  every distinct behavioral category: state, empty-stub, plain relay,
+  multi-call relay, global-counter-gated, discarded-return, literal-
+  constant-selector family, 2-arg-overload, scene-matrix pointer-chain,
+  bool-typed relay). `make verify` full suite green (207+ targets,
+  zero regressions from the RT_run linkage fix). Real `make ko-clean
+  && make ko KDIR=/home/build/linux-kronos` build green. Manifest 3608
+  -> 3710/21,689 (+102, 0 regressions).
+
+  Real-HW test that would help: none identified -- pure free-function
+  relay forwarding, no new hardware I/O surface beyond what the
+  already-declared `RT_*`/`KS_*` externs themselves would eventually
+  need (KARMA library internals, out of this project's own stated
+  scope).

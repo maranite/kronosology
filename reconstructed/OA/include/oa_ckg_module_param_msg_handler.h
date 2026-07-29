@@ -3,6 +3,11 @@
 #define OA_CKG_MODULE_PARAM_MSG_HANDLER_H
 
 #include "oa_engine_init.h"	/* CKGBankManager, CSPREngine */
+#include "oa_rtparm_pe_table.h"	/* RT_run's own real extern "C++" declaration
+					 * (round 52, solo, 2026-07-29) -- see this
+					 * file's own extern "C" externs block below
+					 * for why RT_run is no longer declared a
+					 * 2nd time there. */
 
 /*
  * oa_ckg_module_param_msg_handler.h  -  CKGModuleParamMsgHandler: the KARMA
@@ -420,7 +425,17 @@ extern "C" {
 void RT_pe_select_KorgX2100(void *editBuffer, unsigned char edited, int mode, bool isSingle)
 	__attribute__((regparm(3)));
 void KS_get_rtcm_name_for_ge(short typeId, char *outName) __attribute__((regparm(3)));
-void RT_run(unsigned char a, unsigned char b) __attribute__((regparm(3)));
+/* RT_run: NOT declared here (round 52, solo, 2026-07-29) -- this class of
+ * function is ALSO one of gRTParmFunctionTable_PE's own 46 callees
+ * (oa_rtparm_pe_table.h), which declares it with real extern "C++" linkage
+ * (independently verified against ground truth's own mangled relocation
+ * name by that earlier round's own table-reconstruction work). Redeclaring
+ * it here with extern "C" was a genuine latent conflict -- never triggered
+ * before this round because no prior TU included both headers together
+ * (see src/engine/rtparm_ckgparamedit.cpp's own header comment, which
+ * documented this exact conflict and deliberately worked around it rather
+ * than fixing it). Now fixed at the root: this file #includes
+ * oa_rtparm_pe_table.h (see top of file) instead of re-declaring RT_run. */
 void RT_timbre_thru(unsigned char a, unsigned char b) __attribute__((regparm(3)));
 void BirthOfKarma(void) __attribute__((regparm(3)));
 void KS_set_ge_load_options(unsigned char opts) __attribute__((regparm(3)));
@@ -921,22 +936,74 @@ public:
 
 /*
  * CKGParamEdit -- the real target of every Shape-B method's own SendXxx()
- * call. Opaque stand-in, same "declare only the real methods actually
+ * call. Was: opaque stand-in, "declare only the real methods actually
  * called from this batch, bodies stay genuinely unresolved" convention as
- * CKGBankManager (oa_engine_init.h) -- own class layout entirely out of
- * scope here.
+ * CKGBankManager (oa_engine_init.h). NOW (round 52, solo, 2026-07-29): 101
+ * of its declared methods have real bodies (src/engine/kg_param_edit.cpp,
+ * see oa_kg_param_edit_rt_externs.h for the full derivation) -- each is a
+ * thin relay to an already-named RT_ / KS_ free function, the "real caller"
+ * oa_rtparm_pe_table.h's own header comment had flagged as a TODO. 31
+ * methods remain deferred (2 distinct reasons, see
+ * oa_kg_param_edit_rt_externs.h). `ForceSendOnOff`/`SendOnOff` and the 10
+ * "ForModuleControl"-adjacent GE methods stay genuinely unresolved.
+ *
+ * ClearSoloStatus/ResendSoloStatus/SendSolo (round 52) confirmed 2 real
+ * per-instance fields (mSoloStatus[4]/mPadChangeSource, see below) -- no
+ * longer a fully opaque stand-in for those 3 + the new
+ * ctor/GetPadChangeSource, though the vast majority of this class'
+ * surface remains declared-only.
  */
 struct CKGParamEdit {
+	/* Confirmed real (round 52): zeroes mSoloStatus[4]. Real caller:
+	 * CKGEngine::CKGEngine() placement-news this with no args
+	 * (ckg_engine.cpp's own `new (...) CKGParamEdit()`), previously
+	 * relying on the compiler-provided trivial default ctor -- this is
+	 * the first EXPLICIT ctor for this class, now genuinely zero-
+	 * initializing mSoloStatus to match ground truth instead of leaving
+	 * it as (accidentally-already-zero, since AllocAligned's own backing
+	 * memory happens to start zeroed) uninitialized. */
+	CKGParamEdit();
+
 #include "oa_ckg_param_edit_send_decls.inc"
 
 	/*
 	 * 3 more real methods, discovered while reconstructing CKGEngine
 	 * (src/engine/ckg_engine.cpp) -- same "declared, body genuinely
-	 * out of scope" convention as every SendXxx() above.
+	 * out of scope" convention as every SendXxx() above. ClearSoloStatus/
+	 * ResendSoloStatus got real bodies in round 52 (see above);
+	 * ForceSendOnOff remains deferred (in_stack_/unaff_ blocker).
 	 */
 	void ClearSoloStatus();
 	void ResendSoloStatus();
 	void ForceSendOnOff(bool on);
+
+	/* Round 52: GetPadChangeSource()'s own real read target -- see
+	 * oa_kg_param_edit_rt_externs.h header comment for the full
+	 * mSoloStatus/mPadChangeSource layout derivation. */
+	int GetPadChangeSource() const;
+
+	/* Round 52: no existing caller requires this one (ground truth is a
+	 * literal empty-body stub at .text+0x003c1540, same "arg declared but
+	 * never consumed" shape as SendTempo above), added anyway since it's
+	 * a genuine, individually-confirmed CKGParamEdit method. */
+	void SendLocalControlOn(bool on);
+
+	/* Round 52, 4 more genuinely new methods (no pre-existing caller
+	 * declared any of these): SendStartSeed's own 2-arg overload is a
+	 * DIFFERENT real address (.text+0x003c0df0, 20 bytes, clean) than the
+	 * already-declared 3-arg one above (.text+0x003c0e10, 164 bytes,
+	 * genuinely deferred -- in_stack_/unaff_ blocker) -- a real C++
+	 * overload, not a signature correction. */
+	void SendStartSeed(unsigned char module, long seed);
+	void DrumSwitchOn(bool on);
+	void DrumSwitchMode(unsigned char mode);
+	void RefreshLinkedSceneDisplay(unsigned char sceneIdx);
+
+private:
+	unsigned char mSoloStatus[4]; /* +0x00, real (round 52) */
+	int mPadChangeSource;         /* +0x04, real (round 52) -- never written
+	                                * by any reconstructed method, see header
+	                                * comment linked above */
 };
 
 /*

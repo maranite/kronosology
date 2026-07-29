@@ -245,6 +245,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/ckg_midi_msg_handler.o \
            src/engine/ckg_engine.o \
            src/engine/kg_timer_manager.o \
+           src/engine/kg_param_edit.o \
+           src/engine/kg_param_edit_ctor.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -557,6 +559,8 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/ckg_midi_msg_handler.cpp \
        src/engine/ckg_engine.cpp \
        src/engine/kg_timer_manager.cpp \
+       src/engine/kg_param_edit.cpp \
+       src/engine/kg_param_edit_ctor.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -842,7 +846,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_rtparm_ge_table \
          verify/test_rtparm_pe_table \
          verify/test_rtparm_family \
-         verify/test_rtparm_ckgparamedit
+         verify/test_rtparm_ckgparamedit \
+         verify/test_kg_param_edit
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -1230,14 +1235,19 @@ verify/test_ckg_switch_family: verify/test_ckg_switch_family.cpp src/engine/ckg_
 verify/test_ckg_midi_msg_handler: verify/test_ckg_midi_msg_handler.cpp src/engine/ckg_midi_msg_handler.cpp include/oa_ckg_midi_msg_handler.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_midi_msg_handler.cpp src/engine/ckg_midi_msg_handler.cpp -o $@
 
-verify/test_ckg_engine: verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp include/oa_ckg_module_param_msg_handler.h
+verify/test_ckg_engine: verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp src/engine/kg_param_edit_ctor.cpp include/oa_ckg_module_param_msg_handler.h
 	# -fno-pie/-no-pie: this test round-trips CKGBankManager::ms_poInstance's
 	# own bankMgr[+0]/[+4]/[+8] packed 32-bit pointer slots via ToU32()/
 	# FromU32() (see ckg_engine.cpp's own SharedMemBase()/Initialize());
 	# under default PIE those static mock buffers can land above 4GB and
 	# truncate to a garbage pointer on FromU32() -- same gotcha and same
-	# fix as test_tone_adjust_descriptors.
-	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp -o $@
+	# fix as test_tone_adjust_descriptors. Links
+	# src/engine/kg_param_edit_ctor.cpp (round 52) -- CKGEngine::CKGEngine()
+	# placement-news a real CKGParamEdit(), no longer a compiler-provided
+	# trivial ctor; the FULL kg_param_edit.cpp is deliberately NOT linked
+	# here (its ~35 other RT_*/KS_* mock symbols this test doesn't provide
+	# would fail to link -- see kg_param_edit_ctor.cpp's own header comment).
+	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp src/engine/kg_param_edit_ctor.cpp -o $@
 
 verify/test_kg_timer_manager: verify/test_kg_timer_manager.cpp src/engine/kg_timer_manager.cpp include/oa_kg_timer_manager.h
 	# Does NOT link ckg_engine.cpp (1421 lines, its own large mock
@@ -1272,12 +1282,27 @@ verify/test_rtparm_family: verify/test_rtparm_family.cpp src/engine/rtparm_famil
 	# low, 32-bit-representable address range on a 64-bit host.
 	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_rtparm_family.cpp src/engine/rtparm_family.cpp verify/rtparm_family_stubs.cpp src/engine/rtparm_ge_table.cpp src/engine/rtparm_pe_table.cpp verify/rtparm_ge_func_stubs.cpp verify/rtparm_pe_func_stubs.cpp -o $@
 
-verify/test_rtparm_ckgparamedit: verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp include/oa_ckg_module_param_msg_handler.h
-	# kept out of test_rtparm_family's own binary -- see
-	# src/engine/rtparm_ckgparamedit.cpp's header comment: this header
-	# and oa_rtparm_pe_table.h (needed by test_rtparm_family) declare
-	# RT_run with conflicting linkage if included together.
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp -o $@
+verify/test_rtparm_ckgparamedit: verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp src/engine/kg_param_edit_ctor.cpp include/oa_ckg_module_param_msg_handler.h
+	# Kept out of test_rtparm_family's own binary for a now-historical
+	# reason -- see src/engine/rtparm_ckgparamedit.cpp's header comment:
+	# oa_ckg_module_param_msg_handler.h and oa_rtparm_pe_table.h used to
+	# declare RT_run with conflicting linkage if included together; FIXED
+	# at the root in round 52 (2026-07-29, oa_ckg_module_param_msg_handler.h
+	# now #includes oa_rtparm_pe_table.h instead of re-declaring RT_run).
+	# Still a separate binary since splitting it back into
+	# test_rtparm_family costs nothing and there's no reason to churn a
+	# working test target. Links src/engine/kg_param_edit_ctor.cpp (round
+	# 52) -- `CKGParamEdit pe;` now calls a real, non-trivial ctor (the
+	# FULL kg_param_edit.cpp is deliberately NOT linked here, same reason
+	# as test_ckg_engine).
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp src/engine/kg_param_edit_ctor.cpp -o $@
+
+verify/test_kg_param_edit: verify/test_kg_param_edit.cpp src/engine/kg_param_edit.cpp src/engine/kg_param_edit_ctor.cpp include/oa_kg_param_edit_rt_externs.h include/oa_ckg_module_param_msg_handler.h
+	# Round 52 (solo, 2026-07-29) KAT for CKGParamEdit's 101 real methods.
+	# Provides its own mocks for every RT_*/KS_*/KGOutGate_* symbol this
+	# test's own representative method subset calls -- see that file's
+	# own header comment for the full category breakdown.
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_kg_param_edit.cpp src/engine/kg_param_edit.cpp src/engine/kg_param_edit_ctor.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
