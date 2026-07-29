@@ -11,6 +11,19 @@
 
 extern CSystemApi *Api; /* mains.cpp */
 
+namespace {
+/* Same ApiAssert() convention as res_man.cpp -- diagnostic-only, real callers
+ * always fall through and complete the operation regardless.
+ */
+inline void ApiAssert(const char *file, int line)
+{
+	typedef void (*Fn)(void *, const char *, const char *, int);
+	void *vtbl = *(void **)Api;
+	Fn fn = *(Fn *)((char *)vtbl + 0x94);
+	fn(Api, "Assertion failed in module %s, line %i.\n", file, line);
+}
+} // namespace
+
 /* Real class-static global (symbols.csv: CFileMan::SysName, 4 bytes, a `const
  * char*`) -- same "opaque, content not decoded, non-null is all CModule::CModule()
  * needs" treatment as mains.cpp's own CEditMan_SysName/CViewBase_SysName/
@@ -29,12 +42,12 @@ CFileMan::CFileMan()
 	*reinterpret_cast<void **>(this) = (void *)PTR__CFileMan_08e86e48;
 
 	for (int i = 0; i < 128; i++) {
-		mUnitTable[i].mField0 = 1;
-		mUnitTable[i].mField4 = 0;
-	}
-	for (int i = 0; i < 128; i++) {
 		mHandleTable[i].mField0 = 1;
 		mHandleTable[i].mField4 = 0;
+	}
+	for (int i = 0; i < 128; i++) {
+		mUnitTable[i].mField0 = 1;
+		mUnitTable[i].mField4 = 0;
 	}
 	for (int i = 0; i < 32; i++) {
 		mIOCTLDevTable[i].mField0 = 1;
@@ -103,15 +116,15 @@ void CFileMan::EnableBackgroundJobs(int enabled)
 
 unsigned int CFileMan::GetFile(int index) const
 {
-	if (index < 0x80 && mUnitTable[index].mField0 == 0)
-		return static_cast<unsigned int>(mUnitTable[index].mField4);
+	if (index < 0x80 && mHandleTable[index].mField0 == 0)
+		return static_cast<unsigned int>(mHandleTable[index].mField4);
 	return 0;
 }
 
 unsigned int CFileMan::GetUnitForModify(int index) const
 {
-	if (index < 0x80 && mHandleTable[index].mField0 == 0)
-		return static_cast<unsigned int>(mHandleTable[index].mField4);
+	if (index < 0x80 && mUnitTable[index].mField0 == 0)
+		return static_cast<unsigned int>(mUnitTable[index].mField4);
 	return 0;
 }
 
@@ -153,6 +166,101 @@ bool CFileMan::IsAccessDenied(unsigned char requested, unsigned char granted)
 		denied = false;
 	}
 	return denied;
+}
+
+/* Round 58 batch -- see file_man.h. */
+
+void CFileMan::InitUnitTable()
+{
+	for (int i = 0; i < 128; i++) {
+		mUnitTable[i].mField0 = 1;
+		mUnitTable[i].mField4 = 0;
+	}
+}
+
+void CFileMan::InitHandleTable()
+{
+	for (int i = 0; i < 128; i++) {
+		mHandleTable[i].mField0 = 1;
+		mHandleTable[i].mField4 = 0;
+	}
+}
+
+void CFileMan::RemoveUnit(int index)
+{
+	void *ptr = reinterpret_cast<void *>(mUnitTable[index].mField4);
+	mUnknownA4c--;
+	if (ptr != 0)
+		free(ptr);
+	mUnitTable[index].mField4 = 0;
+	mUnitTable[index].mField0 = 1;
+}
+
+int CFileMan::AddNewHandle(void *descriptor)
+{
+	for (int i = 0; i < 0x80; i++) {
+		if (mHandleTable[i].mField0 != 0) {
+			mHandleTable[i].mField4 = reinterpret_cast<int>(descriptor);
+			mHandleTable[i].mField0 = 0;
+			return i;
+		}
+	}
+	return -1;
+}
+
+/* CFileDescriptor itself is not reconstructed (see file_man.h) -- RemoveHandle()
+ * below reaches into it via raw offsets for its own 4 (pointer, owned-flag)
+ * pairs, same convention as the rest of this file's `this + N` arithmetic.
+ */
+static void FreeIfOwned(unsigned char *fd, int ptrOff, int ownedFlagOff)
+{
+	void *p = *reinterpret_cast<void **>(fd + ptrOff);
+	int owned = *reinterpret_cast<int *>(fd + ownedFlagOff);
+	if (owned == 0 && p != 0)
+		free(p);
+}
+
+void CFileMan::RemoveHandle(int index)
+{
+	unsigned char *ptr = reinterpret_cast<unsigned char *>(mHandleTable[index].mField4);
+	if (ptr != 0) {
+		FreeIfOwned(ptr, 0x170, 0x17c);
+		FreeIfOwned(ptr, 0x160, 0x16c);
+		FreeIfOwned(ptr, 0x14c, 0x158);
+		FreeIfOwned(ptr, 0x13c, 0x148);
+		free(ptr);
+	}
+	mHandleTable[index].mField4 = 0;
+	mHandleTable[index].mField0 = 1;
+}
+
+int CFileMan::AddIOCTLDev(int access, void *task, void *iface)
+{
+	if (task == 0)
+		ApiAssert("FileMan.cpp", 0x9e2);
+	if (iface == 0)
+		ApiAssert("FileMan.cpp", 0x9e3);
+
+	for (int i = 0; i < 0x20; i++) {
+		if (mIOCTLDevTable[i].mField0 == 1) {
+			mIOCTLDevTable[i].mField0 = 0;
+			mIOCTLDevTable[i].mField4 = access;
+			mIOCTLDevTable[i].mField8 = reinterpret_cast<int>(task);
+			mIOCTLDevTable[i].mFieldC = reinterpret_cast<int>(iface);
+			return i;
+		}
+	}
+	return -1;
+}
+
+bool CFileMan::CheckNumInstalledUnit() const
+{
+	int count = 0;
+	for (int i = 0; i < 128; i++) {
+		if (mUnitTable[i].mField0 == 0)
+			count++;
+	}
+	return count == mUnknownA4c;
 }
 
 extern "C" void CFileManSetupVSlot(void *obj)

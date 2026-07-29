@@ -4468,6 +4468,14 @@ RECONSTRUCTED = {
     "08a0abd0",  # CGlobal::InitializeDrumTrackParams() (promoted from no-op stub to real body)
     "08a0abf0",  # CGlobal::InitializeSpecialCCMapping()
     "08a0f380",  # CGlobal::DumpSpecialFuncCCMapSettings() const
+    # -- round 58 (2026-07-29, solo): CFileMan 7-method batch --
+    "08101650",  # CFileMan::InitUnitTable()
+    "081018f0",  # CFileMan::InitHandleTable()
+    "080ff7a0",  # CFileMan::RemoveUnit(int)
+    "08102510",  # CFileMan::AddNewHandle(CFileDescriptor*)
+    "081029a0",  # CFileMan::RemoveHandle(int)
+    "080fc8c0",  # CFileMan::AddIOCTLDev(EDeviceAccess,CDriverTaskBase*,CFMDriverInterface*)
+    "080fc800",  # CFileMan::CheckNumInstalledUnit() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

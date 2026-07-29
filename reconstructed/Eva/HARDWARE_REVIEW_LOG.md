@@ -2631,3 +2631,84 @@ green (105 targets), zero regressions (no heisenbug flake this run).
 Real-HW test that would help: none identified -- pure bitfield
 writes + already-verified forwarders, no hardware I/O surface of
 their own.
+
+## Round 58 (Eva, solo, 2026-07-29): manifest fix + CFileMan 7-method batch
+
+**Manifest bug fix (not a new-code round-58 finding, but caught while
+surveying CFileMan for this round's own work)**: round 55's
+`CFileMan::GetFile(int)` was recorded in `manifest/gen_manifest.py`
+at address `080fc760` -- but ground truth (`GetUnit@080fc760.c`)
+shows that address is actually `CFileMan::GetUnit(int)`, an
+unrelated jumptable dispatcher (`Could not recover jumptable...
+Too many branches`) that stays pending. The real `GetFile` is at
+`080fc8a0`; round 55's C++ implementation in
+`src/init/file_man.cpp` already matched THAT ground truth correctly
+byte-for-byte -- only the manifest's recorded address was wrong (an
+off-by-one-function slip). Fixed as its own small commit before this
+round's real work (no functional change, no reconstructed-count
+change: 3157/37,795 unaffected, 1-for-1 address correction).
+
+**Naming bug also found and fixed** (round 55's own field-purpose
+comment, not a functional bug): `include/file_man.h`'s
+`mUnitTable`/`mHandleTable` struct field names were SWAPPED relative
+to what the ground-truth function names themselves prove --
+`InitHandleTable()`/`AddNewHandle()`/`RemoveHandle()`/`GetFile()` all
+operate on the offset range round 55 had labeled `mUnitTable`
+(+0x2c), while `InitUnitTable()`/`RemoveUnit()`/`GetUnitForModify()`
+all operate on the range labeled `mHandleTable` (+0x42c). The real
+function names are authoritative (recovered from binary symbols, not
+inferred); this round's own 3 new methods (`InitUnitTable`/
+`InitHandleTable`/`RemoveUnit`, see below) made the swap impossible
+to miss. Renamed the struct fields + swapped their declaration order
+to match; `GetFile()`/`GetUnitForModify()`'s own byte-offset
+arithmetic was always correct (numeric offsets don't care about field
+names) so this is a documentation/maintainability fix only, not a
+behavior change.
+
+Landed 7 further `CFileMan` methods, all self-contained field-table
+init/scan/mutate operations on the now-correctly-named
+`mHandleTable`/`mUnitTable`/`mIOCTLDevTable` arrays, no unresolved
+callees: `InitUnitTable()`/`InitHandleTable()` (loop-reset every slot
+to `{1,0}`, byte-for-byte the same shape as the ctor's own init
+loops), `RemoveUnit(int)` (frees a claimed unit's stored pointer,
+decrements the shared installed-unit counter `mUnknownA4c`, resets
+the slot), `AddNewHandle(CFileDescriptor*)` (linear first-free-slot
+scan across `mHandleTable`, Ghidra's own unrolled do-while collapsed
+1:1 into a plain loop), `RemoveHandle(int)` (walks 4 fixed
+`(pointer, owned-flag)` pairs inside the stored `CFileDescriptor*`
+freeing any owned non-NULL one, then frees the descriptor itself --
+`CFileDescriptor` stays unreconstructed, reached via raw offsets same
+convention as the rest of this file), `AddIOCTLDev(EDeviceAccess,
+CDriverTaskBase*, CFMDriverInterface*)` (2 soft-asserts via the same
+`ApiAssert()` convention already established in `res_man.cpp`, then a
+first-free-slot scan on `mIOCTLDevTable`), `CheckNumInstalledUnit()
+const` (counts `mUnitTable`'s actual in-use slots, compares against
+`mUnknownA4c` -- a consistency self-check).
+
+Deliberately NOT attempted this round (all hit established red
+flags): `GetNumInstalledUnit`/`DriverSupportPartitions`/
+`GetNumDriverDescriptions`/`GetDriverName` (dispatch through this's
+own unconfirmed vtable slots 0xbc/0xc0 into a wholly undeclared
+`CVirtualDriverBase`), `BeginWritePartitionTable`/
+`EndWritePartitionTable`/`BeginScanPartitionTable`/
+`EndScanPartitionTable` (`CDriverTaskBase` undeclared +
+`CSysApiInstance::EnableLevel` unreconstructed),
+`BackupUnitReadWriteProtectInfo`/`RestoreUnitReadWriteProtectInfo`
+(iterate the still-unreconstructed `mDriverConstructors` registry).
+
+Real host KAT (17 new checks appended to the existing
+`verify/test_file_man_res_man.cpp`'s CFileMan section, new "[9b]"
+block). Caught and fixed a genuine double-free bug in the test itself
+during development (the test's own cleanup code freed `unitPtr` a
+second time after `RemoveUnit()` had already freed it internally, and
+separately would have double-freed the `RemoveHandle()` test's
+descriptor pointers) -- confirmed via `glibc`'s `free(): double free
+detected in tcache 2` abort, root-caused by tracing which of the new
+methods already call `free()` internally per their own doc comments,
+fixed by removing the redundant test-side frees. `make verify` full
+suite green (110 targets, 0 failures, exit 0), zero regressions.
+`make objs` (real `-m32` target-ABI compile) green. Eva manifest 3157
+-> 3164/37,795 (8.371%).
+
+Real-HW test that would help: none identified -- pure in-memory
+table/counter operations, no hardware I/O surface of their own.

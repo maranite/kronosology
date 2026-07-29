@@ -356,12 +356,15 @@ int main()
 		check("GetIOCTLDev(): still-free slot -> 0 (unclaimed)", fm->GetIOCTLDev(3) == 0);
 		check("GetIOCTLDev(): out-of-range index -> 0", fm->GetIOCTLDev(200) == 0);
 
-		/* Directly claim mUnitTable[5]/mHandleTable[7]/mIOCTLDevTable[3] via the
+		/* Directly claim mHandleTable[5]/mUnitTable[7]/mIOCTLDevTable[3] via the
 		 * same {flag=0 (in use), value} shape the real ctor establishes, using
 		 * the friend test-hook convention already used elsewhere in this file.
+		 * (Round 58: mUnitTable/mHandleTable field NAMES were swapped by round
+		 * 55 -- see file_man.h's own layout comment -- but these raw offsets
+		 * were always correct, +0x2c==mHandleTable/+0x42c==mUnitTable.)
 		 */
-		*(int *)((unsigned char *)fm + 0x2c + 5 * 8) = 0;      /* mUnitTable[5].mField0 = 0 (in use) */
-		*(int *)((unsigned char *)fm + 0x2c + 5 * 8 + 4) = 77; /* mUnitTable[5].mField4 = 77 */
+		*(int *)((unsigned char *)fm + 0x2c + 5 * 8) = 0;      /* mHandleTable[5].mField0 = 0 (in use) */
+		*(int *)((unsigned char *)fm + 0x2c + 5 * 8 + 4) = 77; /* mHandleTable[5].mField4 = 77 */
 		check("GetFile(): in-use slot -> stored value", fm->GetFile(5) == 77);
 
 		*(int *)((unsigned char *)fm + 0x42c + 7 * 8) = 0;
@@ -378,6 +381,127 @@ int main()
 		      fm->RemoveIOCTLDev(3) == 1 && fm->GetIOCTLDev(3) == 0 &&
 		      I32(fm, 0x82c + 3 * 0x10) == 1);
 
+		printf("[9b] CFileMan round 58 batch\n");
+
+		/* InitUnitTable()/InitHandleTable(): scribble the tables then re-init,
+		 * confirm every slot resets to {1,0}.
+		 */
+		for (int i = 0; i < 128; i++) {
+			*(int *)((unsigned char *)fm + 0x42c + i * 8) = 0;
+			*(int *)((unsigned char *)fm + 0x42c + i * 8 + 4) = 0xdead;
+		}
+		fm->InitUnitTable();
+		bool unitTableClean = true;
+		for (int i = 0; i < 128 && unitTableClean; i++) {
+			if (I32(fm, 0x42c + i * 8) != 1 || I32(fm, 0x42c + i * 8 + 4) != 0)
+				unitTableClean = false;
+		}
+		check("InitUnitTable(): every slot reset to {1,0}", unitTableClean);
+
+		for (int i = 0; i < 128; i++) {
+			*(int *)((unsigned char *)fm + 0x2c + i * 8) = 0;
+			*(int *)((unsigned char *)fm + 0x2c + i * 8 + 4) = 0xbeef;
+		}
+		fm->InitHandleTable();
+		bool handleTableClean = true;
+		for (int i = 0; i < 128 && handleTableClean; i++) {
+			if (I32(fm, 0x2c + i * 8) != 1 || I32(fm, 0x2c + i * 8 + 4) != 0)
+				handleTableClean = false;
+		}
+		check("InitHandleTable(): every slot reset to {1,0}", handleTableClean);
+
+		/* RemoveUnit(): claim slot 9 with a real malloc'd pointer + bump the
+		 * installed-unit counter (mUnknownA4c, +0xa4c) so we can observe both
+		 * the free and the decrement.
+		 */
+		void *unitPtr = malloc(4);
+		*(int *)((unsigned char *)fm + 0x42c + 9 * 8) = 0;
+		*(void **)((unsigned char *)fm + 0x42c + 9 * 8 + 4) = unitPtr;
+		*(int *)((unsigned char *)fm + 0xa4c) = 5;
+		fm->RemoveUnit(9);
+		check("RemoveUnit(): resets slot to {1,0}",
+		      I32(fm, 0x42c + 9 * 8) == 1 && I32(fm, 0x42c + 9 * 8 + 4) == 0);
+		check("RemoveUnit(): decrements mUnknownA4c", I32(fm, 0xa4c) == 4);
+
+		fm->RemoveUnit(20); /* already-free slot: mField4 NULL, just decrements + no free() */
+		check("RemoveUnit(): free slot -> still decrements, no crash", I32(fm, 0xa4c) == 3);
+
+		/* AddNewHandle()/RemoveHandle(): all slots free after InitHandleTable()
+		 * above, so AddNewHandle() must claim index 0 first.
+		 */
+		int descriptor1 = 0xcafe;
+		int idx1 = fm->AddNewHandle(&descriptor1);
+		check("AddNewHandle(): claims first free slot (index 0)", idx1 == 0);
+		check("AddNewHandle(): marks slot in-use + stores pointer",
+		      I32(fm, 0x2c) == 0 && *(void **)((unsigned char *)fm + 0x2c + 4) == &descriptor1);
+
+		int descriptor2 = 0xbabe;
+		int idx2 = fm->AddNewHandle(&descriptor2);
+		check("AddNewHandle(): claims next free slot (index 1)", idx2 == 1);
+
+		/* Fill the rest of the table, confirm -1 on exhaustion. */
+		for (int i = 2; i < 128; i++)
+			fm->AddNewHandle(&descriptor2);
+		int fullResult = fm->AddNewHandle(&descriptor2);
+		check("AddNewHandle(): table full -> -1", fullResult == -1);
+
+		fm->InitHandleTable(); /* reset before RemoveHandle()'s own checks */
+		unsigned char *fakeDescriptor = (unsigned char *)calloc(1, 0x180);
+		/* mField148/mField16c/mField17c left 0 ("owned") with their pointer
+		 * fields NULL -> RemoveHandle() must not call free() on any of them
+		 * (NULL-pointer guard), only on the descriptor itself.
+		 */
+		*(int *)((unsigned char *)fm + 0x2c) = 0; /* claim slot 0 */
+		*(void **)((unsigned char *)fm + 0x2c + 4) = fakeDescriptor;
+		fm->RemoveHandle(0);
+		check("RemoveHandle(): frees descriptor + resets slot to {1,0}",
+		      I32(fm, 0x2c) == 1 && I32(fm, 0x2c + 4) == 0);
+
+		unsigned char *fakeDescriptor2 = (unsigned char *)calloc(1, 0x180);
+		void *owned170 = malloc(4);
+		*(void **)(fakeDescriptor2 + 0x170) = owned170;
+		*(int *)(fakeDescriptor2 + 0x17c) = 0; /* owned (0 == owned per real semantics) */
+		*(int *)((unsigned char *)fm + 0x2c) = 0;
+		*(void **)((unsigned char *)fm + 0x2c + 4) = fakeDescriptor2;
+		fm->RemoveHandle(0); /* frees owned170 + fakeDescriptor2; would double-free/crash if
+		                       * the owned-flag guard were wrong */
+		check("RemoveHandle(): frees an owned sub-object without crashing", true);
+
+		/* AddIOCTLDev(): all slots free after ctor; claims index 0 first,
+		 * fills all 4 fields.
+		 */
+		int dummyTask = 1, dummyIface = 2;
+		int devIdx = fm->AddIOCTLDev(0x3, &dummyTask, &dummyIface);
+		check("AddIOCTLDev(): claims first free slot (index 0)", devIdx == 0);
+		check("AddIOCTLDev(): fills all 4 fields",
+		      I32(fm, 0x82c) == 0 && I32(fm, 0x82c + 4) == 0x3 &&
+		      *(void **)((unsigned char *)fm + 0x82c + 8) == &dummyTask &&
+		      *(void **)((unsigned char *)fm + 0x82c + 0xc) == &dummyIface);
+
+		g_assertCount = 0;
+		fm->AddIOCTLDev(0, 0, 0); /* NULL task + NULL iface -> 2 soft asserts, still proceeds */
+		check("AddIOCTLDev(): NULL task/iface -> 2 soft asserts fire", g_assertCount == 2);
+
+		/* CheckNumInstalledUnit(): consistency self-check between mUnitTable's
+		 * actual occupancy and mUnknownA4c.
+		 */
+		fm->InitUnitTable();
+		*(int *)((unsigned char *)fm + 0xa4c) = 0;
+		check("CheckNumInstalledUnit(): freshly-init table, count=0 -> true",
+		      fm->CheckNumInstalledUnit() == true);
+
+		*(int *)((unsigned char *)fm + 0x42c) = 0; /* claim mUnitTable[0] */
+		check("CheckNumInstalledUnit(): 1 in-use slot, count still 0 -> false (mismatch)",
+		      fm->CheckNumInstalledUnit() == false);
+
+		*(int *)((unsigned char *)fm + 0xa4c) = 1;
+		check("CheckNumInstalledUnit(): 1 in-use slot, count=1 -> true (matches)",
+		      fm->CheckNumInstalledUnit() == true);
+
+		/* unitPtr/fakeDescriptor/fakeDescriptor2/owned170 are all already
+		 * freed by RemoveUnit(9)/RemoveHandle() themselves above -- freeing
+		 * any of them again here would double-free.
+		 */
 		free(raw);
 	}
 
