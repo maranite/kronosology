@@ -4330,6 +4330,37 @@ RECONSTRUCTED = {
     "08979990",  # CToneAdjustUpdater::ConvertWSeqNumToBank(int)
     "08977760",  # CToneAdjustUpdater::IsAssignAvailable(int, int)
     "08979c80",  # CToneAdjustUpdater::GetAssignTypeForPCM(unsigned char)
+    # -- round 49 (2026-07-29, solo): CControlSurface fresh cluster, 30/161 --
+    "08942ca0",  # CControlSurface::EditKarmaPadVelocityMode(int)
+    "089442e0",  # CControlSurface::UpdateKnobFaderLED()
+    "089442f0",  # CControlSurface::UpdateKnobFaderLED(CControlSurface::EKnobFader)
+    "0894ec10",  # CControlSurface::UpdateKnobFaderLED(CControlSurface::EKnobFader, unsigned short)
+    "08946350",  # CControlSurface::PressPlayMuteSwitchInExternal(int, int)
+    "08946360",  # CControlSurface::PressSelectSwitchInExternal(int, int)
+    "0894aeb0",  # CControlSurface::PressPlayMuteSwitchInGraphicEQ(int, int)
+    "0894aec0",  # CControlSurface::PressSelectSwitchInGraphicEQ(int, int)
+    "0894aed0",  # CControlSurface::MoveKnobInGraphicEQ(CControlSurface::EKnobFader)
+    "08942a80",  # CControlSurface::GetSongForReset()
+    "0894ad40",  # CControlSurface::InitializeSelectSwitchInGraphicEQ()
+    "08946330",  # CControlSurface::InitializeSelectSwitchInExternal()
+    "0894ae90",  # CControlSurface::InitializePlayMuteSwitchInGraphicEQ()
+    "08946310",  # CControlSurface::InitializePlayMuteSwitchInExternal()
+    "08942c90",  # CControlSurface::EditMasterVolume(int)
+    "08942ac0",  # CControlSurface::GetSoloSelected() const
+    "0894e850",  # CControlSurface::InitializeModKnob()
+    "0894e8f0",  # CControlSurface::GetExternalSwitch(int) const
+    "08946010",  # CControlSurface::GetExternalKnobFaderMax(char) const
+    "0894e8b0",  # CControlSurface::GetExternalKnob(int) const
+    "0894e8d0",  # CControlSurface::GetExternalSlider(int) const
+    "0894e890",  # CControlSurface::EditRTKnob(int, int)
+    "0894b060",  # CControlSurface::EditSetListEQBandLevel(unsigned int, int)
+    "08951dd0",  # CControlSurface::EditAudioVolume(int, int)
+    "08954ca0",  # CControlSurface::EditAudioTrackVolume(int, int)
+    "08942c50",  # CControlSurface::EditVolume(int, int)
+    "0894b530",  # CControlSurface::EditKnobFaderForCustomMod(unsigned int, CControlSurface::EKnobFader, int)
+    "08944440",  # CControlSurface::GetModeLEDCode(CControlSurface::EMode) const
+    "08944460",  # CControlSurface::GetKarmaModuleSelectLEDCode(int) const
+    "08951f30",  # CControlSurface::IsUseGlobalAudio() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

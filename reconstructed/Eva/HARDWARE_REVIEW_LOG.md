@@ -2100,3 +2100,70 @@ should know they exist and are untested/unmodeled, not silently absent.
   Real-HW test that would help: none identified -- pure host-side
   arithmetic/table-lookup logic, no hardware-observable behavior of
   its own.
+
+- **CControlSurface, 30/161 pending methods (round 49)
+  (`control_surface.h`/`control_surface.cpp`), round 49, 2026-07-29
+  (solo, no subagents -- session-wide cap hit, user chose "Continue
+  solo").** Fresh class, no prior header. Survey false alarm first:
+  a case-sensitivity bug in the round's own survey script (comparing
+  manifest `status` against `'RECONSTRUCTED'` instead of the real
+  lowercase `'reconstructed'`) made the ENTIRE manifest look pending,
+  which briefly suggested `CStorageConverterBase` (already fully
+  landed, commit history confirms it) was still open -- caught before
+  any wasted work by re-running the survey with the correct
+  case-insensitive comparison; the real top-of-list fresh candidate
+  was `CControlSurface` (physical knobs/faders/switches/LEDs layer).
+
+  Landed the smallest, fully self-contained 30-method subset: 7 real
+  no-op overrides (`EditKarmaPadVelocityMode`, 3 `UpdateKnobFaderLED`
+  overloads, `PressPlayMuteSwitchInExternal`,
+  `PressSelectSwitchInExternal`, `PressPlayMuteSwitchInGraphicEQ`,
+  `PressSelectSwitchInGraphicEQ`, `MoveKnobInGraphicEQ`); 10
+  fixed-offset field get/set methods including `GetSongForReset`
+  (static/global address return, `__cdecl`, no `this`) and
+  `GetSoloSelected` (indexes a real pointer array by a real index
+  field, reads a fixed offset off the result -- raw memory only, no
+  external call needed even though the pointed-at object is an
+  unreconstructed `CTrackStatus`); 8 `param*0x10 + <base>` real
+  per-channel-array get/set methods (confirmed stride `0x10`, two
+  base offsets `+0xc`/`+0x8c` = `+0xc + 8*0x10`); 2 `.rodata`
+  lookup-table LED-code methods (`GetModeLEDCode`/
+  `GetKarmaModuleSelectLEDCode`, Ghidra's own `CSWTCH_497`/`CSWTCH_500`
+  placeholder names, "confirmed real, content unread" treatment) plus
+  `IsUseGlobalAudio`. Two methods (`IsUseGlobalAudio`,
+  `EditKnobFaderForCustomMod`) dereference a real but unreconstructed
+  pointer field at `+0x140` purely as raw bytes -- correctly used this
+  project's established `FromU32()` host/target pointer-width idiom
+  (`(unsigned char *)(unsigned long)v`, matching OA.ko's
+  `src/init/file_io.cpp` etc) rather than a plain `int`-as-pointer
+  cast, which would have silently truncated on this 64-bit host.
+  `CControlSurface`'s own size is not independently confirmed --
+  sized conservatively to the highest offset touched (`+0x808`,
+  rounded up to `0x810`).
+
+  Deferred, 3 reasons: (1) 6 methods call into a real but wholly
+  unreconstructed sibling class (`SetAsSoloSelected`/`GetSolo`/
+  `GetAudioTrackSolo`/`GetAudioInputSolo` -> `CTrackStatus`;
+  `UpdateLED`/`EditAssignableSwitch` -> `CMMI`); (2)
+  `UpdateKarmaSceneSelectLED` calls an unreconstructed SIBLING
+  `CControlSurface` method (`UpdatePlayMuteSwitchLED`), deferred
+  together rather than guessed at; (3) ~127 methods not surveyed this
+  round (up to several KB), dedicated future round's scope.
+
+  Real host KAT (34 checks, verify/test_control_surface.cpp) --
+  self-contained TU, `mmap32()` used for every buffer a `FromU32`-style
+  field points at, same lesson as OA.ko round 55. One test-fixture bug
+  caught and fixed by the test itself: an `EditAudioVolume` no-op
+  check's chosen out-of-range index (9) collided with an
+  already-written byte at `+0x11c` when read back as a 4-byte int
+  (`9*0x10+0x8c == 0x11c`) -- fixed by picking a non-colliding index
+  (200), not a bug in the reconstructed implementation.
+
+  `make verify` full suite green (real target-ABI `-m32` build via
+  `make objs` + `make verify`), zero regressions. Eva manifest 3028
+  -> 3058/37,795 (8.091%).
+
+  Real-HW test that would help: `IsUseGlobalAudio`/per-channel-array
+  read/write behavior could be cross-checked against a real Kronos's
+  control-surface state if a future round reconstructs `CTrackStatus`
+  and the pointed-at `+0x140` object's real type -- not yet actionable.
