@@ -1294,3 +1294,194 @@ const char *RTParmShortNameGroup::GetRTParmShortNameStringPtr(RTParmNameProductI
 	}
 	return ch ? p : 0;
 }
+
+/* ==== 54. CountOnBits -- .text+0x584c0b, 35 bytes ====
+ * Ground truth's own loop shape checks bit 0 first (unshifted), THEN
+ * decrements width and shifts for the next iteration -- functionally
+ * identical to the more natural "shift-then-check per index" form below
+ * (same bits of `mask` examined, same total iteration count, no side
+ * effect on `mask` survives the call), confirmed via exhaustive
+ * native-execution ground truth (see below). */
+unsigned long CountOnBits(unsigned long mask, unsigned char width)
+{
+	unsigned char count = 0;
+	for (unsigned char i = 0; i < width; ++i) {
+		count = (unsigned char)(count + (mask & 1));
+		mask >>= 1;
+	}
+	return count;
+}
+
+/* ==== 55. Do_KM_rtp_val_out_pe -- .text+0x55e562, 29 bytes ====
+ * Tiny gate + tail call: a single guard byte at gKS+0x16ef4 (exact
+ * semantic meaning not independently determined this pass -- no other
+ * reconstructed member of this family reads or writes it) suppresses
+ * the call to KM_rtp_val_out_pe entirely when nonzero. */
+void Do_KM_rtp_val_out_pe(RTParm *rtParm, unsigned char a, unsigned char b)
+{
+	if (gKS[0x16ef4] != 0)
+		return;
+	KM_rtp_val_out_pe((RTParm_pub *)rtParm, a, b);
+}
+
+/* ==== 56. IsRTParmFunctionSameGE -- .text+0x531a5f, 3907 bytes ====
+ * Sibling of the already-reconstructed IsRTParmFunctionSamePE, but far
+ * larger: `kind` dispatches to one of 12 real cases (2,3,4,5,6,7,8,9,
+ * 0xa,0xb,0xc,0xe), each with its OWN independently-authored compatible-
+ * value set; anything else (0,1,0xd,0xf..) falls through to the shared
+ * default `idx == c`. `kind == 0` is unconditionally false; `kind != b`
+ * (the 3rd parameter) is also unconditionally false in every real case,
+ * mirroring IsRTParmFunctionSamePE's own top-level gate.
+ *
+ * kind==0xb (11) alone dispatches to a FURTHER 22-way sub-switch on
+ * `idx`, each arm hand-listing its own compatible `c` values -- by far
+ * the largest single case, and the reason this function is 13x
+ * IsRTParmFunctionSamePE's size. Given the sheer number of sub-blocks,
+ * this pass built a native-execution harness (the function has ZERO
+ * relocations -- confirmed via `objdump -dr`, fully self-contained pure
+ * logic on `kind`/`idx`/`c` alone, safe to mmap+call directly) and
+ * brute-forced the real ground truth for all 16*256*256 = 1,048,576
+ * (kind,idx,c) combinations with b==kind (the only case that can ever
+ * return true). Every group/range below was cross-checked against that
+ * exhaustive table, not hand-typed or guessed -- kind==2/4/5/6/7/8/9/
+ * 0xa/0xc/0xe are genuine symmetric equivalence-class groups (any two
+ * members of the same listed set are mutually "same"); kind==3 is a
+ * "hub" shape (34..40's own sub-ranges, not a simple partition -- see
+ * inline comments); kind==0xb (11) is NOT even symmetric in ground
+ * truth (e.g. idx=20,c=6 is true but idx=6,c=20 is false -- a genuine
+ * property of the real compiled table, not a transcription artifact,
+ * confirmed by direct harness re-invocation on that exact pair both
+ * ways) and is reproduced here as an explicit directed pair table taken
+ * verbatim from the exhaustive ground-truth dump, since no clean
+ * formula reproduces its real (asymmetric) shape. */
+static const unsigned char sIsRTParmFunctionSameGE_Kind11Pairs[190][2] = {
+	{2,15}, {2,16}, {2,17}, {2,21}, {2,22}, {2,23}, {2,25}, {3,26},
+	{3,27}, {3,29}, {4,15}, {4,18}, {4,19}, {4,21}, {4,22}, {4,24},
+	{4,25}, {5,26}, {5,28}, {5,29}, {6,16}, {6,18}, {6,19}, {6,21},
+	{6,23}, {6,24}, {6,25}, {7,27}, {7,28}, {7,29}, {8,17}, {8,19},
+	{8,20}, {8,22}, {8,23}, {8,24}, {8,25}, {15,2}, {15,4}, {15,16},
+	{15,17}, {15,18}, {15,19}, {15,21}, {15,22}, {15,23}, {15,24}, {15,25},
+	{16,2}, {16,6}, {16,15}, {16,17}, {16,18}, {16,20}, {16,21}, {16,22},
+	{16,23}, {16,24}, {16,25}, {17,2}, {17,8}, {17,15}, {17,16}, {17,19},
+	{17,20}, {17,21}, {17,22}, {17,23}, {17,24}, {17,25}, {18,4}, {18,6},
+	{18,15}, {18,16}, {18,19}, {18,20}, {18,21}, {18,22}, {18,23}, {18,24},
+	{18,25}, {19,4}, {19,8}, {19,15}, {19,17}, {19,18}, {19,20}, {19,21},
+	{19,22}, {19,23}, {19,24}, {19,25}, {20,6}, {20,8}, {20,16}, {20,17},
+	{20,18}, {20,19}, {20,21}, {20,22}, {20,23}, {20,24}, {20,25}, {21,2},
+	{21,4}, {21,6}, {21,15}, {21,16}, {21,17}, {21,18}, {21,19}, {21,20},
+	{21,22}, {21,23}, {21,24}, {21,25}, {22,2}, {22,4}, {22,8}, {22,15},
+	{22,16}, {22,17}, {22,18}, {22,19}, {22,20}, {22,21}, {22,23}, {22,24},
+	{22,25}, {23,2}, {23,6}, {23,8}, {23,15}, {23,16}, {23,17}, {23,18},
+	{23,19}, {23,20}, {23,21}, {23,22}, {23,24}, {23,25}, {24,4}, {24,6},
+	{24,8}, {24,15}, {24,16}, {24,17}, {24,18}, {24,19}, {24,20}, {24,21},
+	{24,22}, {24,23}, {24,25}, {25,2}, {25,4}, {25,6}, {25,8}, {25,15},
+	{25,16}, {25,17}, {25,18}, {25,19}, {25,20}, {25,21}, {25,22}, {25,23},
+	{25,24}, {26,3}, {26,5}, {26,27}, {26,28}, {26,29}, {27,3}, {27,7},
+	{27,26}, {27,28}, {27,29}, {28,5}, {28,7}, {28,26}, {28,27}, {28,29},
+	{29,3}, {29,5}, {29,7}, {29,26}, {29,27}, {29,28},
+};
+
+static bool sIsRTParmFunctionSameGE_InSet(unsigned char v, const unsigned char *set, int n)
+{
+	for (int i = 0; i < n; ++i)
+		if (set[i] == v)
+			return true;
+	return false;
+}
+
+bool IsRTParmFunctionSameGE(unsigned char kind, unsigned char idx, unsigned char b, unsigned char c)
+{
+	if (kind == 0 || kind != b)
+		return false;
+	if (idx == c)
+		return true;
+
+	static const unsigned char k2[]  = {14,15};
+	static const unsigned char k3a[] = {6,7,8};
+	static const unsigned char k4a[] = {2,3};
+	static const unsigned char k4b[] = {9,10,11,12};
+	static const unsigned char k4c[] = {13,14};
+	static const unsigned char k5[]  = {7,8};
+	static const unsigned char k6[]  = {9,10};
+	static const unsigned char k7[]  = {3,4};
+	static const unsigned char k8[]  = {10,11};
+	static const unsigned char k9[]  = {14,15};
+	static const unsigned char ka[]  = {40,41};
+	static const unsigned char kc[]  = {0,1,2,3,4,5};
+	static const unsigned char ke_a[] = {0,1};
+	static const unsigned char ke_b[] = {16,17,18,19};
+	static const unsigned char ke_c[] = {22,23,24};
+	static const unsigned char ke_d[] = {37,38};
+	static const unsigned char ke_e[] = {40,41,42,43,44,45};
+
+	switch (kind) {
+	case 2:
+		return sIsRTParmFunctionSameGE_InSet(idx, k2, 2) && sIsRTParmFunctionSameGE_InSet(c, k2, 2);
+	case 3:
+		/* {6,7,8} clique, plus a "hub" shape over 20..40: 36 is
+		 * compatible with everything in [20,40]; 37/38/39/40 are
+		 * ALSO each compatible with their own 4-value sub-range
+		 * (20-23/24-27/28-31/32-35) on top of 36. */
+		if (sIsRTParmFunctionSameGE_InSet(idx, k3a, 3) && sIsRTParmFunctionSameGE_InSet(c, k3a, 3))
+			return true;
+		if ((idx == 36 && c >= 20 && c <= 40) || (c == 36 && idx >= 20 && idx <= 40))
+			return true;
+		if ((idx == 37 && c >= 20 && c <= 23) || (c == 37 && idx >= 20 && idx <= 23))
+			return true;
+		if ((idx == 38 && c >= 24 && c <= 27) || (c == 38 && idx >= 24 && idx <= 27))
+			return true;
+		if ((idx == 39 && c >= 28 && c <= 31) || (c == 39 && idx >= 28 && idx <= 31))
+			return true;
+		if ((idx == 40 && c >= 32 && c <= 35) || (c == 40 && idx >= 32 && idx <= 35))
+			return true;
+		return false;
+	case 4:
+		if (sIsRTParmFunctionSameGE_InSet(idx, k4a, 2) && sIsRTParmFunctionSameGE_InSet(c, k4a, 2))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, k4b, 4) && sIsRTParmFunctionSameGE_InSet(c, k4b, 4))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, k4c, 2) && sIsRTParmFunctionSameGE_InSet(c, k4c, 2))
+			return true;
+		return false;
+	case 5:
+		return sIsRTParmFunctionSameGE_InSet(idx, k5, 2) && sIsRTParmFunctionSameGE_InSet(c, k5, 2);
+	case 6:
+		return sIsRTParmFunctionSameGE_InSet(idx, k6, 2) && sIsRTParmFunctionSameGE_InSet(c, k6, 2);
+	case 7:
+		return sIsRTParmFunctionSameGE_InSet(idx, k7, 2) && sIsRTParmFunctionSameGE_InSet(c, k7, 2);
+	case 8:
+		return sIsRTParmFunctionSameGE_InSet(idx, k8, 2) && sIsRTParmFunctionSameGE_InSet(c, k8, 2);
+	case 9:
+		return sIsRTParmFunctionSameGE_InSet(idx, k9, 2) && sIsRTParmFunctionSameGE_InSet(c, k9, 2);
+	case 0xa:
+		return sIsRTParmFunctionSameGE_InSet(idx, ka, 2) && sIsRTParmFunctionSameGE_InSet(c, ka, 2);
+	case 0xb:
+		/* NOT symmetric in ground truth -- see header comment.
+		 * Directed pair table, taken verbatim from the exhaustive
+		 * native-execution dump. */
+		for (int i = 0; i < 190; ++i)
+			if (sIsRTParmFunctionSameGE_Kind11Pairs[i][0] == idx &&
+			    sIsRTParmFunctionSameGE_Kind11Pairs[i][1] == c)
+				return true;
+		return false;
+	case 0xc:
+		return sIsRTParmFunctionSameGE_InSet(idx, kc, 6) && sIsRTParmFunctionSameGE_InSet(c, kc, 6);
+	case 0xe:
+		if (sIsRTParmFunctionSameGE_InSet(idx, ke_a, 2) && sIsRTParmFunctionSameGE_InSet(c, ke_a, 2))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, ke_b, 4) && sIsRTParmFunctionSameGE_InSet(c, ke_b, 4))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, ke_c, 3) && sIsRTParmFunctionSameGE_InSet(c, ke_c, 3))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, ke_d, 2) && sIsRTParmFunctionSameGE_InSet(c, ke_d, 2))
+			return true;
+		if (sIsRTParmFunctionSameGE_InSet(idx, ke_e, 6) && sIsRTParmFunctionSameGE_InSet(c, ke_e, 6))
+			return true;
+		return false;
+	default:
+		/* kind in {1,0xd,0xf..0xff}: no dispatch entry, falls
+		 * through to the shared default (idx==c, already true or
+		 * false above). */
+		return false;
+	}
+}

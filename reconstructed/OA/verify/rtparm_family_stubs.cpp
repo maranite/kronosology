@@ -23,23 +23,15 @@ void AssignRTParmGE(unsigned char, GenEffect *, RTParm *, RTParmFunction *,
 void AssignRTParmPE(RTParm *, RTParmFunction *, const RTParmFunctionTable *,
                      unsigned char, unsigned char) { }
 short ScaleRTParmValue(RTParmEdit *, unsigned char, unsigned char) { return 0; }
-void KM_rtp_val_out_pe(RTParm_pub *, unsigned char, unsigned char) { }
+/* Counts real calls that make it through Do_KM_rtp_val_out_pe's own gate
+ * (round 43, 2026-07-29: Do_KM_rtp_val_out_pe is now real and tail-calls
+ * here -- this stub still stands in for KM_rtp_val_out_pe itself, which
+ * stays `pending`). */
+int g_do_km_rtp_val_out_pe_calls;
+void KM_rtp_val_out_pe(RTParm_pub *, unsigned char, unsigned char) { ++g_do_km_rtp_val_out_pe_calls; }
 void Do_KM_rtp_update_name(unsigned char, unsigned char) { }
 void Do_KM_rtp_update_all_names(unsigned char, unsigned long) { }
 void CSKParameterChangeMessage::SetValue(int) { }
 void CSysExBuffer::SendSysExMassage(unsigned char *) { }
 
 void RTParmNameManager::GetRTParmNameString(GenEffect *, RTParm *, char *, bool) { }
-
-/* Added for the follow-up (2026-07-29) pass's 7 deferred members. */
-int g_do_km_rtp_val_out_pe_calls;
-void Do_KM_rtp_val_out_pe(RTParm *, unsigned char, unsigned char) { ++g_do_km_rtp_val_out_pe_calls; }
-bool IsRTParmFunctionSameGE(unsigned char, unsigned char, unsigned char, unsigned char) { return false; }
-unsigned long CountOnBits(unsigned long mask, unsigned char width)
-{
-	unsigned long n = 0;
-	for (unsigned char i = 0; i < width; ++i)
-		if (mask & (1UL << i))
-			++n;
-	return n;
-}

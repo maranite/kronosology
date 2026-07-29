@@ -277,20 +277,14 @@ short ScaleRTParmValue(RTParmEdit *rtd, unsigned char value, unsigned char useCo
 void KM_rtp_val_out_pe(RTParm_pub *rtParm, unsigned char a, unsigned char b) __attribute__((regparm(3)));
 void Do_KM_rtp_update_name(unsigned char a, unsigned char b) __attribute__((regparm(3)));
 void Do_KM_rtp_update_all_names(unsigned char a, unsigned long mask) __attribute__((regparm(3)));
-/* Do_KM_rtp_val_out_pe -- a SEPARATE real symbol from KM_rtp_val_out_pe
- * above (confirmed distinct mangled name, `_Z20Do_KM_rtp_val_out_peP6RTParmhh`
- * vs the RTParm_pub-taking one) -- real callee of UpdateRTParmIfSame_GE,
- * found this pass. */
-void Do_KM_rtp_val_out_pe(RTParm *rtParm, unsigned char a, unsigned char b) __attribute__((regparm(3)));
-/* IsRTParmFunctionSameGE -- real, large (3907B, surveyed-not-attempted)
- * sibling of the already-reconstructed IsRTParmFunctionSamePE; real
- * callee of DoRTParmMultiEnableGE, found this pass. */
-bool IsRTParmFunctionSameGE(unsigned char kind, unsigned char idx, unsigned char b, unsigned char c) __attribute__((regparm(3)));
-/* CountOnBits -- real, not-yet-reconstructed (`_Z11CountOnBitsmh`); real
- * callee of RTParmShortNameGroup::GetRTParmShortNameStringPtr, found this
- * pass. */
-unsigned long CountOnBits(unsigned long mask, unsigned char width) __attribute__((regparm(3)));
 }
+
+/* ---- reconstructed this pass (round 43, solo/no-subagent): Do_KM_rtp_val_out_pe,
+ * IsRTParmFunctionSameGE, CountOnBits -- see src/engine/rtparm_family.cpp for
+ * each one's derivation. ---- */
+void Do_KM_rtp_val_out_pe(RTParm *rtParm, unsigned char a, unsigned char b) __attribute__((regparm(3)));
+bool IsRTParmFunctionSameGE(unsigned char kind, unsigned char idx, unsigned char b, unsigned char c) __attribute__((regparm(3)));
+unsigned long CountOnBits(unsigned long mask, unsigned char width) __attribute__((regparm(3)));
 
 /* RTParmNameManager -- real class (see header comment). Only
  * SetPrependCCInfo() has a body in this pass; ctor/Initialize/

@@ -547,7 +547,8 @@ int main()
 	}
 	memset(gKS, 0, sizeof(gKS));
 
-	printf("  DoRTParmMultiEnableGE (IsRTParmFunctionSameGE stubbed false -> every ge self-writes 0xff)\n");
+	printf("  DoRTParmMultiEnableGE (real IsRTParmFunctionSameGE; all-zero gKS -> every slot's kind==0,\n"
+	       "                         which is unconditionally false in ground truth -> every ge self-writes 0xff)\n");
 	{
 		DoRTParmMultiEnableGE(2, RTPARM_BUFFER_CURRENT);
 		check_eq("module2 ge0 current table +0x24", gKS[2 * 0x9d10 + 0 * 0x28 + 0x1f73c + 0x24], 0xff);
@@ -623,6 +624,81 @@ int main()
 		*(unsigned short *)(p + 7 * 4 + 0xa) = 3;
 		check_ptr("useAlt*stride offset applied",
 		          g.GetRTParmShortNameStringPtr((RTParmNameProductID)7, 2, 0), strTable[80]);
+	}
+
+	printf("-- round 43 (2026-07-29, solo): CountOnBits, Do_KM_rtp_val_out_pe, IsRTParmFunctionSameGE --\n");
+	printf("  CountOnBits\n");
+	{
+		/* expected values from an independent native-execution ground-truth
+		 * run of the real 35-byte function (see rtparm_family_bottom_up_batch/
+		 * follow-up memory files for the harness) -- not hand-typed. */
+		check_eq("width=0 -> 0 regardless of mask", CountOnBits(0xffffffffUL, 0), 0);
+		check_eq("mask=0 any width -> 0", CountOnBits(0, 8), 0);
+		check_eq("0b0111, width=8 -> 3", CountOnBits(0x07, 8), 3);
+		check_eq("0b0111, width=2 (only low 2 bits examined) -> 2", CountOnBits(0x07, 2), 2);
+		check_eq("0xff, width=8 -> 8", CountOnBits(0xff, 8), 8);
+		check_eq("bit7 only, width=8 -> 1", CountOnBits(0x80, 8), 1);
+		check_eq("bit7 only, width=7 (bit7 not examined) -> 0", CountOnBits(0x80, 7), 0);
+	}
+
+	printf("  Do_KM_rtp_val_out_pe\n");
+	{
+		unsigned char rp[4] = {0};
+		g_do_km_rtp_val_out_pe_calls = 0;
+		gKS[0x16ef4] = 0;
+		Do_KM_rtp_val_out_pe((RTParm *)rp, 3, 5);
+		check_eq("gate byte clear -> calls through", g_do_km_rtp_val_out_pe_calls, 1);
+
+		g_do_km_rtp_val_out_pe_calls = 0;
+		gKS[0x16ef4] = 1;
+		Do_KM_rtp_val_out_pe((RTParm *)rp, 3, 5);
+		check_eq("gate byte set -> suppressed", g_do_km_rtp_val_out_pe_calls, 0);
+		gKS[0x16ef4] = 0;
+	}
+
+	printf("  IsRTParmFunctionSameGE\n");
+	{
+		/* every expected value below is taken verbatim from an exhaustive
+		 * native-execution ground-truth dump of the real 3907-byte
+		 * function over all 16*256*256 (kind,idx,c) combinations with
+		 * b==kind (the only case that can ever be true) -- not hand-typed
+		 * or derived by re-reading the disassembly a second time. */
+		check_eq("kind==0 always false", IsRTParmFunctionSameGE(0, 5, 0, 5), 0);
+		check_eq("kind!=b always false", IsRTParmFunctionSameGE(2, 5, 3, 5), 0);
+		check_eq("idx==c always true (any real kind)", IsRTParmFunctionSameGE(7, 42, 7, 42), 1);
+		check_eq("kind==1 (no dispatch entry) idx!=c -> false", IsRTParmFunctionSameGE(1, 5, 1, 6), 0);
+
+		check_eq("kind2 pair (14,15)", IsRTParmFunctionSameGE(2, 14, 2, 15), 1);
+		check_eq("kind2 pair (15,14)", IsRTParmFunctionSameGE(2, 15, 2, 14), 1);
+		check_eq("kind2 non-pair -> false", IsRTParmFunctionSameGE(2, 14, 2, 13), 0);
+
+		check_eq("kind3 clique {6,7,8}: 6~8", IsRTParmFunctionSameGE(3, 6, 3, 8), 1);
+		check_eq("kind3 hub: 36~everything in [20,40]", IsRTParmFunctionSameGE(3, 36, 3, 25), 1);
+		check_eq("kind3 hub: 40~36", IsRTParmFunctionSameGE(3, 40, 3, 36), 1);
+		check_eq("kind3 subhub: 37~20", IsRTParmFunctionSameGE(3, 37, 3, 20), 1);
+		check_eq("kind3 subhub: 37 NOT~24 (that's 38's range)", IsRTParmFunctionSameGE(3, 37, 3, 24), 0);
+		check_eq("kind3 20 NOT~21 (siblings don't connect directly)", IsRTParmFunctionSameGE(3, 20, 3, 21), 0);
+
+		check_eq("kind4 clique {9,10,11,12}: 9~12", IsRTParmFunctionSameGE(4, 9, 4, 12), 1);
+		check_eq("kind4 clique {2,3}", IsRTParmFunctionSameGE(4, 2, 4, 3), 1);
+		check_eq("kind4 clique {13,14}", IsRTParmFunctionSameGE(4, 13, 4, 14), 1);
+		check_eq("kind4 cross-clique -> false", IsRTParmFunctionSameGE(4, 2, 4, 9), 0);
+
+		check_eq("kind12 clique {0..5}: 0~5", IsRTParmFunctionSameGE(0xc, 0, 0xc, 5), 1);
+		check_eq("kind12 out of clique -> false", IsRTParmFunctionSameGE(0xc, 0, 0xc, 6), 0);
+
+		check_eq("kind14 clique {40..45}: 40~45", IsRTParmFunctionSameGE(0xe, 40, 0xe, 45), 1);
+		check_eq("kind14 clique {16..19}", IsRTParmFunctionSameGE(0xe, 16, 0xe, 19), 1);
+		check_eq("kind14 cross-clique -> false", IsRTParmFunctionSameGE(0xe, 16, 0xe, 22), 0);
+
+		/* kind==0xb (11): confirmed genuinely NON-symmetric in ground
+		 * truth (a real property of the compiled table, re-verified via
+		 * direct harness re-invocation on this exact pair both ways). */
+		check_eq("kind11 (20,6) -> true", IsRTParmFunctionSameGE(0xb, 20, 0xb, 6), 1);
+		check_eq("kind11 (6,20) -> false (asymmetric!)", IsRTParmFunctionSameGE(0xb, 6, 0xb, 20), 0);
+		check_eq("kind11 (6,19) -> true", IsRTParmFunctionSameGE(0xb, 6, 0xb, 19), 1);
+		check_eq("kind11 (19,6) -> false (asymmetric!)", IsRTParmFunctionSameGE(0xb, 19, 0xb, 6), 0);
+		check_eq("kind11 unrelated pair -> false", IsRTParmFunctionSameGE(0xb, 2, 0xb, 100), 0);
 	}
 
 	printf("\n%s (%d failure%s)\n", g_fail ? "FAIL" : "PASS", g_fail, g_fail == 1 ? "" : "s");
