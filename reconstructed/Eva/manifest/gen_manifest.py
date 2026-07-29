@@ -4067,6 +4067,24 @@ RECONSTRUCTED = {
     "089ecb40",  # CSysExSongTimbreSet::GetVersion() const
     "089ecb50",  # CSysExSongTimbreSet::GetObjectSize() const
     "089ecb60",  # CSysExSongTimbreSet::GetObjectSizeForExport() const
+
+    # 2026-07-29 (solo, no subagents): CSysExKarmaGEInfo/CSysExSongControl
+    # (sysex_control_objects.h/.cpp), 2 more siblings of the CSysEx*
+    # family, picked up as a round-40-flagged follow-up.
+    "089ebac0",  # CSysExKarmaGEInfo::GetObjectPointer(int, int) const
+    "089edcf0",  # CSysExKarmaGEInfo::GetStorageId() const
+    "089edd00",  # CSysExKarmaGEInfo::GetNumBanks() const
+    "089edd10",  # CSysExKarmaGEInfo::GetVersion() const
+    "089edd20",  # CSysExKarmaGEInfo::GetObjectSize() const
+    "089edd30",  # CSysExKarmaGEInfo::GetObjectSizeForExport() const
+    "089edd40",  # CSysExKarmaGEInfo::GetSysExBankId(int) const
+    "089edd50",  # CSysExKarmaGEInfo::GetNumOfObject(int) const
+    "089edd60",  # CSysExKarmaGEInfo::GetTotalSizeForExport(int, int) const
+    "089ebcc0",  # CSysExSongControl::GetObjectPointer(int, int) const
+    "089edf00",  # CSysExSongControl::GetStorageId() const
+    "089edf10",  # CSysExSongControl::GetVersion() const
+    "089edf20",  # CSysExSongControl::GetObjectSize() const
+    "089edf30",  # CSysExSongControl::GetObjectSizeForExport() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

@@ -1678,3 +1678,66 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified -- same rationale as
   the `CSysEx*Name` family above.
+
+- **CSysExKarmaGEInfo/CSysExSongControl, 14/14 tractable methods
+  (`sysex_control_objects.h`/`.cpp`), round 41, 2026-07-29 (solo, no
+  subagents)**. Flagged as a viable follow-up during round 40's survey
+  of the sibling `CSysEx.../CSysExObjectBase` families, picked up here.
+  `CSysExKarmaGEInfo` (`GetStorageId()`=0x26, `GetNumBanks()`=1,
+  `GetVersion()`=0, `GetObjectSize()`/`GetObjectSizeForExport()`=0x7a0)
+  has 4 extra small real methods on top of the common trio:
+  `GetObjectPointer(int,int)` returns `CKGUtil::sm_poKGUIInfo+0x3c90`;
+  `GetSysExBankId(int)` is an identity passthrough; `GetNumOfObject`/
+  `GetTotalSizeForExport` always return 0. `CSysExSongControl`
+  (`GetStorageId()`=0xc, `GetVersion()`=0, `GetObjectSize()`/
+  `GetObjectSizeForExport()`=0x1490) has 1 extra method,
+  `GetObjectPointer(int,int)`, real return type `void` (ground
+  truth genuinely discards `CSeqDataManager::GetRegistoredSong()`'s
+  result -- no "could not recover" warning here, unlike the 4 deferred
+  `GetNumObjectsForDigest` cases above, so this is a faithfully
+  reproduced real waste, not a decompiler artifact). No deferrals this
+  batch -- every method decompiled cleanly.
+
+  Architectural finding (most significant part of this batch):
+  `CSysExSongControl::GetObjectPointer` genuinely calls a real,
+  confirmed, but entirely unmodeled class (`CSeqDataManager`, via the
+  same "raw static pointer IS the singleton" idiom used throughout the
+  project, e.g. `CKGBankManager::ms_poInstance`). First attempt
+  declared `CSeqDataManager::GetRegistoredSong` as a genuinely
+  unresolved `extern "C"` free function, matching round 40's
+  `GetNumObjectsForDigest` precedent -- but `make verify` failed with
+  `undefined reference to
+  'CSeqDataManager_GetRegistoredSong_Unresolved'` inside
+  `test_alpha_keyb_ctrl`, an entirely unrelated test binary. Root
+  cause: unlike OA.ko's per-target manual linking, Eva's Makefile
+  links EVERY verify target against the full reconstructed object tree
+  (`$(OBJ)`, auto-globbed), so any reconstructed function that actually
+  CALLS an undefined extern breaks every test binary in the suite, not
+  just its own -- round 40's unresolved externs never triggered this
+  because they were declared-but-never-actually-called. Fixed by
+  replacing the free-function extern with a minimal no-op class
+  stand-in (`struct CSeqDataManager { int GetRegistoredSong(int) {
+  return 0; } };`), matching `storage_converter_ext_stubs.h`'s
+  established "declare the minimum viable slice, no-op body, clearly
+  flagged" convention -- fully link-safe since the body is inline.
+  Documented pattern for Eva going forward: a genuinely-unresolved
+  free-function extern is safe only when provably uncalled by
+  reconstructed code; anything actually invoked from reconstructed
+  code needs a class stand-in instead.
+
+  Also hit and fixed an unrelated but instructive bug while drafting
+  the header comment: a literal `*/` embedded in prose ("CSysEx*/
+  CSysExObjectBase") prematurely closed the enclosing `/* ... */` block
+  comment, producing a cascade of downstream parse errors far from the
+  real cause -- reworded to avoid embedded `*/` substrings.
+
+  Same shared-vtable / non-virtual-dtor finding as the `CSysEx*Name`
+  and `CSysExSong`/etc families re-confirmed for both classes here too
+  (no per-class vtable object exists).
+
+  Real host KAT (`verify/test_sysex_control_objects.cpp`, 15 checks).
+  `make verify` full suite green. Eva manifest 2792 -> 2806/37,795
+  (7.424%).
+
+  Real-HW test that would help: none identified -- same rationale as
+  the sibling families above.
