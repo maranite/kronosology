@@ -247,6 +247,101 @@ int main()
 		      sWriteCalls == 1);
 	}
 
+	printf("[10] SaveFilePath: even-length path (\"AB\", len=2) -- LE length prefix, no pad byte\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		check("SaveFilePath ok", ksc.SaveFilePath("AB"));
+		check("wrote exactly 2+2 = 4 bytes (no pad)", sRecordLen == 4);
+		check("length prefix LE == 02 00", sRecord[0] == 2 && sRecord[1] == 0);
+		check("path bytes follow", sRecord[2] == 'A' && sRecord[3] == 'B');
+	}
+
+	printf("[11] SaveFilePath: odd-length path (\"ABC\", len=3) -- LE length prefix + 0x00 pad byte\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		check("SaveFilePath ok", ksc.SaveFilePath("ABC"));
+		check("wrote exactly 2+3+1 = 6 bytes (with pad)", sRecordLen == 6);
+		check("length prefix LE == 03 00", sRecord[0] == 3 && sRecord[1] == 0);
+		check("path bytes follow", memcmp(sRecord + 2, "ABC", 3) == 0);
+		check("trailing pad byte == 0x00", sRecord[5] == 0);
+	}
+
+	printf("[12] ReadFilePath round-trips SaveFilePath's even-length record, *lenOut == strLen+2\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		ksc.SaveFilePath("AB");
+		sCursor = 0;
+		char out[8] = {0};
+		unsigned short lenOut = 0;
+		check("ReadFilePath ok", ksc.ReadFilePath(out, &lenOut));
+		check("path round-trips", memcmp(out, "AB", 2) == 0);
+		check("*lenOut == 2+2 == 4", lenOut == 4);
+	}
+
+	printf("[13] ReadFilePath round-trips SaveFilePath's odd-length record, *lenOut == strLen+3\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		ksc.SaveFilePath("ABC");
+		sCursor = 0;
+		char out[8] = {0};
+		unsigned short lenOut = 0;
+		check("ReadFilePath ok", ksc.ReadFilePath(out, &lenOut));
+		check("path round-trips", memcmp(out, "ABC", 3) == 0);
+		check("*lenOut == 3+3 == 6", lenOut == 6);
+	}
+
+	printf("[14] ReadFilePath returns false when the length-prefix FMApi read itself fails\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		ksc.SaveFilePath("AB");
+		sCursor = 0;
+		sFailNextRead = 1;
+		char out[8] = {0};
+		unsigned short lenOut = 0xdead;
+		check("ReadFilePath false on prefix-read failure", !ksc.ReadFilePath(out, &lenOut));
+	}
+
+	printf("[15] ReadFilePath (even length) returns false when the string data is truncated\n");
+	{
+		ResetFakeRecord();
+		/* LE prefix says strLen=2, but only the 2-byte prefix itself is
+		 * physically present in the backing record -- the string read
+		 * must fail naturally (short read), and since strLen is even,
+		 * that failure (ok2) IS the return value directly. */
+		sRecord[0] = 2;
+		sRecord[1] = 0;
+		sRecordLen = 2;
+		CFileKscList ksc;
+		char out[8] = {0};
+		unsigned short lenOut = 0;
+		check("ReadFilePath false on truncated string data", !ksc.ReadFilePath(out, &lenOut));
+	}
+
+	printf("[16] ReadFilePath (odd length): pad byte missing -- string read succeeds but the\n"
+	       "     overall result is still false, matching ground truth's own last-call-wins\n"
+	       "     return-value reuse (the pad read's result, not the string read's)\n");
+	{
+		ResetFakeRecord();
+		CFileKscList ksc;
+		ksc.SaveFilePath("ABC");
+		/* Drop the trailing pad byte the real SaveFilePath wrote, so the
+		 * string read (bytes 2..4) succeeds but the pad read (byte 5)
+		 * fails with a natural short read. */
+		sRecordLen = 5;
+		sCursor = 0;
+		char out[8] = {0};
+		unsigned short lenOut = 0;
+		check("ReadFilePath false despite successful string read (pad read lost)",
+		      !ksc.ReadFilePath(out, &lenOut));
+		check("path bytes were still written to out before the pad failure",
+		      memcmp(out, "ABC", 3) == 0);
+	}
+
 	FMApi = 0;
 	printf("\n%s (%d failure%s)\n", g_fail ? "FAIL" : "PASS", g_fail, g_fail == 1 ? "" : "s");
 	return g_fail ? 1 : 0;

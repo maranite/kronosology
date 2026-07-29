@@ -1506,6 +1506,32 @@ should know they exist and are untested/unmodeled, not silently absent.
   just field-by-field. Eva manifest 2700 -> 2718/37,795 (7.191%), commit
   b6117ba.
 
+- **CFileKscList round-46 follow-up: `ReadFilePath`/`SaveFilePath`,
+  2026-07-29 (solo, no subagents)**. The length-prefixed-string protocol
+  flagged deferred just above, now landed: 20/26 methods real.
+  `SaveFilePath` writes a 2-byte little-endian length prefix
+  (`CMemoryAccessor::WriteLittle16Bit`, `strlen()` truncated to 16 bits),
+  then the raw path bytes, then -- ONLY when the length is ODD -- a third
+  write of one `0x00` pad byte (confirmed via the real `and esi,1; je
+  <skip>` branch; EVEN lengths write no pad at all). `ReadFilePath` mirrors
+  this exactly on the read side, decoding the prefix via
+  `CMemoryAccessor::ReadLittle16Bit`, setting `*lenOut = decodedLength+2`
+  (or `+3` if odd), with its own return value being the success of
+  whichever real FMApi call happened LAST (the pad read when odd, the
+  string read when even) -- ground truth's own real register reuse,
+  reproduced faithfully rather than "cleaned up" into an AND of both
+  results. `CMemoryAccessor::ReadLittle16Bit`/`WriteLittle16Bit` (2 new
+  tiny static methods, `storage_converter_ext_stubs.h`) independently
+  confirmed real, zero-relocation, zero-call leaf functions via direct
+  `objdump -dr` at ground truth `.text+0x838dd40`/`0x838dd60` (17/18
+  bytes). Real host KAT (`verify/test_file_ksc_list.cpp`, sections 10-16)
+  covers both odd- and even-length round-trips plus 3 distinct failure
+  paths (prefix read fails, string data truncated, pad byte truncated --
+  the last of which exercises the last-call-wins return-value quirk
+  directly: string read succeeds, pad read fails, overall result is still
+  false). Still deferred, unchanged: `RefreshFilePath`/`GetDeviceInfo`/
+  `Load()`/`Save()`. Eva manifest 2718 -> 2730/37,795 (7.223%).
+
 - **CDirCD, 10/~40 methods (`dir_cd.h`/`.cpp`), 2026-07-29 (solo, no
   subagents)**. Real Akai/ISO CD-ROM directory driver
   (`.rodata+0x08e86160` vtable, `0x08e862f8` typeinfo -- a real

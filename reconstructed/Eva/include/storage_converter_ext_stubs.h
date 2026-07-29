@@ -157,13 +157,13 @@ public:
 	void Initialize(EProgParamBankID, unsigned char) {}
 };
 
-// ---- CMemoryAccessor: a big-endian raw-memory-write utility used by the
-// same CGEConverter/CGETemplateConverter Int0000toExt0000 pair above to
-// append the CFileKge item code after the copied payload. Real body (a
-// simple 4-byte big-endian store) IS reconstructed here, unlike the other
-// stubs in this file -- it is small, self-contained, and its exact shape is
-// directly inferable from every call site's own use (write value `v` as
-// big-endian at `p[0..3]`).
+// ---- CMemoryAccessor: a raw-memory-access utility class. WriteBig32Bit
+// was added for the CGEConverter/CGETemplateConverter Int0000toExt0000
+// pair above; ReadLittle16Bit/WriteLittle16Bit added round 46 (2026-07-29,
+// solo) for CFileKscList::ReadFilePath/SaveFilePath's own length-prefix
+// protocol (file_ksc_list.h/.cpp) -- both real, tiny, self-contained
+// (`.text+0x838dd40`/`0x838dd60`, 17/18 bytes, zero relocations/calls),
+// exact shape confirmed via direct `objdump -dr`.
 class CMemoryAccessor {
 public:
 	static void WriteBig32Bit(unsigned char *dst, unsigned long value)
@@ -172,6 +172,17 @@ public:
 		dst[1] = static_cast<unsigned char>(value >> 16);
 		dst[2] = static_cast<unsigned char>(value >> 8);
 		dst[3] = static_cast<unsigned char>(value);
+	}
+
+	static unsigned short ReadLittle16Bit(const unsigned char *src)
+	{
+		return static_cast<unsigned short>(src[0] | (src[1] << 8));
+	}
+
+	static void WriteLittle16Bit(unsigned char *dst, unsigned short value)
+	{
+		dst[0] = static_cast<unsigned char>(value);
+		dst[1] = static_cast<unsigned char>(value >> 8);
 	}
 };
 

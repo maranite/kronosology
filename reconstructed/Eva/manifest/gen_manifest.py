@@ -3950,6 +3950,12 @@ RECONSTRUCTED = {
     # 18/26 methods (ctor/dtor + the "string"/"byte" field accessors +
     # record framing) -- ReadFilePath/SaveFilePath/RefreshFilePath/
     # GetDeviceInfo/Load()/Save() deferred (see file_ksc_list.h).
+    #
+    # round 46 follow-up (2026-07-29, solo): ReadFilePath/SaveFilePath's
+    # real length-prefixed-string protocol reconstructed -- 20/26 methods
+    # now real. RefreshFilePath/GetDeviceInfo/Load()/Save() still deferred.
+    "084205d0",  # CFileKscList::ReadFilePath(char*, unsigned short*)
+    "08420eb0",  # CFileKscList::SaveFilePath(char const*)
     "08420350",  # CFileKscList::CFileKscList()
     "08420360",  # CFileKscList::~CFileKscList()
     "084203f0",  # CFileKscList::ReadVendorId(char*)

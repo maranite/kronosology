@@ -44,15 +44,28 @@
  *     call (byte[0] left zero-initialized on Save, an unexplained-but-
  *     faithfully-reproduced real leading pad byte).
  *
- * DEFERRED this pass (documented, not fabricated): `ReadFilePath`/
- * `SaveFilePath` (a length-prefixed-string protocol with a real odd/even
- * padding-byte branch via `CMemoryAccessor::ReadLittle16Bit` -- understood
- * from disassembly but not landed this pass, budget reasons),
- * `RefreshFilePath`/`GetDeviceInfo` (both call further into `CDeviceMgr`,
- * unmodeled this pass), and `Load()`/`Save()` themselves (the 2 large
- * orchestrator methods -- both call into `CKscSampleManager` AND the
- * project-wide out-of-scope growable `CZ` container, the exact same trap
- * `korg_file.h`'s own header comment already documents for `CFileKge`).
+ * `ReadFilePath`/`SaveFilePath` (round 46, 2026-07-29): a real length-
+ * prefixed-string protocol. `SaveFilePath`: writes a 2-byte little-endian
+ * length prefix (`CMemoryAccessor::WriteLittle16Bit`, `strlen(path)`
+ * truncated to 16 bits) via one FMApi write, then the raw path bytes
+ * (len=that same truncated length) via a second, THEN -- only when the
+ * length is ODD -- a third write of one `0x00` pad byte (confirmed via
+ * the real `and esi,1; je <skip>` branch; EVEN lengths write no pad at
+ * all). `ReadFilePath`: the exact mirror -- reads the 2-byte prefix,
+ * decodes it (`CMemoryAccessor::ReadLittle16Bit`), reads that many bytes
+ * directly into the caller's own `out` buffer, sets `*lenOut =
+ * decodedLength+2`, and if ODD reads one more pad byte and bumps
+ * `*lenOut` to `+3` instead -- own return value is the success of
+ * whichever real read happened LAST (the pad read when ODD, the string
+ * read when EVEN), matching ground truth's own real register reuse
+ * exactly, not simplified.
+ *
+ * DEFERRED (documented, not fabricated): `RefreshFilePath`/`GetDeviceInfo`
+ * (both call further into `CDeviceMgr`, unmodeled this pass), and
+ * `Load()`/`Save()` themselves (the 2 large orchestrator methods -- both
+ * call into `CKscSampleManager` AND the project-wide out-of-scope
+ * growable `CZ` container, the exact same trap `korg_file.h`'s own
+ * header comment already documents for `CFileKge`).
  *
  * Non-polymorphic (no vtable/typeinfo -- confirmed via `nm`), ctor/dtor
  * both real, but EMPTY (1-byte `ret`, confirmed via `objdump`) -- `mHandle`
@@ -90,9 +103,11 @@ public:
 	bool ReadDot();
 	bool WriteDot();
 
-	/* ---- deferred this pass (see header comment) ---- */
-	// bool ReadFilePath(char *out, unsigned short *lenOut);
-	// bool SaveFilePath(const char *in);
+	/* Length-prefixed-string protocol (round 46, see header comment). */
+	bool ReadFilePath(char *out, unsigned short *lenOut);
+	bool SaveFilePath(const char *in);
+
+	/* ---- still deferred this pass (see header comment) ---- */
 	// void RefreshFilePath(char *, char *, char *, char *);
 	// void GetDeviceInfo(EDevice_Id, char *, char *, char *);
 	// void Load();

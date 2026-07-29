@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "file_ksc_list.h"
 #include "system_api.h"
+#include "storage_converter_ext_stubs.h"
+#include <string.h>
 
 /* Real module-scope global (mains.cpp), same extern already used by
  * config_manager.cpp's own FMApi vtable wrappers. */
@@ -165,4 +167,51 @@ bool CFileKscList::WriteDot()
 {
 	unsigned int len = 2;
 	return FMApiWriteField(mHandle, "\r\n", &len) == 1;
+}
+
+/* ==== length-prefixed-string protocol (round 46, see header comment) ==== */
+
+bool CFileKscList::SaveFilePath(const char *path)
+{
+	unsigned short strLen = (unsigned short)strlen(path);
+	unsigned char lenPrefix[2];
+	CMemoryAccessor::WriteLittle16Bit(lenPrefix, strLen);
+
+	unsigned int len = 2;
+	if (FMApiWriteField(mHandle, lenPrefix, &len) != 1)
+		return false;
+
+	len = strLen;
+	if (FMApiWriteField(mHandle, path, &len) != 1)
+		return false;
+
+	if ((strLen & 1) == 0)
+		return true;
+
+	unsigned char pad = 0;
+	len = 1;
+	return FMApiWriteField(mHandle, &pad, &len) == 1;
+}
+
+bool CFileKscList::ReadFilePath(char *out, unsigned short *lenOut)
+{
+	unsigned char lenPrefix[2];
+	unsigned int len = 2;
+	if (FMApiReadField(mHandle, lenPrefix, &len) != 1)
+		return false;
+
+	unsigned short strLen = CMemoryAccessor::ReadLittle16Bit(lenPrefix);
+
+	len = strLen;
+	bool ok2 = FMApiReadField(mHandle, out, &len) == 1;
+	*lenOut = (unsigned short)(strLen + 2);
+
+	if ((strLen & 1) == 0)
+		return ok2;
+
+	unsigned char pad;
+	len = 1;
+	bool ok3 = FMApiReadField(mHandle, &pad, &len) == 1;
+	*lenOut = (unsigned short)(*lenOut + 1);
+	return ok3;
 }
