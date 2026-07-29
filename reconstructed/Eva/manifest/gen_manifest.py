@@ -4316,6 +4316,20 @@ RECONSTRUCTED = {
     "0806a1a0",  # CSysApiInstance::GetDmyMsgInput()
     "0806b230",  # CSysApiInstance::GetTime()
     "08069ce0",  # CSysApiInstance::GetUniqueID()
+    "089772b0",  # CToneAdjustUpdater::CToneAdjustUpdater()
+    "089772c0",  # CToneAdjustUpdater::~CToneAdjustUpdater()
+    "08979130",  # CToneAdjustUpdater::GetProgSwitchValueBuffer(int)
+    "08979140",  # CToneAdjustUpdater::SetProgSwitchValueBuffer(int, short)
+    "08979970",  # CToneAdjustUpdater::ConvertDKitNumToBank(int)
+    "089774f0",  # CToneAdjustUpdater::GetFormatterForPCM(int)
+    "08977510",  # CToneAdjustUpdater::GetFormatterForCommon(int)
+    "08977690",  # CToneAdjustUpdater::GetFormatterForPCMStoredValueForProg(int)
+    "089776b0",  # CToneAdjustUpdater::GetFormatterForPCMStoredValueForTimbre(int)
+    "089776d0",  # CToneAdjustUpdater::GetFormatterForCommonStoredValue(int)
+    "08979cb0",  # CToneAdjustUpdater::GetAssignTypeForCommon(unsigned char)
+    "08979990",  # CToneAdjustUpdater::ConvertWSeqNumToBank(int)
+    "08977760",  # CToneAdjustUpdater::IsAssignAvailable(int, int)
+    "08979c80",  # CToneAdjustUpdater::GetAssignTypeForPCM(unsigned char)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

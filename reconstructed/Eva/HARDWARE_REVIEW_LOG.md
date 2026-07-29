@@ -2048,3 +2048,55 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified -- pure host-side field/
   static-global accessor logic, no hardware-observable behavior of its own.
+
+- **CToneAdjustUpdater, 14/69 clean pending methods (round 48)
+  (`tone_adjust_updater.h`/`tone_adjust_updater.cpp`), round 48,
+  2026-07-29 (solo, no subagents -- session-wide cap hit, user chose
+  "Continue solo"). Fresh class, no prior header existed. Scripted
+  survey found 69 pending methods (63 clean); this round deliberately
+  landed only the smallest, fully self-contained subset -- the class
+  as a whole ranges up to an 11884-byte single method
+  (`UpdateRelatedParamsForPCM`), far outside a single round's scope.
+  Explicitly skipped `CFileOperation` (126 pending, 125 clean, same
+  survey) -- already documented in `long_binary_file.h`/
+  `file_operation_stub.cpp` as Eva's own deliberately out-of-scope
+  global file manager, same category as `CZ`/`CDiskUtil`; re-confirmed
+  rather than re-litigated.
+
+  Confirmed the real class has NO per-instance data at all -- ctor/
+  dtor are both real, literal 1-byte no-op bodies, and every landed
+  method is `static`-shaped (`cc=__cdecl`, no `this` touched anywhere).
+  Landed 3 shapes: (1) ctor/dtor; (2) a plain indexed get/set pair into
+  a single real `short` array (`GetProgSwitchValueBuffer`/
+  `SetProgSwitchValueBuffer`) plus 2 pure-arithmetic bank converters
+  (`ConvertDKitNumToBank`/`ConvertWSeqNumToBank`, no tables); (3) the
+  `GetFormatterForXxx`/`GetAssignTypeForXxx` family, each a bounds-
+  checked index into its OWN distinct real `.rodata` lookup table
+  (Ghidra's own `CSWTCH_165`/`168`/`171`/`174`/`177`/`184`/`187`
+  placeholder names, content not independently confirmed -- same
+  "confirmed real, content unread" treatment already established
+  project-wide, e.g. OA.ko's `STGAPIOutToPhysBusId` round 55), falling
+  back to a fixed literal constant out of range. Confirmed a genuine
+  shared-table quirk: `GetAssignTypeForPCM`/`GetAssignTypeForCommon`
+  both index the SAME `CSWTCH_184` table but with DIFFERENT bounds
+  checks (0x23 vs 0x25) -- sized the shared table to the larger bound.
+  `IsAssignAvailable(EAlgorithm, int)` is pure 2-arg boolean logic, no
+  table, no `this`.
+
+  Deferred, 2 distinct reasons: (1) the remaining 55 methods (~50 to
+  11884 bytes) cover genuinely large, separate sub-areas (MOSS updater
+  construction, control-surface value round-tripping, min/max range
+  calculation, assign-list management) -- each individually tractable
+  but far outside a single round's intended scope, left for dedicated
+  future rounds. (2) 6 additionally decompiler-flagged
+  (`in_stack_`/`unaff_`): `UpdateSWOnValue`, `ConvertParamToValue`,
+  `ConvertValueToParam`, `UpdateFader`, `UpdateKnob`,
+  `UpdateAssignList`.
+
+  Real host KAT (23 checks, verify/test_tone_adjust_updater.cpp).
+  `make verify` full suite green, zero regressions. Eva manifest
+  3014 -> 3028/37,795 (8.012%).
+
+  Real-HW test that would help: none identified -- pure host-side
+  arithmetic/table-lookup logic, no hardware-observable behavior of
+  its own.
