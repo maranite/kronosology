@@ -114,6 +114,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/controller_rt_data_set_assignment.o \
            src/engine/controller_rt_data_set_audio_in_solo.o \
            src/engine/controller_rt_data_reset_send_knobs_jump_catch.o \
+           src/engine/controller_rt_data_send_karma_cc.o \
            src/engine/slot_voice_data_midi_filters.o \
            src/engine/slot_voice_data_update_midi_filter_resend.o \
            src/engine/slot_voice_data_free.o \
@@ -586,6 +587,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/controller_rt_data_set_assignment.cpp \
        src/engine/controller_rt_data_set_audio_in_solo.cpp \
        src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp \
+       src/engine/controller_rt_data_send_karma_cc.cpp \
        src/engine/slot_voice_data_midi_filters.cpp \
        src/engine/slot_voice_data_update_midi_filter_resend.cpp \
        src/engine/slot_voice_data_free.cpp \
@@ -691,7 +693,8 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_channel_values verify/test_hdr_record_track \
          verify/test_smoother_ctor verify/test_hdr_manager_init \
          verify/test_controller_rt_data_set_assignment verify/test_controller_rt_data_set_audio_in_solo \
-         verify/test_controller_rt_data_reset_send_knobs_jump_catch verify/test_slot_voice_data_midi_filters \
+         verify/test_controller_rt_data_reset_send_knobs_jump_catch verify/test_controller_rt_data_send_karma_cc \
+         verify/test_slot_voice_data_midi_filters \
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
          verify/test_message_processor \
@@ -1339,6 +1342,9 @@ verify/test_controller_rt_data_set_audio_in_solo: verify/test_controller_rt_data
 
 verify/test_controller_rt_data_reset_send_knobs_jump_catch: verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp -o $@
+
+verify/test_controller_rt_data_send_karma_cc: verify/test_controller_rt_data_send_karma_cc.cpp src/engine/controller_rt_data_send_karma_cc.cpp include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_send_karma_cc.cpp src/engine/controller_rt_data_send_karma_cc.cpp -o $@
 
 verify/test_heap_manager_alloc_static: verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp include/oa_setup_global_resources.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_heap_manager_alloc_static.cpp src/mem/heap_manager_alloc_static.cpp -o $@

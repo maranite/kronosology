@@ -346,15 +346,9 @@ void CSTGControllerRTData::OnExtModeSetChange() {}
  * long, int) is real now, batch 60 -- see
  * src/engine/controller_info_send_unsolicited_ui_param.cpp. */
 void CSTGControllerRTData::OnPerformanceActivate(CSTGPerformance &) {}
-/* CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) -- confirmed
- * real, deliberately deferred (own body not reconstructed), per
- * oa_global.h's own comment -- needed as a link target now that
- * CSTGFrontPanel::HandleTouchPanel (src/engine/front_panel_handlers.cpp,
- * 2026-07-24) calls it for real. Stubbed here, not given a real body,
- * matching this file's own stated scope: this only sends a KARMA-pad CC
- * value to the (not-present-in-a-VM) KG audio DSP core, so a no-op is
- * safe and inert for kronos_vm boot-testing purposes. */
-void CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) {}
+/* CSTGControllerRTData::SendKarmaCCToKG(int, unsigned char) is real now,
+ * round 44 (2026-07-29) -- see
+ * src/engine/controller_rt_data_send_karma_cc.cpp. */
 /* CSTGControllerInfo::AnalogControllerHandler -- REAL body now, batch 65,
  * see src/engine/controller_info_analog_handler.cpp (own header comment
  * has the full confirmed device-code dispatch). Superseded the deliberate

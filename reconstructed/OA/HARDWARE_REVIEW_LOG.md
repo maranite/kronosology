@@ -3347,3 +3347,49 @@ Manifest 3529 -> 3536/21,689 (+7, 0 regressions, verified via a
 Real-HW test that would help: none identified — same reasoning as the
 parent batch above, these remain internal KARMA table-lookup/edit-value-
 clamp helpers with no single-path audio/UI-observable effect.
+
+## CSTGControllerRTData::SendKarmaCCToKG — dead stub replaced with real body, round 44 (2026-07-29, solo)
+
+Session hit its 200-subagent dispatch cap mid-round-42; this round done
+solo (no `Agent` tool). `bar2_stubs.cpp` had carried an empty-body
+stand-in for this symbol since 2026-07-24 (needed as a link target once
+`CSTGFrontPanel::HandleTouchPanel` started calling it for real), explicitly
+justified at the time as "safe and inert for kronos_vm boot-testing
+purposes" since kronos_vm has no real KG audio DSP core attached. That
+justification was correct for VM-boot-testing scope, but it IS a real
+functional gap on real hardware: every real caller (`HandleTouchPanel`,
+`ButtonPressHandler`, `AnalogControllerHandler`, several
+`CKGControlMsgHandler` message handlers) was silently doing nothing
+whenever it tried to forward a KARMA-pad realtime CC value to the KG
+engine.
+
+Now real (`.text+0xd720`, 80 bytes, confirmed via `objdump -dr`):
+sends a 5-byte MIDI-CC-shaped message `{channel|0xb0, ccNo, value, 0x05,
+0xff}` via `CSTGMidiQueueWriter::Write()` on the embedded queue-writer
+sub-object at `CSTGMidiPortManager::sInstance+0x208` — same overall shape
+as `global.cpp`'s own `SendGlobalMidiMessage()` helper (reused for
+`UpdateKeyTranspose`/`UpdateLocalControl`), but with the 2nd byte ALSO
+variable (the CC number, not `SendGlobalMidiMessage`'s fixed `0x79`), so
+that exact helper wasn't reusable verbatim. A real, notable detail: `this`
+(eax on entry, this project's regparm(3) convention) is NEVER read
+anywhere in the real body — confirmed via KAT (test [3],
+`test_controller_rt_data_send_karma_cc.cpp`, constructs the object at a
+deliberately poisoned/unconstructed address and confirms the result is
+unaffected). The channel byte comes entirely from `CSTGGlobal::sInstance
+[+0x6b8]` instead.
+
+`make verify` full suite green (204 test binaries, 0 FAIL) and a real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build both green;
+`nm OA.ko | c++filt` confirms the new symbol links. Manifest count
+unchanged (3539/21,689) — `gen_oa_manifest.py`'s name-matching heuristic
+had already credited the dead STUB as "reconstructed" purely by symbol-
+name presence (a known, pre-existing limitation of the by-name-only
+match tier, not something this batch introduced); internally the entry
+moved from "by name only" to the higher-confidence "by address AND name"
+tier (89/2338/1112, was 89/2339/1111).
+
+Real-HW test that would help: with a real KG audio DSP core attached,
+touching a KARMA realtime-controllable front-panel knob/pad/switch should
+now produce an audible/observable CC-driven effect that a VM-only build
+could never have exercised — this was previously a guaranteed silent
+no-op on real hardware too (the stub, not just the VM harness).
