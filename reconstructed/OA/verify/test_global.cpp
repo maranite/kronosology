@@ -5967,6 +5967,137 @@ int main(void)
 	check_eq("GetValueGetters() == 0 (no table exists for this class)",
 		 CSTGGlobal::GetValueGetters() == 0, 1u);
 
+	printf("[round 55] CSTGProgramModeDrumTrackSlot 32-method batch\n");
+	check_eq("OverridesProgramScale() == 0",
+		 CSTGProgramModeDrumTrackSlot::OverridesProgramScale(), 0u);
+	check_eq("HasToneAdjust() == 0", CSTGProgramModeDrumTrackSlot::HasToneAdjust(), 0u);
+	check_eq("ShouldUseSlotEQSettings() == 1",
+		 CSTGProgramModeDrumTrackSlot::ShouldUseSlotEQSettings(), 1u);
+	check_eq("UsesProgramChordSource() == 1",
+		 CSTGProgramModeDrumTrackSlot::UsesProgramChordSource(), 1u);
+	check_eq("GetPerformanceType() == 1", CSTGProgramModeDrumTrackSlot::GetPerformanceType(), 1u);
+	check_eq("GetMeterIndex() == 2", CSTGProgramModeDrumTrackSlot::GetMeterIndex(), 2u);
+	check_eq("GetMeterBus() == 0x56", CSTGProgramModeDrumTrackSlot::GetMeterBus(), 0x56u);
+
+	{
+		unsigned char *instBuf = mmap32(0x100);
+		memset(instBuf, 0, 0x100);
+		CSTGProgramModeDrumTrackSlot *slot =
+			reinterpret_cast<CSTGProgramModeDrumTrackSlot *>(instBuf);
+
+		{
+			unsigned char *dtorBuf = mmap32(0x100);
+			memset(dtorBuf, 0xcc, 0x100);
+			CSTGProgramModeDrumTrackSlot *d =
+				reinterpret_cast<CSTGProgramModeDrumTrackSlot *>(dtorBuf);
+			d->~CSTGProgramModeDrumTrackSlot();
+			check_eq("dtor zeroes this+0x0..3", dtorBuf[0] == 0 && dtorBuf[3] == 0, 1u);
+			check_eq("dtor zeroes this+0x7f..0x82 (embedded ToneAdjust vptr)",
+				 dtorBuf[0x7f] == 0 && dtorBuf[0x82] == 0, 1u);
+		}
+
+		unsigned char *chordObj = mmap32(0x1000);
+		memset(chordObj, 0, 0x1000);
+		*reinterpret_cast<unsigned int *>(instBuf + 5) =
+			(unsigned int)(unsigned long)chordObj;
+
+		chordObj[0xc31] = 7;
+		check_eq("GetChordSource() reads chordObj+0xc31", slot->GetChordSource(), 7u);
+
+		chordObj[0xc30] = (unsigned char)-3;
+		check_eq("GetChordMode() reads chordObj+0xc30 (sign-extended)",
+			 (unsigned int)slot->GetChordMode(), (unsigned int)-3);
+
+		chordObj[0xc48 + 2] = 42;
+		check_eq("GetInputChannelSelect(2) reads chordObj+0xc48+2",
+			 slot->GetInputChannelSelect(2), 42u);
+
+		CSTGBusInfo::kInputSourceBusId[9] = 0x55;
+		chordObj[0xc46 + 1] = 9;
+		check_eq("GetInputBus(1): index-through-table via chordObj+0xc46+1",
+			 slot->GetInputBus(1), 0x55u);
+
+		unsigned char *programObj = mmap32(0x1000);
+		memset(programObj, 0, 0x1000);
+		*reinterpret_cast<unsigned int *>(instBuf + 0xe8) =
+			(unsigned int)(unsigned long)programObj;
+
+		check_eq("AccessToneAdjust() == program+0xc4d",
+			 slot->AccessToneAdjust() == programObj + 0xc4d, 1u);
+
+		*reinterpret_cast<float *>(programObj + 0xcc1) = 1.5f;
+		check_eq("GetEQTrim() reads program+0xcc1", slot->GetEQTrim() == 1.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xcc5) = 2.5f;
+		check_eq("GetEQLowGain() reads program+0xcc5", slot->GetEQLowGain() == 2.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xcc9) = 3.5f;
+		check_eq("GetEQMidFreq() reads program+0xcc9", slot->GetEQMidFreq() == 3.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xccd) = 4.5f;
+		check_eq("GetEQMidGain() reads program+0xccd", slot->GetEQMidGain() == 4.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xcd1) = 5.5f;
+		check_eq("GetEQHighGain() reads program+0xcd1", slot->GetEQHighGain() == 5.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xcb9) = 6.5f;
+		check_eq("GetTrackLevel() reads program+0xcb9", slot->GetTrackLevel() == 6.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xcbd) = 7.5f;
+		check_eq("GetDetune() reads program+0xcbd", slot->GetDetune() == 7.5f, 1u);
+		*reinterpret_cast<float *>(programObj + 0xce4 + 3 * 4) = 8.5f;
+		check_eq("GetSendLevel(3) reads program+0xce4+3*4", slot->GetSendLevel(3) == 8.5f, 1u);
+
+		programObj[0xcb7] = 11;
+		check_eq("GetAliasBankSelect() reads program+0xcb7", slot->GetAliasBankSelect(), 11u);
+		programObj[0xcb8] = 22;
+		check_eq("GetAliasProgramId() reads program+0xcb8", slot->GetAliasProgramId(), 22u);
+
+		programObj[0xc2f] = 0x30;
+		check_eq("GetEQBypass(): bit4 of program+0xc2f", slot->GetEQBypass(), 1u);
+		check_eq("GetUseDrumkitBusSettings(): bit5 of program+0xc2f",
+			 slot->GetUseDrumkitBusSettings(), 1u);
+		programObj[0xc2f] = 0;
+		check_eq("GetEQBypass()==0 when clear", slot->GetEQBypass(), 0u);
+		check_eq("GetUseDrumkitBusSettings()==0 when clear",
+			 slot->GetUseDrumkitBusSettings(), 0u);
+
+		extern int STGAPIOutToPhysBusId[16];
+		extern int STGAPIOutToBusType[16];
+		extern int STGAPIFXCtrlToWritePhysBusId[16];
+		extern int STGAPIHDRPhysBusIds[16];
+		extern int STGAPIHDRBusTypes[16];
+
+		programObj[0xcd5] = 4;
+		STGAPIOutToPhysBusId[4] = 100;
+		STGAPIOutToBusType[4] = 200;
+		check_eq("GetOutputBus(): STGAPIOutToPhysBusId[program+0xcd5]",
+			 (unsigned int)slot->GetOutputBus(), 100u);
+		check_eq("GetOutputBusType(): STGAPIOutToBusType[program+0xcd5]",
+			 (unsigned int)slot->GetOutputBusType(), 200u);
+
+		programObj[0xcd6] = 5;
+		STGAPIFXCtrlToWritePhysBusId[5] = 300;
+		check_eq("GetFXControlBus(): STGAPIFXCtrlToWritePhysBusId[program+0xcd6]",
+			 (unsigned int)slot->GetFXControlBus(), 300u);
+
+		programObj[0xcd7] = 6;
+		STGAPIHDRPhysBusIds[6] = 400;
+		STGAPIHDRBusTypes[6] = 500;
+		check_eq("GetHDRBus(): STGAPIHDRPhysBusIds[program+0xcd7]",
+			 (unsigned int)slot->GetHDRBus(), 400u);
+		check_eq("GetHDRBusType(): STGAPIHDRBusTypes[program+0xcd7]",
+			 (unsigned int)slot->GetHDRBusType(), 500u);
+
+		programObj[0xcd8 + 1] = 7;
+		STGAPIOutToPhysBusId[7] = 600;
+		STGAPIOutToBusType[7] = 700;
+		check_eq("GetDKitBus(1): STGAPIOutToPhysBusId[program+0xcd8+1]",
+			 (unsigned int)slot->GetDKitBus(1), 600u);
+		check_eq("GetDKitBusType(1): STGAPIOutToBusType[program+0xcd8+1]",
+			 (unsigned int)slot->GetDKitBusType(1), 700u);
+
+		instBuf[0x43] = 0xfe;
+		slot->SetMute(true);
+		check_eq("SetMute(true): bit0 set, other bits preserved", instBuf[0x43], 0xffu);
+		slot->SetMute(false);
+		check_eq("SetMute(false): bit0 cleared, other bits preserved", instBuf[0x43], 0xfeu);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

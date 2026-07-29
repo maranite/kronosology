@@ -2111,6 +2111,219 @@ void CSTGProgramModeDrumTrackSlot::ChangeDrumTrackProgram(CSTGProgram *newProgra
 	ChangeProgram(arg2);
 }
 
+unsigned char CSTGBusInfo::kInputSourceBusId[16] = {0};
+
+/* round 55 batch: 32 trivial accessors -- see oa_global.h's own header
+ * comment on the class for the +5/+0xe8 sub-object-pointer derivation. */
+
+unsigned int CSTGProgramModeDrumTrackSlot::OverridesProgramScale() { return 0; }
+unsigned int CSTGProgramModeDrumTrackSlot::HasToneAdjust() { return 0; }
+unsigned int CSTGProgramModeDrumTrackSlot::ShouldUseSlotEQSettings() { return 1; }
+unsigned int CSTGProgramModeDrumTrackSlot::UsesProgramChordSource() { return 1; }
+unsigned int CSTGProgramModeDrumTrackSlot::GetPerformanceType() { return 1; }
+unsigned int CSTGProgramModeDrumTrackSlot::GetMeterIndex() { return 2; }
+unsigned int CSTGProgramModeDrumTrackSlot::GetMeterBus() { return 0x56; }
+
+CSTGProgramModeDrumTrackSlot::~CSTGProgramModeDrumTrackSlot()
+{
+	/* Real dtor (both D2/D0 variants, identical): resets both this
+	 * class's own vptr AND the embedded CSTGToneAdjust sub-object's own
+	 * vptr (at +0x7f) to &PTR__CSTGParamsOwner_006c04a8 -- same "opaque
+	 * placeholder, no real vtable pointer needed" treatment already
+	 * established for CSTGKeyTrack/CSTGPatch/CSTGMultibandDelay
+	 * (that symbol is never independently declared in this codebase,
+	 * only referenced in comments). */
+	unsigned char *base = (unsigned char *)this;
+	base[0] = base[1] = base[2] = base[3] = 0;
+	base[0x7f] = base[0x80] = base[0x81] = base[0x82] = 0;
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetChordSource() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *chordObj = FromU32(*(unsigned int *)(base + 5));
+	return *(chordObj + 0xc31);
+}
+
+int CSTGProgramModeDrumTrackSlot::GetChordMode() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *chordObj = FromU32(*(unsigned int *)(base + 5));
+	return (int)(signed char)*(chordObj + 0xc30);
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetInputChannelSelect(unsigned int index) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *chordObj = FromU32(*(unsigned int *)(base + 5));
+	return *(chordObj + 0xc48 + index);
+}
+
+void *CSTGProgramModeDrumTrackSlot::AccessToneAdjust() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return program + 0xc4d;
+}
+
+float CSTGProgramModeDrumTrackSlot::GetEQTrim() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcc1);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetEQLowGain() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcc5);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetEQMidFreq() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcc9);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetEQMidGain() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xccd);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetEQHighGain() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcd1);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetTrackLevel() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcb9);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetDetune() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xcbd);
+}
+
+float CSTGProgramModeDrumTrackSlot::GetSendLevel(unsigned int index) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(float *)(program + 0xce4 + index * 4);
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetAliasBankSelect() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(program + 0xcb7);
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetAliasProgramId() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return *(program + 0xcb8);
+}
+
+void CSTGProgramModeDrumTrackSlot::SetMute(bool mute)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x43] = (unsigned char)((base[0x43] & 0xfe) | (mute ? 1 : 0));
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetInputBus(unsigned int index) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *chordObj = FromU32(*(unsigned int *)(base + 5));
+	unsigned char sel = *(chordObj + 0xc46 + index);
+	return CSTGBusInfo::kInputSourceBusId[sel];
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetEQBypass() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return (*(program + 0xc2f) >> 4) & 1;
+}
+
+unsigned char CSTGProgramModeDrumTrackSlot::GetUseDrumkitBusSettings() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return (*(program + 0xc2f) >> 5) & 1;
+}
+
+/* Real symbols, content not independently confirmed (opaque int tables,
+ * same "confirmed real, content unread" treatment as kInputSourceBusId
+ * above) -- sized 16, a safe upper bound for the small bus-type/dkit
+ * index values this pass's own callers use, not independently confirmed
+ * as the real table size. */
+extern "C" int STGAPIOutToPhysBusId[16] = {0};
+extern "C" int STGAPIOutToBusType[16] = {0};
+extern "C" int STGAPIFXCtrlToWritePhysBusId[16] = {0};
+extern "C" int STGAPIHDRPhysBusIds[16] = {0};
+extern "C" int STGAPIHDRBusTypes[16] = {0};
+
+int CSTGProgramModeDrumTrackSlot::GetOutputBus() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIOutToPhysBusId[*(program + 0xcd5)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetOutputBusType() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIOutToBusType[*(program + 0xcd5)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetFXControlBus() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIFXCtrlToWritePhysBusId[*(program + 0xcd6)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetHDRBus() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIHDRPhysBusIds[*(program + 0xcd7)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetHDRBusType() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIHDRBusTypes[*(program + 0xcd7)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetDKitBus(unsigned int index) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIOutToPhysBusId[*(program + 0xcd8 + index)];
+}
+
+int CSTGProgramModeDrumTrackSlot::GetDKitBusType(unsigned int index) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned char *program = FromU32(*(unsigned int *)(base + 0xe8));
+	return STGAPIOutToBusType[*(program + 0xcd8 + index)];
+}
+
 /*
  * CSTGMidiQueue::AllocReader() (sec 10.82, .text+0x40090 in OA_real.ko)
  * -- RESOLVES sec 10.63's own "static-shaped ambiguity" note: confirmed

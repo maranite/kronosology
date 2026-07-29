@@ -4113,3 +4113,85 @@ hardware I/O surface of its own; the deferred `Run()` (the actual
 per-sample DSP loop) would be the natural next target if audio-DSP
 fidelity were ever brought into this project's scope (currently
 explicitly out of scope, see kronos_project_scope_boundaries).
+
+## OA.ko: CSTGProgramModeDrumTrackSlot (32-method batch), solo round 55 (2026-07-29)
+
+Continuation of solo mode. Scripted survey of manifest/oa_functions.csv
+for small, "no in_stack_/unaff_/Could-not-recover" pending clusters
+found `CSTGProgramModeDrumTrackSlot` (38 pending methods, avg 21.6
+bytes -- smallest average among the top 70 largest pending classes;
+already a real, extensively-documented C++ class with 4 pre-existing
+methods from earlier rounds, not a fresh discovery). Landed 32/35 clean
+methods (3 flagged by the decompiler itself, deferred).
+
+Confirmed two distinct real sub-object pointer chases, both landed
+methods split cleanly along this line: (1) a genuine UNALIGNED 4-byte
+pointer read at `this+5` (no `in_stack_`/`unaff_` warning, not a
+decompiler artifact -- independently cross-confirmed by an ALREADY-
+PASSING pre-existing round-47 test, `[54] CSTGProgramSlot::
+ChangeProgram`, whose own check `"this+0x5 == newProgram (drum-track
+slot)"` shows the base class's own `ChangeProgram()` is the real
+writer of this exact field), used by the "chord"/"input channel"
+accessor family (`GetChordSource`/`GetChordMode`/
+`GetInputChannelSelect`/`GetInputBus`); and (2) the already-documented
+assigned-drum-program pointer at `this+0xe8` (`ChangeDrumTrackProgram`,
+round unknown/earlier), used by the EQ/level/bus accessor family --
+every field in that 2nd family is a raw offset INTO the assigned
+`CSTGProgram` object itself (an opaque, not-yet-reconstructed sibling
+class, ~156 pending methods of its own), not this slot's own
+per-instance state. `AccessToneAdjust()` is a confirmed real quirk:
+returns a pointer into the ASSIGNED PROGRAM's own tone-adjust data
+(`this+0xe8` sub-object +0xc4d), NOT this slot's own embedded
+`CSTGToneAdjust` at `this+0x7f` (`CSTGProgramSlot`'s own ctor comment)
+-- preserved faithfully, not "fixed".
+
+Added 6 new real-but-content-unread lookup-table symbols this round
+introduced dependencies on (`CSTGBusInfo::kInputSourceBusId`,
+`STGAPIOutToPhysBusId`, `STGAPIOutToBusType`,
+`STGAPIFXCtrlToWritePhysBusId`, `STGAPIHDRPhysBusIds`,
+`STGAPIHDRBusTypes`) -- same "confirmed real, content not
+independently confirmed" treatment already established for this
+project's other unread `.rodata` tables, sized 16 as a safe (not
+independently confirmed) upper bound.
+
+`~CSTGProgramModeDrumTrackSlot()` -- both D0/D2 variants byte-
+identical, landed as ONE real dtor (established convention); zeroes
+both this class's own vptr-shaped field AND the embedded
+`CSTGToneAdjust` sub-object's own vptr-shaped field at `this+0x7f`
+(confirmed real, both variants) -- matches the SAME "opaque
+placeholder, no real vtable pointer symbol independently declared"
+treatment already established for CSTGKeyTrack/CSTGPatch/
+CSTGMultibandDelay (the referenced `&PTR__CSTGParamsOwner_006c04a8`
+symbol is never actually declared anywhere in this codebase, only
+mentioned in comments -- discovered the hard way when an initial draft
+tried to literally reference it and failed to compile).
+
+Deferred, 1 reason: 3 methods flagged by the decompiler itself
+(`InitVoice`, `OnUpdateProgramDrumTrackIgnoreSetListTranspose`,
+`SetEffectiveTranspose`).
+
+Real host KAT: appended a new "[round 55]" section directly into the
+ALREADY-EXISTING `verify/test_global.cpp` (32 checks) rather than
+creating a standalone test file -- `global.cpp` is one giant TU with
+many externs that only `test_global.cpp` already has the full mock
+infrastructure for (same class of problem already solved for OA.ko's
+own CKGParamEdit round 52); a first attempt at a standalone test hit
+the same "undefined reference to CSTGMidiPortManager::sInstance"-style
+cascade that round 52 hit. A first attempt at the appended checks also
+segfaulted from a real, previously-latent host-test-infrastructure gap
+this round newly exercised: this class's own `this+5`/`this+0xe8`
+sub-object pointers are stored as truncated 32-bit `ToU32`/`FromU32`-
+style fields (this project's established host/target pointer-width
+convention), so pointing them at plain `static` host arrays (whose
+real 64-bit addresses can exceed 4GB on a modern host) truncates to a
+garbage address on dereference -- fixed by using the file's own
+already-established `mmap32()` helper (`MAP_32BIT`) for every buffer
+these new checks point a packed field at, matching what every other
+scenario in this same file already does.
+
+`make verify` full suite green (209+ targets, zero regressions). Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3806 -> 3840/21,689 (+34, 0 regressions).
+
+Real-HW test that would help: none identified -- pure per-instance/
+assigned-program field-read logic, no hardware I/O surface of its own.

@@ -1260,6 +1260,70 @@ struct CSTGProgramModeDrumTrackSlot : public CSTGProgramSlot {
 	 * confirmed): stores arg1 (the new program) at +0xe8, then calls
 	 * the confirmed-real CSTGProgramSlot::ChangeProgram(arg2). */
 	void ChangeDrumTrackProgram(CSTGProgram *newProgram, CSTGProgram *arg2);
+
+	/*
+	 * round 55 batch (2026-07-29, solo): 32 trivial accessors, all
+	 * reading either (a) fixed literal constants (no real state), (b) a
+	 * packed sub-object pointer at `this+5` (a genuinely confirmed real
+	 * UNALIGNED 4-byte read -- no `in_stack_`/`unaff_` warning, not a
+	 * decompiler artifact, preserved as-is), used by the "chord"/"input
+	 * channel" accessor family, or (c) the already-documented assigned-
+	 * program pointer at `this+0xe8` (see ChangeDrumTrackProgram above),
+	 * used by the EQ/level/bus accessor family -- every field in that
+	 * 2nd family is a raw offset INTO the assigned `CSTGProgram` object
+	 * itself (an opaque, not-yet-reconstructed sibling class, ~156
+	 * pending methods of its own), not this slot's own per-instance
+	 * state. `AccessToneAdjust()` is a confirmed real quirk: returns a
+	 * pointer into the ASSIGNED PROGRAM's own tone-adjust data (`this+
+	 * 0xe8` sub-object +0xc4d), NOT this slot's own embedded
+	 * `CSTGToneAdjust` at `this+0x7f` (CSTGProgramSlot's own ctor
+	 * comment above) -- preserved faithfully, not "fixed".
+	 *
+	 * ~CSTGProgramModeDrumTrackSlot() -- both D0/D2 variants byte-
+	 * identical (same vptr-reset-only quirk as CSTGKeyTrack/CSTGPatch),
+	 * landed as ONE real dtor per this project's established D0/D2-
+	 * dedup convention; also resets the embedded `CSTGToneAdjust` sub-
+	 * object's own vptr at `this+0x7f` (confirmed real, both variants).
+	 */
+	~CSTGProgramModeDrumTrackSlot();
+
+	static unsigned int OverridesProgramScale();
+	static unsigned int HasToneAdjust();
+	static unsigned int ShouldUseSlotEQSettings();
+	static unsigned int UsesProgramChordSource();
+	static unsigned int GetPerformanceType();
+	static unsigned int GetMeterIndex();
+	static unsigned int GetMeterBus();
+
+	unsigned char GetChordSource() const;
+	int GetChordMode() const;
+	unsigned char GetInputChannelSelect(unsigned int index) const;
+	void *AccessToneAdjust() const;
+
+	float GetEQTrim() const;
+	float GetEQLowGain() const;
+	float GetEQMidFreq() const;
+	float GetEQMidGain() const;
+	float GetEQHighGain() const;
+	float GetTrackLevel() const;
+	float GetDetune() const;
+	float GetSendLevel(unsigned int index) const;
+
+	unsigned char GetAliasBankSelect() const;
+	unsigned char GetAliasProgramId() const;
+
+	void SetMute(bool mute);
+	unsigned char GetInputBus(unsigned int index) const;
+	unsigned char GetEQBypass() const;
+	unsigned char GetUseDrumkitBusSettings() const;
+
+	int GetOutputBus() const;
+	int GetOutputBusType() const;
+	int GetFXControlBus() const;
+	int GetHDRBus() const;
+	int GetHDRBusType() const;
+	int GetDKitBus(unsigned int index) const;
+	int GetDKitBusType(unsigned int index) const;
 };
 
 /*
@@ -1838,6 +1902,14 @@ struct CSTGEQ {
  */
 struct CSTGBusInfo {
 	static int GetSignalSelectionForBusType(int busType);
+
+	/* CSTGProgramModeDrumTrackSlot::GetInputBus() (round 55, batch 55) --
+	 * real symbol, content not independently confirmed (opaque byte
+	 * table, same "confirmed real, content unread" treatment as this
+	 * project's other unread .rodata tables). Sized 16 -- a safe upper
+	 * bound for the small input-channel-select index this pass's own
+	 * callers use, not independently confirmed as the real table size. */
+	static unsigned char kInputSourceBusId[16];
 };
 
 /*
