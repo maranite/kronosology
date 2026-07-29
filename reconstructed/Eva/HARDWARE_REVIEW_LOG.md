@@ -2862,3 +2862,34 @@ suite green (exit 0), zero regressions. Eva manifest 3175 -> 3178/
 
 No real-HW test needed -- both getters are always-zero literal returns
 in ground truth itself, nothing hardware-dependent to confirm.
+
+## Round 62 (2026-07-29, solo): CEditable's 4 static Forbidden/NoCallBack stand-ins
+
+Found via the same done>0/pending>0 manifest scan used for round 61.
+`CEditable` (`include/editable.h`, already documented as a thin 2-method
+mixin: ctor + `AddDescriptorsMap()`) turned up 4 more tiny pending
+functions: `GetForbidden`, `SetForbidden`, `NoGetCallBack`,
+`NoSetCallBack`, all 3-6 bytes.
+
+Ground truth confirms these are real `__cdecl` free functions with NO
+`this` at all (each decompile's own signature has zero or all-ignored
+parameters) -- i.e. plain function pointers meant to be installed
+directly into `SDescriptor::getterFn`/`setterFn` (edit_server.h), not
+real instance methods. `GetForbidden`/`SetForbidden` unconditionally
+deny (`return -1`, ignoring every argument); `NoGetCallBack`/
+`NoSetCallBack` unconditionally succeed as a no-op (`return 0`,
+ignoring every argument) -- a common "deny vs pass-through" pair of
+default descriptor callbacks.
+
+Landed as 4 `static` methods on `CEditable` (matching the class's
+existing header-comment convention of documenting real `__cdecl`
+ground truth even where C++ wraps it in a class scope for
+organization). New `verify/test_editable.cpp` (6 checks: each function
+returns its fixed constant regardless of arguments, including a NULL-
+pointer-argument check confirming the body never dereferences its own
+parameters). `make verify` full suite green (107 test binaries, exit
+0), zero regressions. Eva manifest 3178 -> 3182/37,795 (8.419%).
+
+No real-HW test needed -- both "Forbidden"/"NoCallBack" bodies are
+fixed-constant returns in ground truth itself, no hardware-dependent
+behavior to confirm.

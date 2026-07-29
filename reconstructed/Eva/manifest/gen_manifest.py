@@ -4496,6 +4496,12 @@ RECONSTRUCTED = {
     "08995390",  # CPcmFilter::Reset()
     "089953a0",  # CPcmFilter::GetDelayOffsetSeconds()
     "089953b0",  # CPcmFilter::GetDelayOffsetSamples()
+    # -- round 62 (2026-07-29, solo): CEditable's 4 static Forbidden/NoCallBack
+    # stand-ins, found via the same done>0/pending>0-class scan.
+    "08243e00",  # CEditable::GetForbidden(uchar, void*)
+    "08243e10",  # CEditable::SetForbidden(uchar, void const*, EEditSource)
+    "08243e20",  # CEditable::NoGetCallBack(uchar, void*)
+    "08243e30",  # CEditable::NoSetCallBack(uchar, void const*, EEditSource)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

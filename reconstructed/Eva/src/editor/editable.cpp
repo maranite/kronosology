@@ -21,3 +21,23 @@ void CEditable::AddDescriptorsMap(CObjectBase *owner, SDescriptor *descriptors,
 	    reinterpret_cast<char *>(mEditServer) + 4);
 	data->AddDescriptors(owner, descriptors, count, alreadyRegistered);
 }
+
+int CEditable::GetForbidden(unsigned char, void *)
+{
+	return -1;
+}
+
+int CEditable::SetForbidden(unsigned char, const void *, EEditSource)
+{
+	return -1;
+}
+
+int CEditable::NoGetCallBack(unsigned char, void *)
+{
+	return 0;
+}
+
+int CEditable::NoSetCallBack(unsigned char, const void *, EEditSource)
+{
+	return 0;
+}

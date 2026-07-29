@@ -45,6 +45,8 @@
 #ifndef EDITABLE_H
 #define EDITABLE_H
 
+typedef int EEditSource;
+
 class CEditServer;
 class CObjectBase;
 struct SDescriptor;
@@ -60,6 +62,21 @@ public:
 	 */
 	void AddDescriptorsMap(CObjectBase *owner, SDescriptor *descriptors,
 	                       bool alreadyRegistered);
+
+	/* round 62 (2026-07-29, solo): 4 static stand-in SDescriptor::getterFn/
+	 * setterFn callbacks (real ground truth is `__cdecl`, no `this` at all --
+	 * confirmed via each decompile's own zero/no-`this` signature -- so these
+	 * are plain function pointers installable directly into `SDescriptor::
+	 * getterFn`/`setterFn`, not real instance methods). `Forbidden` variants
+	 * unconditionally deny (getter: real ground truth returns -1 ignoring
+	 * every argument; setter: same, -1); `NoCallBack` variants unconditionally
+	 * succeed as a no-op (both return 0, ignoring every argument). Real bodies
+	 * genuinely never read their own parameters -- confirmed via each one's
+	 * own decompile ignoring all its arguments entirely. */
+	static int GetForbidden(unsigned char index, void *buf);
+	static int SetForbidden(unsigned char index, const void *buf, EEditSource source);
+	static int NoGetCallBack(unsigned char index, void *buf);
+	static int NoSetCallBack(unsigned char index, const void *buf, EEditSource source);
 
 private:
 	CEditServer *mEditServer;
