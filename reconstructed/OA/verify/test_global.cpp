@@ -21,6 +21,12 @@
 #include "oa_engine.h"
 #include "oa_engine_init.h"
 
+/* CSTGGlobal's own framework metadata tables (round 48) -- contents out
+ * of scope, only the address matters for these tests (same convention
+ * as test_lfo_component.cpp's own STGLFOParams definition). */
+extern "C" unsigned char STGGlobalParams[5720] = { 0 };
+extern "C" unsigned char _ZN10CSTGGlobal16sMessageHandlersE[896] = { 0 };
+
 /* STGAPIFrontPanelStatus::sInstance (used by CompletePerformanceChange,
  * sec 10.108) -- declared locally rather than pulling in the whole
  * oa_setup_global_resources.h, which redeclares several types this file
@@ -5951,6 +5957,15 @@ int main(void)
 	}
 
 	munmap(buf, globalSize);
+
+	printf("[round 48] CSTGGlobal framework metadata accessors (static, no `this`)\n");
+	check_eq("GetNumParams() == 0x6e", (unsigned int)CSTGGlobal::GetNumParams(), 0x6e);
+	check_eq("GetParamDescriptors() == &STGGlobalParams",
+		 CSTGGlobal::GetParamDescriptors() == (const void *)STGGlobalParams, 1u);
+	check_eq("GetMessageHandlers() == &sMessageHandlers",
+		 CSTGGlobal::GetMessageHandlers() == (const void *)_ZN10CSTGGlobal16sMessageHandlersE, 1u);
+	check_eq("GetValueGetters() == 0 (no table exists for this class)",
+		 CSTGGlobal::GetValueGetters() == 0, 1u);
 
 	printf("=========================================================\n");
 	if (g_fail) {

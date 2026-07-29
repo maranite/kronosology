@@ -3399,6 +3399,27 @@ public:
 	unsigned char _bankType;	/* +0x2 */
 };
 
+/*
+ * CSTGGlobal's own param-descriptor/message-handler registration tables
+ * (round 48, 2026-07-29, solo) -- same "confirmed real via relocation,
+ * contents out of scope" precedent as CSTGLFO's own STGLFOParams/
+ * sMessageHandlers (oa_lfo.h). `STGGlobalParams`: 110 entries (matches
+ * GetNumParams()'s own literal 0x6e) x the confirmed 52-byte
+ * CSTGParamDescriptor stride (independently cross-checked against
+ * CSTGLFO's own STGLFOParams: 1092 bytes / 21 entries = 52 exactly) =
+ * 5720 bytes; ground truth's own byte-level symbol labeling
+ * (STGGlobalParams[0]..[5716]) stops 3 bytes short of this, a Ghidra
+ * labeling artifact (5717 isn't evenly divisible by the confirmed
+ * stride, 5720 is exactly 110x). `_ZN10CSTGGlobal16sMessageHandlersE`:
+ * real mangled symbol confirmed via relocation, 896 bytes (directly
+ * measured from the gap to the next real symbol, `kBankInfo`, not
+ * extrapolated). Unlike `CSTGLFO`, `CSTGGlobal::GetValueGetters()`
+ * itself is a genuine literal `return 0` (no value-getters table
+ * exists for this class) -- no corresponding array declared.
+ */
+extern "C" unsigned char STGGlobalParams[5720];
+extern "C" unsigned char _ZN10CSTGGlobal16sMessageHandlersE[896];
+
 class CSTGGlobal {
 public:
 	static CSTGGlobal *sInstance;
@@ -3410,6 +3431,21 @@ public:
 
 	/* .text+0x93b0, 74 bytes -- fully reconstructed, see global.cpp. */
 	void IncrementMicrosecondCount();
+
+	/*
+	 * The 4 framework metadata accessors (round 48, 2026-07-29, solo) --
+	 * see the STGGlobalParams/sMessageHandlers extern declarations just
+	 * above this class for the full ground-truthing of the tables these
+	 * return pointers into. Same trivial-return shape/precedent as
+	 * CSTGLFO's own 4 (oa_lfo.h/lfo_component.cpp) -- GetValueGetters()
+	 * is the one confirmed difference: a genuine literal `return 0`,
+	 * not a table pointer (no value-getters table exists for this
+	 * class in ground truth).
+	 */
+	static int GetNumParams();
+	static const void *GetParamDescriptors();
+	static const void *GetMessageHandlers();
+	static const void *GetValueGetters();
 
 	/*
 	 * The following four are the smallest, cleanly-confirmed members of

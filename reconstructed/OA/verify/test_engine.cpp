@@ -44,6 +44,12 @@ static void *mmap32(unsigned long size)
  * Sec 10.148: CSTGCDWorker_InitializeBuffer() is now real (managers.cpp)
  * and calls __kmalloc directly -- link-satisfying mock only, this file
  * never calls CSTGCDWorker::Initialize() itself. */
+/* CSTGGlobal's own framework metadata tables (round 48) -- contents out
+ * of scope, only needed here to satisfy the linker (this file never
+ * reads them). */
+extern "C" unsigned char STGGlobalParams[5720] = { 0 };
+extern "C" unsigned char _ZN10CSTGGlobal16sMessageHandlersE[896] = { 0 };
+
 extern "C" void *__kmalloc(unsigned long size, unsigned int) { return malloc(size); }
 extern "C" unsigned int get_sizeof_rtwrap_pthread_mutex(void) { return 24; }
 extern "C" void *rtwrap_malloc(unsigned int size) { return malloc(size); }

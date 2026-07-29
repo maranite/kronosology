@@ -48,6 +48,11 @@ CSTGAudioDriverInterface *CSTGAudioDriverInterface::sInstance;
 CSTGCPUInfo::CSTGCPUInfo(unsigned int cpuCountOverride) { cpuCount = cpuCountOverride; }
 static CSTGCPUInfo g_mockCpuInfo(4);
 CSTGCPUInfo *CSTGCPUInfo::sInstance = &g_mockCpuInfo;
+/* CSTGGlobal's own framework metadata tables (round 48) -- contents out
+ * of scope, only needed here to satisfy the linker. */
+extern "C" unsigned char STGGlobalParams[5720] = { 0 };
+extern "C" unsigned char _ZN10CSTGGlobal16sMessageHandlersE[896] = { 0 };
+
 extern "C" int   KorgUsbAudioInitialize(void) { return 0; }
 extern "C" int   KorgUsbAudioInitialized(void) { return 0; }
 extern "C" int   KorgUsbAudioStart(void) { return 0; }

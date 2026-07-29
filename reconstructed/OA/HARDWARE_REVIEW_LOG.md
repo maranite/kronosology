@@ -3582,3 +3582,62 @@ though nothing about this reconstruction is currently wired into a live
 call path from real front-panel input (the caller of
 `CDrumButtonLED::start()`/`sleep()`/`wakeup()` itself is not yet
 traced).
+
+## CSTGGlobal::GetNumParams/GetParamDescriptors/GetMessageHandlers/GetValueGetters, solo round 48 (2026-07-29)
+
+Continuation of solo mode. Landed the 4 framework metadata accessors
+CSTGGlobal has been missing since this class's own header was first
+opened (its header comment already flagged `GetNumParams()`/
+`GetParamDescriptors()` as "genuine OWN virtual slots... own body
+deliberately NOT reconstructed" -- that earlier note conflated "the
+function body is trivial" with "the backing table contents are
+unrecovered"; only the latter is true). Same trivial-return shape/
+precedent already established for `CSTGLFO`'s own 4 sibling methods
+(`oa_lfo.h`/`lfo_component.cpp`): `GetNumParams()` returns the literal
+`0x6e` (110), `GetParamDescriptors()`/`GetMessageHandlers()` return
+pointers into 2 real, relocation-confirmed `.data`/`.bss` tables
+(`STGGlobalParams`, `_ZN10CSTGGlobal16sMessageHandlersE`), contents out
+of scope (same "framework table, not modeled" precedent as CSTGLFO's
+own `STGLFOParams`).
+
+`STGGlobalParams`'s declared size (5720 bytes = 110 x the confirmed
+52-byte `CSTGParamDescriptor` stride, independently cross-checked
+against `CSTGLFO`'s own `STGLFOParams`: 1092/21 = 52 exactly) was
+derived rather than taken at face value from ground truth's own
+byte-level symbol labeling, which stops 3 bytes short (5717,
+`STGGlobalParams[0]`..`[5716]`) -- 5717 isn't evenly divisible by the
+confirmed stride while 5720 is exactly 110x, strong evidence the
+labeling is a Ghidra artifact, not a real 5717-byte array.
+`sMessageHandlers`'s 896-byte size, in contrast, IS a directly measured
+ground-truth boundary (gap to the next real symbol, `kBankInfo`), not
+extrapolated.
+
+Confirmed real difference from `CSTGLFO`: `CSTGGlobal::GetValueGetters()`
+is a genuine literal `return 0` -- no value-getters table exists for
+this class in ground truth (unlike `CSTGLFO`'s own, which returns a
+real table pointer).
+
+Also surveyed `STGAPIFrontPanelStatus`'s own 4 pending methods
+(`SetEffectThreadUsage`/`SetCPUStaticFrontUsage`/`SetCPUVoiceModelUsage`/
+`SetCPUStaticBackUsage`) as a second small candidate this round --
+deliberately NOT reconstructed: their decompiled bodies reference oddly
+-named symbols (`STGOrganModelFrontVars_mDelayLine328` etc, an organ-
+model-instrument name that doesn't fit a CPU-usage-tracking class) and
+use raw `in_EAX`/`in_EDX`/`in_ECX` register aliases that don't match
+their own declared `param_1`/`param_2`/`this` signature -- a real,
+unresolved register-to-parameter mapping ambiguity that needs raw
+disassembly tracing, not just the auto-decompile, to resolve safely.
+Logged here rather than guessed at.
+
+Real host KAT (new section in `test_global.cpp`, using the file's own
+`check_eq` helper) confirms all 4 return values, including exact address
+equality for the 2 table-pointer accessors. Also had to add matching
+link-satisfying array definitions to `test_engine.cpp`/
+`test_global_ctor.cpp` (both also link `global.cpp`). `make verify` full
+suite green (224 targets), real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green, `nm OA.ko | c++filt`
+confirms all 4 mangled names match ground truth exactly. Manifest 3558
+-> 3562/21,689 (+4, 0 regressions).
+
+Real-HW test that would help: none identified -- pure framework
+metadata with no observable I/O or state.

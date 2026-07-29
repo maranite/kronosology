@@ -24,6 +24,19 @@ extern "C" void PushUnsolicitedMessage(void *msg);
 
 CSTGGlobal *CSTGGlobal::sInstance;
 
+/*
+ * The 4 framework metadata accessors (round 48, 2026-07-29, solo) --
+ * see oa_global.h's own extern declarations for the full
+ * ground-truthing of STGGlobalParams/sMessageHandlers.
+ * GetValueGetters() is a confirmed genuine literal `return 0`, not a
+ * table pointer -- CSTGGlobal has no value-getters table in ground
+ * truth (unlike CSTGLFO's own sibling method).
+ */
+int CSTGGlobal::GetNumParams() { return 0x6e; }
+const void *CSTGGlobal::GetParamDescriptors() { return STGGlobalParams; }
+const void *CSTGGlobal::GetMessageHandlers() { return _ZN10CSTGGlobal16sMessageHandlersE; }
+const void *CSTGGlobal::GetValueGetters() { return 0; }
+
 void CSTGGlobal::IncrementMicrosecondCount()
 {
 	unsigned char *base = (unsigned char *)this;
