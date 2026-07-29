@@ -62,6 +62,9 @@ extern "C" int             CSTGFile_Write(void *handle, const void *buf, unsigne
 extern "C" int             CSTGFile_FileExists(const char *path);
 extern "C" void            CSTGFile_FreeReadBuffer(unsigned char *buf);
 extern "C" unsigned char  *CSTGFile_ReadFileIntoNewBuffer(const char *path, unsigned int *outLen);
+extern "C" int             CSTGFile_GetPosition(void *handle);
+extern "C" bool            CSTGFile_IsAtEnd(void *handle);
+extern "C" void            CSTGFile_Flush(void *handle);
 
 /* ---- kernel VFS mocks ---- */
 static void       *g_filpOpenReturn;
@@ -204,11 +207,11 @@ static void *make_filp(unsigned int fmode, unsigned int i_size)
 {
 	if (!g_inode) g_inode = (unsigned char *)mmap32(128);
 	if (!g_dentry) g_dentry = (unsigned char *)mmap32(64);
-	if (!g_fops) g_fops = (unsigned char *)mmap32(32);
+	if (!g_fops) g_fops = (unsigned char *)mmap32(128); /* +0x34 = flush, needs > 32B */
 	memset(g_inode, 0, 128);
 	memset(g_dentry, 0, 64);
 	memset(g_filp, 0, sizeof g_filp);
-	memset(g_fops, 0, 32);
+	memset(g_fops, 0, 128);
 	*(unsigned int *)(g_inode + 0x40) = i_size;             /* inode.i_size (low) */
 	*(unsigned int *)(g_dentry + 0x10) = ToU32(g_inode);    /* dentry.d_inode     */
 	*(unsigned int *)(g_filp + 0x0c) = ToU32(g_dentry);     /* file.f_path.dentry */
@@ -225,6 +228,21 @@ static void wire_write_fop(void *filp)
 {
 	unsigned char *fops = (unsigned char *)(unsigned long)(*(unsigned int *)((unsigned char *)filp + 0x10));
 	*(void **)(fops + 0xc) = (void *)&mock_write;  /* file_operations.write */
+}
+
+/* ---- fake file_operations.flush dispatch (CSTGFile_Flush) ---- */
+static int   g_flushCalls;
+static void *g_flushFile;
+static void *g_flushId;
+extern "C" int mock_flush(void *file, void *id)
+{
+	g_flushCalls++; g_flushFile = file; g_flushId = id;
+	return 0;
+}
+static void wire_flush_fop(void *filp)
+{
+	unsigned char *fops = (unsigned char *)(unsigned long)(*(unsigned int *)((unsigned char *)filp + 0x10));
+	*(void **)(fops + 0x34) = (void *)&mock_flush; /* file_operations.flush */
 }
 /* Sets file.f_pos (loff_t, +0x24 lo/+0x28 hi) and inode.i_size's high
  * dword (+0x44) on an already-made_filp() handle -- used by the
@@ -486,6 +504,38 @@ int main(void)
 		}
 		check_eq("...filp closed on success too", g_filpCloseCalls, 1);
 		CSTGFile_FreeReadBuffer(buf);
+	}
+
+	printf("[10] CSTGFile_GetPosition/IsAtEnd/Flush (round 49): generic_file_llseek "
+	       "tell() idiom + f_op->flush dispatch\n");
+	{
+		check_eq("GetPosition(NULL) -> 0", (unsigned long)CSTGFile_GetPosition(0), 0);
+		check_eq("IsAtEnd(NULL) -> false", (unsigned long)CSTGFile_IsAtEnd(0), 0);
+
+		void *f = make_filp(0x1, 0x100);
+		g_llseekCalls = 0;
+		g_llseekReturn = 0x40;
+		int pos = CSTGFile_GetPosition(f);
+		check_eq("GetPosition returns llseek's result", (unsigned long)pos, 0x40);
+		check_eq("...llseek called once", g_llseekCalls, 1);
+		check_eq("...llseek offset == 0 (tell idiom)", (unsigned long)g_llseekOffset, 0);
+		check_eq("...llseek whence == SEEK_CUR(1)", (unsigned long)g_llseekWhence, 1);
+
+		/* IsAtEnd: true only when llseek's current-position result
+		 * equals the file's own i_size (0x100 from make_filp above). */
+		g_llseekReturn = 0x100;
+		check_eq("IsAtEnd true when pos == i_size",
+			 (unsigned long)CSTGFile_IsAtEnd(f), 1);
+		g_llseekReturn = 0x50;
+		check_eq("IsAtEnd false when pos != i_size",
+			 (unsigned long)CSTGFile_IsAtEnd(f), 0);
+
+		wire_flush_fop(f);
+		g_flushCalls = 0;
+		CSTGFile_Flush(f);
+		check_eq("Flush dispatches through f_op->flush once", g_flushCalls, 1);
+		check_eq("...called with the handle itself", (unsigned long)g_flushFile == (unsigned long)f, 1);
+		check_eq("...id arg is 0", (unsigned long)g_flushId, 0);
 	}
 
 	printf("\n%s (%d failed checks)\n",

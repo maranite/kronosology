@@ -162,6 +162,57 @@ extern "C" unsigned int CSTGFile_GetFileSize(void *handle)
 }
 
 /*
+ * CSTGFile_GetPosition/CSTGFile_IsAtEnd/CSTGFile_Flush (round 49, solo).
+ * Ground truth's own decompile for GetPosition/IsAtEnd calls a raw fixed
+ * address `func_0x00d2b268(1)` -- the SAME call this file's own
+ * already-committed `CSTGFile_Seek` makes as `func_0x00d2b268(param_3)`
+ * (its `whence` argument), confirmed identical by directly diffing both
+ * functions' ground-truth decompiles. Since `CSTGFile_Seek` already
+ * established `func_0x00d2b268 == generic_file_llseek`, and the literal
+ * `1` GetPosition/IsAtEnd pass is `SEEK_CUR`, both are the standard
+ * `lseek(fd, 0, SEEK_CUR)` "tell" idiom -- `handle`/`offset=0` reach
+ * `generic_file_llseek` unchanged through EAX/EDX (regparm(3): the
+ * decompile only surfaces the ECX-slot literal it can see, same
+ * partial-visibility artifact already documented for `CSTGFile_Seek`).
+ * `CSTGFile_Flush` dispatches through `file->f_op` at raw offset 0x34;
+ * cross-checked against `/home/build/linux-kronos/include/linux/fs.h`'s
+ * own `struct file_operations` layout (owner/llseek/read/write/aio_read/
+ * aio_write/readdir/poll/ioctl/unlocked_ioctl/compat_ioctl/mmap/open/
+ * flush at 4-byte strides 0x00..0x34) -- offset 0x34 is exactly
+ * `flush`, confirmed independently via `CSTGFile_Read`/`_Write`'s own
+ * already-verified `fOp+0x8`=read/`fOp+0xc`=write mapping from the SAME
+ * struct. Real `flush(struct file*, fl_owner_t id)` signature; ground
+ * truth's call shows no explicit second argument (implicit/unset EDX),
+ * so `id=0` is used -- the common case for a caller not doing POSIX
+ * record-lock cleanup.
+ */
+extern "C" int CSTGFile_GetPosition(void *handle)
+{
+	if (handle == 0)
+		return 0;
+	return (int)generic_file_llseek(handle, 0, 1 /* SEEK_CUR */);
+}
+
+extern "C" bool CSTGFile_IsAtEnd(void *handle)
+{
+	if (handle == 0)
+		return false;
+	unsigned char *dentry = FromU32(*(unsigned int *)((unsigned char *)handle + 0x0c));
+	unsigned char *inode  = FromU32(*(unsigned int *)(dentry + 0x10));
+	unsigned int pos = (unsigned int)generic_file_llseek(handle, 0, 1 /* SEEK_CUR */);
+	return *(unsigned int *)(inode + 0x40) == pos;
+}
+
+extern "C" void CSTGFile_Flush(void *handle)
+{
+	unsigned char *file = (unsigned char *)handle;
+	typedef int (*flush_fn_t)(void *file, void *id);
+	unsigned char *fOp = FromU32(*(unsigned int *)(file + 0x10));
+	flush_fn_t flushFn = *(flush_fn_t *)(fOp + 0x34);
+	flushFn(handle, 0);
+}
+
+/*
  * Shared EOF-clamp helper (sec 10.181), factored out of the two real
  * call sites that each embed this exact cascade verbatim in the
  * ground-truth disassembly (CSTGFile_Read and

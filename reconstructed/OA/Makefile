@@ -143,6 +143,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/cpu_affinity.o \
            src/init/startup_helpers.o \
            src/init/file_io.o \
+           src/init/file_stream.o \
            src/init/stg_daemons.o \
            src/engine/tick_count.o \
            src/engine/controller_info_perf_deactivate.o \
@@ -618,6 +619,7 @@ SRC := src/auth/klm_manager.cpp \
        src/init/cpu_affinity.cpp \
        src/init/startup_helpers.cpp \
        src/init/file_io.cpp \
+       src/init/file_stream.cpp \
        src/init/stg_daemons.cpp \
        src/engine/tick_count.cpp \
        src/engine/controller_info_perf_deactivate.cpp \
@@ -711,6 +713,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_lfo_tables verify/test_eq_coefficients \
          verify/test_startup_helpers \
          verify/test_file_io \
+         verify/test_file_stream \
          verify/test_stg_daemons \
          verify/test_tick_count \
          verify/test_controller_info_perf_deactivate \
@@ -1420,6 +1423,9 @@ verify/test_startup_helpers: verify/test_startup_helpers.cpp src/init/startup_he
 
 verify/test_file_io: verify/test_file_io.cpp src/init/file_io.cpp
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_io.cpp src/init/file_io.cpp -o $@
+
+verify/test_file_stream: verify/test_file_stream.cpp src/init/file_stream.cpp
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_file_stream.cpp src/init/file_stream.cpp -o $@
 
 verify/test_stg_daemons: verify/test_stg_daemons.cpp src/init/stg_daemons.cpp include/oa_daemons.h include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_daemons.cpp src/init/stg_daemons.cpp -o $@

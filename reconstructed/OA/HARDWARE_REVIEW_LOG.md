@@ -3641,3 +3641,92 @@ confirms all 4 mangled names match ground truth exactly. Manifest 3558
 
 Real-HW test that would help: none identified -- pure framework
 metadata with no observable I/O or state.
+
+## OA.ko: CFileStream (concrete CStream file-I/O adapter), solo round 49 (2026-07-29)
+
+Continuation of solo mode. Fresh manifest survey (`manifest/oa_functions.
+csv`) picked `CFileStream` (16 pending methods) as a coherent,
+self-contained cluster -- the disk-backed `STGStream::CStream`
+implementation used throughout the file-chunk import subsystem
+(`CKorgFileKMP`/`CKorgFileKSF`/`CMultisampleChunk`/`CSampleChunk`/etc,
+all already referencing `CFileStream&` in their own mangled signatures).
+Landed 18/19 tractable methods: all 16 `CFileStream` methods except
+`SetPositionBeginning`, plus 3 new small `CSTGFile_*` primitives
+(`file_io.cpp`) that `GetPosition`/`IsAtEnd`/`Flush` needed and that
+were themselves separately pending in the manifest.
+
+Confirmed real object layout (regparm(3): `this`=EAX, ground truth's own
+decompile shows it as an unused declared param with the real body
+reading an `in_EAX` pseudo-variable -- same gotcha as
+`oa_ckg_midi_msg_handler.h`): +0x00 vptr, +0x04 error flag (0=ok,
+7=generic-I/O-error -- but see the Write/Read asymmetry below), +0x08 a
+self-pointer set once in the ctor and never read by any method this
+round reconstructs, +0x0c the raw `CSTGFile_Open()` handle.
+
+**`SetPositionBeginning()` deliberately deferred** -- its real body is
+`(**(code**)(*in_EAX + 0xc))()`, a genuine virtual dispatch through
+CFileStream's OWN vtable (confirmed via `_ZTV11CFileStream`@006c0720 in
+symbols.csv: `*in_EAX` == `PTR__CFileStream_006c0728` == slot0, +0xc ==
+slot index 3). Almost certainly `this->SetPosition(0)` given the other
+3 `SetPosition*` siblings' own semantics, but resolving WHICH named
+method occupies vtable slot 3 needs the full 22-slot `STGStream::CStream`
+base interface reconstructed first (`_ZTVN9STGStream7CStreamE`@006c07e0,
+NOT yet touched) to establish slot-index-to-method-name ordering -- out
+of scope for this batch. Left undeclared/uncredited rather than guessed
+at, matching this project's "genuinely-unresolvable decompile
+recognition" convention (same treatment as the 4 deferred
+`STGAPIFrontPanelStatus` methods, sec 10.248-adjacent).
+
+**`CSTGFile_GetPosition`/`CSTGFile_IsAtEnd` resolution, most interesting
+find this round**: their ground-truth decompiles call a raw fixed
+address `func_0x00d2b268(1)` with no visible file handle argument --
+looked like an unrelated function at first glance. Directly diffing
+against this file's own ALREADY-COMMITTED `CSTGFile_Seek`, whose own
+decompile calls the exact SAME `func_0x00d2b268(param_3)` (its `whence`
+arg), confirmed `func_0x00d2b268 == generic_file_llseek` (already
+established/verified in this project). The literal `1` GetPosition/
+IsAtEnd pass is `SEEK_CUR` -- both are the standard `lseek(fd, 0,
+SEEK_CUR)` "tell" idiom, with `handle`/`offset=0` reaching
+`generic_file_llseek` via unchanged EAX/EDX (same partial-visibility
+decompile artifact already documented for `CSTGFile_Seek`). No guessing
+involved -- a direct precedent match against already-verified code.
+
+`CSTGFile_Flush`'s `file->f_op` dispatch at raw offset 0x34 cross-checked
+against `/home/build/linux-kronos/include/linux/fs.h`'s own `struct
+file_operations` field order (owner/llseek/read/write/aio_read/
+aio_write/readdir/poll/ioctl/unlocked_ioctl/compat_ioctl/mmap/open/flush,
+4-byte strides 0x00..0x34) -- offset 0x34 is exactly `flush`, and this
+independently RE-confirms `CSTGFile_Read`/`_Write`'s own already-verified
+`fOp+0x8`=read/`fOp+0xc`=write mapping is the correct struct.
+
+**Own-bug caught before commit, `CFileStream::Copy`'s parameter order**:
+first draft assumed `Copy(srcPath, dstPath)` by analogy with common
+`cp`-style APIs, but ground truth's own decompile opens `param_2` READ
+and `param_1` WRITE/CREATE/TRUNC -- i.e. the REAL signature is
+`Copy(dstPath, srcPath)`, destination first. Also preserved 2 further
+real quirks verbatim: a zero-byte source file returns success without
+ever entering the copy loop, and if the source opens but the destination
+fails to open, the source handle is STILL closed (only the destination's
+close is gated on the destination having opened) -- an asymmetric
+cleanup pattern, not "fixed" to a more symmetric one.
+
+**`Write`/`Read`'s own error-flag asymmetry, preserved not "fixed"**:
+unlike the ctor/`SetPosition*` family (which sets the sentinel `7` on
+failure), `Write`/`Read` set a plain `(len != actual)` 0/1 boolean into
+the SAME error-flag field -- caught by the test harness expecting `7`
+and getting `1`, confirmed as a real ground-truth quirk (not a test or
+implementation bug) by re-reading the disassembly's own `(uint)(in_ECX
+!= iVar1)` cast.
+
+Real host KAT: `verify/test_file_io.cpp`'s new `[10]` section (11
+checks, mocked `generic_file_llseek`/`f_op->flush`) for the 3 new
+`CSTGFile_*` primitives; new `verify/test_file_stream.cpp` (7 sections,
+mocking `CSTGFile_*` directly, no `file_io.cpp` link) for `CFileStream`
+itself. `make verify` full suite green (207 targets). Real `make
+ko-clean && make ko KDIR=/home/build/linux-kronos` build green. Manifest
+3562 -> 3580/21,689 (+18, 0 regressions; `SetPositionBeginning` correctly
+still `pending`).
+
+Real-HW test that would help: none identified -- pure VFS-wrapper logic
+already exercised extensively by the sibling `CSTGFile_*` cluster's own
+prior real-hardware-adjacent verification; no new hardware surface.
