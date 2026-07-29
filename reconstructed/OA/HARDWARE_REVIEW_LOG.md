@@ -3954,3 +3954,95 @@ modulation math, no observable hardware I/O surface.
   already-declared `RT_*`/`KS_*` externs themselves would eventually
   need (KARMA library internals, out of this project's own stated
   scope).
+
+## OA.ko: CSTGPatch (shared "XModelPatch" family default overrides), solo round 53 (2026-07-29)
+
+Continuation of solo mode. Scripted survey of manifest/oa_functions.csv
+for small, "no in_stack_/unaff_/Could-not-recover" pending clusters
+found `CSTGPatch` (84 pending methods, avg 53.2 bytes -- smallest
+average among the top 35 largest pending classes; 16/84 flagged by the
+decompiler itself, 68/84 clean). Landed 34/68 clean methods; the
+remaining 34 clean + all 16 flagged deferred across 3 DISTINCT,
+independently-verified reasons (see include/oa_stg_patch.h's own
+header comment for the full breakdown).
+
+Confirmed real class relationship: `CSTGPatch` is the shared base for
+the entire "XModelPatch" family already visible elsewhere in this
+project's own manifest (`CSTGOrganModelPatch`, `CSTGPolysixModelPatch`,
+`CSTGMS20ModelPatch`, `CSTGVPMModelPatch`, `CSTGPluckedModelPatch`,
+`CSTGEPModelPatch`, `CSTGPCMModelPatch`, `CSTGAnalogSyncModelPatch`,
+`CSTGPianoModelPatch`) -- confirmed via the dtor's own
+`&PTR__CSTGParamsOwner_006c04a8` vptr write, the SAME real base-class
+relationship and "opaque placeholder, not a real C++ base" treatment
+already established for `CSTGKeyTrack` (round 51). Landed methods are
+almost entirely this base class's own DEFAULT virtual override bodies
+(trivial no-ops or fixed-constant returns) meant to be overridden by
+the concrete "XModelPatch" siblings -- confirmed via 7+ spot-checked
+ground-truth decompiles, all `cc=__cdecl`/`(void)` (Ghidra recovered
+ZERO real parameters for any of them, despite each one's own
+C++-demangled comment showing a much richer real signature that only
+the OVERRIDING subclass would actually consume).
+
+Two methods needed closer handling beyond plain constant/no-op
+transcription:
+- `GetDefaultContext()` -- a function-local-static "default patch
+  message context" singleton whose real one-time-init guard is a
+  single byte that decompiles as sharing storage with the same
+  field's own vptr-slot low byte (a decompiler symbol-overlap
+  artifact, same class as this round's own deferred
+  GetVoiceDelay/UpdateVoiceDelay pair) -- reconstructed with a real,
+  separate C++ static-init guard (`static bool s_inited`) instead of
+  literally transcribing the corrupted byte overlap, which reproduces
+  the INTENDED one-time-stamp behavior rather than the artifact. Its
+  OTHER 11 fields are unconditionally reset to fixed defaults on every
+  single call, confirmed and preserved. The real vtable-slot value
+  stamped into +0x00 (`&PTR_IsLiveUpdate_006bf728`) is a genuinely
+  unmodeled external data symbol -- stored as an opaque non-null
+  sentinel, never dereferenced by any reconstructed caller.
+- `CheckMatchingToneAdjustTargetParam` -- the real high-level C++
+  signature comment's own claimed 2nd-parameter type (`unsigned
+  char`) contradicts the decompiled body's actual use of that same
+  register as a pointer base into a 4-field descriptor struct --
+  reconstructed matching the ACTUAL decompiled parameter usage (a
+  descriptor pointer), not the possibly-stale/mismatched doc-comment
+  signature.
+
+Deferred, 3 distinct reasons: (1) 16 methods flagged by the decompiler
+itself (`in_stack_`/`unaff_`/"Could not recover jumptable") --
+SaveParams, HandleCC, UseDefaults, the 158-byte HandleParamChange
+overload, InitVoiceNotifyVector/Wave, SetupComponents, the 7
+UpdateToneAdjustCommonXxx setters, GetRequiredVoiceInfo,
+GetMultisampleIds. (2) ~33 methods making a genuine, fully-concrete
+virtual call through an UNNAMED vtable slot -- either operating on a
+`CSTGVoice&`'s own vtable (`NoteOff`/`Steal`/`FreeVoice`/
+`UpdateUnisonSpread`/`SetMute`/`HandleThreadIdChanged`/the 53-byte
+HandleParamChange overload) or the repeated "for each submodule index,
+call submodule's own vtable method" loop shape
+(`PrecomputeData`/`UpdateGlobalTune`/`UpdateTrackTune`/
+`UpdateTrackBendRange`) -- the SAME deferral class already established
+for CSTGKeyTrack's own `PrecomputeData`/`UpdateXxxRamp` family (round
+51): fully concrete control flow, but no independent confirmation of
+which named method occupies the target slot. (3) `GetTransposedNote`
+-- decompiled body is a bare, unassigned `undefined4 in_ECX; return
+in_ECX;` despite `cc=__cdecl`/`(void)` (Ghidra recovered no real
+parameters and no assignment to `in_ECX` anywhere in the function) --
+a genuinely unrecoverable return value (reads whatever happens to be
+in a register the `__cdecl` ABI never defines as an argument-passing
+register at this call shape), not a vtable-slot-naming problem like
+(2) -- left undeclared rather than guessing a constant.
+
+Real host KAT (`verify/test_stg_patch.cpp`, 28 checks spanning every
+distinct behavioral category: constant-return family, no-op-void
+family, 4-field descriptor compare with short-circuit verification,
+static-singleton lazy-init + unconditional-per-call field reset).
+`make verify` full suite green (208+ targets, zero regressions). Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3710 -> 3745/21,689 (+35, 0 regressions).
+
+Real-HW test that would help: none identified -- these are all
+default/never-overridden-in-this-pass virtual bodies with no hardware
+I/O surface of their own; real value would come from eventually
+reconstructing one of the concrete "XModelPatch" siblings and
+confirming these defaults are genuinely never reached on a live
+instance (every real patch presumably always uses a concrete
+override).
