@@ -3730,3 +3730,67 @@ still `pending`).
 Real-HW test that would help: none identified -- pure VFS-wrapper logic
 already exercised extensively by the sibling `CSTGFile_*` cluster's own
 prior real-hardware-adjacent verification; no new hardware surface.
+
+## OA.ko: CKGTimerManager (KARMA tempo/clock manager), solo round 50 (2026-07-29)
+
+Continuation of solo mode. Manifest survey picked `CKGTimerManager`
+(15 pending methods) -- KARMA's own tempo/clock manager, previously
+only a 5-method stub (`oa_ckg_module_param_msg_handler.h`) discovered
+while reconstructing `CKGEngine`'s own ctor, flagged then as "a real,
+self-contained future cluster of their own." Landed 13/15: everything
+except `Process()`/`AdvanceClock()`.
+
+Confirmed real object layout, byte-for-byte -- `sizeof` comes out to
+exactly `0x38` (56 bytes), matching the ctor's own confirmed
+`operator new(0x38)` allocation size verbatim (a strong independent
+cross-check that the field layout is complete/correct, not just
+individually-plausible). A genuine ctor quirk preserved: `mCurrentTempo`
+(+0x08) and `mLastElapsedTick` (+0x18) are NEVER initialized by the real
+ctor -- zeroed here only for this reconstruction's own UB-safety, not
+because ground truth zeroes them (same convention as
+`CSPRUIMsgSender`'s 4-byte stack gap, sec 10.181-adjacent).
+
+**Replaced, not duplicated, the pre-existing stub**: the old 5-method
+`struct CKGTimerManager` in `oa_ckg_module_param_msg_handler.h`
+(ChangePerformance/Process/StartSync/StopSync/ctor, all undefined)
+INCORRECTLY declared `StartSync`/`StopSync` as instance methods --
+ground truth's own decompile shows NO `this` parameter at all for
+either (`cc=__cdecl`, unlike every genuinely-`this`-taking method here
+which Ghidra always shows an explicit `CKGTimerManager *this` for, even
+when the arg is otherwise unused) -- confirming both are genuinely
+`static`. Fixed by replacing the whole stub with an `#include` of the
+new full header; `Process()`/`AdvanceClock()` stay declared-but-
+undefined (real callers, `CKGEngine::Update()`, still reference
+`Process()`) -- this project's kernel-module link model tolerates an
+unresolved internal C++ method symbol at build time exactly like any
+other genuinely-unresolved extern (confirmed: `make ko` still links
+clean with them undefined, since LKM partial linking never requires
+full resolution -- that only happens, or doesn't, at insmod time).
+
+`Process()`/`AdvanceClock()` deliberately NOT reconstructed -- genuinely
+ambiguous register/stack allocation, distinct from the usual "this is
+EAX" gotcha: both bodies read `in_stack_ffffffe0`/`in_stack_ffffffe4`/
+`unaff_EBX` pseudo-variables (Ghidra's own markers for values inherited
+from an unknown caller context, never assigned anywhere in the function
+itself) to build a `CKGRTCHandler*` and call 2 of its methods plus a
+`CKGEngine::IsKarmaOn(CKGEngine*, int)` call -- needs raw disassembly
+tracing of the real caller, not just the auto-decompile, to resolve
+safely. Both functions' OTHER logic (the fixed-point interval-clock
+accumulator, tempo-LED countdown) is IDENTICAL to the already-
+reconstructed `GetIntervalClock`/`ShouldTempoLEDFlash`, so nothing new
+would be learned by guessing at the ambiguous part.
+
+Real host KAT (`verify/test_kg_timer_manager.cpp`, 24 checks,
+including a `sizeof()` cross-check against the ctor's own allocation
+size) -- does NOT link the 1421-line `ckg_engine.cpp`, provides its own
+minimal `CKGEngine::ms_poInstance`/`HaveAllModulesStopped()` mock
+instead (same "test provides its own mocks" convention as
+`test_ckg_engine.cpp` itself). `make verify` full suite green (208
+targets). Real `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+build green. Manifest 3580 -> 3593/21,689 (+13, 0 regressions).
+
+Real-HW test that would help: the tempo-LED flash cadence and
+external-MIDI-clock-sync backlog draining would both be directly
+observable on a real Kronos (front-panel tempo LED blink rate, MIDI
+clock slaving) -- flagged for the eventual real-hardware verification
+pass, not attempted here.

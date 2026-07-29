@@ -244,6 +244,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/ckg_switch_family.o \
            src/engine/ckg_midi_msg_handler.o \
            src/engine/ckg_engine.o \
+           src/engine/kg_timer_manager.o \
            src/engine/midi_in_port.o \
            src/engine/midi_in_port_serial.o \
            src/engine/midi_queue_writer_byte.o \
@@ -554,6 +555,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/ckg_switch_family.cpp \
        src/engine/ckg_midi_msg_handler.cpp \
        src/engine/ckg_engine.cpp \
+       src/engine/kg_timer_manager.cpp \
        src/engine/lfo_stepseq_quad.cpp \
        src/engine/wave_seq_manager.cpp \
        src/engine/waveseq_generator.cpp \
@@ -833,6 +835,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_ckg_switch_family \
          verify/test_ckg_midi_msg_handler \
          verify/test_ckg_engine \
+         verify/test_kg_timer_manager \
          verify/test_rtparm_ge_table \
          verify/test_rtparm_pe_table \
          verify/test_rtparm_family \
@@ -1229,6 +1232,14 @@ verify/test_ckg_engine: verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp inc
 	# truncate to a garbage pointer on FromU32() -- same gotcha and same
 	# fix as test_tone_adjust_descriptors.
 	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp -o $@
+
+verify/test_kg_timer_manager: verify/test_kg_timer_manager.cpp src/engine/kg_timer_manager.cpp include/oa_kg_timer_manager.h
+	# Does NOT link ckg_engine.cpp (1421 lines, its own large mock
+	# surface) -- provides its own minimal CKGEngine::ms_poInstance/
+	# HaveAllModulesStopped() mock instead, same "test provides its own
+	# mocks for every external dependency" convention as test_ckg_engine
+	# itself, kept independent.
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_kg_timer_manager.cpp src/engine/kg_timer_manager.cpp -o $@
 
 verify/test_rtparm_ge_table: verify/test_rtparm_ge_table.cpp src/engine/rtparm_ge_table.cpp verify/rtparm_ge_func_stubs.cpp include/oa_rtparm_ge_table.h
 	# rtparm_ge_func_stubs.cpp supplies TEST-ONLY empty bodies for the 313

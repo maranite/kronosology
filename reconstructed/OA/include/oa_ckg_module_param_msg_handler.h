@@ -508,21 +508,15 @@ void KGOutGate_NotifyEnableDirectPathForVectorCCToSoundEngine(bool enable)
  * CKGTimerManager -- KARMA tempo/clock singleton, discovered constructing
  * CKGEngine (its ctor placement-constructs one via `operator new(0x38)` +
  * `CSTGBankMemory::AllocAligned(0x10,0x38)`, real relocation
- * `_ZN15CKGTimerManagerC1Ev`). Real class has 14 methods total (`nm -C`
- * confirmed: AdvanceClock/IncElapsedTick/SetCurrentTempo/SetTempoPercent/
- * GetIntervalClock/ReceiveMIDIClock/ShouldTempoLEDFlash/
- * GetTicksUntilTheBeat/GetKarmaIntervalClock/SetTempo in addition to the
- * 5 below) -- only the 5 CKGEngine itself calls are declared here, the
- * other 9 are a real, self-contained future cluster of their own. Own
- * class layout/body entirely out of scope here.
+ * `_ZN15CKGTimerManagerC1Ev`). FULLY reconstructed (round 50, solo,
+ * 2026-07-29) -- see oa_kg_timer_manager.h for the real object layout
+ * (matches the ctor's own confirmed `0x38`-byte allocation exactly) and
+ * per-method derivation; `Process()`/`AdvanceClock()` remain
+ * deliberately undefined (genuinely ambiguous register/stack
+ * allocation, see that header's own comment) but stay declared since
+ * `CKGEngine::Update()` below still calls `Process()`.
  */
-struct CKGTimerManager {
-	CKGTimerManager();
-	void Process();
-	void ChangePerformance();
-	void StopSync();
-	void StartSync();
-};
+#include "oa_kg_timer_manager.h"
 
 /*
  * CKarmaPerfCommon / CKarmaPerfModule -- opaque KARMA "performance"
