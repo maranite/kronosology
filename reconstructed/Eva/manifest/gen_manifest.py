@@ -4361,6 +4361,20 @@ RECONSTRUCTED = {
     "08944440",  # CControlSurface::GetModeLEDCode(CControlSurface::EMode) const
     "08944460",  # CControlSurface::GetKarmaModuleSelectLEDCode(int) const
     "08951f30",  # CControlSurface::IsUseGlobalAudio() const
+    # -- round 50 (2026-07-29, solo): CControlSurface 13-method batch --
+    "08942a50",  # CControlSurface::SetSongForReset(CSong*)
+    "08958ba0",  # CControlSurface::SetBackupMode(CControlSurface::EMode)
+    "0894b940",  # CControlSurface::ShouldSetupFaderAsReverse(EKnobFader, EAlgorithm, uchar)
+    "08951ee0",  # CControlSurface::EditAudioChannelStripKnob(int, int, EKnobFader)
+    "08942b90",  # CControlSurface::EditIFXSend1(int, int)
+    "08942bf0",  # CControlSurface::EditIFXSend2(int, int)
+    "0894e910",  # CControlSurface::EditExternalKnob(int, int)
+    "0894e960",  # CControlSurface::EditExternalSlider(int, int)
+    "0894e7f0",  # CControlSurface::GetCurrentKarmaSceneId(int)
+    "08951c40",  # CControlSurface::InitializeSelectSwitchInAudioInput()
+    "08951d70",  # CControlSurface::EditAudioPan(int, int)
+    "0894c270",  # CControlSurface::GetCurrentKarmaScene()
+    "0894bf00",  # CControlSurface::InitializePlayMuteSwitchInModKarma()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

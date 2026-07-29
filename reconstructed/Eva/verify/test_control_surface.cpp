@@ -10,6 +10,8 @@
 
 extern "C" unsigned int CSWTCH_497[9];
 extern "C" unsigned int CSWTCH_500[4];
+extern "C" unsigned int g_oSongForReset[0xcc5];
+extern "C" unsigned char s_akbyAreaForIFX[64];
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -177,6 +179,165 @@ int main()
 	      cs->IsUseGlobalAudio() == true);
 	audioObj[3] = 0x0;
 	check("IsUseGlobalAudio: bit0 clear -> false", cs->IsUseGlobalAudio() == false);
+
+	// [7] round 50 batch
+	unsigned char songBuf[sizeof(g_oSongForReset)];
+	memset(songBuf, 0xab, sizeof(songBuf));
+	CControlSurface::SetSongForReset(songBuf);
+	check("SetSongForReset copies the FULL 0xcc5-dword song image",
+	      memcmp(g_oSongForReset, songBuf, sizeof(g_oSongForReset)) == 0);
+	check("GetSongForReset() address matches the grown array",
+	      (void *)CControlSurface::GetSongForReset() == (void *)g_oSongForReset);
+
+	buf[0x118] = 0xaa;
+	buf[0x119] = 0xaa;
+	cs->SetBackupMode(0);
+	check("SetBackupMode(0) writes +0x118", buf[0x118] == 0 && buf[0x119] == 0xaa);
+	buf[0x118] = 0xaa;
+	buf[0x119] = 0xaa;
+	cs->SetBackupMode(2);
+	check("SetBackupMode(2) writes +0x119", buf[0x119] == 2 && buf[0x118] == 0xaa);
+	buf[0x118] = 0xaa;
+	buf[0x119] = 0xaa;
+	cs->SetBackupMode(5);
+	check("SetBackupMode(5) is a no-op (neither mask matches)",
+	      buf[0x118] == 0xaa && buf[0x119] == 0xaa);
+	cs->SetBackupMode(9);
+	check("SetBackupMode(9) out of [0,8) range is a no-op",
+	      buf[0x118] == 0xaa && buf[0x119] == 0xaa);
+
+	check("ShouldSetupFaderAsReverse: in-range knob+algo+value(0x25) -> true",
+	      cs->ShouldSetupFaderAsReverse(10, 3, 0x25) == true);
+	check("ShouldSetupFaderAsReverse: in-range knob+algo+value(0x10<0x1a) -> true",
+	      cs->ShouldSetupFaderAsReverse(10, 3, 0x10) == true);
+	check("ShouldSetupFaderAsReverse: wrong algorithm -> false",
+	      cs->ShouldSetupFaderAsReverse(10, 1, 0x25) == false);
+	check("ShouldSetupFaderAsReverse: knobFader out of [8,16] -> false",
+	      cs->ShouldSetupFaderAsReverse(20, 3, 0x25) == false);
+	check("ShouldSetupFaderAsReverse: value 0x30 (neither range) -> false",
+	      cs->ShouldSetupFaderAsReverse(10, 3, 0x30) == false);
+
+	unsigned char *csObj = (unsigned char *)mmap32(0x10);
+	memset(csObj, 0, 0x10);
+	*(unsigned int *)(buf + 0x140) = (unsigned int)(unsigned long)csObj;
+	*(int *)(buf + 0x138) = 7;
+	csObj[2] = 0x5;
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditAudioChannelStripKnob(0xffffffff, 0x77, 5);
+	check("EditAudioChannelStripKnob(arg1=-1) writes unconditionally",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0x77);
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditAudioChannelStripKnob(0x11, 0x88, 5);
+	check("EditAudioChannelStripKnob(knobFader==0x11) is a no-op",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0);
+
+	s_akbyAreaForIFX[3] = 0x10;
+	*(int *)(buf + 0x128) = 3;
+	buf[0x72] = 0x15; // 0x10 + 5
+	*(int *)(buf + 0x138) = 7;
+	cs->EditIFXSend1(5, 0x99);
+	check("EditIFXSend1: area match writes +0x6c", *(int *)(buf + 0x6c) == 0x99);
+	buf[0x82] = 0x16; // 0x10 + 6
+	cs->EditIFXSend2(6, 0xaa);
+	check("EditIFXSend2: area match writes +0x7c", *(int *)(buf + 0x7c) == 0xaa);
+
+	*(int *)(buf + 0x138) = 4;
+	*(unsigned int *)(buf + 2 * 0x10 + 4) = 0x1111;
+	*(unsigned int *)(buf + 2 * 0x10 + 8) = 0x2222;
+	*(unsigned int *)(buf + 2 * 0x10 + 0x10) = 0x4444;
+	cs->EditExternalKnob(2, 0x3333);
+	check("EditExternalKnob writes value at +0xc", *(int *)(buf + 2 * 0x10 + 0xc) == 0x3333);
+	check("EditExternalKnob mirrors 4-dword block (sees NEW +0xc value)",
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x154) == 0x1111 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x158) == 0x2222 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x15c) == 0x3333 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x160) == 0x4444);
+
+	*(unsigned int *)(buf + 2 * 0x10 + 0x84) = 0x5555;
+	*(unsigned int *)(buf + 2 * 0x10 + 0x88) = 0x6666;
+	*(unsigned int *)(buf + 2 * 0x10 + 0x90) = 0x8888;
+	cs->EditExternalSlider(2, 0x7777);
+	check("EditExternalSlider writes value at +0x8c", *(int *)(buf + 2 * 0x10 + 0x8c) == 0x7777);
+	check("EditExternalSlider mirrors 4-dword block (sees NEW +0x8c value)",
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x1d4) == 0x5555 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x1d8) == 0x6666 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x1dc) == 0x7777 &&
+	      *(unsigned int *)(buf + 2 * 0x10 + 0x1e0) == 0x8888);
+
+	unsigned char *scene144 = (unsigned char *)mmap32(0x200);
+	memset(scene144, 0, 0x200);
+	scene144[0x135] = 0x9;
+	*(unsigned int *)(buf + 0x144) = (unsigned int)(unsigned long)scene144;
+	*(unsigned int *)(buf + 0x148) = 0;
+	check("GetCurrentKarmaSceneId(0): reads +0x144's own +0x135 & 7",
+	      cs->GetCurrentKarmaSceneId(0) == (0x9 & 7));
+	check("GetCurrentKarmaSceneId(1), no +0x148 table: same fallback",
+	      cs->GetCurrentKarmaSceneId(1) == (0x9 & 7));
+
+	unsigned char *scene148 = (unsigned char *)mmap32(0x1000);
+	memset(scene148, 0, 0x1000);
+	scene148[0x127 + 2 * 0x2e8] = 0x44;
+	*(unsigned int *)(buf + 0x148) = (unsigned int)(unsigned long)scene148;
+	check("GetCurrentKarmaSceneId(3), +0x148 table present: reads its own record",
+	      cs->GetCurrentKarmaSceneId(3) == 0x44);
+
+	*(int *)(buf + 0x114) = 0;
+	csObj[2] = 0x3; // buf+0x140 still points at csObj here
+	cs->InitializeSelectSwitchInAudioInput();
+	check("InitializeSelectSwitchInAudioInput: +0x114==0 path sets bit from +0x140's own +2",
+	      buf[0x11c] == (unsigned char)(1u << (0x3 & 0xf)));
+
+	*(int *)(buf + 0x114) = 1;
+	*(int *)(buf + 0x128) = 4;
+	unsigned char *trackObj2 = (unsigned char *)mmap32(0x20);
+	memset(trackObj2, 0, 0x20);
+	*(unsigned short *)(trackObj2 + 0xc) = 0x1234;
+	*(unsigned int *)(buf + 4 * 4 + 0x7ec) = (unsigned int)(unsigned long)trackObj2;
+	cs->InitializeSelectSwitchInAudioInput();
+	check("InitializeSelectSwitchInAudioInput: +0x114!=0 path reads indexed +0x7ec object's +0xc",
+	      buf[0x11c] == (unsigned char)0x1234);
+
+	*(int *)(buf + 0x138) = 7;
+	csObj[0] = 0x0; // top bit clear -> "positive" branch
+	csObj[2] = 0x5;
+	*(int *)(buf + 0xc) = 0;
+	cs->EditAudioPan(-1, 0x55);
+	check("EditAudioPan: positive-branch arg1==-1 writes +0xc unconditionally",
+	      *(int *)(buf + 0xc) == 0x55);
+	csObj[0] = 0x80; // top bit set -> "negative" branch
+	*(int *)(buf + 3 * 0x10 + 0xc) = 0;
+	cs->EditAudioPan(3, 0x66);
+	check("EditAudioPan: negative-branch writes per-channel slot",
+	      *(int *)(buf + 3 * 0x10 + 0xc) == 0x66);
+
+	scene144[2] = 0x0;
+	*(unsigned int *)(buf + 0x148) = 0;
+	scene144[0x135] = 0x2;
+	unsigned int expectScene = (unsigned int)(unsigned long)scene144 + 0x136 + (0x2 & 7) * 9;
+	check("GetCurrentKarmaScene: fallback branch (+0x148==0)",
+	      cs->GetCurrentKarmaScene() == expectScene);
+
+	*(int *)(buf + 0x128) = 1;
+	scene144[2] = 0x2;
+	*(unsigned int *)(buf + 0x148) = (unsigned int)(unsigned long)scene148;
+	scene148[0x127] = 0x0; // record for scene index (2&7)-1 == 1: base = scene148 + 1*0x2e8
+	unsigned char *rec1 = scene148 + 1 * 0x2e8;
+	rec1[0x127] = 0x7;
+	unsigned int expectScene2 = (unsigned int)(unsigned long)rec1 + 0x148 + 0x7 * 9;
+	check("GetCurrentKarmaScene: real-table branch (+0x148!=0, sceneSel&7!=0)",
+	      cs->GetCurrentKarmaScene() == expectScene2);
+
+	*(int *)(buf + 0x128) = 3;
+	buf[0x11a] = 0xaa;
+	cs->InitializePlayMuteSwitchInModKarma();
+	check("InitializePlayMuteSwitchInModKarma: +0x128==3 clears +0x11a", buf[0x11a] == 0);
+
+	*(int *)(buf + 0x128) = 1;
+	scene144[2] = 0x0;
+	scene144[0x135] = 0x4;
+	cs->InitializePlayMuteSwitchInModKarma();
+	check("InitializePlayMuteSwitchInModKarma: fallback scene sets bit",
+	      buf[0x11a] == (unsigned char)(1u << (0x4 & 0x1f)));
 
 	printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
 	return g_fail ? 1 : 0;

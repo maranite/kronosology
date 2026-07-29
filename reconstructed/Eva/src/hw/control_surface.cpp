@@ -5,6 +5,7 @@
  * used below.
  */
 #include "control_surface.h"
+#include <cstring>
 
 // Host/target pointer-width convention (this project's established
 // ToU32/FromU32 idiom, e.g. OA.ko's src/init/file_io.cpp) -- the real
@@ -23,8 +24,16 @@ extern "C" unsigned int CSWTCH_500[4] = {0};
 
 // Real static/global object CControlSurface::GetSongForReset() returns
 // the address of -- opaque, content/type not independently confirmed
-// beyond being 4-byte-aligned.
-extern "C" unsigned int g_oSongForReset = 0;
+// beyond size: SetSongForReset() (round 50) copies 0xcc5 (3269) DWORDs
+// into it, confirming the true size (13,076 bytes), NOT a single scalar
+// as round 49 assumed.
+extern "C" unsigned int g_oSongForReset[0xcc5] = {0};
+
+// s_akbyAreaForIFX: real .rodata byte table, indexed by the same +0x128
+// "current slot" index field GetSoloSelected (round 49) already uses --
+// content and true size not independently confirmed, sized to a safe,
+// generous upper bound.
+extern "C" unsigned char s_akbyAreaForIFX[64] = {0};
 
 void CControlSurface::EditKarmaPadVelocityMode(int) { }
 void CControlSurface::UpdateKnobFaderLED() { }
@@ -38,7 +47,7 @@ void CControlSurface::MoveKnobInGraphicEQ(int) { }
 
 unsigned int *CControlSurface::GetSongForReset()
 {
-	return &g_oSongForReset;
+	return g_oSongForReset;
 }
 
 void CControlSurface::InitializeSelectSwitchInGraphicEQ()
@@ -204,4 +213,180 @@ bool CControlSurface::IsUseGlobalAudio() const
 		return (*(FromU32(ptr) + 3) & 1) != 0;
 	}
 	return true;
+}
+
+void CControlSurface::SetSongForReset(const void *song)
+{
+	memcpy(g_oSongForReset, song, sizeof(g_oSongForReset));
+}
+
+void CControlSurface::SetBackupMode(int mode)
+{
+	unsigned char *base = (unsigned char *)this;
+	if ((unsigned int)mode >= 8)
+		return;
+	unsigned int bit = 1u << (mode & 0x1f);
+	if ((bit & 0x8c) != 0) {
+		base[0x119] = (unsigned char)mode;
+	} else if ((bit & 3) != 0) {
+		base[0x118] = (unsigned char)mode;
+	}
+}
+
+bool CControlSurface::ShouldSetupFaderAsReverse(int knobFader, int algorithm, unsigned char value) const
+{
+	if ((unsigned int)(knobFader - 8) >= 9 || algorithm != 3)
+		return false;
+	return ((unsigned char)(value - 0x23) < 5) || (value < 0x1a);
+}
+
+void CControlSurface::EditAudioChannelStripKnob(unsigned int arg1, int value, int knobFader)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	unsigned char *p = FromU32(ptr);
+	if (*(signed char *)p < 0)
+		return;
+	if (*(int *)(base + 0x138) != 7)
+		return;
+	if (arg1 != 0xffffffffu && arg1 != (unsigned int)(p[2] & 0xf))
+		return;
+	if (knobFader == 0x11)
+		return;
+	*(int *)(base + knobFader * 0x10 + 0xc) = value;
+}
+
+void CControlSurface::EditIFXSend1(int arg1, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	if (*(signed char *)FromU32(ptr) < 0)
+		return;
+	unsigned int mode = *(unsigned int *)(base + 0x138);
+	if (mode != 7 && mode > 1)
+		return;
+	int idx = *(int *)(base + 0x128);
+	unsigned int rhs = (unsigned int)s_akbyAreaForIFX[idx] + (unsigned int)arg1;
+	if ((unsigned int)base[0x72] == rhs) {
+		*(int *)(base + 0x6c) = value;
+	}
+}
+
+void CControlSurface::EditIFXSend2(int arg1, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	if (*(signed char *)FromU32(ptr) < 0)
+		return;
+	unsigned int mode = *(unsigned int *)(base + 0x138);
+	if (mode != 7 && mode > 1)
+		return;
+	int idx = *(int *)(base + 0x128);
+	unsigned int rhs = (unsigned int)s_akbyAreaForIFX[idx] + (unsigned int)arg1;
+	if ((unsigned int)base[0x82] == rhs) {
+		*(int *)(base + 0x7c) = value;
+	}
+}
+
+void CControlSurface::EditExternalKnob(int index, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	if (*(int *)(base + 0x138) != 4)
+		return;
+	int off = index * 0x10;
+	*(int *)(base + off + 0xc) = value;
+	*(unsigned int *)(base + off + 0x154) = *(unsigned int *)(base + off + 4);
+	*(unsigned int *)(base + off + 0x158) = *(unsigned int *)(base + off + 8);
+	*(unsigned int *)(base + off + 0x15c) = *(unsigned int *)(base + off + 0xc);
+	*(unsigned int *)(base + off + 0x160) = *(unsigned int *)(base + off + 0x10);
+}
+
+void CControlSurface::EditExternalSlider(int index, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	if (*(int *)(base + 0x138) != 4)
+		return;
+	int off = index * 0x10;
+	*(int *)(base + off + 0x8c) = value;
+	*(unsigned int *)(base + off + 0x1d4) = *(unsigned int *)(base + off + 0x84);
+	*(unsigned int *)(base + off + 0x1d8) = *(unsigned int *)(base + off + 0x88);
+	*(unsigned int *)(base + off + 0x1dc) = *(unsigned int *)(base + off + 0x8c);
+	*(unsigned int *)(base + off + 0x1e0) = *(unsigned int *)(base + off + 0x90);
+}
+
+unsigned char CControlSurface::GetCurrentKarmaSceneId(int arg1) const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr144 = *(unsigned int *)(base + 0x144);
+	if (arg1 == 0)
+		return FromU32(ptr144)[0x135] & 7;
+	unsigned int ptr148 = *(unsigned int *)(base + 0x148);
+	if (ptr148 != 0)
+		return FromU32(ptr148)[0x127 + (arg1 - 1) * 0x2e8];
+	return FromU32(ptr144)[0x135] & 7;
+}
+
+void CControlSurface::InitializeSelectSwitchInAudioInput()
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x11c] = 0;
+	if (*(int *)(base + 0x114) == 0) {
+		unsigned int ptr = *(unsigned int *)(base + 0x140);
+		unsigned char b = FromU32(ptr)[2] & 0xf;
+		if (b < 8)
+			base[0x11c] = (unsigned char)(1u << b);
+		return;
+	}
+	int idx = *(int *)(base + 0x128);
+	unsigned int ptr7ec = *(unsigned int *)(base + idx * 4 + 0x7ec);
+	base[0x11c] = (unsigned char)(*(unsigned short *)(FromU32(ptr7ec) + 0xc));
+}
+
+void CControlSurface::EditAudioPan(int index, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	unsigned char *p = FromU32(ptr);
+	if (*(signed char *)p < 0) {
+		if (*(int *)(base + 0x138) == 7 && (unsigned int)index < 8) {
+			*(int *)(base + index * 0x10 + 0xc) = value;
+		}
+	} else {
+		if (*(int *)(base + 0x138) == 7 &&
+		    (index == -1 || index == (p[2] & 0xf))) {
+			*(int *)(base + 0xc) = value;
+		}
+	}
+}
+
+unsigned int CControlSurface::GetCurrentKarmaScene() const
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int p144 = *(unsigned int *)(base + 0x144);
+	unsigned int p148 = *(unsigned int *)(base + 0x148);
+	unsigned char sceneSel = FromU32(p144)[2];
+	if (p148 != 0 && (sceneSel & 7) != 0) {
+		unsigned int rec = p148 + ((sceneSel & 7) - 1) * 0x2e8;
+		return rec + 0x148 + FromU32(rec)[0x127] * 9;
+	}
+	return p144 + 0x136 + (FromU32(p144)[0x135] & 7) * 9;
+}
+
+void CControlSurface::InitializePlayMuteSwitchInModKarma()
+{
+	unsigned char *base = (unsigned char *)this;
+	if (*(int *)(base + 0x128) != 3) {
+		unsigned int p144 = *(unsigned int *)(base + 0x144);
+		unsigned char b = FromU32(p144)[2];
+		unsigned char scene;
+		if ((b & 7) == 0 || *(unsigned int *)(base + 0x148) == 0) {
+			scene = FromU32(p144)[0x135] & 7;
+		} else {
+			unsigned int p148 = *(unsigned int *)(base + 0x148);
+			scene = FromU32(p148)[0x127 + ((b & 7) - 1) * 0x2e8];
+		}
+		base[0x11a] = (unsigned char)(1u << (scene & 0x1f));
+		return;
+	}
+	base[0x11a] = 0;
 }

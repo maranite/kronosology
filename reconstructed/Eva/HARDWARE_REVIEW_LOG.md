@@ -2167,3 +2167,66 @@ should know they exist and are untested/unmodeled, not silently absent.
   read/write behavior could be cross-checked against a real Kronos's
   control-surface state if a future round reconstructs `CTrackStatus`
   and the pointed-at `+0x140` object's real type -- not yet actionable.
+
+- **CControlSurface, 13 more methods (round 50)
+  (`control_surface.h`/`control_surface.cpp`), round 50, 2026-07-29
+  (solo, no subagents -- session-wide cap hit, user chose "Continue
+  solo").** Continuation of round 49's fresh class, targeting the next
+  smallest self-contained subset among the 131 still-pending methods.
+
+  REAL BUG FOUND AND FIXED THIS ROUND: round 49's `g_oSongForReset`
+  placeholder for the static/global object `GetSongForReset()` returns
+  the address of was declared as a bare `unsigned int` (4 bytes).
+  Ground truth's own `SetSongForReset(CSong*)` (now landed this round)
+  copies `0xcc5` (3269) DWORDs -- 13,076 bytes -- into it in a tight
+  loop; the 4-byte placeholder would have overflowed the moment
+  `SetSongForReset` was actually exercised (host test, real hardware,
+  or a future caller). Fixed by growing it to
+  `unsigned int[0xcc5]` and updating `GetSongForReset()`'s own return
+  (array-to-pointer decay instead of `&scalar`) to match. Caught
+  because this round's own sample-read of `SetSongForReset`'s ground
+  truth revealed the real copy size -- not found by any test, since
+  round 49's own test never called `SetSongForReset` (it didn't exist
+  yet in the reconstruction).
+
+  Landed 13 more self-contained methods: `SetSongForReset` (the fix
+  above), `SetBackupMode` (real per-mode bitfield router, 2 disjoint
+  bitmasks preserved verbatim), `ShouldSetupFaderAsReverse` (unused
+  `this`, pure 3-arg boolean range logic), `EditAudioChannelStripKnob`/
+  `EditIFXSend1`/`EditIFXSend2`/`EditAudioPan` (all gate on the SAME
+  real `+0x140` pointed-at object's own `+0`/`+2` fields already
+  established by round 49), `EditIFXSend1`/`EditIFXSend2` also index a
+  new real-but-unread `.rodata` byte table `s_akbyAreaForIFX` by the
+  same `+0x128` "current slot" index field round 49 already
+  established, `EditExternalKnob`/`EditExternalSlider` (write the
+  round-49-confirmed per-channel array then mirror a 4-DWORD block
+  into a second array, real evaluation order preserved: mirror reads
+  the NEW just-written value, not the old one),
+  `GetCurrentKarmaSceneId`/`GetCurrentKarmaScene`/
+  `InitializePlayMuteSwitchInModKarma`/
+  `InitializeSelectSwitchInAudioInput` (2 new real packed-pointer
+  fields `+0x144`/`+0x148`, `FromU32()` treatment; `GetCurrentKarmaScene`'s
+  own return value is itself computed and kept as a packed 32-bit
+  pointer throughout, never converted to a host pointer, matching how
+  the real 32-bit target computes and returns it).
+
+  Deferred, same 2 external-dependency reasons as round 49 plus 2 new
+  instances: `ForceGlobalAudio` (calls
+  `USTGAPIControl::UseGlobalAudioInputSettings` + sibling
+  `SetAsUseGlobalSetting`), `PressSelectSwitchForSolo` (calls
+  `CTrackStatus::ToggleSolo` + `USTGUserAPI::mNowStopMessaging`),
+  `UpdateModeLED` (calls `CMMI`).
+
+  Real host KAT (31 new checks, appended to the existing
+  `verify/test_control_surface.cpp`, 65 total). One test-authoring bug
+  caught and fixed by the test itself: an
+  `InitializeSelectSwitchInAudioInput` check set up the WRONG mocked
+  object (`scene144` instead of `csObj`, the one `+0x140` actually
+  pointed at during that section) -- fixed by pointing the setup at
+  the correct object, not a bug in the reconstructed implementation.
+
+  `make verify` full suite green (real target-ABI `-m32` build), zero
+  regressions. Eva manifest 3058 -> 3071/37,795 (8.125%).
+
+  Real-HW test that would help: none identified beyond what round 49
+  already flagged -- same `CTrackStatus`/`+0x140` object dependency.

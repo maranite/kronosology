@@ -65,18 +65,78 @@
  * Same "declare uncertain size clearly" convention as
  * `storage_converter_base.h`'s `CConvertStorageParam`.
  *
- * === Deferred, 3 reasons (131/161 methods) ===
+ * === Deferred, 3 reasons (131/161 methods after round 49) ===
  * (1) Calls into a real but wholly unreconstructed sibling class:
  *     `SetAsSoloSelected`/`GetSolo`/`GetAudioTrackSolo`/
  *     `GetAudioInputSolo` (`CTrackStatus::SetAsSoloSelected`/`GetSolo`),
- *     `UpdateLED`/`EditAssignableSwitch` (`CMMI::GetInstance`/`SetLED`).
+ *     `UpdateLED`/`EditAssignableSwitch` (`CMMI::GetInstance`/`SetLED`),
+ *     `ForceGlobalAudio` (`USTGAPIControl::UseGlobalAudioInputSettings`),
+ *     `PressSelectSwitchForSolo` (`CTrackStatus::ToggleSolo`,
+ *     `USTGUserAPI::mNowStopMessaging`), `UpdateModeLED` (`CMMI`).
  * (2) Calls into an unreconstructed SIBLING `CControlSurface` method:
- *     `UpdateKarmaSceneSelectLED` (calls `UpdatePlayMuteSwitchLED`, not
- *     yet landed -- deferred together for accuracy rather than guessing
- *     at the sibling's real behavior).
- * (3) Everything else not surveyed this round (~127 methods, up to
- *     several KB) -- a dedicated future round's scope, same discipline
- *     as every other oversized class in this project.
+ *     `UpdateKarmaSceneSelectLED` (calls `UpdatePlayMuteSwitchLED`),
+ *     `ForceGlobalAudio` (also calls `SetAsUseGlobalSetting`) -- deferred
+ *     together for accuracy rather than guessing at the sibling's real
+ *     behavior.
+ * (3) Everything else not surveyed this round (up to several KB) -- a
+ *     dedicated future round's scope, same discipline as every other
+ *     oversized class in this project.
+ *
+ * === Round 50 batch (2026-07-29, solo): 13 more methods ===
+ * All self-contained (raw `this`-relative reads/writes and 2 more real,
+ * content-unread packed-pointer fields at `+0x144`/`+0x148`, same
+ * `FromU32()` treatment as `+0x140`), no external calls.
+ *
+ * BUG FIX (round 50): `GetSongForReset()`'s own sibling
+ * `SetSongForReset(CSong*)` (real ground truth) copies `0xcc5` (3269)
+ * DWORDs -- 13,076 bytes -- from its argument into `m_oSongForReset`,
+ * not a single 4-byte scalar. Round 49's `g_oSongForReset` placeholder
+ * was a bare `unsigned int` (4 bytes); grown here to
+ * `unsigned int[0xcc5]` to match the real copy size ground truth
+ * proves, avoiding a buffer overflow the moment `SetSongForReset` is
+ * exercised. `GetSongForReset()` itself is unaffected (still returns
+ * the array's own address, array-to-pointer decay).
+ *
+ * `SetBackupMode(EMode)`: real per-mode bitfield router -- modes 0/1
+ * write `+0x118`, modes 2/3/7 write `+0x119`, modes 4/5/6/`>=8` are a
+ * genuine no-op (ground truth's own two disjoint bitmasks `0x8c`/`3`
+ * against `1<<mode`, preserved verbatim, not simplified to a range
+ * check).
+ *
+ * `ShouldSetupFaderAsReverse(EKnobFader, EAlgorithm, uchar)`: unused
+ * `this`, pure 3-arg boolean logic -- `knobFader` in `[8,16]` AND
+ * `algorithm==3` AND (`value` in `[0x23,0x27]` OR `value<0x1a`).
+ *
+ * `EditAudioChannelStripKnob`/`EditIFXSend1`/`EditIFXSend2`/
+ * `EditAudioPan` all gate on the SAME real `+0x140` pointed-at object's
+ * own `+0`/`+2` fields (top-bit-of-byte-0 and low-nibble-of-byte-2)
+ * already established by round 49's `IsUseGlobalAudio`/
+ * `EditKnobFaderForCustomMod`. `EditIFXSend1`/`EditIFXSend2` are
+ * otherwise identical shape (`this[0x72]`/`this[0x6c]` vs
+ * `this[0x82]`/`this[0x7c]`), both indexing a new real-but-unread
+ * `.rodata` byte table `s_akbyAreaForIFX` by the same `+0x128`
+ * "current slot" index field already established by round 49's
+ * `GetSoloSelected`.
+ *
+ * `EditExternalKnob`/`EditExternalSlider`: write the per-channel-array
+ * slot (stride `0x10`, offsets `+0xc`/`+0x8c` -- SAME array round 49
+ * already confirmed) then mirror a 4-DWORD block of that slot's own
+ * neighboring fields into a second array at `+0x154`/`+0x1d4` --
+ * reads back its OWN just-written value as part of the mirror (ground
+ * truth's real evaluation order preserved exactly: write first, then
+ * mirror-copy, so the mirrored slot sees the NEW value not the old
+ * one).
+ *
+ * `GetCurrentKarmaSceneId(int)`/`GetCurrentKarmaScene()`/
+ * `InitializePlayMuteSwitchInModKarma()`/
+ * `InitializeSelectSwitchInAudioInput()` all dereference the 2 new
+ * real packed-pointer fields `+0x144`/`+0x148` (KARMA
+ * scene/module-select state, real meaning not independently
+ * recovered) purely as raw memory. `GetCurrentKarmaScene()`'s own
+ * return value is itself a packed 32-bit pointer (arithmetic on the
+ * `+0x144`/`+0x148` values, kept in packed-uint space throughout --
+ * never converted to a host pointer -- matching how the real 32-bit
+ * target computes and returns it).
  */
 
 #ifndef CONTROL_SURFACE_H
@@ -121,6 +181,21 @@ public:
 	unsigned int GetModeLEDCode(int mode) const;
 	unsigned int GetKarmaModuleSelectLEDCode(int index) const;
 	bool IsUseGlobalAudio() const;
+
+	// -- round 50 batch --
+	static void SetSongForReset(const void *song);
+	void SetBackupMode(int mode);
+	bool ShouldSetupFaderAsReverse(int knobFader, int algorithm, unsigned char value) const;
+	void EditAudioChannelStripKnob(unsigned int arg1, int value, int knobFader);
+	void EditIFXSend1(int arg1, int value);
+	void EditIFXSend2(int arg1, int value);
+	void EditExternalKnob(int index, int value);
+	void EditExternalSlider(int index, int value);
+	unsigned char GetCurrentKarmaSceneId(int arg1) const;
+	void InitializeSelectSwitchInAudioInput();
+	void EditAudioPan(int index, int value);
+	unsigned int GetCurrentKarmaScene() const;
+	void InitializePlayMuteSwitchInModKarma();
 };
 
 #endif /* CONTROL_SURFACE_H */
