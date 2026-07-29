@@ -4244,6 +4244,51 @@ RECONSTRUCTED = {
     "08ddecf0",  # CESDiskCommandTask::LoadAll(unsigned char)
     "08de01a0",  # CESDiskCommandTask::LoadMossBank(unsigned char)
     "08de01d0",  # CESDiskCommandTask::Load1MossProg(unsigned char)
+
+    # 2026-07-29 (round 45, solo, no subagents): CESDiskTask, 39/143
+    # tractable methods (es_disk_task.h/.cpp). 3 shapes: plain static-
+    # global accessors, "this-offset" accessors (GET side only), and
+    # single-branch index-gated dialog accessors. The other 104 methods
+    # remain deferred -- see es_disk_task.cpp's own header comment.
+    "08ddc8b0",  # CESDiskTask::GetFilerMsg(unsigned char, unsigned char*)
+    "08ddc8d0",  # CESDiskTask::SetFilerMsg(unsigned char, unsigned char const*)
+    "08ddc8f0",  # CESDiskTask::GetResultWriteExcl(unsigned char, unsigned char*)
+    "08ddc910",  # CESDiskTask::GetProgress(unsigned char, unsigned char*)
+    "08ddc930",  # CESDiskTask::SetProgress(unsigned char, unsigned char const*)
+    "08ddc950",  # CESDiskTask::GetMultipleSelect(unsigned char, unsigned char*)
+    "08ddc970",  # CESDiskTask::SetMultipleSelect(unsigned char, unsigned char const*)
+    "08ddca60",  # CESDiskTask::GetNotifyFileSelected(unsigned char, unsigned char*)
+    "08ddca80",  # CESDiskTask::SetNotifyFileSelected(unsigned char, unsigned char const*)
+    "08ddcc10",  # CESDiskTask::SetWriteExcl(unsigned char, unsigned char const*)
+    "08ddd800",  # CESDiskTask::GetDefaultFileName()
+    "08ddc990",  # CESDiskTask::GetBankProgToWrite(unsigned char, char*) const
+    "08ddc9c0",  # CESDiskTask::GetBankProgToWriteFullRange(unsigned char, unsigned char*) const
+    "08ddca30",  # CESDiskTask::GetBankCombiToWrite(unsigned char, char*) const
+    "08ddc9f0",  # CESDiskTask::GetOscTypeToWrite(unsigned char, unsigned char*) const
+    "08ddca10",  # CESDiskTask::SetOscTypeToWrite(unsigned char, unsigned char const*)
+    "08de3880",  # CESDiskTask::GetLdCombiBankDialog(unsigned char, unsigned char*)
+    "08de38a0",  # CESDiskTask::SetLdCombiBankDialog(unsigned char, unsigned char const*)
+    "08de38c0",  # CESDiskTask::GetLdDkitBankDialog(unsigned char, unsigned char*)
+    "08de38e0",  # CESDiskTask::SetLdDkitBankDialog(unsigned char, unsigned char const*)
+    "08de3900",  # CESDiskTask::GetLdKarmaGEBankDialog(unsigned char, unsigned char*)
+    "08de3920",  # CESDiskTask::SetLdKarmaGEBankDialog(unsigned char, unsigned char const*)
+    "08de3940",  # CESDiskTask::GetLdTemplateBankDialog(unsigned char, unsigned char*)
+    "08de3960",  # CESDiskTask::SetLdTemplateBankDialog(unsigned char, unsigned char const*)
+    "08de3980",  # CESDiskTask::GetLdProgBankDialog(unsigned char, unsigned char*)
+    "08de39a0",  # CESDiskTask::SetLdProgBankDialog(unsigned char, unsigned char const*)
+    "08de39c0",  # CESDiskTask::GetLdWseqBankDialog(unsigned char, unsigned char*)
+    "08de39e0",  # CESDiskTask::SetLdWseqBankDialog(unsigned char, unsigned char const*)
+    "08de4040",  # CESDiskTask::SetLoadSampleDialog(unsigned char, unsigned char const*)
+    "08de4080",  # CESDiskTask::GetLoadSampleDialog(unsigned char, unsigned char*)
+    "08de4260",  # CESDiskTask::GetLoadRegionsDialog(unsigned char, unsigned char*)
+    "08de4280",  # CESDiskTask::SetLoadRegionsDialog(unsigned char, unsigned char const*)
+    "08de4a40",  # CESDiskTask::GetEraseCDRWDialog(unsigned char, unsigned char*)
+    "08de4a60",  # CESDiskTask::SetEraseCDRWDialog(unsigned char, unsigned char const*)
+    "08de72b0",  # CESDiskTask::SetDeleteDialog(unsigned char, unsigned char const*)
+    "08de72f0",  # CESDiskTask::GetDeleteDialog(unsigned char, unsigned char*)
+    "08de7530",  # CESDiskTask::SetNewDirDialog(unsigned char, unsigned char const*)
+    "08de7570",  # CESDiskTask::GetNewDirDialog(unsigned char, unsigned char*)
+    "08ddd810",  # CESDiskTask::CopyBytes(unsigned char*, unsigned char const*, int)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

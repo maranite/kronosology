@@ -1872,3 +1872,75 @@ should know they exist and are untested/unmodeled, not silently absent.
   hardware-observable behavior beyond what the disk-command dispatcher
   (deferred `ExecuteLoadCommand`/`ExecuteSaveCommand`) would eventually
   consume.
+
+- **CESDiskTask, 39/143 tractable methods
+  (`es_disk_task.h`/`es_disk_task.cpp`), round 45, 2026-07-29 (solo, no
+  subagents)**. Fresh manifest survey filtered to pending methods with
+  no `in_stack_ffffffXX`/`unaff_`/"Could not recover" warnings, sorted
+  by class average size -- surfaced `CESDiskTask` (143 pending methods,
+  avg 145.8 bytes) as an unclaimed cluster, ALL 143 of which are
+  warning-free (a much larger tractable backlog than this round alone
+  landed -- see below).
+
+  3 distinct shapes landed: (1) 10 plain static-global accessors
+  (`s_ucFilerMsg`/`s_ucProgress`/etc); (2) 5 "this-offset" accessors
+  (GET side only -- the SET-side counterparts are larger/deferred),
+  confirming a packed `bank*0x80+secondary` field layout at
+  `this+0x84..0x8c` shared in part across 3 different accessor
+  families (`GetBankProgToWrite`/`GetBankProgToWriteFullRange` share
+  the SAME `+0x85` "prog" byte with two DIFFERENT bank bytes,
+  `+0x84`/`+0x88`); (3) 22 single-branch "index-gated dialog"
+  accessors (real ground truth only ever acts when `param_1==0`, a
+  much larger 79-method sibling family with 2-3 real branches or an
+  unconditional trailing statement deferred, see below) + `CopyBytes`
+  itself (its own 634-byte ground truth is a compiler-unrolled
+  Duff's-device memcpy, transcribed as its real semantic operation --
+  `memcpy` + conditional null-terminate for `len<=0xf0` -- not the
+  literal unrolled instruction sequence, matching this project's
+  established "recover the real operation, not the compiler's
+  unrolling artifacts" convention).
+
+  Confirmed real base classes: `CTask` (0x7c) + `CEditable` (+0x7c,
+  unmodeled gap) -- same layout already established for
+  `CESDiskCommandTask` (round 44).
+
+  New minimal stand-ins: `CDiskUtil::WriteByteToSharedBuffer`
+  (identity pass-through -- CDiskUtil is a separate 59-method
+  unreconstructed cluster; a bare declaration would have broken every
+  OTHER `make verify` target, since Eva links every test against the
+  full object tree) and `CLoadSampleDlogMgr::sm_caLoadFileName` (a
+  real confirmed 0xec-byte static buffer, that class's only touched
+  member).
+
+  Deferred, 2 distinct reasons (104/143 methods): (1) 79 "index-gated
+  dialog" accessors with 2-3 real param_1 branches or an unconditional
+  trailing statement outside any branch (e.g. `GetLoad1PatternDialog`/
+  `GetLoad1SongDialog` always touch one field regardless of param_1,
+  THEN conditionally touch a second/third) -- fully concrete, no
+  decompiler warning, genuinely tractable, just deferred for time
+  budget; (2) 4 dtor variants, the 1767-byte ctor (needs the
+  unrecovered `descCESDiskTask*` SDescriptor tables),
+  `GetFileName`/`SetFileName` (500+ bytes), and `GetMakeAudioCD`
+  (1934 bytes) -- larger, separate reconstruction efforts.
+
+  Own bug caught and fixed before commit (test-only, not in the
+  reconstructed code itself): the KAT's own `GetDeleteDialog`/
+  `GetNewDirDialog` calls initially passed 16-byte stack buffers, but
+  real ground truth genuinely reads/writes the FULL 0xf0-byte dialog
+  buffer contract -- a real stack-buffer-overflow in the TEST that
+  corrupted the adjacent `CTask` sub-object's own `CLimiterMan`
+  bookkeeping, surfacing as a segfault inside `~CLimiterMan()` at
+  program exit (traced via `gdb -batch -ex run -ex bt`). Also caught:
+  `SetOscTypeToWrite`'s own real body only ever reads `*param_2` (ONE
+  byte, zero-extended) despite the target field's own 4-byte width --
+  an initial test assertion wrongly assumed a 4-byte read; re-verified
+  against the ground-truth decompile and fixed the test, not the
+  (already-correct) reconstructed code.
+
+  Real host KAT (`verify/test_es_disk_task.cpp`, 22 checks). `make
+  verify` full suite green (207+ targets). Eva manifest 2948 ->
+  2987/37,795 (7.903%).
+
+  Real-HW test that would help: none identified -- pure host-side
+  static-global/struct-field accessor logic, no hardware-observable
+  behavior of its own.
