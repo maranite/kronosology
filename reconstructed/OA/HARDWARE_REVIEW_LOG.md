@@ -4709,3 +4709,45 @@ KDIR=/home/build/linux-kronos` build green. Manifest 4033 ->
 
 Real-HW test that would help: none identified -- pure per-step field
 writes, no hardware I/O surface of its own.
+
+## Round 64 (OA.ko, solo, 2026-07-29): CSTGString, 8-method batch
+
+`CSTGString` (105 `Get*` value-getters already reconstructed in an
+earlier round) had 8 remaining pending methods, all explicitly
+flagged "left pending" in this class's own header derivation notes
+as a distinct, well-scoped family: the generic `CSTGParamsOwner`
+reflection-API overrides (`GetId`/`GetName`/`GetNumParams`/
+`GetParamDescriptors`/`GetMessageHandlers`/`GetValueGetters`/
+`GetNumSubComponents`) plus `InitVoice`. Ground truth confirms all 6
+reflection accessors are literal-constant/extern-array returns --
+same exact shape already established for `CSTGWaveSequence`'s own
+`GetNumParams`/`GetParamDescriptors`/`GetMessageHandlers`/
+`GetValueGetters` (`stg_wave_sequence_updaters.cpp`) -- and
+`InitVoice` is confirmed genuinely empty (`{ return; }`), matching
+this project's standing "confirmed empty" convention (e.g.
+`CFileMan::Setup`/`Config`/`Start`). `CSTGVoice`/
+`CSTGVoiceInitialState` forward-declared only (not fully defined),
+same precedent as `CSTGLFO::InitVoice` (`oa_lfo.h`) since the body
+never touches either reference.
+
+Deliberately NOT attempted this round (already-documented deferrals
+in the class header, re-confirmed, not re-litigated): the 2 real
+DSP-computation outliers (`GetPluckDelay`/`GetPluckDelayAMSIntensity`,
+runtime-sample-rate float math, out of scope per this project's DSP-
+fidelity policy), `GetNoiseSaturation` (real `fyl2x`-based log2 dB
+conversion, same reason), and `GetSubComponent(unsigned short)` (a
+genuinely different `__thiscall` calling convention and a branchy,
+sub-object-pointer-returning shape, not part of either family above).
+
+Real host KAT (8 new checks appended to the existing
+`verify/test_stg_string_valuegetters.cpp`, with local placeholder
+definitions for the 3 extern arrays these accessors return, same
+per-TU-local-definition convention as `test_stg_wave_sequence_updaters.cpp`/
+`test_stg_program_slot_getters.cpp`). `make verify` full suite green
+(109 targets), zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4035 ->
+4043/21,689 (18.641%).
+
+Real-HW test that would help: none identified -- pure literal-
+constant reflection accessors + a confirmed no-op, no hardware I/O
+surface of their own.

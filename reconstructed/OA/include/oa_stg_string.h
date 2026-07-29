@@ -5,6 +5,11 @@
 #include "oa_adsr_base.h"	/* CSTGPatchMessageContext, STGConvertedParam,
 				 * CSTGParamsOwner::sValueGetterTemp */
 
+class CSTGVoice;		/* opaque, InitVoice() below never touches it --
+				 * same forward-decl-only precedent as CSTGLFO's
+				 * own InitVoice (oa_lfo.h) */
+struct CSTGVoiceInitialState;
+
 /*
  * oa_stg_string.h  -  CSTGString's "value getter" family: 105
  * STGConvertedParam &Get*(CSTGPatchMessageContext &) methods (real ground
@@ -169,6 +174,27 @@ struct CSTGString {
 	STGConvertedParam &GetRelease(CSTGPatchMessageContext &ctx);
 	STGConvertedParam &GetReleaseAMSIntensity(CSTGPatchMessageContext &ctx);
 	STGConvertedParam &GetReleaseAMSSource(CSTGPatchMessageContext &ctx);
+
+	/* round 64 (2026-07-29, solo): the generic CSTGParamsOwner reflection-API
+	 * overrides + InitVoice, flagged "left pending" in this header's own
+	 * derivation notes above. All confirmed genuinely trivial: 6 are literal-
+	 * constant/extern-array returns (same shape as CSTGWaveSequence's own
+	 * already-reconstructed GetNumParams/GetParamDescriptors/
+	 * GetMessageHandlers/GetValueGetters, stg_wave_sequence_updaters.cpp),
+	 * and InitVoice is a confirmed genuinely-empty passthrough (same
+	 * "confirmed empty" convention as CFileMan::Setup/Config/Start).
+	 * GetSubComponent(unsigned short) stays deferred -- real __thiscall (not
+	 * __regparm3), branchy, returns a sub-object pointer, a different shape
+	 * entirely (see header note above).
+	 */
+	static unsigned int GetId();
+	static const char *GetName();
+	static unsigned int GetNumParams();
+	static const void *GetParamDescriptors();
+	static const void *GetMessageHandlers();
+	static const void *GetValueGetters();
+	static unsigned int GetNumSubComponents();
+	void InitVoice(CSTGVoice &voice, CSTGVoiceInitialState &initialState);
 };
 
 #endif

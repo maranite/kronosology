@@ -21,6 +21,15 @@
 
 STGConvertedParam CSTGParamsOwner::sValueGetterTemp;
 
+/* round 64: placeholder definitions for CSTGString::GetParamDescriptors/
+ * GetMessageHandlers/GetValueGetters's own extern arrays -- same local-
+ * definition convention as test_stg_wave_sequence_updaters.cpp/
+ * test_stg_program_slot_getters.cpp.
+ */
+extern "C" unsigned char STGStringParams[4] = {0};
+extern "C" unsigned char sMessageHandlers[4] = {0};
+extern "C" unsigned char sValueGetters[4] = {0};
+
 static int g_fail;
 static void check_eq(const char *label, long got, long want)
 {
@@ -318,6 +327,37 @@ int main(void)
 	check_eq("CSTGString::GetReleaseAMSIntensity displayValue", CSTGParamsOwner::sValueGetterTemp.displayValue, -919958548L);
 	s->GetReleaseAMSSource(ctx);
 	check_eq("CSTGString::GetReleaseAMSSource value", CSTGParamsOwner::sValueGetterTemp.value, 104L);
+
+	/* round 64: reflection-API overrides + InitVoice -- literal constants,
+	 * no `this` state involved.
+	 */
+	check_eq("CSTGString::GetId", (long)CSTGString::GetId(), 0x35L);
+	{
+		bool nameOk = strcmp(CSTGString::GetName(), "String") == 0;
+		if (!nameOk) g_fail++;
+		printf("  %s  CSTGString::GetName == \"String\"\n", nameOk ? "ok  " : "FAIL");
+	}
+	check_eq("CSTGString::GetNumParams", (long)CSTGString::GetNumParams(), 0x6cL);
+	check_eq("CSTGString::GetNumSubComponents", (long)CSTGString::GetNumSubComponents(), 3L);
+	{
+		bool ok = CSTGString::GetParamDescriptors() != 0 && CSTGString::GetMessageHandlers() != 0 &&
+		          CSTGString::GetValueGetters() != 0;
+		if (!ok) g_fail++;
+		printf("  %s  CSTGString::GetParamDescriptors/GetMessageHandlers/GetValueGetters non-NULL\n",
+		       ok ? "ok  " : "FAIL");
+	}
+	{
+		/* CSTGVoice/CSTGVoiceInitialState are opaque (forward-declared only,
+		 * oa_stg_string.h) -- InitVoice's real body is confirmed genuinely
+		 * empty and never dereferences either ref, so a raw-buffer
+		 * reinterpret_cast is safe here (same idiom used throughout this
+		 * project for opaque-class raw-pointer casts).
+		 */
+		unsigned char dummy1[4] = {0}, dummy2[4] = {0};
+		s->InitVoice(*reinterpret_cast<CSTGVoice *>(dummy1),
+		             *reinterpret_cast<CSTGVoiceInitialState *>(dummy2));
+		printf("  ok    CSTGString::InitVoice doesn't crash (confirmed empty)\n");
+	}
 
 	printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all tests passed");
 	return g_fail ? 1 : 0;

@@ -940,3 +940,26 @@ STGConvertedParam &CSTGString::GetReleaseAMSSource(CSTGPatchMessageContext &)
 	CSTGParamsOwner::sValueGetterTemp.value = v;
 	return CSTGParamsOwner::sValueGetterTemp;
 }
+
+/* round 64 (2026-07-29, solo): the generic CSTGParamsOwner reflection-API
+ * overrides + InitVoice -- see oa_stg_string.h's own header comment. Same
+ * literal-constant/extern-array shape already established for
+ * CSTGWaveSequence's own GetNumParams/GetParamDescriptors/
+ * GetMessageHandlers/GetValueGetters (stg_wave_sequence_updaters.cpp).
+ */
+extern "C" unsigned char STGStringParams[];
+extern "C" unsigned char sMessageHandlers[];
+extern "C" unsigned char sValueGetters[];
+
+unsigned int CSTGString::GetId() { return 0x35; }
+const char *CSTGString::GetName() { return "String"; }
+unsigned int CSTGString::GetNumParams() { return 0x6c; }
+const void *CSTGString::GetParamDescriptors() { return STGStringParams; }
+const void *CSTGString::GetMessageHandlers() { return sMessageHandlers; }
+const void *CSTGString::GetValueGetters() { return sValueGetters; }
+unsigned int CSTGString::GetNumSubComponents() { return 3; }
+
+void CSTGString::InitVoice(CSTGVoice &, CSTGVoiceInitialState &)
+{
+	/* Confirmed genuinely empty in the real binary. */
+}
