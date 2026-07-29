@@ -1137,6 +1137,98 @@ struct CSTGProgramSlot {
 	 */
 	void Initialize();
 	void UseDefaults();
+
+	/*
+	 * Round 57 batch (2026-07-29, solo): 27 STG value-getter-family
+	 * methods, all confirmed via ground truth's own `in_EAX`/`in_EDX`
+	 * pseudo-variable pattern -- this project's regparm(3) ABI means
+	 * `this` is EAX (Ghidra's decompile shows it as an unused declared
+	 * parameter, same gotcha as oa_stg_key_track.h/oa_ckg_midi_msg_handler.h),
+	 * and a 2nd integer arg (where present) is EDX. Every offset below
+	 * is a direct field read off `this`, no external call, no table
+	 * content assumed beyond what's already independently confirmed.
+	 *
+	 * Framework accessors: `GetNumParams()` returns the literal `0x52`
+	 * (82); `GetParamDescriptors()` returns a new real-but-unread
+	 * `.rodata` table `STGProgramSlotParams` (content not independently
+	 * confirmed, same "confirmed real, content unread" treatment as
+	 * every other such table in this project); `GetMessageHandlers()`/
+	 * `GetValueGetters()` return the SAME shared `sMessageHandlers`/
+	 * `sValueGetters` symbols already declared (unresolved-at-link,
+	 * expected) by CSTGKeyTrack/CSTGWaveSequence/CSTGMultibandDelay.
+	 * `HasToneAdjust()`/`ShouldUseSlotEQSettings()` are both literal
+	 * `cc=__cdecl` constant-`1` overrides, no `this` touched at all.
+	 *
+	 * `AccessToneAdjust() const` returns `this+0x7f` (the embedded
+	 * `CSTGToneAdjust` sub-object, already confirmed real via this
+	 * class's own ctor comment above) -- matches the signature already
+	 * declared by the derived `CSTGProgramModeDrumTrackSlot`'s own
+	 * OVERRIDE of the same name (round 55), which instead returns into
+	 * the assigned PROGRAM's tone-adjust data; this is the BASE
+	 * class's own default behavior.
+	 *
+	 * EQ float family (`GetEQTrim`/`GetEQLowGain`/`GetEQMidFreq`/
+	 * `GetEQMidGain`/`GetEQHighGain`, `+0x48`/`+0x4c`/`+0x50`/`+0x54`/
+	 * `+0x58`, 4 bytes apart, all real `float` fields) plus
+	 * `GetEQBypass()` (`+0x43` bit 7) and `GetUseDrumkitBusSettings()`
+	 * (`+0x44` bit 0) -- a tightly packed EQ/bus-routing field cluster
+	 * sitting entirely below the `+0x7f` ToneAdjust sub-object boundary
+	 * (no offset overlap with that sub-object's own internal fields).
+	 *
+	 * `GetDetune() const` (`+0x1d`, float), `GetAliasBankSelect()`/
+	 * `GetAliasProgramId()` (`+0x9`/`+0xb`, bytes), `GetMeterIndex()`
+	 * (`+0x4`, byte -- CROSS-CHECKED against the ALREADY-CONFIRMED
+	 * `ResolveActiveVoiceDataNode()`'s own `idx = base[0x4]` read,
+	 * global.cpp, same field independently re-derived from a completely
+	 * different method family), `UsesProgramChordSource()` (`+0x16`
+	 * byte `== 0`), `GetSendLevel(unsigned int)` (`+0x77 + index*4`,
+	 * float array), `GetInputChannelSelect(unsigned int)` (`+0x5e +
+	 * index`, byte array), `GetMeterBus(unsigned int)` (`cc=__regparm3`,
+	 * single param IS `this` directly -- no hidden `this` shown by
+	 * Ghidra for this one, `*(byte*)(this+4) * 2 + 0x52`).
+	 *
+	 * `GetOutputBus`/`GetOutputBusType`/`GetFXControlBus`/`GetHDRBus`/
+	 * `GetHDRBusType` all index into the SAME 5 real lookup tables
+	 * already declared by round 55's `CSTGProgramModeDrumTrackSlot`
+	 * (`STGAPIOutToPhysBusId`/`STGAPIOutToBusType`/
+	 * `STGAPIFXCtrlToWritePhysBusId`/`STGAPIHDRPhysBusIds`/
+	 * `STGAPIHDRBusTypes`, defined once in global.cpp) via a byte index
+	 * at `+0x60`/`+0x60`/`+0x61`/`+0x62`/`+0x62` -- a cross-check reuse
+	 * of an already-confirmed symbol, not a fresh table.
+	 *
+	 * Deferred, 2 reasons: the remaining 248 pending methods range up
+	 * to 3344 bytes and cover genuinely separate large sub-areas
+	 * (DSP voice-model dispatch, controller/RPN handling, drum-kit
+	 * bus routing) out of this round's scope; a further subset is
+	 * decompiler-flagged.
+	 */
+	void *AccessToneAdjust() const;
+	float GetEQTrim() const;
+	float GetEQLowGain() const;
+	float GetEQMidFreq() const;
+	float GetEQMidGain() const;
+	float GetEQHighGain() const;
+	float GetDetune() const;
+	unsigned char GetAliasBankSelect() const;
+	unsigned char GetAliasProgramId() const;
+	unsigned char GetMeterIndex() const;
+	float GetSendLevel(unsigned int index) const;
+	static unsigned int GetNumParams();
+	static const void *GetParamDescriptors();
+	static const void *GetMessageHandlers();
+	static const void *GetValueGetters();
+	unsigned char GetInputChannelSelect(unsigned int index) const;
+	static bool HasToneAdjust();
+	static bool ShouldUseSlotEQSettings();
+	bool GetUseDrumkitBusSettings() const;
+	bool GetEQBypass() const;
+	bool UsesProgramChordSource() const;
+	unsigned int GetMeterBus() const;
+	unsigned int GetOutputBus() const;
+	unsigned int GetOutputBusType() const;
+	unsigned int GetFXControlBus() const;
+	unsigned int GetHDRBus() const;
+	unsigned int GetHDRBusType() const;
 };
 
 /*

@@ -4268,6 +4268,73 @@ fixture, not the implementation.
 `make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
 Manifest 3840 -> 3872/21,689 (+32, 0 regressions).
 
+## OA.ko: CSTGProgramSlot STG value-getter batch (27 methods), solo round 57 (2026-07-29)
+
+Extended the pre-existing `CSTGProgramSlot` class (already had 12
+methods: ctor, `IsActive`/`AccessActiveSlotVoiceData`/
+`HasActiveSlotVoiceData`/`HasActiveVoices`, `ChangeProgram`,
+`GetProperMidiChannel`, `CompleteLoadProgram`, `Initialize`/
+`UseDefaults`) with a fresh 27-method batch: 4 framework accessors
+(`GetNumParams`/`GetParamDescriptors`/`GetMessageHandlers`/
+`GetValueGetters`), 2 literal-constant-`1` overrides (`HasToneAdjust`/
+`ShouldUseSlotEQSettings`), `AccessToneAdjust` (returns `this+0x7f`,
+the already-confirmed embedded `CSTGToneAdjust` sub-object), a tight
+EQ/bus-routing field cluster (`GetEQTrim`/`GetEQLowGain`/
+`GetEQMidFreq`/`GetEQMidGain`/`GetEQHighGain` floats at `+0x48..+0x58`,
+`GetEQBypass`/`GetUseDrumkitBusSettings` bitfields at `+0x43`/`+0x44`),
+and a handful of plain field/array getters (`GetDetune`,
+`GetAliasBankSelect`/`GetAliasProgramId`, `GetMeterIndex`,
+`GetSendLevel`, `GetInputChannelSelect`, `UsesProgramChordSource`,
+`GetMeterBus`, `GetOutputBus`/`GetOutputBusType`/`GetFXControlBus`/
+`GetHDRBus`/`GetHDRBusType`).
+
+Methodology: this project's regparm(3) ABI means `this` is passed in
+EAX, and ground truth's own decompile for every one of these methods
+shows it as an UNUSED declared parameter with the real body instead
+reading a Ghidra `in_EAX` pseudo-variable (same gotcha already
+documented in oa_stg_key_track.h/oa_ckg_midi_msg_handler.h/
+oa_kg_timer_manager.h/oa_file_stream.h) -- confirmed, not guessed,
+before writing a single method body. A 2nd integer arg (where
+present, e.g. `GetSendLevel`/`GetInputChannelSelect`) reads from
+`in_EDX`. `GetMeterBus()`'s own ground truth mangled name suggested a
+1-arg signature, but its actual 9-byte body never reads a 2nd value
+at all -- modeled as the true 0-arg method the body proves it to be,
+not the possibly-stale demangled name.
+
+`GetMeterIndex()`'s `+0x4` byte field is a CROSS-CHECK, not a fresh
+derivation: it's the exact same field `ResolveActiveVoiceDataNode()`
+(already landed, global.cpp) independently reads as `idx =
+base[0x4]` from a completely different method family, now confirmed
+a second time.
+
+`GetOutputBus`/`GetOutputBusType`/`GetFXControlBus`/`GetHDRBus`/
+`GetHDRBusType` reuse the SAME 5 real lookup-table symbols
+(`STGAPIOutToPhysBusId`/`STGAPIOutToBusType`/
+`STGAPIFXCtrlToWritePhysBusId`/`STGAPIHDRPhysBusIds`/
+`STGAPIHDRBusTypes`) already declared+defined by round 55's
+`CSTGProgramModeDrumTrackSlot` -- a cross-check reuse of an
+already-confirmed symbol via `extern`, not a fresh table. New
+`STGProgramSlotParams` table (this class's own param-descriptor
+array) added with the same "confirmed real, content unread"
+treatment as every other such table in this project.
+
+Deferred, 2 reasons: 248 remaining methods (up to 3344 bytes) cover
+genuinely separate large sub-areas (DSP voice-model dispatch,
+controller/RPN handling, drum-kit bus routing) out of this round's
+scope; a further subset decompiler-flagged.
+
+Real host KAT (30 checks, verify/test_stg_program_slot_getters.cpp)
+-- self-contained TU, no test_global.cpp-style shared mocks needed
+despite CSTGProgramSlot's other methods living in global.cpp (this
+batch lives in its own new file, stg_program_slot_getters.cpp).
+
+`make verify` full suite green, zero regressions. Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3872 -> 3899/21,689 (+27, 0 regressions).
+
+Real-HW test that would help: none identified -- pure field-read
+accessor logic, no hardware I/O surface of its own.
+
 Real-HW test that would help: none identified -- pure in-memory
 sequence-data-structure field writes, no hardware I/O surface of its
 own.
