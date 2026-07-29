@@ -1411,6 +1411,51 @@ struct CSTGProgramSlot {
 	void UpdateIgnoreSetListTranspose(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
 	void UpdateEnableRibbon(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
 	void UpdateUseDrumkitBusSettings(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+
+	/*
+	 * Round 60 batch (15 methods) -- continuation of round 59's exact same
+	 * pattern families, discovered by re-surveying the (still large, 146-
+	 * method) pending backlog for CSTGProgramSlot:
+	 *
+	 *   Class A (6 methods): GetValueEnableKnob2..7, filling in the middle
+	 *   of round 59's GetValueEnableKnob1(bit0)/EnableKnob8(bit7) pair at
+	 *   ctx+0x47 -- same single-bit ctx-read shape, just the missing bits.
+	 *
+	 *   Class B (5 methods): Update* bit setters that are the missing
+	 *   write-side counterparts of round 59's own class-A GetValueXxx bit
+	 *   getters -- SAME byte offset and bit position, confirmed by direct
+	 *   cross-check (UpdatePriority@this+0x43 bit1 pairs with round 59's
+	 *   GetValuePriority@ctx+0x43 bit1, etc.). Unlike round 58/59's class-D
+	 *   setters (always bit0), these write an ARBITRARY bit position, so
+	 *   the write formula generalizes to
+	 *   `base[OFF] = (base[OFF] & ~(1<<BIT)) | ((val.value!=0)<<BIT)`.
+	 *
+	 *   Class C (4 methods): override-with-patch-fallback getters. Each
+	 *   reads a per-slot override field; if it's the "unset" sentinel,
+	 *   falls back to a byte field on the patch object pointed to by
+	 *   `this+5` (a real pointer, confirmed already-used field offsets
+	 *   0xc2a/0xc2b/0xc2f/0xc30 cross-checked against AllocateVoice/
+	 *   AutoLoadDrumTrackEQ/Copy/CSTGPianoModelPatch's own ctor in this
+	 *   same binary -- CSTGPCMModelPatch-family fields, not guessed).
+	 *   `this+5`'s patch object is treated as an opaque raw pointer (same
+	 *   "opaque past what's needed" convention used throughout this
+	 *   project), not a fully-typed struct.
+	 */
+	STGConvertedParam &GetValueEnableKnob2(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob3(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob4(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob5(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob6(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob7(CSTGProgramSlotMessageContext &ctx) const;
+	void UpdatePriority(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateEnableProgramChange(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateUseProgramScale(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateProgVectorVolume(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateEQAutoLoadProgram(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	unsigned int GetMaxNumNotes() const;
+	int GetChordMode() const;
+	bool GetWaveSeqKeySync() const;
+	bool GetWaveSeqQuantizeTrigger() const;
 };
 
 /*

@@ -310,6 +310,99 @@ int main()
 	check("UpdateUseDrumkitBusSettings clears bit0", buf[0x44] == 0x3c);
 	buf[0x44] = buf[0x45] = buf[0x46] = 0;
 
+	// --- round 60 batch (15 methods) ---
+	ctxBuf[0x47] = 0x02;
+	check("GetValueEnableKnob2 bit1 of ctx+0x47", slot->GetValueEnableKnob2(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x04;
+	check("GetValueEnableKnob3 bit2 of ctx+0x47", slot->GetValueEnableKnob3(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x08;
+	check("GetValueEnableKnob4 bit3 of ctx+0x47", slot->GetValueEnableKnob4(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x10;
+	check("GetValueEnableKnob5 bit4 of ctx+0x47", slot->GetValueEnableKnob5(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x20;
+	check("GetValueEnableKnob6 bit5 of ctx+0x47", slot->GetValueEnableKnob6(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x40;
+	check("GetValueEnableKnob7 bit6 of ctx+0x47", slot->GetValueEnableKnob7(*ctx2).value == 1);
+	ctxBuf[0x47] = 0;
+
+	buf[0x43] = 0xf0;
+	slot->UpdatePriority(*ctx2, P(1));
+	check("UpdatePriority sets bit1, preserves other bits", buf[0x43] == 0xf2);
+	slot->UpdatePriority(*ctx2, P(0));
+	check("UpdatePriority clears bit1", buf[0x43] == 0xf0);
+	buf[0x43] = 0;
+
+	buf[0x44] = 0xf0;
+	slot->UpdateEnableProgramChange(*ctx2, P(1));
+	check("UpdateEnableProgramChange sets bit1, preserves other bits", buf[0x44] == 0xf2);
+	slot->UpdateEnableProgramChange(*ctx2, P(0));
+	check("UpdateEnableProgramChange clears bit1", buf[0x44] == 0xf0);
+	buf[0x44] = 0;
+
+	buf[0x43] = 0xf0;
+	slot->UpdateUseProgramScale(*ctx2, P(1));
+	check("UpdateUseProgramScale sets bit2, preserves other bits", buf[0x43] == 0xf4);
+	slot->UpdateUseProgramScale(*ctx2, P(0));
+	check("UpdateUseProgramScale clears bit2", buf[0x43] == 0xf0);
+	buf[0x43] = 0;
+
+	buf[0x43] = 0xf0;
+	slot->UpdateProgVectorVolume(*ctx2, P(1));
+	check("UpdateProgVectorVolume sets bit3, preserves other bits", buf[0x43] == 0xf8);
+	slot->UpdateProgVectorVolume(*ctx2, P(0));
+	check("UpdateProgVectorVolume clears bit3", buf[0x43] == 0xf0);
+	buf[0x43] = 0;
+
+	buf[0x43] = 0x0f;
+	slot->UpdateEQAutoLoadProgram(*ctx2, P(1));
+	check("UpdateEQAutoLoadProgram sets bit6, preserves other bits", buf[0x43] == 0x4f);
+	slot->UpdateEQAutoLoadProgram(*ctx2, P(0));
+	check("UpdateEQAutoLoadProgram clears bit6", buf[0x43] == 0x0f);
+	buf[0x43] = 0;
+
+	{
+		unsigned char patchBuf[0xc50];
+		memset(patchBuf, 0, sizeof(patchBuf));
+		*(unsigned char **)(buf + 5) = patchBuf;
+
+		buf[0x14] = 0;
+		patchBuf[0xc2a] = 7;
+		check("GetMaxNumNotes falls back to patch+0xc2a when unset", slot->GetMaxNumNotes() == 7u);
+		buf[0x14] = 5;
+		check("GetMaxNumNotes uses override-1 when set", slot->GetMaxNumNotes() == 4u);
+		buf[0x14] = 0;
+
+		patchBuf[0xc30] = (unsigned char)-3;
+		check("GetChordMode falls back to signed patch+0xc30", slot->GetChordMode() == -3);
+		buf[0x15] = 9;
+		check("GetChordMode uses override-1 when set", slot->GetChordMode() == 8);
+		buf[0x15] = 0;
+
+		buf[0x3d] = 0; // round 58's own UpdateKeySync test left this nonzero earlier in this file
+		patchBuf[0xc2b] = 0x80;
+		check("GetWaveSeqKeySync falls back to patch+0xc2b bit7 (set)", slot->GetWaveSeqKeySync() == true);
+		patchBuf[0xc2b] = 0;
+		check("GetWaveSeqKeySync falls back to patch+0xc2b bit7 (clear)", slot->GetWaveSeqKeySync() == false);
+		buf[0x3d] = 2;
+		check("GetWaveSeqKeySync override != 1 -> true", slot->GetWaveSeqKeySync() == true);
+		buf[0x3d] = 1;
+		check("GetWaveSeqKeySync override == 1 -> false", slot->GetWaveSeqKeySync() == false);
+		buf[0x3d] = 0;
+
+		buf[0x3e] = 0; // round 58's own UpdateQuantizeTrigger test left this nonzero earlier in this file
+		patchBuf[0xc2f] = 1;
+		check("GetWaveSeqQuantizeTrigger falls back to patch+0xc2f bit0 (set)", slot->GetWaveSeqQuantizeTrigger() == true);
+		patchBuf[0xc2f] = 0;
+		check("GetWaveSeqQuantizeTrigger falls back to patch+0xc2f bit0 (clear)", slot->GetWaveSeqQuantizeTrigger() == false);
+		buf[0x3e] = 2;
+		check("GetWaveSeqQuantizeTrigger override != 1 -> true", slot->GetWaveSeqQuantizeTrigger() == true);
+		buf[0x3e] = 1;
+		check("GetWaveSeqQuantizeTrigger override == 1 -> false", slot->GetWaveSeqQuantizeTrigger() == false);
+		buf[0x3e] = 0;
+
+		*(unsigned char **)(buf + 5) = 0;
+	}
+
 	printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

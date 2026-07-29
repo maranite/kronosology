@@ -579,3 +579,101 @@ void CSTGProgramSlot::UpdateUseDrumkitBusSettings(CSTGProgramSlotMessageContext 
 	unsigned char *base = (unsigned char *)this;
 	base[0x44] = (unsigned char)((base[0x44] & 0xfe) | (val.value != 0));
 }
+
+/* Round 60 batch (15 methods) -- see header for class A/B/C pattern notes. */
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob2(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 1) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob3(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 2) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob4(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 3) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob5(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 4) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob6(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 5) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob7(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 6) & 1);
+}
+
+void CSTGProgramSlot::UpdatePriority(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x43] = (unsigned char)((base[0x43] & 0xfd) | ((val.value != 0) << 1));
+}
+
+void CSTGProgramSlot::UpdateEnableProgramChange(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x44] = (unsigned char)((base[0x44] & 0xfd) | ((val.value != 0) << 1));
+}
+
+void CSTGProgramSlot::UpdateUseProgramScale(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x43] = (unsigned char)((base[0x43] & 0xfb) | ((val.value != 0) << 2));
+}
+
+void CSTGProgramSlot::UpdateProgVectorVolume(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x43] = (unsigned char)((base[0x43] & 0xf7) | ((val.value != 0) << 3));
+}
+
+void CSTGProgramSlot::UpdateEQAutoLoadProgram(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x43] = (unsigned char)((base[0x43] & 0xbf) | ((val.value != 0) << 6));
+}
+
+unsigned int CSTGProgramSlot::GetMaxNumNotes() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	if (base[0x14] != 0)
+		return base[0x14] - 1;
+	const unsigned char *patch = *(const unsigned char *const *)(base + 5);
+	return patch[0xc2a];
+}
+
+int CSTGProgramSlot::GetChordMode() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	if (base[0x15] != 0)
+		return base[0x15] - 1;
+	const unsigned char *patch = *(const unsigned char *const *)(base + 5);
+	return (signed char)patch[0xc30];
+}
+
+bool CSTGProgramSlot::GetWaveSeqKeySync() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	if ((signed char)base[0x3d] != 0)
+		return (signed char)base[0x3d] != 1;
+	const unsigned char *patch = *(const unsigned char *const *)(base + 5);
+	return (patch[0xc2b] >> 7) & 1;
+}
+
+bool CSTGProgramSlot::GetWaveSeqQuantizeTrigger() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	if ((signed char)base[0x3e] != 0)
+		return (signed char)base[0x3e] != 1;
+	const unsigned char *patch = *(const unsigned char *const *)(base + 5);
+	return patch[0xc2f] & 1;
+}

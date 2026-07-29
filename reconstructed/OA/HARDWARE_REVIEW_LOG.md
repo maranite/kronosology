@@ -4449,3 +4449,68 @@ build green. Manifest 3958 -> 4001/21,689 (+43, 0 regressions).
 
 Real-HW test that would help: none identified -- pure field-read/
 write accessor logic, no hardware I/O surface of its own.
+
+## Round 60 (OA.ko, solo, 2026-07-29): CSTGProgramSlot, 15-method
+batch (still 146 pending after round 59)
+
+Re-surveying CSTGProgramSlot's pending backlog turned up 3 clean
+families:
+
+- Class A (6 methods): `GetValueEnableKnob2`..`GetValueEnableKnob7`,
+  filling in the middle of round 59's `GetValueEnableKnob1`(bit0)/
+  `EnableKnob8`(bit7) pair at ctx+0x47 -- same single-bit ctx-read
+  shape.
+- Class B (5 methods): `UpdatePriority`/`UpdateEnableProgramChange`/
+  `UpdateUseProgramScale`/`UpdateProgVectorVolume`/
+  `UpdateEQAutoLoadProgram` -- the missing WRITE-side counterparts of
+  5 of round 59's own class-A `GetValueXxx` bit getters, confirmed
+  by exact offset+bit cross-check (`UpdatePriority`@this+0x43 bit1
+  pairs with round 59's `GetValuePriority`@ctx+0x43 bit1, etc.).
+  Generalizes round 58/59's always-bit0 setter formula to an
+  arbitrary bit position.
+- Class C (4 methods): `GetMaxNumNotes`/`GetChordMode`/
+  `GetWaveSeqKeySync`/`GetWaveSeqQuantizeTrigger` -- override-with-
+  patch-fallback getters. Each reads a per-slot override field; if
+  it's the "unset" sentinel, falls back to a byte on the patch
+  object pointed to by `this+5`, using field offsets (0xc2a/0xc2b/
+  0xc2f/0xc30) independently cross-checked as real via
+  `AllocateVoice`/`AutoLoadDrumTrackEQ`/`Copy`/
+  `CSTGPianoModelPatch`'s own ctor already using those exact same
+  offsets elsewhere in this binary -- not guessed. `this+5`'s patch
+  object is treated as an opaque raw pointer, same convention used
+  throughout this project.
+
+DEFERRED, 4 distinct reasons (full backlog still ~130 methods after
+this round):
+- `GetWaveSeqSwingAmount`: compares against a real float `.rodata`
+  constant (`_DAT_006ba8e4`) whose actual value isn't cheaply
+  recoverable from the available export data; deferred rather than
+  guessing the threshold.
+- `GetWaveSeqSwingResolution`: forwards to
+  `CSTGProgram::GetWaveSeqSwingResolution`, a wholly unreconstructed
+  sibling class (already flagged in round 58's log).
+- `UpdateEnableSW1`/`SW2`/`EnableKnob2`..`8` (Update side):
+  thunks to shared helpers `UpdateEnableAssignableSwitch`/
+  `UpdateEnableAssignableKnob` (306B/310B), neither reconstructed
+  yet -- good future-round target (2 methods would unblock 8
+  thunks).
+- `UpdateDetune`/`UpdatePitchBendRange`/`KarmaPitchBendRangeReset`:
+  all three forward to `SetEffectiveDetune`(343B)/
+  `SetEffectivePitchBendRange`(463B), neither reconstructed yet --
+  another good future-round target (2 methods unblock 3+ callers).
+
+Real host KAT (15 new checks appended to
+`verify/test_stg_program_slot_updaters.cpp`, 120 total in that
+file). Caught and fixed 2 test-authoring bugs during this round: the
+new `GetWaveSeqKeySync`/`GetWaveSeqQuantizeTrigger` fallback-path
+checks initially failed because round 58's own earlier
+`UpdateKeySync`/`UpdateQuantizeTrigger` checks in the SAME test file
+leave `this+0x3d`/`this+0x3e` nonzero and never reset them --
+fixed by explicitly zeroing both before the new checks (not a bug in
+the reconstructed implementation). `make verify` full suite green,
+zero regressions. Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build
+green. Manifest 4001 -> 4016/21,689 (+15, 0 regressions).
+
+Real-HW test that would help: none identified -- pure field-read/
+write accessor logic, no hardware I/O surface of its own.
