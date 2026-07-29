@@ -4951,3 +4951,44 @@ matching behavior).
 Real-HW test that would help: none identified -- `_vtablePtr` here is
 confirmed install-only and never dispatched through anywhere in this
 project or on real hardware per the standing "install vs dispatch" rule.
+
+## Round 70 (OA.ko, solo, 2026-07-29): CSTGFrontPanel's dtor + an 11th missing-vtable-write instance
+
+Found via a fresh done>0/pending>0 manifest scan (excluding the 3
+`*MsgHandler` classes just closed in round 69). `CSTGFrontPanel`
+(already 14/16 reconstructed) was missing only its byte-identical
+D0/D1 dtor pair (`.text+0x1a3ab0`/`0x1a3ac0`, 7 bytes each), which
+resets the vtable pointer to `&PTR__CSTGFrontPanel_006bf708` (this
+class's OWN vtable, not a base -- `CSTGFrontPanel` has no derived class
+in this project).
+
+**Real bug found while confirming the dtor's target value:** this
+class's own ctor header comment (`engine_startup_bits.cpp`) already
+claimed "sets the vtable pointer and sInstance = this, nothing else" --
+but the actual reconstructed C++ ctor body only did the `sInstance`
+half. A fresh disassembly read of the real ctor (`.text+0x1bd70`)
+confirms ground truth genuinely does `*in_EAX = &PTR__CSTGFrontPanel_
+006bf708;` BEFORE `sInstance = in_EAX;` -- a real, previously-uncaught
+instance of this project's own well-documented "ctor doesn't install
+vtable pointer" bug class (the 11th instance; see the consolidated
+lesson doc referenced in HARDWARE_REVIEW_LOG's earlier entries). Fixed
+both the ctor (now installs `_ZTV14CSTGFrontPanel + 8`) and added the
+dtor (volatile-store reset to the same value, matching round 69's
+GCC dead-store-elimination fix).
+
+Added `_ZTV14CSTGFrontPanel[24]` (a fresh placeholder -- this class
+had never had a vtable modeled at all before this round, since its
+own struct declares no `_vtablePtr` field and all its methods treat
+`this` as unused/raw bytes). Real host KAT (`test_engine_startup_
+bits.cpp` extended: confirms the ctor now installs the placeholder,
+the dtor resets to the same value, then a fresh placement-new before
+continuing the existing `Initialize()` checks). `make verify` full
+suite green (exit 0), zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4067 -> 4069/
+21,689 (18.761%).
+
+Real-HW test that would help: none identified for the dtor itself
+(`_vtablePtr` confirmed install-only, never dispatched through) -- but
+the ctor fix genuinely changes what a real `CSTGFrontPanel` instance's
+first 4 bytes contain, so worth a quick sanity boot-test alongside any
+future kronos_vm session touching front-panel init.

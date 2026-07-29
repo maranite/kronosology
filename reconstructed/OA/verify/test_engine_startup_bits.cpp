@@ -55,6 +55,12 @@ int main(void)
 	memset(fpBuf, 0xcc, sizeof(fpBuf));
 	CSTGFrontPanel *fp = new (fpBuf) CSTGFrontPanel();
 	check_eq("sInstance == this", (long)(CSTGFrontPanel::sInstance == fp), 1);
+	check_eq("ctor installs the vtable pointer (round 70 fix)",
+		 *(long *)fpBuf, (long)(_ZTV14CSTGFrontPanel + 8));
+	fp->~CSTGFrontPanel();
+	check_eq("dtor resets the vtable pointer to the same placeholder",
+		 *(long *)fpBuf, (long)(_ZTV14CSTGFrontPanel + 8));
+	new (fpBuf) CSTGFrontPanel();
 	fp->Initialize();
 	check_eq("+0x104/+0x105/+0x106 all zeroed",
 		 (long)(fpBuf[0x104] == 0 && fpBuf[0x105] == 0 && fpBuf[0x106] == 0), 1);

@@ -412,9 +412,30 @@ public:
 	void SetLED(unsigned int code, unsigned int action);
 };
 
+/*
+ * `CSTGFrontPanel`'s own vtable placeholder (round 70). FIXED
+ * (2026-07-29): the ctor's own header comment ABOVE already claimed
+ * "sets the vtable pointer and sInstance = this" but the actual C++
+ * body only did the latter -- a genuine instance of this project's
+ * well-documented "ctor doesn't install vtable pointer" bug class
+ * (10 prior instances, sec 10.153-10.225). Ground truth's own ctor
+ * (`.text+0x1bd70`) does `*in_EAX = &PTR__CSTGFrontPanel_006bf708;`
+ * BEFORE `sInstance = in_EAX;` -- confirmed via a fresh disassembly
+ * read, not just the stale comment. The dtor (D0/D1 byte-identical,
+ * `.text+0x1a3ab0`/`0x1a3ac0`) resets to this SAME placeholder (own
+ * class, not a base -- `CSTGFrontPanel` has no further derived class
+ * in this project). Real vtable size not independently determined;
+ * 24 bytes matches this project's established generic "install-only,
+ * never dispatched" placeholder convention.
+ */
+extern "C" unsigned char _ZTV14CSTGFrontPanel[24];
+
 struct CSTGFrontPanel {
 	static CSTGFrontPanel *sInstance;
 	CSTGFrontPanel();
+	/* D0/D1 byte-identical: resets the vtable pointer this class's own
+	 * ctor installs, see header comment above `_ZTV14CSTGFrontPanel`. */
+	~CSTGFrontPanel();
 	void Initialize();
 
 	/*

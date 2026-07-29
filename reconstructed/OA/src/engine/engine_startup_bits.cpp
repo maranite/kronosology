@@ -102,9 +102,24 @@ CSTGCPUInfo *CSTGCPUInfo::sInstance;
  * form corrupted the adjacent managers.cpp singleton block. */
 CSTGSampleRateMonitor CSTGSampleRateMonitor::sInstance;
 
+extern "C" unsigned char _ZTV14CSTGFrontPanel[24] = { 0 };
+
 CSTGFrontPanel::CSTGFrontPanel()
 {
+	/* FIXED (round 70): ground truth installs the vtable pointer BEFORE
+	 * sInstance -- see oa_setup_global_resources.h's header comment on
+	 * _ZTV14CSTGFrontPanel for the "ctor doesn't install vtable pointer"
+	 * bug class this closes (11th instance). */
+	*(void **)this = _ZTV14CSTGFrontPanel + 8;
 	CSTGFrontPanel::sInstance = this;
+}
+
+CSTGFrontPanel::~CSTGFrontPanel()
+{
+	/* volatile: a plain store here is otherwise dead-store-eliminated by
+	 * GCC at -O2, see CSTGControlMsgHandler's identical dtor note
+	 * (round 69). */
+	*(void * volatile *)this = _ZTV14CSTGFrontPanel + 8;
 }
 
 void CSTGFrontPanel::Initialize()
