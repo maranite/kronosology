@@ -1,0 +1,919 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * rtparm_family.cpp  -  the 56 reconstructed members of the KARMA RTParm
+ * free-function family (see include/oa_rtparm_family.h for the full
+ * scope/deferral list and the shared data-model notes every function
+ * below relies on).
+ *
+ * Every function is a direct, offset-faithful translation of real
+ * `objdump -dr -M intel` disassembly against
+ * `/home/share/docs/ASM Docs/OA.ko/OA.ko` (name+size resolved per-function
+ * via `nm -C -S`, NOT a single additive address delta -- see the header's
+ * own note on why). Jump-table-driven functions (GetRTParmGroupItems,
+ * GetRTParmDescriptor{,GE,PE}, IsRTParmTemplateRestoreType,
+ * GetRTParmCurValue, GetRTParmCurValueFromOffset) had their real
+ * `.rodata` jump tables dumped and decoded (`objdump -s -j .rodata`)
+ * rather than guessed from the case bodies' apparent ordering.
+ *
+ * NOTE on GetRTParmFunctionTableEntry_{GE,PE}'s own `kind==1` search: both
+ * compare a 16-bit value at RECORD OFFSET +0xa against the search key,
+ * NOT the already-independently-verified `index` field at +0x08
+ * (RTParmFunctionTableEntry_{GE,PE}, oa_rtparm_{ge,pe}_table.h -- that
+ * offset was cross-checked by two decoders plus real KAT tests, high
+ * confidence). Implemented here via a raw offset read
+ * (`*(unsigned short*)(e+0xa)`, i.e. treating field0a+field0b as one
+ * packed word) rather than asserting it's secretly the same field --
+ * worth a dedicated follow-up look, not resolved this pass.
+ */
+
+#include "oa_rtparm_family.h"
+#include "oa_rtparm_ge_table.h"
+#include "oa_rtparm_pe_table.h"
+
+/* No libc in this freestanding kernel build (matches project convention
+ * elsewhere in this tree, e.g. ckg_ui_msg_sender.cpp -- no other file
+ * under src/ calls memset()/memcpy() as real code either); tiny local
+ * helpers instead of <cstring>. */
+static void oa_copy(unsigned char *dst, const unsigned char *src, unsigned int n)
+{
+	for (unsigned int i = 0; i < n; i++)
+		dst[i] = src[i];
+}
+static void oa_fill(unsigned char *dst, unsigned char v, unsigned int n)
+{
+	for (unsigned int i = 0; i < n; i++)
+		dst[i] = v;
+}
+
+unsigned char gKS[0x402a8];
+
+unsigned char RTParm_menu_ge_off[0x20];
+unsigned char RTParm_menu_ge_ge[0x80];
+unsigned char RTParm_menu_ge_rif[0x200];
+unsigned char RTParm_menu_ge_phs[0x520];
+unsigned char RTParm_menu_ge_rhy[0x1e0];
+unsigned char RTParm_menu_ge_dur[0x120];
+unsigned char RTParm_menu_ge_nte[0x160];
+unsigned char RTParm_menu_ge_clu[0xa0];
+unsigned char RTParm_menu_ge_vel[0x180];
+unsigned char RTParm_menu_ge_pan[0x200];
+unsigned char RTParm_menu_ge_wav[0x540];
+unsigned char RTParm_menu_ge_env[0x3c0];
+unsigned char RTParm_menu_ge_rpt[0x360];
+unsigned char RTParm_menu_ge_bnd[0x260];
+unsigned char RTParm_menu_ge_drm[0x5c0];
+unsigned char RTParm_menu_ge_dix[0x280];
+unsigned char RTParm_menu_pe_off[0x20];
+unsigned char RTParm_menu_pe_pe[0x20];
+unsigned char RTParm_menu_pe_mix[0x80];
+unsigned char RTParm_menu_pe_ctl[0x180];
+unsigned char RTParm_menu_pe_trg[0x1e0];
+unsigned char RTParm_menu_pe_key[0x140];
+unsigned char RTParm_menu_pe_rsd[0x80];
+
+RTParmNameManager *gRTParmNameManagerPtr;
+
+/* ==== 1. ResetDynRTParmWindow -- .text+0x511abc, 8 bytes ==== */
+void ResetDynRTParmWindow(unsigned char *p)
+{
+	*p = 0;
+}
+
+/* ==== 2. CKGParamEdit::GetRTParmBufferSelectId -- see
+ * src/engine/rtparm_ckgparamedit.cpp. NOT defined in this TU: including
+ * oa_ckg_module_param_msg_handler.h here conflicts with oa_rtparm_pe_table.h
+ * (both declare `RT_run(unsigned char, unsigned char)`, with different
+ * linkage -- extern "C" there vs extern "C++" here -- see that file's own
+ * header comment for why; a real, pre-existing latent inconsistency
+ * between the two headers, surfaced for the first time by this pass
+ * needing both, not introduced by this pass). Kept in its own TU rather
+ * than "fixing" either established header under time pressure. */
+
+/* ==== 3. GetRTParmIDFromGE -- .text+0x52472c, 17 bytes ==== */
+unsigned int GetRTParmIDFromGE(GenEffect *ge, RTParm *rtParm)
+{
+	return (unsigned int)((unsigned char *)rtParm - ((unsigned char *)ge + 0x8cc)) >> 3;
+}
+
+/* ==== 4. GetRTParmIDFromPE -- .text+0x52473d, 17 bytes ==== */
+unsigned int GetRTParmIDFromPE(Performance *perf, RTParm *rtParm)
+{
+	return (unsigned int)((unsigned char *)rtParm - ((unsigned char *)perf + 0x26a)) >> 3;
+}
+
+/* ==== 5. CKGSysExBuffer::StoreRTParmBySeq -- .text+0x34cbb0, 18 bytes ==== */
+void CKGSysExBuffer::StoreRTParmBySeq(int seq, int offset)
+{
+	int base = *(int *)((unsigned char *)this + 0xc);
+	unsigned char *p = (unsigned char *)(long)base + (long)seq * 0x42a8 + offset + 0xe0;
+	*p = 1;
+}
+
+/* ==== 6. ResetRTParmGELastVal -- .text+0x52528f, 30 bytes ==== */
+void ResetRTParmGELastVal(GenMod *genMod)
+{
+	unsigned char *base = (unsigned char *)genMod + 0x86a4 + 0x26;
+	for (unsigned int i = 0; i < 0x500; i += 0x28)
+		*(short *)(base + i) = (short)0x8001;
+}
+
+/* ==== 7. ByteSwapRTParm -- .text+0x55ae49, 41 bytes ==== */
+void ByteSwapRTParm(RTParm *rtParm)
+{
+	unsigned char *p = (unsigned char *)rtParm;
+	unsigned short w;
+	w = *(unsigned short *)(p + 4);
+	w = (unsigned short)((w << 8) | (w >> 8));
+	*(unsigned short *)(p + 4) = w;
+	w = *(unsigned short *)(p + 6);
+	w = (unsigned short)((w << 8) | (w >> 8));
+	*(unsigned short *)(p + 6) = w;
+}
+
+/* ==== 8. CreateRTParmNameString -- .text+0x52ced8, 43 bytes ==== */
+void CreateRTParmNameString(GenEffect *ge, RTParm *rtParm, char *buf, unsigned char flag)
+{
+	gRTParmNameManagerPtr->GetRTParmNameString(ge, rtParm, buf, flag != 0);
+}
+
+/* ==== 9. GetRTParmGroupItems -- .text+0x52150d, 49 bytes ==== */
+unsigned char GetRTParmGroupItems(unsigned char type, unsigned char mode)
+{
+	/* .rodata+0xb1798 (7 entries, mode==0) / +0xb1788 (16 entries, mode!=0) */
+	static const unsigned char kMode0[7] = { 0x00, 0x01, 0x04, 0x0c, 0x0f, 0x0a, 0x04 };
+	static const unsigned char kModeN[16] = {
+		0x00, 0x04, 0x10, 0x29, 0x0f, 0x09, 0x0b, 0x05,
+		0x0c, 0x10, 0x2a, 0x1e, 0x1b, 0x13, 0x2e, 0x14,
+	};
+	if (mode == 0) {
+		if (type > 6) return 0;
+		return kMode0[type];
+	}
+	if (type > 15) return 0;
+	return kModeN[type];
+}
+
+/* ==== 10. GetRTParmFunctionGE -- .text+0x52479c, 52 bytes ==== */
+RTParmFunctionTable *GetRTParmFunctionGE(unsigned char module, unsigned char ge, RTParmBufferSelect sel)
+{
+	unsigned int base = (unsigned int)module * 0x9d10 + (sel != 0 ? 0x1fc3c : 0x1f73c);
+	return (RTParmFunctionTable *)(gKS + base + (unsigned int)ge * 40);
+}
+
+/* ==== 11. GetRTParmEditGE -- .text+0x524766, 54 bytes ==== */
+RTParmEdit *GetRTParmEditGE(Performance *perf, RTParmBufferSelect sel, unsigned char module, unsigned char ge)
+{
+	unsigned int idx = (unsigned int)module * 32 + ge;
+	unsigned char *base = (unsigned char *)perf + idx * 8;
+	return (RTParmEdit *)(base + (sel != 0 ? 0x6ea : 0x2ea));
+}
+
+/* ==== 12. ByteSwapRTParmEdit -- .text+0x55c21f, 57 bytes ==== */
+void ByteSwapRTParmEdit(RTParmEdit *rtd)
+{
+	unsigned char *p = (unsigned char *)rtd;
+	unsigned short w;
+	w = *(unsigned short *)(p + 0);
+	w = (unsigned short)((w << 8) | (w >> 8));
+	*(unsigned short *)(p + 0) = w;
+	w = *(unsigned short *)(p + 4);
+	w = (unsigned short)((w << 8) | (w >> 8));
+	*(unsigned short *)(p + 4) = w;
+	w = *(unsigned short *)(p + 6);
+	w = (unsigned short)((w << 8) | (w >> 8));
+	*(unsigned short *)(p + 6) = w;
+}
+
+/* ==== 13. AdjustRTParmFunctionGE -- .text+0x51cefb, 58 bytes ==== */
+void AdjustRTParmFunctionGE(RTParmFunction *rtf)
+{
+	void **handler = (void **)((unsigned char *)rtf + 4);
+	if (*handler == (void *)&RT_phs_xpose_oct || *handler == (void *)&RT_phs_xpose_oct_5th) {
+		*handler = (void *)&RT_phs_xpose;
+		return;
+	}
+	if (*handler == (void *)&RT_drm_pat_xpose_oct || *handler == (void *)&RT_drm_pat_xpose_oct_5th) {
+		*handler = (void *)&RT_drm_pat_xpose;
+		return;
+	}
+}
+
+/* ==== 14. GetScaledRTParmValue -- .text+0x51cd79, 66 bytes ==== */
+short GetScaledRTParmValue(RTParmEdit *rtd, RTParmFunction *rtf, unsigned char value)
+{
+	unsigned char *f = (unsigned char *)rtf;
+	bool useCompare;
+	if (f[0xc] <= 7)
+		useCompare = !(f[0xb] == 0 && *((unsigned char *)rtd + 3) <= 1);
+	else
+		useCompare = !(f[0xc] <= 0xf);
+	return ScaleRTParmValue(rtd, value, useCompare ? 1 : 0);
+}
+
+/* ==== 15. GetRTParmFunctionTableEntry_PE -- .text+0x56501b, 66 bytes ==== */
+RTParmFunctionTable *GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType kind, void *key)
+{
+	unsigned char *base = (unsigned char *)gRTParmFunctionTable_PE;
+	const unsigned int stride = sizeof(RTParmFunctionTableEntry_PE);
+	if (kind == kRTParmFunctionTableEntryIndexType_0) {
+		for (unsigned char *e = base; e < base + RTPARM_PE_TABLE_SIZE * stride; e += stride)
+			if (*(void **)e == key)
+				return (RTParmFunctionTable *)e;
+		return 0;
+	}
+	if (kind == kRTParmFunctionTableEntryIndexType_1) {
+		unsigned short want = *(unsigned short *)key;
+		for (unsigned char *e = base; e < base + RTPARM_PE_TABLE_SIZE * stride; e += stride)
+			if (*(unsigned short *)(e + 0xa) == want)
+				return (RTParmFunctionTable *)e;
+		return 0;
+	}
+	return 0;
+}
+
+/* ==== 16. X2100ShMem_UpdateMasterRTParmEdit -- .text+0x51f598, 70 bytes ==== */
+void X2100ShMem_UpdateMasterRTParmEdit(Performance *perf, unsigned char module, unsigned char ge)
+{
+	unsigned char *shmemBase = *(unsigned char **)(gKS + 0x8ce0);
+	if (!shmemBase)
+		return;
+	unsigned char *shmem = *(unsigned char **)(shmemBase + (unsigned int)module * 4 + 4);
+	unsigned int srcIdx = (unsigned int)module * 32 + ge + 0x5c;
+	unsigned int dstIdx = (unsigned int)ge + 2;
+	unsigned char *src = (unsigned char *)perf + srcIdx * 8;
+	unsigned char *dst = shmem + dstIdx * 8;
+	*(short *)(dst + 0x14) = *(short *)(src + 0xa);
+	*(short *)(dst + 0x10) = *(short *)(src + 0xe);
+	*(short *)(dst + 0x12) = *(short *)(src + 0x10);
+}
+
+/* ==== 17. RTParmShortNameGroup ctor -- .text+0x5644da, 71 bytes ==== */
+RTParmShortNameGroup::RTParmShortNameGroup()
+{
+	unsigned char *p = (unsigned char *)this;
+	*(unsigned int *)p = 0;
+	for (int off = 4; off <= 0x16; off += 2)
+		*(unsigned short *)(p + off) = 0;
+}
+
+/* ==== 17b. RTParmShortNameGroup::SetRTParmShortNameStringPtr -- .text+0x56460e, 18 bytes ==== */
+void RTParmShortNameGroup::SetRTParmShortNameStringPtr(const char (*str)[24], unsigned short a, unsigned short b)
+{
+	unsigned char *p = (unsigned char *)this;
+	/* real ground truth is `mov DWORD PTR[eax],edx` -- a packed 32-bit
+	 * pointer (the real -m32 target's native pointer width), NOT a
+	 * native 64-bit `void*` write. Using `void**` here on a 64-bit host
+	 * build clobbers the next field's own bytes too -- same "packed
+	 * 32-bit, not host pointer width" convention already established
+	 * elsewhere in this project (CSTGMidiQueueWriter, oa_global.h),
+	 * caught by this pass's own KAT. */
+	*(unsigned int *)p = (unsigned int)(unsigned long)str;
+	*(unsigned short *)(p + 4) = a;
+	*(unsigned short *)(p + 6) = b;
+}
+
+/* ==== 17c. RTParmShortNameGroup::SetProductArrays -- .text+0x564620, 20 bytes ==== */
+void RTParmShortNameGroup::SetProductArrays(RTParmNameProductID product, unsigned short a, unsigned short b)
+{
+	unsigned char *p = (unsigned char *)this;
+	unsigned int idx = (unsigned int)product;
+	*(unsigned short *)(p + idx * 4 + 8) = a;
+	*(unsigned short *)(p + idx * 4 + 0xa) = b;
+}
+
+/* ==== 17d. RTParmNameManager::SetPrependCCInfo -- .text+0x5644ba, 31 bytes ==== */
+void RTParmNameManager::SetPrependCCInfo(RTParmNameProductID product, bool a, bool b)
+{
+	unsigned char *rec = (unsigned char *)this + (unsigned int)product * 3 + 0x180;
+	rec[4] = a;
+	rec[5] = b;
+}
+
+/* ==== 18. X2100ShMem_UpdateModuleRTParmEdit -- .text+0x51f5de, 73 bytes ==== */
+void X2100ShMem_UpdateModuleRTParmEdit(Performance *perf, unsigned char module, unsigned char ge)
+{
+	unsigned char *shmemBase = *(unsigned char **)(gKS + 0x8ce0);
+	if (!shmemBase)
+		return;
+	unsigned char *shmem = *(unsigned char **)(shmemBase + (unsigned int)module * 4 + 4);
+	unsigned int srcIdx = (unsigned int)module * 32 + ge + 0xdc;
+	unsigned int dstIdx = (unsigned int)ge + 0x32;
+	unsigned char *src = (unsigned char *)perf + srcIdx * 8;
+	unsigned char *dst = shmem + dstIdx * 8;
+	*(short *)(dst + 0xa) = *(short *)(src + 0xa);
+	*(short *)(dst + 0x6) = *(short *)(src + 0xe);
+	*(short *)(dst + 0x8) = *(short *)(src + 0x10);
+}
+
+/* ==== 19. GetRTParmFunctionTableEntry_GE -- .text+0x564fd0, 75 bytes ==== */
+RTParmFunctionTable *GetRTParmFunctionTableEntry_GE(kRTParmFunctionTableEntryIndexType kind, void *key)
+{
+	if (kind == kRTParmFunctionTableEntryIndexType_0) {
+		if (!key)
+			return 0;
+		for (unsigned int i = 0; i < RTPARM_GE_TABLE_SIZE; ++i)
+			if (gRTParmFunctionTable_GE[i].funcPtr == key)
+				return (RTParmFunctionTable *)&gRTParmFunctionTable_GE[i];
+		return 0;
+	}
+	if (kind == kRTParmFunctionTableEntryIndexType_1) {
+		unsigned short want = *(unsigned short *)key;
+		for (unsigned int i = 0; i < RTPARM_GE_TABLE_SIZE; ++i)
+			if (*(unsigned short *)((unsigned char *)&gRTParmFunctionTable_GE[i] + 0xa) == want)
+				return (RTParmFunctionTable *)&gRTParmFunctionTable_GE[i];
+		return 0;
+	}
+	return 0;
+}
+
+/* ==== 20. GetRTParmAssigned_GE -- .text+0x526387, 76 bytes ==== */
+RTParm *GetRTParmAssigned_GE(GenEffect *ge, unsigned char a, unsigned char b, unsigned char mask)
+{
+	unsigned char *e = (unsigned char *)ge + 0x8cc;
+	for (int count = 0x20; count > 0; --count, e += 8) {
+		if (e[0] == a && e[1] == b) {
+			unsigned char masked = (unsigned char)(mask & e[2]);
+			if (masked == mask)
+				return (RTParm *)e;
+		}
+	}
+	return 0;
+}
+
+/* ==== 21. ResetRTParmPELastVal -- .text+0x52531a, 77 bytes ==== */
+void ResetRTParmPELastVal()
+{
+	for (int i = 0; i < 8; ++i)
+		*(short *)(gKS + 0x16cc0 + i * 2) = (short)0x8001;
+}
+
+/* ==== 22. AssignRTParmFunction_PE -- .text+0x522e01, 81 bytes ==== */
+void AssignRTParmFunction_PE(RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (entry) {
+		AssignRTParmPE(rtParm, rtf, entry, 0, 0);
+	} else {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+	}
+}
+
+/* ==== 23. CopyRTParmFunctionToOtherBuffer -- .text+0x52669b, 81 bytes ==== */
+void CopyRTParmFunctionToOtherBuffer(GenMod *genMod, RTParmBufferSelect sel, unsigned char idx)
+{
+	unsigned int off = (unsigned int)idx * 40;
+	unsigned char *cur = (unsigned char *)genMod + 0x86a4 + off;
+	unsigned char *cmp = (unsigned char *)genMod + 0x8ba4 + off;
+	unsigned char *src = (sel != 0) ? cmp : cur;
+	unsigned char *dst = (sel != 0) ? cur : cmp;
+	oa_copy(dst, src, 40);
+}
+
+/* ==== 24. AdjustRTParmFunctionPE -- .text+0x51cea8, 83 bytes ==== */
+void AdjustRTParmFunctionPE(RTParmFunction *rtf)
+{
+	void **handler = (void **)((unsigned char *)rtf + 4);
+	if (*handler == (void *)&RT_crb_xpose_oct || *handler == (void *)&RT_crb_xpose_oct_5th) {
+		*handler = (void *)&RT_crb_xpose;
+		return;
+	}
+	if (*handler == (void *)&RT_kbd_thru_in_xpose_oct || *handler == (void *)&RT_kbd_thru_in_xpose_oct_5th) {
+		*handler = (void *)&RT_kbd_thru_in_xpose;
+		return;
+	}
+	if (*handler == (void *)&RT_kbd_thru_out_xpose_oct || *handler == (void *)&RT_kbd_thru_out_xpose_oct_5th) {
+		*handler = (void *)&RT_kbd_thru_out_xpose;
+		return;
+	}
+}
+
+/* ==== 25. SetRTParmMultiBackupGE -- .text+0x52ce82, 86 bytes ==== */
+void SetRTParmMultiBackupGE(unsigned char module, RTParmBufferSelect sel)
+{
+	unsigned char *dst = gKS + (unsigned int)module * 0x9d10 + (sel != 0 ? 0x1fc3c : 0x1f73c);
+	unsigned char *src = gKS + 0x280c + (unsigned int)module * 0x9cc; /* 627*4 == 0x9cc */
+	for (unsigned int i = 0; i < 32; ++i)
+		dst[i * 0x28 + 0x20] = src[i * 8 + 2];
+}
+
+/* ==== 26. CopyRTParmEditToOtherBuffer -- .text+0x526565, 88 bytes ==== */
+void CopyRTParmEditToOtherBuffer(Performance *perf, RTParmBufferSelect sel, unsigned char a, unsigned char b)
+{
+	unsigned int idx = (unsigned int)a * 32 + b;
+	unsigned char *cur = (unsigned char *)perf + idx * 8 + 0x2ea;
+	unsigned char *cmp = (unsigned char *)perf + idx * 8 + 0x6ea;
+	unsigned char *src = (sel != 0) ? cmp : cur;
+	unsigned char *dst = (sel != 0) ? cur : cmp;
+	oa_copy(dst, src, 8);
+}
+
+/* ==== 27/28. AssignRTParmFunction_Key/Ctl -- .text+0x522c4b / 0x522d37, 99 bytes each ==== */
+static inline void AssignRTParmFunction_KeyCtlShape(RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (entry) {
+		unsigned char bit = (unsigned char)GetFirstOnBit(((unsigned char *)rtParm)[2], 4);
+		AssignRTParmPE(rtParm, rtf, entry, 4, bit);
+	} else {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+	}
+}
+void AssignRTParmFunction_Key(RTParm *rtParm, RTParmFunction *rtf) { AssignRTParmFunction_KeyCtlShape(rtParm, rtf); }
+void AssignRTParmFunction_Ctl(RTParm *rtParm, RTParmFunction *rtf) { AssignRTParmFunction_KeyCtlShape(rtParm, rtf); }
+
+/* ==== 29. SetRTParmMultiBackupPE -- .text+0x52ce1d, 101 bytes ==== */
+void SetRTParmMultiBackupPE()
+{
+	static const unsigned int kOff[8] = { 0x26c, 0x274, 0x27c, 0x284, 0x28c, 0x294, 0x29c, 0x2a4 };
+	static const unsigned int kDst[8] = { 0x16f44, 0x16f6c, 0x16f94, 0x16fbc, 0x16fe4, 0x1700c, 0x17034, 0x1705c };
+	for (int i = 0; i < 8; ++i)
+		gKS[kDst[i]] = gKS[kOff[i]];
+}
+
+/* ==== 30. AssignRTParmFunction_Mix -- .text+0x522d9a, 103 bytes ==== */
+void AssignRTParmFunction_Mix(RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (entry) {
+		unsigned char bit = (unsigned char)GetFirstOnBit(((unsigned char *)rtParm)[2], 4);
+		AssignRTParmPE(rtParm, rtf, entry, 4, bit);
+		f[0xa] = 0;
+	} else {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+	}
+}
+
+/* ==== 31. IsRTParmTemplateRestoreType -- .text+0x532b62, 104 bytes ==== */
+bool IsRTParmTemplateRestoreType(RTParm *rtParm)
+{
+	unsigned char *p = (unsigned char *)rtParm;
+	unsigned char type = p[0];
+	unsigned char sub = p[1];
+	if (type < 4 || type > 14)
+		return false;
+	switch (type) {
+	case 4:  return sub == 0x0e;
+	case 5:  return sub == 0x08;
+	case 6:  return sub == 0x0a;
+	case 7:  return sub == 0x04;
+	case 8:  return sub == 0x0b;
+	case 9:  return sub == 0x0f;
+	case 10: return sub == 0x29;
+	case 11: case 12: case 13: return false;
+	case 14: return (unsigned char)(sub - 0x2b) <= 2;
+	}
+	return false;
+}
+
+/* ==== 32/33/34/... AssignRTParmFunction_{Dix,Bnd,GE} -- 105 bytes each, GE-table shape ==== */
+static inline void AssignRTParmFunction_DixBndGEShape(unsigned char module, GenEffect *ge, RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_GE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (entry) {
+		AssignRTParmGE(module, ge, rtParm, rtf, entry, 0, 0);
+	} else {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+	}
+}
+void AssignRTParmFunction_Dix(unsigned char module, GenEffect *ge, RTParm *rtParm, RTParmFunction *rtf) { AssignRTParmFunction_DixBndGEShape(module, ge, rtParm, rtf); }
+void AssignRTParmFunction_Bnd(unsigned char module, GenEffect *ge, RTParm *rtParm, RTParmFunction *rtf) { AssignRTParmFunction_DixBndGEShape(module, ge, rtParm, rtf); }
+void AssignRTParmFunction_GE(unsigned char module, GenEffect *ge, RTParm *rtParm, RTParmFunction *rtf) { AssignRTParmFunction_DixBndGEShape(module, ge, rtParm, rtf); }
+
+/* ==== 35. CopyRTParmEditToModule -- .text+0x526632, 105 bytes ==== */
+void CopyRTParmEditToModule(Performance *perf, unsigned char a, unsigned char b)
+{
+	unsigned char *base = (unsigned char *)perf;
+	unsigned int srcIdx = (unsigned int)a * 32 + b + 0x5c;
+	unsigned int dstIdx = (unsigned int)a * 32 + b + 0xdc;
+
+	short v0e = *(short *)(base + srcIdx * 8 + 0xe);
+	*(short *)(base + dstIdx * 8 + 0xe) = v0e;
+	short v10 = *(short *)(base + srcIdx * 8 + 0x10);
+	*(short *)(base + dstIdx * 8 + 0x10) = v10;
+	short v0a = *(short *)(base + srcIdx * 8 + 0xa);
+
+	unsigned char *shmemBase = *(unsigned char **)(gKS + 0x8ce0);
+	if (shmemBase) {
+		unsigned char *shmem = *(unsigned char **)(shmemBase + (unsigned int)a * 4 + 4);
+		unsigned int shIdx = (unsigned int)b + 0x32;
+		*(short *)(shmem + shIdx * 8 + 0xa) = v0a;
+		*(short *)(shmem + shIdx * 8 + 0x6) = *(short *)(base + dstIdx * 8 + 0xe);
+		*(short *)(shmem + shIdx * 8 + 0x8) = *(short *)(base + dstIdx * 8 + 0x10);
+	}
+}
+
+/* ==== 36. ResetRTParmGELastValIndControl -- .text+0x5252ad, 109 bytes ==== */
+void ResetRTParmGELastValIndControl(unsigned char module, unsigned char control, RTParmBufferSelect sel)
+{
+	unsigned char *srcBuf = gKS + (unsigned int)module * 0x9d10 + (sel != 0 ? 0x1fc3c : 0x1f73c);
+	unsigned char *dstBuf = gKS + (unsigned int)module * 0x9d10 + 0x1f762;
+	for (unsigned int i = 0; i < 32; ++i) {
+		if ((int)(signed char)srcBuf[i * 0x28 + 0xc] == (int)control)
+			*(short *)(dstBuf + i * 0x28) = (short)0x8001;
+	}
+}
+
+/* ==== 37. SetRTParmWasEdited -- .text+0x51cf35, 116 bytes ==== */
+void SetRTParmWasEdited(unsigned char a, unsigned char b, bool clearAll)
+{
+	unsigned char fill = (unsigned char)clearAll;
+	if (b != 0xff) {
+		gKS[(unsigned int)a * 0x9d10 + 0x20b08 + b] = fill;
+		return;
+	}
+	if (a != 0xff) {
+		oa_fill(gKS + (unsigned int)a * 0x9d10 + 0x20b08, fill, 0x20);
+		return;
+	}
+	static const unsigned int kBases[4] = { 0x20b08, 0x2a818, 0x34528, 0x3e238 };
+	for (int r = 0; r < 4; ++r)
+		oa_fill(gKS + kBases[r], fill, 0x20);
+}
+
+/* ==== 38. CopyRTParmEditToMaster -- .text+0x5265bd, 117 bytes ==== */
+void CopyRTParmEditToMaster(Performance *perf, unsigned char a, unsigned char b)
+{
+	unsigned char *base = (unsigned char *)perf;
+	unsigned int dstIdx = (unsigned int)a * 32 + b + 0x5c;
+	unsigned int srcIdx = (unsigned int)a * 32 + b + 0xdc;
+	if (base[dstIdx * 8 + 0xc] == 0xff)
+		return;
+
+	short v0e = *(short *)(base + srcIdx * 8 + 0xe);
+	*(short *)(base + dstIdx * 8 + 0xe) = v0e;
+	short v10 = *(short *)(base + srcIdx * 8 + 0x10);
+	*(short *)(base + dstIdx * 8 + 0x10) = v10;
+	short v0a = *(short *)(base + srcIdx * 8 + 0xa);
+
+	unsigned char *shmemBase = *(unsigned char **)(gKS + 0x8ce0);
+	if (shmemBase) {
+		unsigned char *shmem = *(unsigned char **)(shmemBase + (unsigned int)a * 4 + 4);
+		unsigned int shIdx = (unsigned int)b + 2;
+		*(short *)(shmem + shIdx * 8 + 0x14) = v0a;
+		*(short *)(shmem + shIdx * 8 + 0x10) = *(short *)(base + dstIdx * 8 + 0xe);
+		*(short *)(shmem + shIdx * 8 + 0x12) = *(short *)(base + dstIdx * 8 + 0x10);
+	}
+}
+
+/* ==== 39. AssignRTParmFunction_Env -- .text+0x523a97, 119 bytes ==== */
+void AssignRTParmFunction_Env(unsigned char module, GenEffect *ge, RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_GE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (entry) {
+		unsigned char bit = (unsigned char)GetFirstOnBit(((unsigned char *)rtParm)[2], 3);
+		AssignRTParmGE(module, ge, rtParm, rtf, entry, 3, bit);
+	} else {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+	}
+}
+
+/* ==== 40. GetRTParmDescriptorPE -- .text+0x52140d, 120 bytes ==== */
+unsigned char *GetRTParmDescriptorPE(unsigned char module, unsigned char idx)
+{
+	static unsigned char *const kMenu[7] = {
+		RTParm_menu_pe_off, RTParm_menu_pe_pe, RTParm_menu_pe_mix, RTParm_menu_pe_ctl,
+		RTParm_menu_pe_trg, RTParm_menu_pe_key, RTParm_menu_pe_rsd,
+	};
+	if (module > 6) return 0;
+	return kMenu[module] + (unsigned int)idx * 0x20;
+}
+
+/* ==== 41. CKGSysExBuffer::SendParamsDependOnRTParm -- .text+0x34e7b0, 123 bytes ==== */
+void CKGSysExBuffer::SendParamsDependOnRTParm(CSKParameterChangeMessage *msg)
+{
+	unsigned char *thisB = (unsigned char *)this;
+	unsigned char *msgB = (unsigned char *)msg;
+	unsigned int scaled = 0;
+	unsigned int base = 0;
+	if (thisB[4] != 0) {
+		scaled = msgB[2] & 0xf;
+		base = scaled * 0x42a8;
+	}
+	unsigned char f9 = msgB[9];
+	unsigned char *table = *(unsigned char **)(thisB + 0xc);
+	unsigned char *entry = table + f9;
+	if (entry[base + 0xe0] != 0) {
+		unsigned char *tableBase = *(unsigned char **)(thisB + 8) + scaled * 0x10aa0;
+		msgB[8] = 0x1c;
+		int value = *(int *)(tableBase + (unsigned int)f9 * 4 + 0x380);
+		msg->SetValue(value);
+		SendSysExMassage(msgB);
+	}
+}
+
+/* ==== 42. GetRTParmDescriptor -- .text+0x521485, 136 bytes ==== */
+unsigned char *GetRTParmDescriptor(RTParm *rtParm, unsigned char mode)
+{
+	unsigned char *p = (unsigned char *)rtParm;
+	if (mode != 0)
+		return GetRTParmDescriptorGE(p[0], p[1]);
+
+	static unsigned char *const kMenu[7] = {
+		RTParm_menu_pe_off, RTParm_menu_pe_pe, RTParm_menu_pe_mix, RTParm_menu_pe_ctl,
+		RTParm_menu_pe_trg, RTParm_menu_pe_key, RTParm_menu_pe_rsd,
+	};
+	unsigned char type = p[0];
+	unsigned char idx = p[1];
+	if (type > 6) return 0;
+	return kMenu[type] + (unsigned int)idx * 0x20;
+}
+
+/* ==== 43. AssignRTParmFunction_Trg -- .text+0x522cae, 137 bytes ==== */
+void AssignRTParmFunction_Trg(RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (!entry) {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+		return;
+	}
+	unsigned char *p = (unsigned char *)rtParm;
+	unsigned char bit = (unsigned char)GetFirstOnBit(p[2], 4);
+	unsigned char extra = 0;
+	unsigned char sub = (unsigned char)(p[1] - 7);
+	if (sub <= 5) {
+		/* .rodata+0xb17a4, 6 bytes */
+		static const unsigned char kExtra[6] = { 0x00, 0x00, 0x01, 0x01, 0x02, 0x02 };
+		extra = kExtra[sub];
+	}
+	AssignRTParmPE(rtParm, rtf, entry, 4, bit);
+	f[0xa] = extra;
+}
+
+/* ==== 44. IsRTParmPairAssignedGE -- .text+0x525c88, 150 bytes ==== */
+unsigned char IsRTParmPairAssignedGE(unsigned char a, unsigned char b, unsigned char c, unsigned char d)
+{
+	unsigned char *base = gKS + (unsigned int)a * 0x9cc + 0x280c;
+	unsigned char *e = base;
+	for (int count = 0x20; count > 0; --count, e += 8) {
+		if (e[0] == b && e[1] == c) {
+			unsigned char masked = (unsigned char)(d & e[2]);
+			if (masked == d) {
+				if (!e)
+					return 0;
+				unsigned int elemIdx = (unsigned int)((e - base) >> 3) & 0xff;
+				unsigned int idx2 = ((unsigned int)a << 5) + elemIdx;
+				signed char flag1 = (signed char)gKS[idx2 * 8 + 0x6ec];
+				if (flag1 >= 0)
+					return 1;
+				unsigned char flag2 = gKS[idx2 * 8 + 0x2ec];
+				unsigned char notFlag2 = (unsigned char)~flag2; /* truncate to 8 bits
+					* BEFORE shifting -- `~` promotes to `int` in C++, so
+					* `(~flag2) >> 7` on an unpromoted expression would shift
+					* the 32-bit-wide complement, not the real `not bl; shr
+					* bl,7` 8-bit-register operation ground truth performs
+					* (caught by this pass's own KAT: flag2==0 must yield 1,
+					* not 0xff >> 7 done at 32-bit width). */
+				return (unsigned char)(notFlag2 >> 7);
+			}
+		}
+	}
+	return 0;
+}
+
+/* ==== 45. UpdateRTParmName -- .text+0x52511d, 159 bytes ==== */
+void UpdateRTParmName(unsigned char p1, unsigned char p2, unsigned char p3, unsigned char p4)
+{
+	unsigned long bitmask = 0;
+	if (p2 >= p3) {
+		unsigned char *regionBase = gKS + (unsigned int)p1 * 0x9cc + 0x2800;
+		for (unsigned int outer = p3; p4 >= outer; ++outer) {
+			unsigned char *elem = regionBase + 0xc;
+			for (unsigned int esi = 0; esi < 32; ++esi, elem += 8) {
+				if (elem[0] == p2 && elem[1] == (unsigned char)outer) {
+					Do_KM_rtp_update_name(p1, (unsigned char)esi);
+					bitmask |= (1UL << esi);
+				}
+			}
+		}
+	}
+	Do_KM_rtp_update_all_names(p1, bitmask);
+}
+
+/* ==== 46. AssignRTParmFunction_Rsd -- .text+0x522b9f, 172 bytes ==== */
+void AssignRTParmFunction_Rsd(RTParm *rtParm, RTParmFunction *rtf)
+{
+	RTParmFunctionTable *entry = GetRTParmFunctionTableEntry_PE(kRTParmFunctionTableEntryIndexType_1, rtParm);
+	unsigned char *f = (unsigned char *)rtf;
+	if (!entry) {
+		*(unsigned int *)(f + 4) = 0;
+		*(unsigned int *)(f + 0) = 0;
+		return;
+	}
+	unsigned char *p = (unsigned char *)rtParm;
+	unsigned char bit = (unsigned char)GetFirstOnBit(p[2], 4);
+	AssignRTParmPE(rtParm, rtf, entry, 4, bit);
+	if (p[1] == 0 && bit <= 3) {
+		unsigned char *slotPtr = *(unsigned char **)(gKS + (unsigned int)bit * 0x9d10 + 0x1709c);
+		int val = *(int *)(slotPtr + 0x20);
+		if (val > 0x1fff)
+			*(int *)(slotPtr + 0x20) = 0x1fff;
+		else if (val < -0x2000)
+			*(int *)(slotPtr + 0x20) = -0x2000;
+	}
+}
+
+/* ==== 47. LimitRTParmPairPE -- .text+0x526210, 183 bytes ==== */
+void LimitRTParmPairPE(unsigned char a, RTParm *rtParm, RTParmEdit *rtd)
+{
+	unsigned char *p = (unsigned char *)rtParm;
+	if (p[0] != 5)
+		return;
+	unsigned char sub = p[1];
+	if (sub != 2 && sub != 3)
+		return;
+
+	unsigned char bit = (unsigned char)GetFirstOnBit(p[2], 4);
+	if (bit > 3)
+		return;
+	/* gKS + bit*120 (bit<<7 - bit<<3), field +0xa for sub==3, +0xb for sub==2 */
+	unsigned char threshold = gKS[(unsigned int)bit * 120 + (sub == 3 ? 0xa : 0xb)];
+
+	short cur = *(short *)rtd;
+	if (sub == 3) {
+		if (cur >= (short)(signed char)threshold)
+			return;
+	} else {
+		if (cur <= (short)(signed char)threshold)
+			return;
+	}
+	*(short *)rtd = (short)(unsigned short)threshold;
+	KM_rtp_val_out_pe((RTParm_pub *)rtParm, a, 0);
+}
+
+/* ==== 48. GetRTParmCurValue -- .text+0x52153e, 195 bytes ==== */
+int GetRTParmCurValue(RTParmFunction *rtf)
+{
+	unsigned char *rf = (unsigned char *)rtf;
+	unsigned char *src = *(unsigned char **)(rf + 0);
+	if (!src)
+		return 0;
+	unsigned char kind = rf[8];
+	if (kind > 0x27)
+		return 0;
+	switch (kind) {
+	case 0: case 3: case 6: case 8: case 9: case 36: case 37:
+		return src[0];
+	case 1: case 4: case 7: case 10: case 38: case 39:
+		return (short)(signed char)src[0];
+	case 2: case 5: case 11: case 12: case 35:
+		return *(unsigned short *)src;
+	case 13: case 27: return src[0] & 1;
+	case 14: case 28: return (src[0] & 2) != 0;
+	case 15: case 29: return (src[0] & 4) != 0;
+	case 16: case 30: return (src[0] & 8) != 0;
+	case 17: case 31: return (src[0] & 0x10) != 0;
+	case 18: case 32: return (src[0] & 0x20) != 0;
+	case 19: case 33: return (src[0] & 0x40) != 0;
+	case 20: case 34: return ((signed char)src[0]) < 0 ? 1 : 0;
+	case 21: return (src[1] & 0x40) != 0;
+	case 22: return (*(unsigned short *)src & 0x8000) != 0;
+	case 23: return src[0] & 3;
+	case 24: return src[0] & 7;
+	case 25: return src[0] & 0x3f;
+	case 26: return (src[0] & 0x38) >> 3;
+	default: return 0;
+	}
+}
+
+/* ==== 49. GetRTParmDescriptorGE -- .text+0x521317, 246 bytes ==== */
+unsigned char *GetRTParmDescriptorGE(unsigned char module, unsigned char idx)
+{
+	static unsigned char *const kMenu[16] = {
+		RTParm_menu_ge_off, RTParm_menu_ge_ge, RTParm_menu_ge_rif, RTParm_menu_ge_phs,
+		RTParm_menu_ge_rhy, RTParm_menu_ge_dur, RTParm_menu_ge_nte, RTParm_menu_ge_clu,
+		RTParm_menu_ge_vel, RTParm_menu_ge_pan, RTParm_menu_ge_wav, RTParm_menu_ge_env,
+		RTParm_menu_ge_rpt, RTParm_menu_ge_bnd, RTParm_menu_ge_drm, RTParm_menu_ge_dix,
+	};
+	if (module > 15) return 0;
+	return kMenu[module] + (unsigned int)idx * 0x20;
+}
+
+/* ==== 50. IsRTParmFunctionSamePE -- .text+0x52a51a, 294 bytes ====
+ * Literal transcription of the real compare-tree (two "compatibility
+ * group" tables for kind==2 -> {1,2,3} and kind==5 -> {4,5,6,7,8,9}); kept
+ * as nested ifs matching each real basic block rather than collapsed into
+ * a lookup table, to avoid introducing a simplification bug. */
+bool IsRTParmFunctionSamePE(unsigned char kind, unsigned char p2, unsigned char p3, unsigned char p4)
+{
+	if (kind == 0 || kind != p3)
+		return false;
+
+	if (kind == 2) {
+		if (p2 == p4) return true;
+		if (p2 == 1) return (p4 == 2) || (p4 == 3);
+		if (p2 == 2) return (p4 == 1) || (p4 == 3);
+		if (p2 == 3) return (p4 == 1) || (p4 == 2);
+		return false; /* p2 == 0 (or any other value): no match beyond p2==p4 above */
+	}
+
+	if (kind == 5) {
+		if (p2 == p4) return true;
+		if (p2 == 4) return (p4 == 6) || (p4 == 8);
+		if (p2 == 6) return (p4 == 4) || (p4 == 6);
+		if (p2 == 8) return (p4 == 4) || (p4 == 6);
+		if (p2 == 5) return (p4 == 7) || (p4 == 9);
+		if (p2 == 7) return (p4 == 5) || (p4 == 9);
+		if (p2 == 9) return (p4 == 5) || (p4 == 7);
+		return false;
+	}
+
+	return p2 == p4;
+}
+
+/* ==== 51. GetRTParmCurValueFromOffset -- .text+0x52269a, 372 bytes ==== */
+int GetRTParmCurValueFromOffset(const RTParmFunctionTable *table, void *base, unsigned char idx)
+{
+	const unsigned char *t = (const unsigned char *)table;
+	if (!t)
+		return 0;
+	unsigned int kind = *(const unsigned int *)(t + 4);
+	if (kind > 0x27)
+		return 0;
+	unsigned int off = *(const unsigned int *)(t + (unsigned int)idx * 4 + 0x10);
+	unsigned char *p = (unsigned char *)base + off;
+	switch (kind) {
+	case 0: case 3: case 6: case 8: case 9: case 36: case 37:
+		return p[0];
+	case 1: case 4: case 7: case 10: case 38: case 39:
+		return (signed char)p[0];
+	case 2: case 5: case 12:
+		return *(short *)p;
+	case 11:
+		return *(unsigned short *)p;
+	case 13: case 27: return p[0] & 1;
+	case 14: case 28: return (p[0] & 2) != 0;
+	case 15: case 29: return (p[0] & 4) != 0;
+	case 16: case 30: return (p[0] & 8) != 0;
+	case 17: case 31: return (p[0] & 0x10) != 0;
+	case 18: case 32: return (p[0] & 0x20) != 0;
+	case 19: case 33: return (p[0] & 0x40) != 0;
+	case 20: case 34: return ((signed char)p[0]) < 0 ? 1 : 0;
+	case 21: return (p[1] & 0x40) != 0;
+	case 22: return (*(short *)p) < 0 ? 1 : 0;
+	case 23: return p[0] & 3;
+	case 24: return p[0] & 7;
+	case 25: return p[0] & 0x3f;
+	case 26: return (p[0] & 0x38) >> 3;
+	case 35: return *(unsigned int *)p;
+	default: return 0;
+	}
+}
+
+/* ==== 52. IsRTParmPairAssignedPE -- .text+0x525af8, 400 bytes ==== */
+unsigned char IsRTParmPairAssignedPE(unsigned char a, unsigned char b, unsigned char c)
+{
+	static const unsigned int kBase[8] = { 0x26a, 0x272, 0x27a, 0x282, 0x28a, 0x292, 0x29a, 0x2a2 };
+	for (int i = 0; i < 8; ++i) {
+		unsigned int base = kBase[i];
+		if (a == gKS[base + 0]) {
+			if (b == gKS[base + 1]) {
+				unsigned char masked = (unsigned char)(c & gKS[base + 2]);
+				if (c == masked) {
+					unsigned int idx = (unsigned int)i * 8;
+					unsigned char flag = gKS[idx + 0x2ac];
+					unsigned char notFlag = (unsigned char)~flag; /* see
+						* IsRTParmPairAssignedGE's own comment: truncate
+						* to 8 bits before shifting, matching the real
+						* 8-bit-register `not bl; shr bl,7`. */
+					return (unsigned char)(notFlag >> 7);
+				}
+			}
+			/* real disasm: once `a` matches this slot's id, a
+			 * failed b/mask check falls through to the NEXT
+			 * slot's `a` comparison rather than returning 0
+			 * directly -- behaviorally identical to returning 0
+			 * here as long as slot ids are distinct (assumed,
+			 * not independently re-verified this pass). */
+			return 0;
+		}
+	}
+	return 0;
+}
+
+/* ==== 53. GetRTParmAssigned_PE -- .text+0x5263d3, 402 bytes ==== */
+unsigned char *GetRTParmAssigned_PE(Performance *perf, unsigned char p1, unsigned char p2, unsigned char p3)
+{
+	unsigned char *base = (unsigned char *)perf;
+	static const unsigned int kOff[8] = { 0x26a, 0x272, 0x27a, 0x282, 0x28a, 0x292, 0x29a, 0x2a2 };
+	for (int i = 0; i < 8; ++i) {
+		unsigned int off = kOff[i];
+		if (base[off + 0] == p1 && base[off + 1] == p2) {
+			unsigned char masked = (unsigned char)(p3 & base[off + 2]);
+			if (masked == p3)
+				return base + off;
+		}
+	}
+	return 0;
+}

@@ -87,7 +87,12 @@
 	void SendUpdateOnRelease(unsigned char, unsigned char);
 	void SendUseGChAlso(unsigned char, unsigned char);
 
-	unsigned int GetRTParmBufferSelectId(int deviceIndex);  /* used by the Shape-C/D Knob/Sw/Scene families */
+	unsigned int GetRTParmBufferSelectId(int deviceIndex);  /* used by the Shape-C/D Knob/Sw/Scene families;
+		* real body reconstructed in src/engine/rtparm_family.cpp
+		* alongside the RTParm free-function family (.text+0x3ab550,
+		* 15 bytes) -- ignores `this` entirely: a plain 4-entry
+		* `.rodata` lookup table ({1,2,3,4}), out-of-range (>3) input
+		* returns 0. */
 
 	/*
 	 * CKGCommonParamMsgHandler's own SendXxx() targets (src/engine/

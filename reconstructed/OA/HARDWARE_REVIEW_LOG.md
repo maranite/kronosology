@@ -3199,3 +3199,95 @@ Real-HW test that would help: none identified this batch either — KARMA
 performance-change orchestration has no direct single-observable front-
 panel/audio effect distinguishable from the dozens of other real KARMA
 call paths already exercised by prior batches.
+
+## RTParm free-function family, bottom-up batch — 56 members reconstructed, 7 deliberately deferred (2026-07-29)
+
+Continuation of the RTParm GE/PE dispatch-table work (`rtparm-ge-table-
+scripted-decoder`, `rtparm-pe-table-and-rtparm-family-survey` memory
+entries): the ~99-function/62,318-byte free-function family those passes
+identified but didn't attempt. Per this project's "verify tractability
+before committing to a whole cluster" rule, sampled the family's LARGEST
+members first (`AssignRTParmFunction_Drm`, 8294B — real nm size, not the
+8094B the earlier survey estimated) before committing: confirmed real
+(a genuine jump-table dispatcher over `GenMod`/`GenEffect`-domain
+`gKS`-relative writes referencing already-declared `RT_*`/`GetFirstOnBit`/
+`AssignRTParmGE` symbols, not an exotic unmodeled dependency) but too
+dense to attempt this pass — reconstructed bottom-up instead, smallest
+(8B) to largest attempted (`IsRTParmPairAssignedPE`/`GetRTParmAssigned_PE`,
+400/402B).
+
+56 members reconstructed: 48 free functions
+(`src/engine/rtparm_family.cpp`) + `RTParmShortNameGroup`'s ctor and 2
+setters + `RTParmNameManager::SetPrependCCInfo` (both in the same file) +
+`CKGParamEdit::GetRTParmBufferSelectId`/`CKGSysExBuffer::
+{StoreRTParmBySeq,SendParamsDependOnRTParm}` (kept in a SEPARATE new file,
+`src/engine/rtparm_ckgparamedit.cpp` — see below). New shared header
+`include/oa_rtparm_family.h` documents the reverse-engineered data model
+(GenEffect/Performance/GenMod/gKS layout facts, RTParm/RTParmFunction/
+RTParmEdit field offsets) other RTParm work can build on.
+
+**7 members deliberately deferred**, all real disassembly read but left
+`pending` rather than risk a wrong translation: `LimitRTParmEditValues`/
+`LimitRTParmEditValuesRow` (interleaved dual-index clamp logic),
+`UpdateRTParmIfSame_GE` (a pointer-identity/byte-compare dual-path loop
+whose fail path re-enters mid-loop at a different label than the match
+path — the single most confusing control flow sampled this pass),
+`GetRTParmModAndID` (dynamic range search, capture also incomplete at
+session end), `RTParmShortNameGroup::GetRTParmShortNameStringPtr` (nested
+string-scan loops), `DoRTParmMultiEnablePE`/`DoRTParmMultiEnableGE`
+(nested 8x8 loop with byte inversion and cross-table bit accumulation).
+Full reasoning for each lives in `oa_rtparm_family.h`'s own header
+comment. Logged as a real, working `.text+0x`-addressed TODO list, not a
+vague "later" — a focused follow-up session can pick any of these up
+directly.
+
+**A real, pre-existing latent header conflict found and worked around,
+not fixed** (logged in `DECOMPILE_ERRORS.md` too): `oa_ckg_module_param_
+msg_handler.h` declares `RT_run(unsigned char, unsigned char)` `extern
+"C"` (a deliberate choice for that file's OWN enum-widened KARMA externs,
+per its own header comment) while `oa_rtparm_pe_table.h` declares the
+SAME symbol `extern "C++"` (the real, GE/PE-table-verified mangled
+linkage). No prior file ever included both headers together, so this
+never surfaced before. `CKGParamEdit::GetRTParmBufferSelectId` needed
+`CKGParamEdit`'s full declaration (only available via the first header)
+while the rest of the family needed `gRTParmFunctionTable_PE` (via the
+second) — worked around by keeping `CKGParamEdit::
+GetRTParmBufferSelectId` in its own translation unit
+(`rtparm_ckgparamedit.cpp`) with its own KAT binary
+(`test_rtparm_ckgparamedit`), rather than editing either established
+header under this batch's own time budget.
+
+**3 real bugs caught by this batch's own independent-oracle KAT**
+(`verify/test_rtparm_family.cpp`, 94 checks) before landing: (1)
+`IsRTParmPairAssigned{GE,PE}`'s `(unsigned char)((~flag) >> 7)` — C++'s
+integer promotion applies `~` to the promoted `int`, not the real 8-bit
+`not bl` the ground truth's own register-width operation performs;
+fixed by truncating back to `unsigned char` before shifting. (2)
+`RTParmShortNameGroup::SetRTParmShortNameStringPtr` wrote a native 8-byte
+`void*` into what's really a packed 32-bit field on the true -m32 target
+(`mov DWORD PTR[eax],edx`), corrupting the next field's own bytes on this
+64-bit verify host — fixed via this project's established packed-32-bit-
+field convention (same class of issue as `CKGBankManager::ms_poInstance`,
+prior batch). (3) A wrong test assumption, not a source bug: assumed
+`gRTParmFunctionTable_GE[0]`'s `funcPtr` was `RT_bnd_amt` (the first
+`extern` listed in `oa_rtparm_ge_table.h`) — that header's own listing
+order is NOT the real table's initializer order; fixed the test to search
+for entry `[5]`'s own real `funcPtr` self-consistently instead of
+asserting which named function occupies which index.
+
+`make verify` (all binaries green, including the 2 new ones) and a real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build both
+green — confirmed via `nm OA.ko | c++filt`, every new symbol's real
+mangled name matches ground truth exactly (e.g.
+`CKGSysExBuffer::SendParamsDependOnRTParm(CSKParameterChangeMessage*)`),
+and the handful of deliberately-`extern`-only sibling calls
+(`AssignRTParmGE`/`AssignRTParmPE`/`GetFirstOnBit`/`KM_rtp_val_out_pe`/
+`Do_KM_rtp_update_name`/`Do_KM_rtp_update_all_names`/`ScaleRTParmValue`)
+show up as the expected "Unknown symbol" `U` entries with their own real
+mangled names too. Manifest 3473 -> 3529/21,689 (+56, 0 regressions,
+verified via a full before/after name-set diff).
+
+Real-HW test that would help: none of this batch is independently
+front-panel-observable — same reasoning as the CKGEngine batch above,
+these are internal KARMA table-lookup/state-mirror helpers with no
+single-path audio/UI effect.

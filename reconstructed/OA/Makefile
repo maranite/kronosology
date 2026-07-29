@@ -167,6 +167,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/karma_seq_backup.o \
            src/engine/rtparm_ge_table.o \
            src/engine/rtparm_pe_table.o \
+           src/engine/rtparm_family.o \
+           src/engine/rtparm_ckgparamedit.o \
            src/engine/stg_string_valuegetters.o \
            src/engine/stg_organ_model_patch_valuegetters.o \
            src/engine/stg_ms20_valuegetters.o \
@@ -640,7 +642,9 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/adsr_base.cpp \
        src/engine/lfo_component.cpp \
        src/engine/rtparm_ge_table.cpp \
-       src/engine/rtparm_pe_table.cpp
+       src/engine/rtparm_pe_table.cpp \
+       src/engine/rtparm_family.cpp \
+       src/engine/rtparm_ckgparamedit.cpp
 
 # `.hostobj`, NOT `.o` (sec 10.143): this rule's own outputs used to be
 # plain `.o` files at the exact same paths Kbuild's `OA-objs` list uses
@@ -818,7 +822,9 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_ckg_midi_msg_handler \
          verify/test_ckg_engine \
          verify/test_rtparm_ge_table \
-         verify/test_rtparm_pe_table
+         verify/test_rtparm_pe_table \
+         verify/test_rtparm_family \
+         verify/test_rtparm_ckgparamedit
 
 CRYPTO_SRC := src/crypto/blowfish.cpp src/crypto/moancjsd82.cpp src/crypto/cb32.cpp src/crypto/md5.cpp
 
@@ -1220,6 +1226,23 @@ verify/test_rtparm_pe_table: verify/test_rtparm_pe_table.cpp src/engine/rtparm_p
 	# identity -- see that file's own header comment. Never linked into
 	# OA.ko itself.
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtparm_pe_table.cpp src/engine/rtparm_pe_table.cpp verify/rtparm_pe_func_stubs.cpp -o $@
+
+verify/test_rtparm_family: verify/test_rtparm_family.cpp src/engine/rtparm_family.cpp verify/rtparm_family_stubs.cpp src/engine/rtparm_ge_table.cpp src/engine/rtparm_pe_table.cpp verify/rtparm_ge_func_stubs.cpp verify/rtparm_pe_func_stubs.cpp include/oa_rtparm_family.h
+	# -fno-pie/-no-pie: several tests round-trip a real 32-bit-target
+	# pointer field (e.g. CKGSysExBuffer_StoreRTParmBySeq's own
+	# `int base = *(int*)(self+0xc)`, RTParmShortNameGroup::
+	# SetRTParmShortNameStringPtr's packed 32-bit field) through static
+	# mock buffers -- same fix as test_ckg_engine/
+	# test_tone_adjust_descriptors, needed so those buffers land in the
+	# low, 32-bit-representable address range on a 64-bit host.
+	$(HOST_CXX) $(HOST_CXXFLAGS) -fno-pie -no-pie verify/test_rtparm_family.cpp src/engine/rtparm_family.cpp verify/rtparm_family_stubs.cpp src/engine/rtparm_ge_table.cpp src/engine/rtparm_pe_table.cpp verify/rtparm_ge_func_stubs.cpp verify/rtparm_pe_func_stubs.cpp -o $@
+
+verify/test_rtparm_ckgparamedit: verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp include/oa_ckg_module_param_msg_handler.h
+	# kept out of test_rtparm_family's own binary -- see
+	# src/engine/rtparm_ckgparamedit.cpp's header comment: this header
+	# and oa_rtparm_pe_table.h (needed by test_rtparm_family) declare
+	# RT_run with conflicting linkage if included together.
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_rtparm_ckgparamedit.cpp src/engine/rtparm_ckgparamedit.cpp -o $@
 
 verify/test_omap_nks_msg_handler: verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp include/oa_omap_nks_msg_handler.h include/oa_setup_global_resources.h include/oa_keybed_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) -mhard-float -msse2 -mfpmath=sse verify/test_omap_nks_msg_handler.cpp src/init/omap_nks_msg_handler.cpp src/engine/front_panel_handlers.cpp src/init/keybed_debounce.cpp -o $@
