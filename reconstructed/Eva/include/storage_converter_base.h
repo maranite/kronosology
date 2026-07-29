@@ -199,6 +199,29 @@ public:
 	// -- target Int0000 --
 	void Ext0000toInt0000(const CConvertStorageParam &param) const;  // REAL identity copy, .text+0x08dea8f0, 37B
 	void Int0000toExt0000(const CConvertStorageParam &param) const;  // REAL reverse identity copy, .text+0x08dea920, 37B, NEW 2026-07-28
+	// Int0001toExt0001..Int000FtoExt000F -- round 56 batch (2026-07-29, solo).
+	// Real: every single one is a bare 1-byte `ret`, i.e. a genuine
+	// unconditional no-op, confirmed directly from ground truth (no
+	// scripted decoder needed at only 15 methods) -- the IntXXXXtoExtYYYY
+	// counterpart to the already-documented ExtXXXXtoIntYYYY matrix's own
+	// "every diagonal Y!=0 stays unimplemented" finding above. No X-vs-Y
+	// pairs off the diagonal exist in this family (only X==Y symbols were
+	// found in the export), so there is no thunk-chasing to do here.
+	void Int0001toExt0001(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9090, 1B
+	void Int0002toExt0002(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90a0, 1B
+	void Int0003toExt0003(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90b0, 1B
+	void Int0004toExt0004(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90c0, 1B
+	void Int0005toExt0005(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90d0, 1B
+	void Int0006toExt0006(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90e0, 1B
+	void Int0007toExt0007(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de90f0, 1B
+	void Int0008toExt0008(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9100, 1B
+	void Int0009toExt0009(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9110, 1B
+	void Int000AtoExt000A(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9120, 1B
+	void Int000BtoExt000B(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9130, 1B
+	void Int000CtoExt000C(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9140, 1B
+	void Int000DtoExt000D(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9150, 1B
+	void Int000EtoExt000E(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9160, 1B
+	void Int000FtoExt000F(const CConvertStorageParam &) const;  // no-op stub, .text+0x08de9170, 1B
 	void Ext0001toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de9180, 19B
 	void Ext0002toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de91a0, 19B
 	void Ext0003toInt0000(const CConvertStorageParam &param) const;  // thunk -> Ext0000toInt0000, .text+0x08de91c0, 19B

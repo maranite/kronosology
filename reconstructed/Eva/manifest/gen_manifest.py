@@ -4447,6 +4447,22 @@ RECONSTRUCTED = {
     "0815fb10",  # CResMan::TestAndSetBusy(CRMApiCallBack*)
     "0815ac50",  # CResMan::UnPrepareDestMap(STriplet**) const
     "08068b20",  # IsOnDemand(uint) (free function, ResTable.cpp)
+    # -- round 56 (2026-07-29, solo): CStorageConverterBase Int0001toExt0001..Int000FtoExt000F --
+    "08de9090",  # CStorageConverterBase::Int0001toExt0001(CConvertStorageParam const&) const
+    "08de90a0",  # CStorageConverterBase::Int0002toExt0002(CConvertStorageParam const&) const
+    "08de90b0",  # CStorageConverterBase::Int0003toExt0003(CConvertStorageParam const&) const
+    "08de90c0",  # CStorageConverterBase::Int0004toExt0004(CConvertStorageParam const&) const
+    "08de90d0",  # CStorageConverterBase::Int0005toExt0005(CConvertStorageParam const&) const
+    "08de90e0",  # CStorageConverterBase::Int0006toExt0006(CConvertStorageParam const&) const
+    "08de90f0",  # CStorageConverterBase::Int0007toExt0007(CConvertStorageParam const&) const
+    "08de9100",  # CStorageConverterBase::Int0008toExt0008(CConvertStorageParam const&) const
+    "08de9110",  # CStorageConverterBase::Int0009toExt0009(CConvertStorageParam const&) const
+    "08de9120",  # CStorageConverterBase::Int000AtoExt000A(CConvertStorageParam const&) const
+    "08de9130",  # CStorageConverterBase::Int000BtoExt000B(CConvertStorageParam const&) const
+    "08de9140",  # CStorageConverterBase::Int000CtoExt000C(CConvertStorageParam const&) const
+    "08de9150",  # CStorageConverterBase::Int000DtoExt000D(CConvertStorageParam const&) const
+    "08de9160",  # CStorageConverterBase::Int000EtoExt000E(CConvertStorageParam const&) const
+    "08de9170",  # CStorageConverterBase::Int000FtoExt000F(CConvertStorageParam const&) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

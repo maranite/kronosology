@@ -2539,3 +2539,36 @@ target-ABI compile) green. Eva manifest 3127 -> 3138/37,795 (8.303%).
 Real-HW test that would help: none identified -- pure field-read/
 write accessor + critical-section logic, no hardware I/O surface of
 its own.
+
+## Round 56 (Eva, solo, 2026-07-29): CStorageConverterBase Int000XtoExt000X, 15-method batch
+
+`CStorageConverterBase` (274 methods already reconstructed, the big
+Ext{X}toInt{Y} conversion matrix from the 2026-07-28 storage-cluster
+batches) had exactly 15 pending methods left: `Int0001toExt0001`
+through `Int000FtoExt000F`, the diagonal-only `IntXXXXtoExtYYYY`
+counterpart family to the already-documented `ExtXXXXtoIntYYYY`
+matrix. Ground truth confirms every one is a bare 1-byte `ret` --
+genuine unconditional no-ops, same "every non-0000 internal version
+is unimplemented in this build" finding the existing header comment
+already established for the other direction. `Int0000toExt0000`
+(the one real body, a reverse identity `memcpy`) was already
+reconstructed in an earlier round; these 15 fill out the rest of
+that same small family. No X-vs-Y off-diagonal thunks exist in this
+naming direction (only X==Y symbols appear in the export), so unlike
+the 256-method Ext-to-Int matrix there was no thunk-chasing needed.
+
+Real host KAT (new loop appended to the existing
+`verify/test_storage_converter_base.cpp`'s black-box shape: sentinel
+destination buffer, confirm untouched after the call, mirroring the
+existing Ext*toInt0001..000F no-op checks). `make verify` full suite
+green (105 targets) -- hit one flaky failure on an UNRELATED test
+(`test_korg_kmp`'s `IsStereoCounterpart` check) mid-run; confirmed
+via `git stash`/rebuild that it reproduces intermittently with AND
+without this round's changes present, so it's the same class of
+pre-existing heisenbug already tracked for `test_client_comm_server`
+(session task #125), not something this round introduced. Reran
+clean immediately after. `make objs` (real `-m32` target-ABI compile)
+green. Eva manifest 3138 -> 3153/37,795 (8.342%).
+
+Real-HW test that would help: none identified -- confirmed no-ops,
+no hardware I/O surface of their own.

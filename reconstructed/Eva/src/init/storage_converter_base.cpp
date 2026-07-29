@@ -42,6 +42,26 @@ void CStorageConverterBase::Int0000toExt0000(const CConvertStorageParam &param) 
 	std::memcpy(param.m_externalBuf, param.m_internalBuf, param.m_size);
 }
 
+/* Int0001toExt0001..Int000FtoExt000F -- round 56 batch (2026-07-29, solo).
+ * Real: every one is a bare 1-byte `ret`, genuine unconditional no-ops --
+ * see storage_converter_base.h's own header comment on this family.
+ */
+void CStorageConverterBase::Int0001toExt0001(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0002toExt0002(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0003toExt0003(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0004toExt0004(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0005toExt0005(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0006toExt0006(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0007toExt0007(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0008toExt0008(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int0009toExt0009(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000AtoExt000A(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000BtoExt000B(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000CtoExt000C(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000DtoExt000D(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000EtoExt000E(const CConvertStorageParam &) const {}
+void CStorageConverterBase::Int000FtoExt000F(const CConvertStorageParam &) const {}
+
 /* .text+0x08de9180, 19B. Real: tail-call (jmp, not call+ret) to Ext0000toInt0000
  * -- ground truth's vtable slot for "produce Int0000" is looked up via
  * this->vtbl[0x58] and jumped to directly, ignoring the source version X

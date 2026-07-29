@@ -156,6 +156,49 @@ int main()
 	printf("Ext*toInt0000 (real-copy) failures: %u/16\n", (unsigned)realFailCount);
 	printf("Ext*toInt0001..000F (no-op) failures: %u/240\n", (unsigned)noopFailCount);
 
+	/* round 56 (2026-07-29, solo): Int0001toExt0001..Int000FtoExt000F, the
+	 * IntXXXXtoExtYYYY counterpart's own diagonal-only no-op family. Same
+	 * black-box shape: call with a sentinel destination, confirm untouched.
+	 */
+	typedef void (CStorageConverterBase::*IntToExtMethodPtr)(const CConvertStorageParam &) const;
+	const IntToExtMethodPtr kIntToExt[15] = {
+		&CStorageConverterBase::Int0001toExt0001, &CStorageConverterBase::Int0002toExt0002,
+		&CStorageConverterBase::Int0003toExt0003, &CStorageConverterBase::Int0004toExt0004,
+		&CStorageConverterBase::Int0005toExt0005, &CStorageConverterBase::Int0006toExt0006,
+		&CStorageConverterBase::Int0007toExt0007, &CStorageConverterBase::Int0008toExt0008,
+		&CStorageConverterBase::Int0009toExt0009, &CStorageConverterBase::Int000AtoExt000A,
+		&CStorageConverterBase::Int000BtoExt000B, &CStorageConverterBase::Int000CtoExt000C,
+		&CStorageConverterBase::Int000DtoExt000D, &CStorageConverterBase::Int000EtoExt000E,
+		&CStorageConverterBase::Int000FtoExt000F,
+	};
+	unsigned char intToExtFailCount = 0;
+	for (int i = 0; i < 15; ++i) {
+		unsigned char src[8], dst[8];
+		for (int j = 0; j < 8; ++j) {
+			src[j] = static_cast<unsigned char>(0xB0 + j);
+			dst[j] = 0xDD; /* sentinel */
+		}
+		CConvertStorageParam param;
+		std::memset(&param, 0, sizeof param);
+		param.m_internalBuf = src;
+		param.m_externalBuf = dst;
+		param.m_size = sizeof dst;
+
+		(conv.*kIntToExt[i])(param);
+
+		bool untouched = true;
+		for (int j = 0; j < 8; ++j)
+			if (dst[j] != 0xDD)
+				untouched = false;
+
+		char label[48];
+		std::sprintf(label, "Int%04XtoExt%04X (no-op)", i + 1, i + 1);
+		if (!untouched)
+			++intToExtFailCount;
+		check(label, untouched);
+	}
+	printf("Int0001toExt0001..000F (no-op) failures: %u/15\n", (unsigned)intToExtFailCount);
+
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;
 }
