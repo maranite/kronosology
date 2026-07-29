@@ -4485,6 +4485,10 @@ RECONSTRUCTED = {
     "08e1dcd0",  # USTGAPILCDControl::SetColorTemp(eLCDColorTemp)
     "08e1dce0",  # USTGAPILCDControl::SetSpreadSpectrumClock(uchar,uchar)
     "08e1dcf0",  # USTGAPILCDControl::SetPadDrive2(uchar,uchar)
+    # -- round 60 (2026-07-29, solo): LoadStoredSettings fix + 3-method batch --
+    "08e1dc70",  # USTGAPILCDControl::SetBacklightBrightness(uchar)
+    "08e1dd00",  # USTGAPILCDControl::ResetToInit()
+    "08e1dd60",  # USTGAPILCDControl::SaveCurrentSettings()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

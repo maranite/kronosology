@@ -2756,3 +2756,53 @@ Real-HW test that would help: none identified -- the 7 LCD-control
 stubs are confirmed no-ops with no real hardware behavior to verify;
 the CombiParameter overload is a pure wire-format forward already
 covered by its sibling methods' own real-hardware notes.
+
+## Round 60 (Eva, solo, 2026-07-29): LoadStoredSettings bug fix + SetBacklightBrightness/ResetToInit/SaveCurrentSettings
+
+**Genuine pre-existing bug found and fixed** (from before this
+session's own work, invisible until now because no KAT test
+previously exercised `LoadStoredSettings()`'s own field mapping at
+all): the function had a bogus extra read from
+`mFrontPanelStatusAddress+0xe0` that does NOT exist anywhere in the
+real ground-truth decompile, and silently discarded the real, NAMED
+global `sCurrentSettings` (frontPanel+0xc4 -- a genuine Ghidra-
+recovered symbol, not a placeholder `DAT_xxxxxxxx`) into a dead local
+instead of persisting it. Caught only because this round's 3 new
+methods (`SetBacklightBrightness`/`ResetToInit`/`SaveCurrentSettings`)
+all read/write `sCurrentSettings` directly, which is impossible to
+implement correctly against the old, wrong field mapping. Fixed:
+`sStoredSettings` shrunk from a bogus 9 elements to the real 7
+(dropping the phantom +0xe0 read), `sCurrentSettings` promoted to its
+own persistent global, and `sUnknownFc` added (frontPanel+0xe0's own
+backing store -- confirmed real via `SaveCurrentSettings`'s own read
+of it, but genuinely never written by `LoadStoredSettings` -- a real
+quirk in ground truth itself, not a further bug in this
+reconstruction). Re-verified byte-for-byte against a fresh, careful
+re-read of `LoadStoredSettings@08e1dde0.c`.
+
+Landed `SetBacklightBrightness(unsigned char)`/`ResetToInit()` (both
+set `sCurrentSettings`'s own byte 3 then send the same STGMessage
+shape `LoadStoredSettings()` already does) and `SaveCurrentSettings()`
+(writes `sCurrentSettings` + all 7 `sStoredSettings` elements +
+`sUnknownFc` back to `mFrontPanelStatusAddress`, the exact inverse of
+`LoadStoredSettings()`'s own read order, then tail-calls
+`USTGAPICalibration::SaveCurrentCalibrationToDisk()` -- a genuinely
+unreconstructed sibling class, given a minimal linkage-only counting
+stub, same established pattern as `sysex_msg_task_base.cpp`'s own
+`CSysExApiInstance::EventToMessage`/`MessageToEvent`).
+
+Real host KAT (`verify/test_lcd_control.cpp` extended with a new
+section: sets up a fake `mFrontPanelStatusAddress` buffer with known
+sentinel values, confirms `LoadStoredSettings()` populates the
+correct fields and does NOT read the bogus +0xe0 address, confirms
+`SetBacklightBrightness`/`ResetToInit`/`SaveCurrentSettings` round-
+trip every field correctly including the never-set `sUnknownFc`
+quirk). `make verify` full suite green (exit 0), zero regressions.
+`make objs` (real `-m32` target-ABI compile) green. Eva manifest 3172
+-> 3175/37,795 (8.401%).
+
+Real-HW test that would help: confirming `sUnknownFc`'s real
+semantic meaning and whether ground truth's own `LoadStoredSettings()`
+genuinely never restores it on boot (a real, if odd, persistent-
+settings gap) would need a live front-panel LCD calibration round-
+trip on real hardware.
