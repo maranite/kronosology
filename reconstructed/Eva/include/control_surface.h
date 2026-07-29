@@ -137,6 +137,29 @@
  * `+0x144`/`+0x148` values, kept in packed-uint space throughout --
  * never converted to a host pointer -- matching how the real 32-bit
  * target computes and returns it).
+ *
+ * === Round 51 batch (2026-07-29, solo): 6 more methods ===
+ * `InitializeSelectSwitchInAudioTrack`/`EditAudioTrackChannelStripKnob`/
+ * `EditAudioTrackPan`/`EditPan`/`EditChannelStripKnob` all reuse the
+ * SAME already-confirmed `+0x140` pointed-at object fields (round
+ * 49/50) and, for `EditPan`/`EditChannelStripKnob`, the SAME
+ * `s_akbyAreaForIFX` table (round 50) -- no new tables/fields needed.
+ * `InitializeSelectSwitchInAudioTrack`'s `+0x114==0` branch reuses
+ * `+0x140`'s own `+2` byte (top nibble this time, not the low nibble
+ * round 49/50 used); its other branch reuses the SAME `+0x7ec`
+ * indexed-pointer-array pattern `GetSoloSelected` (round 49) already
+ * confirmed, reading a NEW confirmed offset (`+0x12`, a real `short`)
+ * off the indexed object.
+ *
+ * `SetEnabledMIDITrack()` introduces one new real packed-pointer field,
+ * `+0x134` (a "current track/channel context" object, real meaning not
+ * independently recovered), dereferenced purely as raw memory
+ * (`FromU32()` treatment) at 3 confirmed byte offsets (`+0x9fe`/
+ * `+0xb29`/`+0xf45`). Landed as a direct, mechanical goto-preserving
+ * translation of ground truth's own control flow (multiple named
+ * labels reached from more than one branch) rather than restructured,
+ * to minimize transcription risk on this one's unusually tangled
+ * bitmask/branch logic.
  */
 
 #ifndef CONTROL_SURFACE_H
@@ -196,6 +219,14 @@ public:
 	void EditAudioPan(int index, int value);
 	unsigned int GetCurrentKarmaScene() const;
 	void InitializePlayMuteSwitchInModKarma();
+
+	// -- round 51 batch --
+	void InitializeSelectSwitchInAudioTrack();
+	void EditAudioTrackChannelStripKnob(unsigned int arg1, int value, int knobFader);
+	void EditAudioTrackPan(int index, int value);
+	void EditPan(int index, int value);
+	void EditChannelStripKnob(unsigned int arg1, int value, int knobFader);
+	void SetEnabledMIDITrack();
 };
 
 #endif /* CONTROL_SURFACE_H */

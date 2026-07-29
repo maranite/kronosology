@@ -339,6 +339,104 @@ int main()
 	check("InitializePlayMuteSwitchInModKarma: fallback scene sets bit",
 	      buf[0x11a] == (unsigned char)(1u << (0x4 & 0x1f)));
 
+	// [8] round 51 batch
+	*(int *)(buf + 0x114) = 0;
+	csObj[2] = (unsigned char)(3 << 4); // top nibble = 3
+	*(int *)(buf + 0x138) = 0; // mode != 3, no subtraction
+	cs->InitializeSelectSwitchInAudioTrack();
+	check("InitializeSelectSwitchInAudioTrack: +0x114==0 path, top nibble of +0x140[2]",
+	      buf[0x11c] == (unsigned char)(1u << 3));
+
+	*(int *)(buf + 0x114) = 1;
+	*(int *)(buf + 0x128) = 4;
+	*(unsigned short *)(trackObj2 + 0x12) = 0x0234;
+	*(int *)(buf + 0x138) = 2; // mode==2 -> shift 0
+	cs->InitializeSelectSwitchInAudioTrack();
+	check("InitializeSelectSwitchInAudioTrack: +0x114!=0, mode==2 -> low byte",
+	      buf[0x11c] == 0x34);
+	*(int *)(buf + 0x138) = 7; // mode!=2 -> shift 8
+	cs->InitializeSelectSwitchInAudioTrack();
+	check("InitializeSelectSwitchInAudioTrack: +0x114!=0, mode!=2 -> high byte",
+	      buf[0x11c] == 0x02);
+
+	csObj[0] = 0; // top bit clear
+	csObj[2] = (unsigned char)(5 << 4);
+	*(int *)(buf + 0x138) = 2;
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditAudioTrackChannelStripKnob(5, 0x91, 5);
+	check("EditAudioTrackChannelStripKnob: mode==2, matching nibble -> writes",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0x91);
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditAudioTrackChannelStripKnob(5, 0x92, 0x11);
+	check("EditAudioTrackChannelStripKnob: knobFader==0x11 -> no-op",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0);
+
+	csObj[0] = 0x80; // top bit set -> negative branch
+	*(int *)(buf + 0x138) = 2;
+	*(int *)(buf + 3 * 0x10 + 0xc) = 0;
+	cs->EditAudioTrackPan(3, 0x55);
+	check("EditAudioTrackPan: negative branch, mode==2, writes per-channel",
+	      *(int *)(buf + 3 * 0x10 + 0xc) == 0x55);
+	csObj[0] = 0; // positive branch
+	csObj[2] = (unsigned char)(0 << 4);
+	*(int *)(buf + 0x138) = 2;
+	*(int *)(buf + 0xc) = 0;
+	cs->EditAudioTrackPan(-1, 0x66);
+	check("EditAudioTrackPan: positive branch, index==-1, nibble matches -> writes",
+	      *(int *)(buf + 0xc) == 0x66);
+
+	csObj[0] = 0x80; // negative branch
+	*(int *)(buf + 0x128) = 5;
+	*(int *)(buf + 0x138) = 0;
+	*(int *)(buf + 2 * 0x10 + 0xc) = 0;
+	cs->EditPan(2, 0x77);
+	check("EditPan: negative branch, mode==0, writes per-channel",
+	      *(int *)(buf + 2 * 0x10 + 0xc) == 0x77);
+	csObj[0] = 0; // positive branch
+	csObj[1] = 9; // slot selector byte
+	*(int *)(buf + 0x128) = 9;
+	s_akbyAreaForIFX[9] = 0x40;
+	buf[0x12] = 0x41; // != s_akbyAreaForIFX[9]
+	*(int *)(buf + 0x138) = 1;
+	*(int *)(buf + 0xc) = 0;
+	cs->EditPan(9, 0x88);
+	check("EditPan: positive branch, area mismatch -> writes",
+	      *(int *)(buf + 0xc) == 0x88);
+
+	csObj[0] = 0; // top bit clear
+	*(int *)(buf + 0x128) = 9; // slot not in {1,3}, so arg1 passed through unchanged
+	csObj[1] = 0xff;
+	*(int *)(buf + 0x138) = 1;
+	s_akbyAreaForIFX[9] = 0x50;
+	buf[5 * 0x10 + 0x12] = 0x51; // mismatch vs s_akbyAreaForIFX[9] -> writes
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditChannelStripKnob(0xff, 0xaa, 5);
+	check("EditChannelStripKnob: arg1==p[1] (0xff), area mismatch -> writes",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0xaa);
+	*(int *)(buf + 5 * 0x10 + 0xc) = 0;
+	cs->EditChannelStripKnob(0xfe, 0xbb, 5);
+	check("EditChannelStripKnob: arg1 != p[1] -> no-op",
+	      *(int *)(buf + 5 * 0x10 + 0xc) == 0);
+
+	*(int *)(buf + 0x128) = 0; // mode 0: writes 0xffff
+	cs->SetEnabledMIDITrack();
+	check("SetEnabledMIDITrack: slot==0 -> 0xffff", *(unsigned short *)(buf + 0x126) == 0xffff);
+	*(int *)(buf + 0x128) = 3; // mode 3: writes 1
+	cs->SetEnabledMIDITrack();
+	check("SetEnabledMIDITrack: slot==3 -> 1", *(unsigned short *)(buf + 0x126) == 1);
+
+	unsigned char *trackCtx = (unsigned char *)mmap32(0x1000);
+	memset(trackCtx, 0, 0x1000);
+	*(unsigned int *)(buf + 0x134) = (unsigned int)(unsigned long)trackCtx;
+	*(int *)(buf + 0x128) = 1;
+	trackCtx[0x9fe] = 3; // bit (1<<3)=8 branch -> writes 0/2 or 1/3, then maybe |4
+	trackCtx[0xb29] = 0; // not in [1,9] -> stays uVar4=2, this[0x126]=0
+	trackCtx[0xf45] = 0; // not in [1,9] -> falls through to "uVar4 = *(this+0x126)|4"
+	*(unsigned short *)(buf + 0x126) = 0;
+	cs->SetEnabledMIDITrack();
+	check("SetEnabledMIDITrack: slot==1, bit3 branch, both extra bytes 0 -> falls to |4 path",
+	      *(unsigned short *)(buf + 0x126) == 4);
+
 	printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

@@ -4375,6 +4375,13 @@ RECONSTRUCTED = {
     "08951d70",  # CControlSurface::EditAudioPan(int, int)
     "0894c270",  # CControlSurface::GetCurrentKarmaScene()
     "0894bf00",  # CControlSurface::InitializePlayMuteSwitchInModKarma()
+    # -- round 51 (2026-07-29, solo): CControlSurface 6-method batch --
+    "08954840",  # CControlSurface::InitializeSelectSwitchInAudioTrack()
+    "08954db0",  # CControlSurface::EditAudioTrackChannelStripKnob(int, int, EKnobFader)
+    "08954c10",  # CControlSurface::EditAudioTrackPan(int, int)
+    "08942ae0",  # CControlSurface::EditPan(int, int)
+    "0894eb70",  # CControlSurface::EditChannelStripKnob(int, int, EKnobFader)
+    "0895c5c0",  # CControlSurface::SetEnabledMIDITrack()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

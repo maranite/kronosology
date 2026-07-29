@@ -2230,3 +2230,47 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified beyond what round 49
   already flagged -- same `CTrackStatus`/`+0x140` object dependency.
+
+- **CControlSurface, 6 more methods (round 51)
+  (`control_surface.h`/`control_surface.cpp`), round 51, 2026-07-29
+  (solo, no subagents -- session-wide cap hit, user chose "Continue
+  solo").** Continued CControlSurface with a deliberately small
+  batch -- the class's remaining ~112 pending methods increasingly
+  depend on `CTrackStatus`/`CMMI`/`EditApi` vtable dispatch/
+  `USTGAPIProgram`/`USTGAPICombi`/`CStorage`/`CPrograms`/
+  `CCombinations`/unreconstructed sibling methods
+  (`InitializeCombiKnob`/`InitializeProgKnob`/
+  `UpdatePlayMuteSwitchLED`/`ShouldBlinkKarmaSceneLEDForLinkedScene`/
+  `GetBackupKarmaScene`), so this round intentionally landed only the
+  smallest fully self-contained remainder rather than force through
+  external dependencies.
+
+  `InitializeSelectSwitchInAudioTrack`/`EditAudioTrackChannelStripKnob`/
+  `EditAudioTrackPan`/`EditPan`/`EditChannelStripKnob` all reuse the
+  SAME already-confirmed `+0x140` pointed-at object fields (round
+  49/50) and, for `EditPan`/`EditChannelStripKnob`, the SAME
+  `s_akbyAreaForIFX` table (round 50) -- no new tables/fields needed.
+  `InitializeSelectSwitchInAudioTrack`'s `+0x114==0` branch reuses
+  `+0x140`'s own `+2` byte (top nibble this time, not the low nibble
+  round 49/50 used); its other branch reuses the SAME `+0x7ec`
+  indexed-pointer-array pattern `GetSoloSelected` (round 49) already
+  confirmed, reading a NEW confirmed offset (`+0x12`, a real `short`)
+  off the indexed object.
+
+  `SetEnabledMIDITrack()` introduces one new real packed-pointer
+  field, `+0x134` (a "current track/channel context" object, real
+  meaning not independently recovered), dereferenced purely as raw
+  memory (`FromU32()` treatment) at 3 confirmed byte offsets
+  (`+0x9fe`/`+0xb29`/`+0xf45`). Landed as a direct, mechanical
+  goto-preserving translation of ground truth's own control flow
+  (multiple named labels reached from more than one branch) rather
+  than restructured, to minimize transcription risk on this one's
+  unusually tangled bitmask/branch logic.
+
+  Real host KAT (18 new checks, appended to
+  `verify/test_control_surface.cpp`, 83 total). `make verify` full
+  suite green (real target-ABI `-m32` build), zero regressions. Eva
+  manifest 3071 -> 3077/37,795 (8.141%).
+
+  Real-HW test that would help: none identified beyond what round 49
+  already flagged.

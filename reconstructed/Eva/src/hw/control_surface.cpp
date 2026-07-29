@@ -390,3 +390,168 @@ void CControlSurface::InitializePlayMuteSwitchInModKarma()
 	}
 	base[0x11a] = 0;
 }
+
+void CControlSurface::InitializeSelectSwitchInAudioTrack()
+{
+	unsigned char *base = (unsigned char *)this;
+	if (*(int *)(base + 0x114) == 0) {
+		unsigned int ptr = *(unsigned int *)(base + 0x140);
+		unsigned int idx = FromU32(ptr)[2] >> 4;
+		if (*(int *)(base + 0x138) == 3)
+			idx -= 8;
+		if (idx < 8)
+			base[0x11c] = (unsigned char)(1u << (idx & 0x1f));
+		return;
+	}
+	int slot = *(int *)(base + 0x128);
+	unsigned int ptr7ec = *(unsigned int *)(base + slot * 4 + 0x7ec);
+	unsigned short v = *(unsigned short *)(FromU32(ptr7ec) + 0x12);
+	unsigned int shift = (*(int *)(base + 0x138) != 2) ? 8 : 0;
+	base[0x11c] = (unsigned char)(v >> shift);
+}
+
+void CControlSurface::EditAudioTrackChannelStripKnob(unsigned int arg1, int value, int knobFader)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	unsigned char *p = FromU32(ptr);
+	if (*(signed char *)p < 0)
+		return;
+	if ((unsigned int)(*(int *)(base + 0x138) - 2) >= 2)
+		return;
+	if (arg1 != 0xffffffffu && arg1 != (unsigned int)(p[2] >> 4))
+		return;
+	if (knobFader == 0x11)
+		return;
+	*(int *)(base + knobFader * 0x10 + 0xc) = value;
+}
+
+void CControlSurface::EditAudioTrackPan(int index, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	unsigned char *p = FromU32(ptr);
+	if (*(signed char *)p < 0) {
+		int mode = *(int *)(base + 0x138);
+		if (mode != 2) {
+			if (mode != 3)
+				return;
+			index -= 8;
+		}
+		if ((unsigned int)index < 8)
+			*(int *)(base + index * 0x10 + 0xc) = value;
+	} else if ((unsigned int)(*(int *)(base + 0x138) - 2) < 2 &&
+	           (index == -1 || index == (p[2] >> 4))) {
+		*(int *)(base + 0xc) = value;
+	}
+}
+
+void CControlSurface::EditPan(int index, int value)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int ptr = *(unsigned int *)(base + 0x140);
+	unsigned char *p = FromU32(ptr);
+	if (*(signed char *)p < 0) {
+		int mode = *(int *)(base + 0x138);
+		if (mode != 0) {
+			if (mode != 1)
+				return;
+			index -= 8;
+		}
+		if ((unsigned int)index < 8)
+			*(int *)(base + index * 0x10 + 0xc) = value;
+		return;
+	}
+	int slot = *(int *)(base + 0x128);
+	if (slot == 3 || slot == 1) {
+		if (index == -1) {
+			if (p[1] > 1)
+				return;
+		} else if ((unsigned int)p[1] != (unsigned int)index) {
+			return;
+		}
+	} else if ((unsigned int)p[1] != (unsigned int)index) {
+		return;
+	}
+	if (*(unsigned int *)(base + 0x138) < 2 && base[0x12] != s_akbyAreaForIFX[slot]) {
+		*(int *)(base + 0xc) = value;
+	}
+}
+
+void CControlSurface::EditChannelStripKnob(unsigned int arg1, int value, int knobFader)
+{
+	unsigned char *base = (unsigned char *)this;
+	int slot = *(int *)(base + 0x128);
+	unsigned char *p;
+	if ((slot == 3 || slot == 1) && arg1 == 0xffffffffu) {
+		p = FromU32(*(unsigned int *)(base + 0x140));
+		if (p[1] < 2)
+			arg1 = p[1];
+	} else {
+		p = FromU32(*(unsigned int *)(base + 0x140));
+	}
+	if (*(signed char *)p < 0)
+		return;
+	if (arg1 != (unsigned int)p[1])
+		return;
+	if (*(unsigned int *)(base + 0x138) >= 2)
+		return;
+	if (knobFader == 0x11)
+		return;
+	if (base[knobFader * 0x10 + 0x12] == s_akbyAreaForIFX[slot])
+		return;
+	*(int *)(base + knobFader * 0x10 + 0xc) = value;
+}
+
+void CControlSurface::SetEnabledMIDITrack()
+{
+	unsigned char *base = (unsigned char *)this;
+	int mode = *(int *)(base + 0x128);
+	if (mode != 1) {
+		if (mode < 2) {
+			if (mode == 0)
+				goto set_ffff;
+		} else {
+			if (mode == 2) {
+			set_ffff:
+				*(unsigned short *)(base + 0x126) = 0xffff;
+				return;
+			}
+			if (mode == 3)
+				*(unsigned short *)(base + 0x126) = 1;
+		}
+		return;
+	}
+
+	{
+		unsigned int ptr134 = *(unsigned int *)(base + 0x134);
+		unsigned char *t = FromU32(ptr134);
+		unsigned char b = t[0x9fe] & 7;
+		unsigned short result;
+		bool done = false;
+		if (b < 6) {
+			unsigned int bit = 1u << b;
+			if ((bit & 0x15) != 0) {
+				result = 5;
+				done = true;
+			} else if ((bit & 0x22) != 0) {
+				result = 7;
+				done = true;
+			} else if ((bit & 8) != 0) {
+				*(unsigned short *)(base + 0x126) = 0;
+				result = 2;
+				if (t[0xb29] < 10 && t[0xb29] != 0) {
+					*(unsigned short *)(base + 0x126) = 1;
+					result = 3;
+				}
+				if (t[0xf45] < 10 && t[0xf45] != 0) {
+					result |= 4;
+					done = true;
+				}
+			}
+		}
+		if (!done)
+			result = *(unsigned short *)(base + 0x126) | 4;
+		*(unsigned short *)(base + 0x126) = result;
+	}
+}
