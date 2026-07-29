@@ -6105,6 +6105,34 @@ int main(void)
 		check_eq("SetMute(false): bit0 cleared, other bits preserved", instBuf[0x43], 0xfeu);
 	}
 
+	printf("\n[round 68] CSTGChannelValues::CopyPolyAfterTouch\n");
+	{
+		unsigned char srcBuf[0x92c];
+		unsigned char dstBuf[0x92c];
+		memset(srcBuf, 0, sizeof(srcBuf));
+		memset(dstBuf, 0xcc, sizeof(dstBuf));
+
+		for (int i = 0; i < 0x20 * 4; i++)
+			srcBuf[0x5ad + i] = (unsigned char)(i + 1);
+		for (int i = 0; i < 0x80 * 4; i++)
+			srcBuf[0x6b4 + i] = (unsigned char)(i + 0x40);
+
+		CSTGChannelValues *dst = (CSTGChannelValues *)dstBuf;
+		CSTGChannelValues *src = (CSTGChannelValues *)srcBuf;
+		dst->CopyPolyAfterTouch(*src);
+
+		bool region1Ok = memcmp(dstBuf + 0x5ad, srcBuf + 0x5ad, 0x20 * 4) == 0;
+		bool region2Ok = memcmp(dstBuf + 0x6b4, srcBuf + 0x6b4, 0x80 * 4) == 0;
+		check_eq("CopyPolyAfterTouch: +0x5ad..+0x5ad+0x7f region copied", (unsigned int)region1Ok, 1u);
+		check_eq("CopyPolyAfterTouch: +0x6b4..+0x6b4+0x1ff region copied", (unsigned int)region2Ok, 1u);
+		check_eq("CopyPolyAfterTouch: byte just before +0x5ad untouched",
+			 dstBuf[0x5ac], 0xccu);
+		check_eq("CopyPolyAfterTouch: byte just after first region untouched",
+			 dstBuf[0x5ad + 0x20 * 4], 0xccu);
+		check_eq("CopyPolyAfterTouch: byte just after second region untouched",
+			 dstBuf[0x6b4 + 0x80 * 4], 0xccu);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

@@ -1308,6 +1308,20 @@ struct CSTGChannelValues {
 	 */
 	void SetPitchBend(const CSTGControllerValue &value, bool flag);
 	void SetControllerValue(unsigned char ccNumber, const CSTGControllerValue &value);
+
+	/* CopyPolyAfterTouch(CSTGChannelValues const&) (round 68, solo,
+	 * .text+0x36d80, 100 bytes) confirmed real: two raw dword-array
+	 * copies from `other`'s own fields into this object's -- 0x20
+	 * dwords (128 bytes) starting at `+0x5ad`, then 0x80 dwords
+	 * (512 bytes) starting at `+0x6b4`. Clean `this=EAX/other=EDX`
+	 * regparm3 attribution, no unresolved constants, no dispatch.
+	 * SetAfterTouch(CSTGControllerValue const&) -- deliberately NOT
+	 * attempted alongside this: its own real body reads an
+	 * unrecoverable `.rodata` float constant (`_DAT_006ba674`), same
+	 * "unrecoverable rodata constant" red flag this project always
+	 * defers on.
+	 */
+	void CopyPolyAfterTouch(const CSTGChannelValues &other);
 };
 
 struct CSTGMidiDispatcher {

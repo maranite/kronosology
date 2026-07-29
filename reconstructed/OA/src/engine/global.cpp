@@ -5056,6 +5056,28 @@ void CSTGChannelValues::SetPitchBend(const CSTGControllerValue &value, bool flag
 		*(unsigned int *)(self + 0x634) = *(const unsigned int *)(src + 0);
 }
 
+/* Round 68 (solo): CopyPolyAfterTouch(CSTGChannelValues const&) --
+ * confirmed real, two raw dword-array copies (0x20 dwords at +0x5ad,
+ * then 0x80 dwords at +0x6b4). Explicit dword loop (no memcpy, matching
+ * this project's own established freestanding-build convention, sec
+ * 10.56), same shape ground truth's own unrolled copy loop has.
+ */
+void CSTGChannelValues::CopyPolyAfterTouch(const CSTGChannelValues &other)
+{
+	unsigned char *self = (unsigned char *)this;
+	const unsigned char *src = (const unsigned char *)&other;
+
+	unsigned int *dst32 = (unsigned int *)(self + 0x5ad);
+	const unsigned int *src32 = (const unsigned int *)(src + 0x5ad);
+	for (int i = 0x20; i != 0; i--)
+		*dst32++ = *src32++;
+
+	dst32 = (unsigned int *)(self + 0x6b4);
+	src32 = (const unsigned int *)(src + 0x6b4);
+	for (int i = 0x80; i != 0; i--)
+		*dst32++ = *src32++;
+}
+
 /*
  * CSTGChannelValues::Initialize() (.text+0x26a50, 75 bytes, sec 10.151)
  * confirmed: lazily runs InitializeLongHand() on a hidden static

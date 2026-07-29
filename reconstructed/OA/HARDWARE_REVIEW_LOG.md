@@ -4872,3 +4872,28 @@ Manifest 4057 -> 4060/21,689 (18.719%).
 
 Real-HW test that would help: none identified -- pure vtable-pointer/
 no-op operations, no hardware I/O surface of their own.
+
+## Round 68 (OA.ko, solo, 2026-07-29): CSTGChannelValues::CopyPolyAfterTouch
+
+Surveyed near-complete classes; `CSTGChannelValues::SetAfterTouch`
+(reads an unrecoverable `.rodata` float constant, `_DAT_006ba674` --
+the established "unrecoverable rodata constant" red flag) stayed
+deferred while its sibling `CopyPolyAfterTouch` turned out clean: two
+raw dword-array copies (0x20 dwords at `+0x5ad`, 0x80 dwords at
+`+0x6b4`) with no unresolved constants, no dispatch, clean
+`this=EAX/other=EDX` regparm3 attribution.
+
+Landed `CSTGChannelValues::CopyPolyAfterTouch(CSTGChannelValues
+const&)`, transcribed via an explicit dword-copy loop (no memcpy,
+matching this project's own established freestanding-build convention
+already used elsewhere in this same class's own header comments).
+
+Real host KAT (5 new checks, existing `verify/test_global.cpp`,
+confirming both copied regions byte-for-byte plus the untouched bytes
+immediately surrounding each region). `make verify` full suite green
+(exit 0), zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4060 ->
+4061/21,689 (18.724%).
+
+Real-HW test that would help: none identified -- pure in-memory field
+copy, no hardware I/O surface of its own.
