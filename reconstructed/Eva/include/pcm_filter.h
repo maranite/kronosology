@@ -11,6 +11,19 @@
  * only `memmove`/`memset` and (for the 2 instance methods) its own 5 float
  * fields. Split into two shapes:
  *
+ * PLUS 3 more real instance methods found later (round 61 of the batch
+ * sweep), confirmed same class via `nm -C` demangling
+ * (`_ZN10CPcmFilter5ResetEv` etc.) despite living far away at
+ * `.text+0x08995390..0x089953b0` -- all 3 are `W` (weak) symbols, meaning
+ * they were originally trivial inline-in-header bodies deduplicated by the
+ * linker to one out-of-line copy, landing wherever the linker happened to
+ * place the surviving copy rather than next to the rest of the class. Each
+ * body ignores `this` entirely (confirmed: Ghidra's own decompile shows a
+ * zero-arg `__cdecl` signature because no register referencing `this` is
+ * live), consistent with `Reset()` being a real no-op and the two getters
+ * being real, always-zero stand-ins (this project's collapsed-audio-DSP
+ * scope never populates a real delay-offset value here).
+ *
  *   - 2 real INSTANCE methods (`__thiscall`, bit-depth-conversion state:
  *     `mBits`/`mIntToFloatScale`/`mFloatToIntScale`/`mClampMax`/`mClampMin`):
  *     the ctor, `SetBitsPerSample(int)`, `IntToFloat()`, `FloatToInt()`.
@@ -119,6 +132,15 @@ public:
 	/* .text+0x08308270, 541 bytes, __cdecl static. Per-channel memset(0).
 	 * Returns `count`. */
 	static unsigned long Mute(float **buf, unsigned long count, unsigned long channels);
+
+	/* .text+0x08995390, 1 byte, weak. Real no-op. */
+	void Reset();
+
+	/* .text+0x089953a0, 3 bytes, weak. Real ground truth: literal 0. */
+	float GetDelayOffsetSeconds() const;
+
+	/* .text+0x089953b0, 3 bytes, weak. Real ground truth: literal 0. */
+	int GetDelayOffsetSamples() const;
 
 private:
 	int   mBits;            /* +0x04 */

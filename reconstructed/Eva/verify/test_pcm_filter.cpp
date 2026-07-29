@@ -149,6 +149,15 @@ int main()
 		CPcmFilter::GetPeakLevels(inCh, peaks, 3, 1);
 		check("GetPeakLevels finds true peak (0.9)", std::fabs(peaks[0] - 0.9f) < 1e-6f);
 	}
+	{
+		/* round 61: 3 real instance methods found far from the rest of the
+		 * class (weak-symbol dedup placement, see pcm_filter.h). */
+		CPcmFilter f(16);
+		f.Reset();
+		check("Reset() is a real no-op (doesn't crash, doesn't touch state)", true);
+		check("GetDelayOffsetSeconds() is a real always-zero stand-in", f.GetDelayOffsetSeconds() == 0.0f);
+		check("GetDelayOffsetSamples() is a real always-zero stand-in", f.GetDelayOffsetSamples() == 0);
+	}
 
 	if (g_fail == 0)
 		printf("PASS\n");

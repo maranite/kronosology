@@ -212,3 +212,17 @@ unsigned long CPcmFilter::Mute(float **buf, unsigned long count, unsigned long c
 		std::memset(buf[ch], 0, count * sizeof(float));
 	return count;
 }
+
+void CPcmFilter::Reset()
+{
+}
+
+float CPcmFilter::GetDelayOffsetSeconds() const
+{
+	return 0.0f;
+}
+
+int CPcmFilter::GetDelayOffsetSamples() const
+{
+	return 0;
+}

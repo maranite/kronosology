@@ -4489,6 +4489,13 @@ RECONSTRUCTED = {
     "08e1dc70",  # USTGAPILCDControl::SetBacklightBrightness(uchar)
     "08e1dd00",  # USTGAPILCDControl::ResetToInit()
     "08e1dd60",  # USTGAPILCDControl::SaveCurrentSettings()
+    # -- round 61 (2026-07-29, solo): CPcmFilter's last 3 methods, found via a
+    # done>0/pending>0-class scan of the manifest itself. Confirmed same class
+    # via nm -C despite living far from the rest (weak-symbol dedup landing
+    # site) -- see pcm_filter.h's own header comment.
+    "08995390",  # CPcmFilter::Reset()
+    "089953a0",  # CPcmFilter::GetDelayOffsetSeconds()
+    "089953b0",  # CPcmFilter::GetDelayOffsetSamples()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

@@ -2806,3 +2806,59 @@ semantic meaning and whether ground truth's own `LoadStoredSettings()`
 genuinely never restores it on boot (a real, if odd, persistent-
 settings gap) would need a live front-panel LCD calibration round-
 trip on real hardware.
+
+## Round 61 (2026-07-29, solo): CPcmFilter's last 3 methods
+
+Found via a fresh discovery method: scanned `eva_functions.csv` for
+classes with `done>0 AND pending>0`, sorted by average pending size
+ascending (small pending residue on an otherwise-complete class is a
+strong "cheap and safe" signal). `CPcmFilter` (`include/pcm_filter.h`,
+already 18/18-documented as fully reconstructed as of an earlier
+round) turned up with 3 more pending 1-3 byte functions the earlier
+round had missed: `Reset()`, `GetDelayOffsetSeconds()`,
+`GetDelayOffsetSamples()`.
+
+Initial suspicion: a possible manifest name-collision bug (these 3
+addresses, `0x08995390..0x089953b0`, sit ~0x68f000 bytes away from the
+rest of `CPcmFilter`'s methods at `0x08306xxx`, and the real Eva ELF
+checked into this repo (`./Eva`) doesn't even span that far -- its
+`.text` ends at `0x0806ab8c`). Confirmed NOT a bug by checking against
+`/home/share/Decomp/EVA_Decomp/Eva`, the actual ground-truth binary
+Ghidra decompiled (its `.text` correctly spans up to `0x08e7967c`):
+`nm -C` demangles all 3 addresses to genuine `CPcmFilter::` symbols
+(`_ZN10CPcmFilter5ResetEv` etc.), all marked **weak** (`W`) --
+consistent with these having originally been trivial inline-in-header
+bodies that the linker deduplicated to a single out-of-line copy,
+landing wherever the linker happened to place the survivor rather
+than next to the rest of the class's own translation unit. A
+genuinely separate, previously-uncounted set of real methods, not a
+false attribution.
+
+Also investigated and correctly ruled OUT as this round's candidates
+(all already resolved, not fresh work):
+- `CGlobalConverter`/`CRegionConverter` dtors -- restore the
+  deliberately-un-modeled `PTR__CStorageConverterBase_08fcc9c8` vtable
+  (`storage_converter_base.h`'s own documented decision); landing
+  would risk this project's known vtable-dispatch-stub-gap bug class.
+- `CDumpTask`/`CAlphaKeybCtrlTask`/`CBatchDiskMan` dtor pairs --
+  compiler-generated "non-virtual thunk to X::~X()" multiple-
+  inheritance adjustment bodies, too complex to land quickly.
+- `CSysExSong`/`CSysExKarmaGEInfo` dtors -- already landed back in
+  rounds 40-41 (`~ClassName() {}`, matching the established
+  `PTR__CSysExObjectBase_08f7a908` sibling convention) and their
+  addresses are deliberately EXCLUDED from the manifest already
+  (`gen_manifest.py`'s own comment: "Dtors intentionally excluded (same
+  'D0's free(this) not reproduced' convention as `CLongBinaryFile`)").
+  Not a manifest gap -- a documented exclusion.
+
+`Reset()` is a real no-op; both `Get*` getters are real, unconditional
+`return 0` stand-ins in ground truth (this project's collapsed-audio-
+DSP scope never populates a real delay-offset value here). Landed all
+3 with matching declarations/bodies in `pcm_filter.h`/`pcm_filter.cpp`.
+Real host KAT (`verify/test_pcm_filter.cpp` extended, 3 new checks:
+doesn't crash, both getters return exactly 0). `make verify` full
+suite green (exit 0), zero regressions. Eva manifest 3175 -> 3178/
+37,795 (8.409%).
+
+No real-HW test needed -- both getters are always-zero literal returns
+in ground truth itself, nothing hardware-dependent to confirm.
