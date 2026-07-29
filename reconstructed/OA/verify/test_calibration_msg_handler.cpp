@@ -324,6 +324,21 @@ int main()
 	check_eq("PushMessage called", g_pushMessageCalls, 1);
 	check_eq("reply.result == 0", g_lastReply.result, 0);
 
+	printf("[20] ~CSTGCalibrationMsgHandler (round 69): resets _vtablePtr to base's slot\n");
+	{
+		/* Reading `->_vtablePtr` right after an explicit dtor call is UB
+		 * (object lifetime already ended) -- read the raw bytes instead,
+		 * see test_control_msg_handler.cpp's identical note. */
+		unsigned char *buf = new unsigned char[sizeof(CSTGCalibrationMsgHandler)];
+		CSTGCalibrationMsgHandler *h = new (buf) CSTGCalibrationMsgHandler();
+		check_eq("ctor installed own vtable slot",
+			 *(long *)buf, (long)(_ZTV25CSTGCalibrationMsgHandler + 8));
+		h->~CSTGCalibrationMsgHandler();
+		check_eq("dtor resets to shared CSTGMessageHandler base vtable slot",
+			 *(long *)buf, (long)(_ZTV18CSTGMessageHandler + 8));
+		delete[] buf;
+	}
+
 	printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "ALL TESTS PASSED");
 	return g_fail ? 1 : 0;
 }

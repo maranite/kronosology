@@ -321,6 +321,23 @@ public:
 	void HandleUnsupportedMessage(void *msg, int source);
 };
 
+/*
+ * `CSTGMessageHandler`'s own vtable (`_ZTV18CSTGMessageHandler`) -- the
+ * shared base every `*MsgHandler` subclass in this cluster (`CSTGControl-
+ * MsgHandler`, `CSTGCalibrationMsgHandler`, `CSTGFrontPanelMsgHandler`)
+ * derives from. Ground truth's own `~ClassName()` for all 3 subclasses
+ * restores THIS symbol's `+8` slot into `this+0` (confirmed identical
+ * disassembly across all 3, `PTR__CSTGMessageHandler_006c2300`) -- same
+ * install-only, never-dispatched-through placeholder convention as each
+ * subclass's own `_ZTVnnClassName` (round 69). Declared `weak` (matching
+ * this project's existing weak-symbol convention, e.g. oa_global.h's
+ * `NotifyParam`) so each of the 3 `.cpp` TUs that include this header
+ * can carry its own definition without a multiple-definition link error.
+ */
+extern "C" __attribute__((weak)) unsigned char _ZTV18CSTGMessageHandler[24] = { 0 };
+
+extern "C" unsigned char _ZTV21CSTGControlMsgHandler[24];
+
 class CSTGControlMsgHandler {
 public:
 	static CSTGControlMsgHandler *sInstance;
@@ -331,6 +348,10 @@ public:
 	unsigned char _replyTag;	/* +0x8, default 0x36 */
 
 	CSTGControlMsgHandler();
+	/* D0/D1 byte-identical (round 69): resets `_vtablePtr` to the shared
+	 * `CSTGMessageHandler` base's vtable slot, see header comment above
+	 * `_ZTV18CSTGMessageHandler`. */
+	~CSTGControlMsgHandler();
 
 	void SetModeHandler(const STGControlMsgDataModeChange *param, int source);
 	void PerformanceChgHandler(const STGControlMsgDataPerformanceChange *param, int source);

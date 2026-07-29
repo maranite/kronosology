@@ -2,6 +2,8 @@
 #ifndef OA_CALIBRATION_H
 #define OA_CALIBRATION_H
 
+#include "oa_control_msg_handler.h"	/* _ZTV18CSTGMessageHandler, see dtor below */
+
 /*
  * oa_calibration.h  -  CSTGCalibrationMsgHandler: the front-panel/keybed
  * analog-controller calibration state machine (joystick X/Y, vector
@@ -105,6 +107,8 @@ struct STGCalibrationMsgHandlerEntry {
 	void *ctx;
 };
 
+extern "C" unsigned char _ZTV25CSTGCalibrationMsgHandler[24];
+
 class CSTGCalibrationMsgHandler {
 public:
 	static CSTGCalibrationMsgHandler *sInstance;
@@ -115,6 +119,10 @@ public:
 	unsigned char _replyTag; /* +0x8, default 0x12 */
 
 	CSTGCalibrationMsgHandler();
+	/* D0/D1 byte-identical (round 69): resets `_vtablePtr` to the shared
+	 * `CSTGMessageHandler` base's vtable slot, same pattern as
+	 * `CSTGControlMsgHandler`'s dtor, see oa_control_msg_handler.h. */
+	~CSTGCalibrationMsgHandler();
 
 	/* Joystick X (controller id 5) */
 	static void StartJSXCalibration();

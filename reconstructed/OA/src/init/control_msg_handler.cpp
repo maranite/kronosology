@@ -158,6 +158,15 @@ CSTGControlMsgHandler::CSTGControlMsgHandler()
 	sMsgHandler[0xd4 / 4] = AsRawFn(&CSTGControlMsgHandler::EnableAfterTouch);
 }
 
+CSTGControlMsgHandler::~CSTGControlMsgHandler()
+{
+	/* volatile: a plain store here is otherwise dead-store-eliminated by
+	 * GCC at -O2 (the object's lifetime ends when the dtor returns, so
+	 * the optimizer assumes no one can observe this write) -- same fix
+	 * as CSTGStreamingEvent::~CSTGStreamingEvent() (round 67). */
+	*(void * volatile *)&_vtablePtr = _ZTV18CSTGMessageHandler + 8;
+}
+
 /* ------------------------------------------------------------------ */
 /* Performance/mode-change producers (shape 4) -- pure "unpack param,  */
 /* validate bounds, forward" glue onto already-real CSTGGlobal methods. */

@@ -114,6 +114,24 @@ int main()
 	h->Beep(nullptr, 0);
 	check_eq("Beep calls CSTGFrontPanel::Beep once", g_beepCalls, 1);
 
+	printf("[6] ~CSTGFrontPanelMsgHandler (round 69): resets _vtablePtr to base's slot\n");
+	{
+		/* Separate placement-new'd heap instance (not the `handler` stack
+		 * local used above) -- reading a member right after an explicit
+		 * dtor call on an ordinary automatic variable is UB the
+		 * optimizer can (and did, at -O2) exploit; matches the project's
+		 * own established pattern (test_managers.cpp's CSTGStreamingEvent
+		 * dtor check). */
+		unsigned char *buf = new unsigned char[sizeof(CSTGFrontPanelMsgHandler)];
+		CSTGFrontPanelMsgHandler *h2 = new (buf) CSTGFrontPanelMsgHandler();
+		check_eq("ctor installed own vtable slot",
+			 *(long *)buf, (long)(_ZTV24CSTGFrontPanelMsgHandler + 8));
+		h2->~CSTGFrontPanelMsgHandler();
+		check_eq("dtor resets to shared CSTGMessageHandler base vtable slot",
+			 *(long *)buf, (long)(_ZTV18CSTGMessageHandler + 8));
+		delete[] buf;
+	}
+
 	if (g_fail) {
 		printf("\n%d check(s) FAILED\n", g_fail);
 		return 1;

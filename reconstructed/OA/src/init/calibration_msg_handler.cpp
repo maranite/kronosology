@@ -166,6 +166,12 @@ CSTGCalibrationMsgHandler::CSTGCalibrationMsgHandler()
 	sMsgHandler[17] = { CancelAftertouchCalibration, 0 };
 }
 
+CSTGCalibrationMsgHandler::~CSTGCalibrationMsgHandler()
+{
+	/* volatile: see CSTGControlMsgHandler's identical dtor note. */
+	*(void * volatile *)&_vtablePtr = _ZTV18CSTGMessageHandler + 8;
+}
+
 /* ------------------------------------------------------------------ */
 /* Joystick X (keybed controller id 5)                                */
 /* ------------------------------------------------------------------ */

@@ -58,6 +58,8 @@ struct STGFrontPanelMsgHandlerEntry {
 	void *ctx;
 };
 
+extern "C" unsigned char _ZTV24CSTGFrontPanelMsgHandler[24];
+
 class CSTGFrontPanelMsgHandler {
 public:
 	static CSTGFrontPanelMsgHandler *sInstance;
@@ -68,6 +70,10 @@ public:
 	unsigned char _replyTag;	/* +0x8, default 0x05 */
 
 	CSTGFrontPanelMsgHandler();
+	/* D0/D1 byte-identical (round 69): resets `_vtablePtr` to the shared
+	 * `CSTGMessageHandler` base's vtable slot, same pattern as
+	 * `CSTGControlMsgHandler`'s dtor, see oa_control_msg_handler.h. */
+	~CSTGFrontPanelMsgHandler();
 
 	void SetLED(const STGMsgDataOneParam *param, int source);
 	void ResetLED(const STGMsgDataOneParam *param, int source);

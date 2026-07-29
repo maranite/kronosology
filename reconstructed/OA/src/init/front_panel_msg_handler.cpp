@@ -109,3 +109,9 @@ CSTGFrontPanelMsgHandler::CSTGFrontPanelMsgHandler()
 		AsRawFn(&CSTGFrontPanelMsgHandler::Beep));
 	sMsgHandler[4].ctx = nullptr;
 }
+
+CSTGFrontPanelMsgHandler::~CSTGFrontPanelMsgHandler()
+{
+	/* volatile: see CSTGControlMsgHandler's identical dtor note. */
+	*(void * volatile *)&_vtablePtr = _ZTV18CSTGMessageHandler + 8;
+}

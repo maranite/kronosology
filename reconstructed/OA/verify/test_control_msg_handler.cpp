@@ -648,6 +648,24 @@ int main()
 		check_eq("Run(): confirmed-empty body doesn't crash", 1, 1);
 	}
 
+	section("~CSTGControlMsgHandler (round 69): resets _vtablePtr to base's slot");
+	{
+		/* Reading `->_vtablePtr` AFTER an explicit dtor call is technically
+		 * UB (object lifetime already ended) -- GCC's optimizer proved
+		 * this at -O2 and compiled the dtor to a bare `ret`. Read the raw
+		 * bytes instead, matching the project's own established pattern
+		 * (test_managers.cpp's CSTGStreamingEvent dtor check). */
+		resetFixture();
+		unsigned char *buf = new unsigned char[sizeof(CSTGControlMsgHandler)];
+		CSTGControlMsgHandler *h = new (buf) CSTGControlMsgHandler();
+		check_eq("ctor installed own vtable slot",
+			 *(long *)buf, (long)(_ZTV21CSTGControlMsgHandler + 8));
+		h->~CSTGControlMsgHandler();
+		check_eq("dtor resets to shared CSTGMessageHandler base vtable slot",
+			 *(long *)buf, (long)(_ZTV18CSTGMessageHandler + 8));
+		delete[] buf;
+	}
+
 	printf("%s (%d failed)\n", g_fail ? "FAILED" : "PASSED", g_fail);
 	return g_fail ? 1 : 0;
 }

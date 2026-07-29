@@ -4897,3 +4897,57 @@ KDIR=/home/build/linux-kronos` build green. Manifest 4060 ->
 
 Real-HW test that would help: none identified -- pure in-memory field
 copy, no hardware I/O surface of its own.
+
+## Round 69 (OA.ko, solo, 2026-07-29): 3 `*MsgHandler` dtors + a real GCC dead-store-elimination gotcha
+
+Found via a `done>0 AND pending>0` manifest scan of `oa_functions.csv`
+(same discovery method used for Eva round 61 this session), sorted by
+average pending size ascending. Top hits: `CSTGFrontPanelMsgHandler`,
+`CSTGControlMsgHandler`, `CSTGCalibrationMsgHandler` -- each missing
+only their D0/D1 dtor pair (7 bytes, byte-identical bodies). All 3
+disassemble to the exact same shape: `*in_EAX = &PTR__CSTGMessageHandler_
+006c2300; return;` -- a reset of `_vtablePtr` back to the shared
+`CSTGMessageHandler` base class's own vtable slot. All 3 subclasses
+already document the established "install vs dispatch" rule (`_vtablePtr`
+modeled as a raw untyped pointer, never a real virtual dispatch target),
+so landing a dtor that writes into it is exactly the same low-risk shape
+as `CSTGStreamingEvent::~CSTGStreamingEvent()` (round 67).
+
+Added a new shared `_ZTV18CSTGMessageHandler[24]` placeholder (declared
+`weak` so each of the 3 `.cpp` TUs that include `oa_control_msg_handler.h`
+can carry its own definition without a multiple-definition link error),
+landed `~CSTGControlMsgHandler()`/`~CSTGCalibrationMsgHandler()`/
+`~CSTGFrontPanelMsgHandler()` all resetting `_vtablePtr` to this shared
+symbol's `+8` slot.
+
+**Real bug hit and fixed during KAT development, not in the reconstruction
+itself:** all 3 dtors initially compiled to a bare `ret` at `-O2` --
+confirmed via `objdump -d -C` on the test binary. Root cause: a plain
+`_vtablePtr = X;` write inside a destructor is dead-store-eliminated by
+GCC, because per the C++ object model the object's lifetime ends when
+the destructor returns, so the optimizer can prove no valid program can
+observe the write and removes it -- REGARDLESS of whether the test then
+reads the "same" memory through a raw pointer afterward (that read is
+itself UB, which is exactly what let GCC discard the store). This
+project already has the fix for this exact situation, used and passing
+in `CSTGStreamingEvent::~CSTGStreamingEvent()` (round 67): `*(volatile
+unsigned int *)this = ...` (or here, `*(void * volatile *)&_vtablePtr = ...`)
+-- the `volatile` qualifier disables the optimization. Re-verified with
+`objdump` that all 3 dtors now emit a real store instruction after the
+fix.
+
+Real host KAT (`test_control_msg_handler.cpp`/`test_calibration_msg_
+handler.cpp`/`test_front_panel_msg_handler.cpp`, one new 2-check section
+each: ctor installs its own class's vtable slot, dtor resets to the
+shared base's slot -- reading via a raw pointer cast to the freshly
+`new`'d buffer, matching the established `CSTGStreamingEvent` KAT
+pattern, not a named local or `->_vtablePtr` member access). `make
+verify` full suite green (exit 0), zero regressions. Real `make ko-clean
+&& make ko KDIR=/home/build/linux-kronos` build green. Manifest 4061 ->
+4067/21,689 (18.751%) (+6: each dtor's C++ body auto-credits both its
+D0/D1 manifest rows, matching this project's established name-based
+matching behavior).
+
+Real-HW test that would help: none identified -- `_vtablePtr` here is
+confirmed install-only and never dispatched through anywhere in this
+project or on real hardware per the standing "install vs dispatch" rule.
