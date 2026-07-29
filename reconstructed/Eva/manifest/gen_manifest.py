@@ -4397,6 +4397,20 @@ RECONSTRUCTED = {
     "0830d990",  # CDDriverIO::ExecuteCommand(EMsgTypScsi, SDriverIOPbuf*)
     "0830d6e0",  # CDDriverIO::scsi_req_sense(EDevice_Id)
     "08e1c120",  # USTGAPIControl::SysLogPrintf(char const*, ...)
+    # -- round 53 (2026-07-29, solo): CPcgSaveInfo 13-method batch --
+    "0838eca0",  # CPcgSaveInfo::CPcgSaveInfo()
+    "0838fa30",  # CPcgSaveInfo::Clear(CPcgSaveInfo&)
+    "0838ffd0",  # CPcgSaveInfo::HasNothingToSave()
+    "0838f970",  # CPcgSaveInfo::Compare(CPcgSaveInfo&)
+    "0838eb60",  # CPcgSaveInfo::ProcessEndian()
+    "0838ed00",  # CPcgSaveInfo::setsaveprogbank(int,int,int,int,int,int)
+    "0838ee80",  # CPcgSaveInfo::setsavecombibank(int,int,int,int,int,int,int)
+    "0838ef80",  # CPcgSaveInfo::setsavedkitbank(int)
+    "0838f090",  # CPcgSaveInfo::setsavewseqbank(int)
+    "0838ed60",  # CPcgSaveInfo::setsaveprogbank_exb(14 ints)
+    "0838eef0",  # CPcgSaveInfo::setsavecombibank_exb(7 ints)
+    "0838efa0",  # CPcgSaveInfo::setsavedkitbank_exb(14 ints)
+    "0838f0b0",  # CPcgSaveInfo::setsavewseqbank_exb(14 ints)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

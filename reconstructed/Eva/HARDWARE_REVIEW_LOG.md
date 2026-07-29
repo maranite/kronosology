@@ -2345,3 +2345,58 @@ should know they exist and are untested/unmodeled, not silently absent.
   byte offsets (`+0x8`/`+0xc`.../`+0x20`) used throughout this whole
   cluster, and to properly recover the 6 "Could not recover
   jumptable" methods deferred above.
+
+## Round 53 (Eva, solo, 2026-07-29): CPcgSaveInfo 13-method batch
+
+Fresh cluster: `CPcgSaveInfo`, a real class (30 `nm -C` methods
+total) that tracks which PCG (Program/Combi/Global) bank types are
+selected for save/export -- found while surveying `CFilePcg`'s own
+`calcsizesaveXxx` family (which reads this class byte-for-byte;
+`CFilePcg` itself deferred, see below).
+
+Landed 13 of the 30 methods -- the ctor, `Clear`, `HasNothingToSave`,
+`Compare`, `ProcessEndian`, and all 8 `setsaveXxxbank`/
+`setsaveXxxbank_exb` variants -- after individually confirming each
+has NO dependency on the class's real compiler-generated switch/jump
+tables (`CSWTCH_128`/`131`/`134`/`137`). Real struct layout
+cross-validated by 5+ independent methods all agreeing on the same
+offsets: 4 dual-`ushort` bank bitmask pairs at +0x00/+0x04 (prog),
++0x08/+0x0c (combi), +0x10/+0x14 (dkit), +0x18/+0x1c (wseq), plus 3
+real flag bytes (+0x20/+0x21/+0x23) and a dword tail field (+0x24).
+`Compare()`'s own 4-byte `& 0xff00ffff` mask on the +0x20 word
+independently PROVES a real, intentionally-excluded byte exists at
++0x22 -- not guessed, derived from the ground truth's own masking.
+
+DEFERRED, 2 reasons (17 of 30 methods): `HasSaveXxxBankInfo`/
+`SetSaveXxxBankInfo`/`ClearExceptAppointSaveXxxBankInfo`/
+`ClearSaveXxxBankInfo` (16 methods, 4 bank types x 4 operations) all
+index into the same real `CSWTCH_*` jump tables whose actual
+`.rodata` contents aren't cheaply recoverable from the available
+export data -- deferred rather than guessing per-enumerator mask
+values. `getsaveitem()` (1974B) is far larger than anything else in
+the class and genuinely deep, not attempted this pass.
+
+Also surveyed `CFilePcg`'s own `calcsizesaveXxx` family (12 methods)
+as a candidate for this round -- only 2 are fully self-contained
+(`calcsizesaveglobal`, `calcsizesavesetlistextended`, both already
+read but not yet landed) and 2 more (`calcsizesavedkit`/
+`calcsizesavewseq`) depend only on `CBitMaskL::getbit` (already
+reconstructed); the rest need `CChunkFileBase::
+GetSizeOfMultiBankChunk`, `CStorage::GetInstance`, and 4 unreconstructed
+`CPcgSaveInfoXxx::ConvertInfoXxxBankToEXxxBank` helper classes --
+noted as a good future-round target once those land.
+
+Real host KAT (23 checks, new `verify/test_pcg_save_info.cpp`).
+Caught and fixed 2 test-authoring bugs during this round: an
+assumed-would-differ dkit-bank comparison that didn't actually flip
+any bit (the ctor's own default mask already had that bit set), and
+a `Clear()` test whose "mask" object was built from a freshly-
+constructed `CPcgSaveInfo` (nonzero ctor defaults) instead of an
+all-zero one, silently changing which bits the test was actually
+exercising -- both fixed by using a zero-initialized buffer for
+mask/target objects where the test needs to isolate a single bit.
+`make verify` full suite green (real `-m32` build), zero
+regressions. Eva manifest 3091 -> 3104/37,795 (8.213%).
+
+Real-HW test that would help: none identified -- pure in-memory
+bitmask accessor logic, no hardware I/O surface of its own.
