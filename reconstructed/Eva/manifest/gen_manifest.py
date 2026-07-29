@@ -3889,6 +3889,61 @@ RECONSTRUCTED = {
     "08d67960",  # CSmplMemManager::refreshhdfreesize(EDevice_Id)
     "08d67990",  # CSmplMemManager::gethdfreesize()
     "08d679c0",  # CSmplMemManager::dechdfreesize(unsigned long)
+
+    # 2026-07-29: CChunkRootBase/CChunkRootWithSeek/CChunkRootWithSeekWithCRC +
+    # CCrc32 (chunk_root_family.h/.cpp) -- the "index/seek/CRC on top of
+    # chunked I/O" layer chunk_family.h's own header comment flagged as the
+    # natural next batch. CChunkRootWithSeek::BuildSubChunkIndex() (08b2c60)
+    # stays "pending" -- only its fast-path guards are real, the deep
+    # eRead-mode body is deferred (needs CImageStr, out of scope this batch).
+    "080ad6f0",  # CChunkRootBase::PreClose()
+    "080ad700",  # CChunkRootBase::PostClose()
+    "080ad720",  # CChunkRootBase::MediaCheck()
+    "080ad830",  # CChunkRootBase::Close()
+    "080ad8c0",  # CChunkRootBase::OnWriteLenAndFlags(unsigned long, unsigned long, unsigned long, unsigned char)
+    "080ad980",  # CChunkRootBase::Init()
+    "080ada60",  # CChunkRootBase::~CChunkRootBase()
+    "080adba0",  # CChunkRootBase::~CChunkRootBase()
+    "080b1740",  # CChunkRootBase::CChunkRootBase(SChkHeader const&)
+    "080b1800",  # CChunkRootBase::CChunkRootBase()
+    "080b1850",  # CChunkRootBase::CloseStream()
+    "080b1890",  # CChunkRootBase::ResetPath()
+    "080b18c0",  # CChunkRootBase::SetPath(char const*)
+    "080b1970",  # CChunkRootBase::OpenStreamInWrite()
+    "080b1b30",  # CChunkRootBase::OpenStreamInRead()
+    "08185200",  # CChunkRootBase::GetRelSonNumber() const
+    "08185220",  # CChunkRootBase::GetFather()
+    "08185260",  # CChunkRootBase::SetFather(CChunkBase*)
+    "081852a0",  # CChunkRootBase::SetRankNumber(unsigned int)
+    "081852e0",  # CChunkRootBase::OnSetInfo(CChunkInfoItem*)
+    "080b2720",  # CChunkRootWithSeek::ExcludeFromIndex(SIdVRF)
+    "080b2730",  # CChunkRootWithSeek::GetNumByteAfterIndex() const
+    "080b2740",  # CChunkRootWithSeek::GetNextSubChunk(CChunk*&)
+    "080b27d0",  # CChunkRootWithSeek::Init()
+    "080b27e0",  # CChunkRootWithSeek::PostClose()
+    "080b27f0",  # CChunkRootWithSeek::~CChunkRootWithSeek()
+    "080b2850",  # CChunkRootWithSeek::~CChunkRootWithSeek()
+    "080b28c0",  # CChunkRootWithSeek::CChunkRootWithSeek(SChkHeader const&)
+    "080b2960",  # CChunkRootWithSeek::CChunkRootWithSeek()
+    "080b29f0",  # CChunkRootWithSeek::ComputeIndexDataSize(unsigned long)
+    "080b2a30",  # CChunkRootWithSeek::AddSubChunk(CChunk*&, SIdVRF)
+    "080b2af0",  # CChunkRootWithSeek::CopySubChunkIndex(TObjArray<unsigned long> const&)
+    "080b34e0",  # CChunkRootWithSeek::GetSizeWhenRewrite()
+    "080b3550",  # CChunkRootWithSeek::SeekToSubChunk(unsigned int)
+    "080b3650",  # CChunkRootWithSeek::PreClose()
+    "080b39a0",  # CChunkRootWithSeekWithCRC::ExcludeFromIndex(SIdVRF)
+    "080b3a00",  # CChunkRootWithSeekWithCRC::PreClose()
+    "080b3b00",  # CChunkRootWithSeekWithCRC::GetNumByteAfterIndex() const
+    "080b3b40",  # CChunkRootWithSeekWithCRC::~CChunkRootWithSeekWithCRC()
+    "080b3b60",  # CChunkRootWithSeekWithCRC::~CChunkRootWithSeekWithCRC()
+    "080b3bb0",  # CChunkRootWithSeekWithCRC::CChunkRootWithSeekWithCRC(SChkHeader const&, int)
+    "080b3c20",  # CChunkRootWithSeekWithCRC::CChunkRootWithSeekWithCRC()
+    "080b3c50",  # CChunkRootWithSeekWithCRC::GetCRC(unsigned long&, unsigned long&, int&, CChunkCallback const*)
+    "080b4280",  # CChunkRootWithSeekWithCRC::PostClose()
+    "080b43c0",  # CChunkRootWithSeekWithCRC::CheckCRC(CChunkCallback const*)
+    "080b4460",  # CChunkRootWithSeekWithCRC::HasCRCSubChunk() const
+    "080b4890",  # CCrc32::CCrc32(unsigned long, unsigned long)
+    "080b4930",  # CCrc32::PutBuffer(unsigned char*, unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

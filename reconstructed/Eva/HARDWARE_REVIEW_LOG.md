@@ -1426,3 +1426,41 @@ should know they exist and are untested/unmodeled, not silently absent.
   pass's own agent-memory note). Full host `make verify` green (2676 checks
   across all binaries, 0 failures); new `verify/test_note_tracer.cpp` (37
   checks). Eva manifest 2143 -> 2167/37,795 (5.734%).
+
+- **`CBackupChunk` (34 methods) / `CImageStr` (11 methods)** — deferred
+  2026-07-29 while reconstructing `CChunkRootBase`/`CChunkRootWithSeek`/
+  `CChunkRootWithSeekWithCRC` (`chunk_root_family.h`/`.cpp`), the "index/
+  seek/CRC on top of chunked I/O" layer `chunk_family.h`'s own header
+  comment flagged as the natural next batch. A real vtable byte-dump
+  (`.rodata+0x8e84d60`/`0x8e84e00`/`0x8e85000`/`0x8e850a0`) CORRECTED that
+  header's own prior speculative guess ("CBackupChunk is CChunk-derived,
+  vtable-diffed byte-for-byte against CChunk's own") -- the real hierarchy
+  is a genuine linear chain, `CChunkBase -> CChunkRootBase ->
+  CChunkRootWithSeek -> CChunkRootWithSeekWithCRC -> CBackupChunk`, confirmed
+  because `CBackupChunk`'s own vtable slot 25 (`GetNumByteAfterIndex`) is the
+  LITERAL SAME function pointer as `CChunkRootWithSeekWithCRC`'s own
+  (inherited unchanged, only possible with real inheritance). `CBackupChunk`
+  itself stays out of scope: every one of its 8 ctor overloads plus
+  `GetNextPackSize`/`ReadNextPack`/`SkipNextPack`/`WriteNextPack`/
+  `WriteTailPack` calls a real, out-of-scope proprietary compression codec
+  (`COComp`, dispatching into `CBarc`'s own ~3KB real LZ-style
+  `m_ifnBCompress`/`m_ifnBDeCompress` routines, confirmed via a direct
+  call-xref trace of the actual disassembly, not a size guess) -- a
+  genuinely separate DSP-like subsystem. `CImageStr` (a memory-backed
+  `CStream`, `stream_family.h`'s own sibling family) is the one remaining
+  dependency of `CChunkRootWithSeek::BuildSubChunkIndex()`'s deep read-mode
+  body (parsing a previously-written index sub-chunk back off disk); its own
+  `GetLength()`/`Tell()`/`Open()`/`Seek()` overrides implement a genuinely
+  distinct mode-dependent windowing scheme this session did not have budget
+  to independently trace. `BuildSubChunkIndex()` itself IS reconstructed for
+  its two real, faithful fast-path guards (`mStatus!=eRead -> false`;
+  already-built -> `true`); only the deep eRead-mode body is stubbed
+  (conservative `false`, correct/safe for every real caller in this batch --
+  none can silently corrupt data on that return). `CCrc32`/`GetCRC()`/
+  `PostClose()`'s own CRC-patch-back ARE fully reconstructed and exercised by
+  a real Close()-round-trip KAT (`verify/test_chunk_root_family.cpp`).
+  Real callers of this whole family (a "SaveFile"-shaped high-level entry
+  point, presumably somewhere in the still out-of-scope
+  `CLoadSoundFontMgr`/`CPCMManager`/`CDiskUtil` cluster or a sibling) not
+  independently traced this session either. Eva manifest 2652 -> 2700/37,795
+  (7.144%), commit pending.

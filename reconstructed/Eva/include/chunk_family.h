@@ -333,13 +333,15 @@ public:
 	/* .text+0x0804d050, real body: return mRelSonNestLev + 1. */
 	unsigned int GetRelSonNestLev() const { return (unsigned int)mRelSonNestLev + 1; }
 
-	/* .text+0x080aea20. Real body: reads mParent's own status-ish field
-	 * (through the SAME this-adjusted secondary vtable view used by the
-	 * position query) and maps it onto mStatus: parent==eWrite -> self=eRead;
-	 * parent==eClosed or eError -> self=eWrite; anything else -> soft-assert
-	 * (Chunk.h 0x1a6=422), self=eError. Returns the new mStatus. Real deep
-	 * "why" of this specific remap not independently confirmed -- transcribed
-	 * exactly as the real branch structure, not reinterpreted.
+	/* .text+0x080aea20. UPGRADED 2026-07-29 from an earlier, less certain
+	 * reading (chunk_root_family.cpp's own GetCRC() is this method's first
+	 * real caller): reads mParent's own mAccessMode (CStream+0x18, a plain
+	 * field read, NOT a virtual call -- re-confirmed directly against the
+	 * disassembly) and maps it onto mStatus: mode==eRead(1) -> self=eRead;
+	 * mode==eWrite(2) or eReadWrite(3) -> self=eWrite; anything else ->
+	 * soft-assert (Chunk.cpp 0x1a6=422), self=eError. Returns the new
+	 * mStatus. Same mode-based remap OpenStreamInRead()/OpenStreamInWrite()
+	 * (chunk_root_family.h) independently derive inline for themselves.
 	 */
 	virtual int SetStatus();
 

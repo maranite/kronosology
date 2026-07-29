@@ -31,6 +31,7 @@ void CChunkBase::ApiAssertChunkH(int line) { ApiAssertImpl("Chunk.h", line); }
 void CChunkBase::ApiAssertFileChunkCpp(int line) { ApiAssertImpl("FileChunk.cpp", line); }
 
 static void ApiAssertChunkInfoCpp(int line) { ApiAssertImpl("ChunkInfo.cpp", line); }
+static void ApiAssertChunkCpp(int line) { ApiAssertImpl("Chunk.cpp", line); }
 
 /* ---------------------------------------------------------------------- *
  * CChunkBase
@@ -342,14 +343,26 @@ int CChunkBase::SetStatus()
 		ApiAssertChunkH(0xbb);
 		return mStatus;
 	}
-	/* Real ground truth reads mParent's own status-ish field through the SAME
-	 * this-adjusted secondary view used elsewhere. Modeled here via
-	 * mParent's own Tell()-derived state is not applicable -- mParent is a
-	 * plain CStream, which has no "status" concept of its own in this
-	 * project's model. This method has no reconstructed caller in this batch
-	 * (deferred territory: CBackupChunk/CChunkRootWithSeek); kept as a
-	 * documented but unexercised passthrough returning mStatus unchanged.
+	/* UPGRADED 2026-07-29 (chunk_root_family.cpp's own GetCRC() is this
+	 * method's first real caller) from a documented-but-unexercised
+	 * passthrough to a real implementation, now independently re-derived
+	 * from the actual disassembly (.text+0x080aea20) rather than the
+	 * earlier, less certain "status-ish field" guess: reads mParent's own
+	 * mAccessMode (CStream+0x18) directly (a plain field read, NOT a
+	 * virtual call) and remaps it onto mStatus -- mode==eRead(1) -> self
+	 * eRead; mode==eWrite(2) or eReadWrite(3) -> self eWrite; anything else
+	 * -> soft-assert (Chunk.cpp 0x1a6), self eError. Returns the new
+	 * mStatus, same as the real ground truth.
 	 */
+	int mode = mParent->GetAccessMode();
+	if (mode == 1) {
+		mStatus = eRead;
+	} else if (mode == 2 || mode == 3) {
+		mStatus = eWrite;
+	} else {
+		mStatus = eError;
+		ApiAssertChunkCpp(0x1a6);
+	}
 	return mStatus;
 }
 

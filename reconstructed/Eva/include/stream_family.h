@@ -224,6 +224,18 @@ public:
 	unsigned long GetLastOpLen() const volatile { return mLastOpLen; }
 	bool HasIoError() const volatile { return mUnknown10 != 0; }
 
+	/* Added 2026-07-29 for chunk_root_family.h's own CChunkRootBase family --
+	 * CChunkRootBase::Close()/CloseStream()/OpenStreamInRead()/
+	 * OpenStreamInWrite() all read mParent's own mState/mAccessMode fields
+	 * directly (through the same this-adjusted CStream-view pointer used
+	 * everywhere else in this project) to decide whether the underlying
+	 * stream is currently open, and in which mode. Same "expose the field the
+	 * real caller reads" convention as GetLastOpLen()/HasIoError() above.
+	 */
+	bool IsOpenForRead() const volatile { return mState == 4; }
+	bool IsOpenForWrite() const volatile { return mState == 5; }
+	int GetAccessMode() const volatile { return mAccessMode; }
+
 protected:
 	CStream() : mPosition(0), mLength(0), mLastOpLen(0), mUnknown10(0), mState(0),
 		mAccessMode(0) {}
