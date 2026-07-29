@@ -4436,7 +4436,7 @@ RECONSTRUCTED = {
     "083c6090",  # CFileOperation::GetResultBlocknoGetcurpos(EAudioStatusMMC*,uchar*)
     "083d0810",  # CFileOperation::EnableFileCache(int)
     # -- round 55 (2026-07-29, solo): CFileMan (6) / CResMan (4) / IsOnDemand batch --
-    "080fc760",  # CFileMan::GetFile(int)
+    "080fc8a0",  # CFileMan::GetFile(int)
     "080fc780",  # CFileMan::GetUnitForModify(int)
     "080fc9c0",  # CFileMan::GetIOCTLDev(int)
     "080fc980",  # CFileMan::RemoveIOCTLDev(int)
