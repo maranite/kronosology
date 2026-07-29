@@ -4793,3 +4793,42 @@ green. Manifest 4043 -> 4046/21,689 (18.655%).
 Real-HW test that would help: none identified -- pure field writes
 gated on already-modeled global state, no hardware I/O surface of
 their own.
+
+## Round 66 (OA.ko, solo, 2026-07-29): 11-method confirmed-trivial sweep across 5 classes
+
+Surveyed classes with only a handful of pending methods left (mostly-
+complete classes are cheaper to finish than to open a fresh one) --
+`CFileStream`/`CSTGAudioDriverInterface`/`CSTGLFO` each had exactly 1
+pending method, but all 3 hit red flags (raw vtable dispatch into an
+unconfirmed slot for the first two; an unresolved, unnamed
+`func_0x00141724` callee plus deep linked-list traversal for
+`CSTGLFO::ProcessSubRate`) and stayed deferred.
+
+Instead landed 11 confirmed genuinely-trivial methods spread across 5
+different classes, all either a bare `ret` (1-3 byte bodies) or an
+unconditional `return 0`/`return false`, cc=`__cdecl` in ground truth
+despite class-scoped doxygen names (i.e. real `this`-ignoring,
+effectively-static functions) -- `CSTGAudioInputMixerBase::ShouldMute`,
+`CSTGLFOBase::AdvanceFadeEnv`/`ShouldDelayCompensateRestart` (the
+latter is a DISTINCT real function from the already-reconstructed
+`CSTGLFO::ShouldDelayCompensateRestart`, a derived-class override that
+does real work -- both genuinely exist at different addresses, not a
+naming collision), `CSTGAudioEvent::HandleFileOpened/HandleFileClosed/
+HandleErrorOpening/HandleErrorReading/HandleErrorWriting` (5 methods),
+`CSTGMidiPortManager::DumpQueueDepths`, and
+`CSTGStreamingFileReader::~CSTGStreamingFileReader`. Several of these
+(`AdvanceFadeEnv`, `DumpQueueDepths`) have a doxygen-documented
+parameter list that disagrees with their own decompiled `(void)`
+signature -- harmless given the body is confirmed empty regardless of
+what it's declared to take, same precedent as `CSTGString::InitVoice`.
+
+Real host KAT (11 new checks spread across 5 existing test files --
+`test_audio_input_mixer.cpp`/`test_lfo_component.cpp`/
+`test_managers.cpp`/`test_midi_port_manager.cpp`/
+`test_playback_event_methods.cpp`). `make verify` full suite green
+(all targets, exit 0), zero regressions. Real `make ko-clean && make
+ko KDIR=/home/build/linux-kronos` build green. Manifest 4046 ->
+4057/21,689 (18.705%).
+
+Real-HW test that would help: none identified -- pure no-op/constant-
+return stubs, no hardware I/O surface of their own.

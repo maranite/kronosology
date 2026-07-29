@@ -377,3 +377,9 @@ CSTGMidiPortManager::~CSTGMidiPortManager()
 
 	sInstance = 0;
 }
+
+/* Round 66 (solo): confirmed genuinely empty (bare `ret`), ignores its
+ * own (unused, per ground truth) label parameter. */
+void CSTGMidiPortManager::DumpQueueDepths(const char *)
+{
+}

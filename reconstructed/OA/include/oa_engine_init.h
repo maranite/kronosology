@@ -2879,6 +2879,31 @@ struct CSTGLFOBase {
 	void Restart(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, bool keySync);
 	void UpdateRandomValue(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice);
 	void SetSubRateParamsOnRestart(STGLFOSubRateParamsSlice *slice, CSTGVoice *voice, bool arg);
+
+	/* Round 66 (solo): 2 further confirmed-trivial CSTGLFOBase methods,
+	 * both cc=__cdecl in ground truth (not __thiscall) despite the class-
+	 * scoped doxygen name -- same "effectively static, ignores this"
+	 * shape as the 4 static methods above. AdvanceFadeEnv's own doxygen
+	 * signature (2 explicit params) disagrees with its own decompiled
+	 * body (`(void)`, 1-byte genuinely-empty function) -- an internally-
+	 * inconsistent-signature case this project treats as harmless when
+	 * the body is confirmed empty regardless of what it's declared to
+	 * take (same precedent as CSTGString::InitVoice).
+	 */
+	static void AdvanceFadeEnv(STGLFOSubRateParamsSlice *slice, unsigned int arg);
+
+	/* NOTE: this is `CSTGLFOBase::ShouldDelayCompensateRestart`
+	 * (.text+0x5a69c0, always returns false) -- a DISTINCT real
+	 * function from the already-reconstructed `CSTGLFO::
+	 * ShouldDelayCompensateRestart(CSTGVoice*)` (oa_lfo.h,
+	 * lfo_component.cpp, real body `return GetKeySyncMasterLFO(voice)
+	 * == nullptr;`). Both are genuinely real, different addresses,
+	 * different classes (CSTGLFO derives from CSTGLFOBase per this
+	 * class's own header note above) -- the derived class's own
+	 * override shadows this trivial base version, not a naming
+	 * collision or a mistake in either reconstruction.
+	 */
+	static bool ShouldDelayCompensateRestart(CSTGVoice *voice);
 };
 struct CSTGStepSeqBase { static void InitializeQuad(STGStepSeqSubRateParams *quad); };
 
@@ -2998,6 +3023,18 @@ extern "C" unsigned char _ZTV17CSTGPlaybackEvent[];
 struct CSTGAudioEvent {
 	CSTGAudioEvent();
 	void Reset();
+
+	/* Round 66 (solo): 5 confirmed genuinely-empty 1-byte functions
+	 * (real body: a bare `ret`). All cc=__cdecl in ground truth despite
+	 * the class-scoped doxygen name (no explicit params either) --
+	 * effectively static, same "ignores this" shape as
+	 * CSTGAudioInputMixerBase::ShouldMute above.
+	 */
+	static void HandleFileOpened();
+	static void HandleFileClosed();
+	static void HandleErrorOpening();
+	static void HandleErrorReading();
+	static void HandleErrorWriting();
 	unsigned int  vtablePtr32;	/* +0x0, packed 32-bit vtable pointer (see ctor) */
 	unsigned char _gap4[4];		/* +0x4..+0x7, not touched by ctor */
 	unsigned int  field8;		/* +0x8, confirmed zeroed */

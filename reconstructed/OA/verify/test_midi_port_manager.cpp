@@ -314,6 +314,13 @@ int main(void)
 		check_eq("fieldAt(0x8) == (int)(0.2*cyclesPerTick)",  (unsigned int)*(int *)(portMgrBuf+0x8), 500);
 	}
 
+	printf("[round 66] CSTGMidiPortManager::DumpQueueDepths\n");
+	{
+		CSTGMidiPortManager::DumpQueueDepths("test-label");
+		CSTGMidiPortManager::DumpQueueDepths(0);
+		check_eq("DumpQueueDepths: confirmed-empty body doesn't crash on either arg", 1, 1);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

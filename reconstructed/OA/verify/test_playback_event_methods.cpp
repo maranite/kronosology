@@ -265,6 +265,16 @@ int main(void)
 			 *(unsigned int *)evtBuf, ToU32(_ZTV14CSTGAudioEvent + 8));
 	}
 
+	printf("[round 66] CSTGAudioEvent's 5 confirmed-empty Handle* methods\n");
+	{
+		CSTGAudioEvent::HandleFileOpened();
+		CSTGAudioEvent::HandleFileClosed();
+		CSTGAudioEvent::HandleErrorOpening();
+		CSTGAudioEvent::HandleErrorReading();
+		CSTGAudioEvent::HandleErrorWriting();
+		check_eq("all 5 confirmed-empty bodies don't crash", 1, 1);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("FAILED: %d check(s)\n", g_fail);

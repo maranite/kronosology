@@ -2401,6 +2401,15 @@ public:
 	 * per-entry `+0x60` overwrites.
 	 */
 	void SetSendBuses();
+
+	/* .text+0x5a6310, 3 bytes (round 66, solo). Confirmed real: `const`
+	 * per its own doxygen comment, ignores its own `unsigned int` param
+	 * entirely and doesn't touch `this` -- ground truth's own cc=__cdecl
+	 * (not __thiscall) confirms it's effectively static, same
+	 * "ignores this" convention already established elsewhere in this
+	 * project. Always returns false.
+	 */
+	static bool ShouldMute(unsigned int index);
 };
 
 /*

@@ -387,6 +387,11 @@ CSTGStreamingFileReader::CSTGStreamingFileReader()
 	*(unsigned int *)(p + 0x1c) = 0;
 }
 
+/* Round 66 (solo): confirmed genuinely empty (bare `ret`) real destructor. */
+CSTGStreamingFileReader::~CSTGStreamingFileReader()
+{
+}
+
 CSTGFileCloser::CSTGFileCloser()
 {
 	unsigned char *p = (unsigned char *)this;

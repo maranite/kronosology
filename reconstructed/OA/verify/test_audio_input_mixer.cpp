@@ -366,6 +366,13 @@ int main(void)
 			 *(unsigned int *)(raw + 0x14), want14_1);
 	}
 
+	{
+		printf("[round 66] CSTGAudioInputMixerBase::ShouldMute\n");
+		check_eq("ShouldMute(0) -> false", (unsigned int)CSTGAudioInputMixerBase::ShouldMute(0), 0u);
+		check_eq("ShouldMute(99) -> false (ignores index)",
+			 (unsigned int)CSTGAudioInputMixerBase::ShouldMute(99), 0u);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

@@ -1409,6 +1409,12 @@ public:
 	void ProcessCommandComplete(CSTGStreamingEvent *event, long param);
 	void ProcessCommandFilledBytes(CSTGStreamingEvent *event, long param);
 	void ProcessCommandError(CSTGStreamingEvent *event, long param);
+
+	/* .text+0x12aa00, 1 byte (round 66, solo). Confirmed genuinely
+	 * empty (bare `ret`) real destructor.
+	 */
+	~CSTGStreamingFileReader();
+
 	unsigned char _unrecovered[56];	/* confirmed size; ctor touches +0x00..+0x1c */
 };
 
@@ -2073,6 +2079,14 @@ public:
 	 * not vtable dispatch at all.
 	 */
 	void NotifyNKS4TestMode();
+
+	/* .text+0x105810, 1 byte (round 66, solo). Confirmed genuinely
+	 * empty (bare `ret`) despite its own doxygen-documented
+	 * `(char const*)` parameter -- cc=__cdecl, effectively static, same
+	 * "harmless unused-param mismatch on a confirmed-empty body"
+	 * precedent as CSTGLFOBase::AdvanceFadeEnv.
+	 */
+	static void DumpQueueDepths(const char *label);
 };
 
 /*

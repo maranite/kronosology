@@ -739,3 +739,11 @@ unsigned char *CSTGAudioInputMixerBase::Initialize(unsigned int count)
 	}
 	return mixerArr;
 }
+
+/* Round 66 (solo): confirmed genuinely trivial -- always returns false,
+ * ignores its own (unused, per ground truth) index parameter and doesn't
+ * touch `this` at all. */
+bool CSTGAudioInputMixerBase::ShouldMute(unsigned int)
+{
+	return false;
+}

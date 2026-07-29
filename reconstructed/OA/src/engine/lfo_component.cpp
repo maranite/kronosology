@@ -1244,3 +1244,14 @@ void CSTGLFO::ToneAdjustShape(CSTGPatchMessageContext &ctx, STGConvertedParam &n
 		entry = *reinterpret_cast<void **>(entry);
 	}
 }
+
+/* Round 66 (solo): 2 further confirmed-trivial CSTGLFOBase methods -- see
+ * oa_engine_init.h's own header comment above these 2 declarations. */
+void CSTGLFOBase::AdvanceFadeEnv(STGLFOSubRateParamsSlice *, unsigned int)
+{
+}
+
+bool CSTGLFOBase::ShouldDelayCompensateRestart(CSTGVoice *)
+{
+	return false;
+}

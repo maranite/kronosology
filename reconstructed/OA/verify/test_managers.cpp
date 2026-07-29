@@ -1700,6 +1700,14 @@ int main(void)
 		delete[] fcBuf;
 	}
 
+	printf("[round 66] CSTGStreamingFileReader::~CSTGStreamingFileReader\n");
+	{
+		unsigned char raw[sizeof(CSTGStreamingFileReader)];
+		CSTGStreamingFileReader *r = new (raw) CSTGStreamingFileReader();
+		r->~CSTGStreamingFileReader();
+		check_eq("~CSTGStreamingFileReader: confirmed-empty body doesn't crash", 1, 1);
+	}
+
 	printf("=====================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

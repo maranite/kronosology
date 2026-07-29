@@ -347,3 +347,25 @@ CSTGPlaybackEvent::~CSTGPlaybackEvent()
 {
 	*(volatile unsigned int *)this = ToU32(_ZTV14CSTGAudioEvent + 8);
 }
+
+/* Round 66 (solo): 5 confirmed genuinely-empty CSTGAudioEvent methods --
+ * see oa_engine_init.h's own header comment above these 5 declarations. */
+void CSTGAudioEvent::HandleFileOpened()
+{
+}
+
+void CSTGAudioEvent::HandleFileClosed()
+{
+}
+
+void CSTGAudioEvent::HandleErrorOpening()
+{
+}
+
+void CSTGAudioEvent::HandleErrorReading()
+{
+}
+
+void CSTGAudioEvent::HandleErrorWriting()
+{
+}

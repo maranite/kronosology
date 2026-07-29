@@ -591,6 +591,19 @@ int main(void)
 		check_true("ShouldDelayCompensateRestart: true when no master", lfo.ShouldDelayCompensateRestart(voice));
 	}
 
+	printf("[round 66] CSTGLFOBase::AdvanceFadeEnv/ShouldDelayCompensateRestart\n");
+	{
+		STGLFOSubRateParamsSlice slice;
+		memset(&slice, 0xAB, sizeof(slice));
+		unsigned char before[sizeof(STGLFOSubRateParamsSlice)];
+		memcpy(before, &slice, sizeof(slice));
+		CSTGLFOBase::AdvanceFadeEnv(&slice, 5);
+		check_true("AdvanceFadeEnv: confirmed-empty body doesn't touch slice",
+			   memcmp(before, &slice, sizeof(slice)) == 0);
+		check_true("CSTGLFOBase::ShouldDelayCompensateRestart(nullptr) -> false (always)",
+			   CSTGLFOBase::ShouldDelayCompensateRestart(nullptr) == false);
+	}
+
 	printf("\n%s\n", g_fail ? "SOME CHECKS FAILED" : "all checks passed");
 	return g_fail ? 1 : 0;
 }
