@@ -131,6 +131,7 @@ OA-objs := src/auth/klm_manager.o \
            src/init/debug_marker.o \
            src/init/stgheap_init.o \
            src/init/shmemproc_init.o \
+           src/init/memorymod_procfileop.o \
            src/init/setup_global_resources.o \
            src/init/keybed_init.o \
            src/init/keybed_receive.o \
@@ -603,6 +604,7 @@ SRC := src/auth/klm_manager.cpp \
        src/init/init_module.cpp \
        src/init/stgheap_init.cpp \
        src/init/shmemproc_init.cpp \
+       src/init/memorymod_procfileop.cpp \
        src/init/setup_global_resources.cpp \
        src/init/keybed_init.cpp \
        src/init/keybed_receive.cpp \
@@ -669,7 +671,8 @@ OBJ := $(SRC:.cpp=.hostobj)
 TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/test_quad_list \
          verify/test_scale verify/test_new_delete verify/test_engine verify/test_managers \
          verify/test_global verify/test_init_module verify/test_stgheap_init \
-         verify/test_shmemproc_init verify/test_pcmmodproc_init verify/test_setup_global_resources \
+         verify/test_shmemproc_init verify/test_pcmmodproc_init verify/test_memorymod_procfileop \
+         verify/test_setup_global_resources \
          verify/test_keybed_init verify/test_keybed_receive verify/test_audio_start verify/test_rtfifo_init \
          verify/test_cpu_affinity verify/test_comport verify/test_comport_init \
          verify/test_global_ctor verify/test_engine_startup_bits \
@@ -878,6 +881,9 @@ verify/test_init_module: verify/test_init_module.cpp src/init/init_module.cpp in
 
 verify/test_stgheap_init: verify/test_stgheap_init.cpp src/init/stgheap_init.cpp include/oa_stgheap_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stgheap_init.cpp src/init/stgheap_init.cpp -o $@
+
+verify/test_memorymod_procfileop: verify/test_memorymod_procfileop.cpp src/init/memorymod_procfileop.cpp src/init/stgheap_init.cpp include/oa_memorymod_procfileop.h include/oa_stgheap_init.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_memorymod_procfileop.cpp src/init/memorymod_procfileop.cpp src/init/stgheap_init.cpp -o $@
 
 verify/test_shmemproc_init: verify/test_shmemproc_init.cpp src/init/shmemproc_init.cpp include/oa_shmemproc_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_shmemproc_init.cpp src/init/shmemproc_init.cpp -o $@

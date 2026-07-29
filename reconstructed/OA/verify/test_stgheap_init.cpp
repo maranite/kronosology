@@ -121,10 +121,17 @@ int main(void)
 	check_eq("sIORemapBase", stgheap_get_ioremap_base(), (unsigned long)(void *)sMappedRegion);
 	check_eq("CSTGHeapManager_Initialize base", g_heapInitBase, (unsigned long)(void *)sMappedRegion);
 	check_eq("CSTGHeapManager_Initialize size", g_heapInitSize, 0x00400000UL);
-	/* AlignedHeapBase = (mockHeapInitResult=mappedBase+0x40) - mappedBase
+	/* Round 46 naming fix: ground truth's REAL sAlignedHeapBase is the raw
+	 * CSTGHeapManager_Initialize() return value (mockHeapInitResult =
+	 * mappedBase+0x40 here) -- distinct from sPhysicalHeapBase below,
+	 * despite the final printk's own misleadingly-named format string
+	 * (see oa_stgheap_init.h's NAMING FIX note). */
+	check_eq("sAlignedHeapBase (raw)", stgheap_get_aligned_heap_base(),
+		 (unsigned long)(void *)sMappedRegion + 0x40);
+	/* sPhysicalHeapBase = (mockHeapInitResult=mappedBase+0x40) - mappedBase
 	 * + sPhysicalBankStart(final)=0x00401001 = 0x00401041 -- independent
 	 * of the actual malloc'd address. */
-	check_eq("AlignedHeapBase", stgheap_get_aligned_heap_base(), 0x00401041UL);
+	check_eq("sPhysicalHeapBase", stgheap_get_physical_heap_base(), 0x00401041UL);
 	check_eq("sHeapSize", stgheap_get_heap_size(), 0x1234UL);
 
 	/* Confirm the mapped region really was zeroed (spot-check first/last

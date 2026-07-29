@@ -3441,3 +3441,88 @@ Manifest 3539 -> 3540/21,689 (+1, 0 regressions).
 Real-HW test that would help: none identified — this is an internal
 KARMA-sequencer backup-record bookkeeping path with no directly
 observable audio/UI effect on its own.
+
+## MemoryModProcFileOp_{open,close,lseek,mmap,ioctl,write,read}, solo round 46 (2026-07-29)
+
+Continuation of solo mode. Pulled the 7-function `MemoryModProcFileOp_*`
+cluster from `/home/share/Decomp/oa_export` (a tight, self-contained
+`/proc` file-ops family, ~783 bytes total) — the real handlers behind a
+`.data`-resident named struct, `MemoryModProcFileOps` (`.data+0x6da8a0`).
+
+**Found while landing this**: `InitSharedMemProcInterface` (already
+reconstructed, `shmemproc_init.cpp`) wires `/proc/.shm`'s `proc_fops` to
+this SAME real `MemoryModProcFileOps` global — NOT the invented
+per-mode-page virtual stand-in that file's own header comment already
+flags as a documented software substitute. Cross-checking against
+`CSTGHandle::Access()`'s own already-reconstructed real call sequence
+(Eva's `stg_handle.cpp`) confirms the REAL protocol: `mode` is a literal
+`CSTGHeapManager` handle number, not an enum of fixed shared-memory
+kinds — `ioctl(fd,0x64,mode)`→`GetHandleOffset`, `ioctl(fd,0x65,mode)`→
+`GetHandleSize`, then `mmap()` computes a PHYSICAL address
+(`vm_pgoff*PAGE_SIZE + sPhysicalHeapBase`) and `remap_pfn_range()`s it
+directly — genuine zero-copy shared memory between OA.ko's kernel-side
+STG heap and Eva's userspace mapping of the SAME physical page. NOT
+swapped into `InitSharedMemProcInterface` this round: doing so needs the
+6 `CSTGHeapManager_*` alloc/free/resize/defragment/reserve callees (none
+reconstructed yet, declared here as genuinely unresolved externs) AND
+re-verifying kronos_vm boot, since the existing virtual stand-in is
+itself load-bearing for that exact scenario (see its own header
+comment). Left as a documented, deferred cross-reference for a future
+round, not silently dropped.
+
+Also found and fixed, incidentally: `stgheap_init.cpp`'s own
+`sAlignedHeapBase`/`sPhysicalHeapBase` naming bug (needed to get the
+right value into this batch's `mmap` formula) — ground truth has TWO
+distinct real globals here; an earlier pass named its single local after
+the misleading printk format string ("AlignedHeapBase") while actually
+computing and storing the OTHER global's (`sPhysicalHeapBase`) formula,
+leaving ground truth's real `sAlignedHeapBase` (the raw
+`CSTGHeapManager_Initialize()` return value) unmodeled under any name.
+Fixed: renamed accessor to match ground truth, added a new
+`stgheap_get_physical_heap_base()` accessor for the value this batch
+actually needs. Purely a naming fix — the printk's own real argument
+(`sPhysicalHeapBase`, confirmed directly in ground truth's own decompile,
+not the string's literal wording) is unchanged, so no behavioral
+regression.
+
+**Real bug caught by the KAT, not by inspection**: `MemoryModProcFileOp_mmap`'s
+first draft read `vm_start`/`vm_end`/`vm_page_prot` as `unsigned long`
+(8 bytes on this 64-bit host) instead of the real x86-32 target's 4-byte
+fields — silently reading garbage across adjacent struct fields. Caught
+when the host KAT's `remap_pfn_range` mock received nonsense
+addr/size/prot values; fixed to `unsigned int` reads, matching
+`file_io.cpp`'s own already-established host/target pointer-width
+caveat for exactly this bug class.
+
+**Inferred, not directly decompiled** (documented, not fabricated):
+`MemoryModProcFileOp_write`/`read`'s own `copy_from_user`/`copy_to_user`
+calls and `mmap`'s own `remap_pfn_range` call are each decompiled with
+FEWER visible arguments than their real Linux 2.6.32 prototypes take —
+Ghidra failed to recover every register-passed arg under this
+`-mregparm=3` build. The missing args (kernel-side `to`/`from` pointer =
+`sIORemapBase + f_pos`; `remap_pfn_range`'s `vma`/`addr`/`pfn`) are
+filled in from the well-known real kernel API contract, not guessed;
+every OTHER piece of control flow (the 64-bit-safe bounds check, the
+manual carry-preserving 64-bit `pos += count`, the exact ioctl case
+dispatch including which cases dereference `arg` as a pointer vs. use it
+as a raw integer) is a literal, unmodified transcription of the real
+decompile.
+
+Real host KAT (`verify/test_memorymod_procfileop.cpp`, 11 sections)
+covers open/close/all 3 lseek origins/lseek error paths/mmap success+
+failure/all 9 ioctl cases/write+read success and out-of-bounds paths
+(the OOB cases use a valid seek near the mocked heap's end whose COUNT
+then overflows — a direct out-of-bounds seek is itself rejected by
+lseek's own bounds check, exercised separately). `make verify` full
+suite green (223 targets, 0 failures), real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green, `nm OA.ko` confirms all 7
+function symbols plus `MemoryModProcFileOps` itself. Manifest 3540 ->
+3547/21,689 (+7, 0 regressions).
+
+Real-HW test that would help: none directly (this cluster isn't wired
+into any live proc entry yet), but a future round that DOES complete the
+`CSTGHeapManager_*` family and swaps it into `InitSharedMemProcInterface`
+should re-run the full kronos_vm boot-test sequence before trusting it —
+the existing virtual stand-in's own header comment documents the exact
+Eva-segfault-on-`/proc/.shm`-mmap regression a broken swap could
+reintroduce.

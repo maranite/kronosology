@@ -35,13 +35,20 @@ extern "C" __attribute__((regparm(0))) int printk(const char *fmt, ...);
 static unsigned long sInstalledRAM;
 static unsigned long sPhysicalBankStart;
 static unsigned long sIORemapBase;
+/* Ground truth's raw CSTGHeapManager_Initialize() return value (0x6f58a8,
+ * see oa_stgheap_init.h's own NAMING FIX note). */
 static unsigned long sAlignedHeapBase;
+/* Ground truth's sAlignedHeapBase - sIORemapBase + sPhysicalBankStart
+ * (0x6f58ac) -- a DISTINCT real global, not the same slot as the one
+ * above despite the final printk's misleading "AlignedHeapBase" string. */
+static unsigned long sPhysicalHeapBase;
 static unsigned long sHeapSize;
 
 unsigned long stgheap_get_installed_ram(void) { return sInstalledRAM; }
 unsigned long stgheap_get_physical_bank_start(void) { return sPhysicalBankStart; }
 unsigned long stgheap_get_ioremap_base(void) { return sIORemapBase; }
 unsigned long stgheap_get_aligned_heap_base(void) { return sAlignedHeapBase; }
+unsigned long stgheap_get_physical_heap_base(void) { return sPhysicalHeapBase; }
 unsigned long stgheap_get_heap_size(void) { return sHeapSize; }
 
 int InitializeSTGHeap(void)
@@ -256,9 +263,13 @@ int InitializeSTGHeap(void)
 
 	unsigned long heapInitResult = CSTGHeapManager_Initialize(sIORemapBase, bestGap);
 
-	/* AlignedHeapBase: real name confirmed via the 5th printk's format
-	 * string below. */
-	sAlignedHeapBase = heapInitResult - sIORemapBase + sPhysicalBankStart;
+	/* sAlignedHeapBase: the raw return value, ground truth's own real
+	 * 0x6f58a8 global. sPhysicalHeapBase (0x6f58ac, a DIFFERENT global) is
+	 * the physical-offset-adjusted derivative the final printk below
+	 * actually prints despite its format string saying "AlignedHeapBase"
+	 * -- see oa_stgheap_init.h's own NAMING FIX note. */
+	sAlignedHeapBase = heapInitResult;
+	sPhysicalHeapBase = heapInitResult - sIORemapBase + sPhysicalBankStart;
 
 	/* sHeapSize via the real class-member getter is known-unreliable here
 	 * (see heap_manager.cpp's own file comment -- CSTGHeapManager_GetHeapSize()
@@ -271,10 +282,15 @@ int InitializeSTGHeap(void)
 	 * trustworthy just because it compiles. */
 	sHeapSize = CSTGHeapManager_GetHeapSize();
 
+	/* Ground truth's own printk argument is sPhysicalHeapBase, not
+	 * sAlignedHeapBase, despite the format string's own "AlignedHeapBase"
+	 * wording -- reproduced faithfully, not "corrected" to match the
+	 * string (see this file's own sAlignedHeapBase/sPhysicalHeapBase
+	 * comment above). */
 	printk(KERN_INFO "%p..%p is ioremapped memory, %lu bytes, "
 	       "physicalBankStart @ 0x%08lx\nAlignedHeapBase is 0x%lx\n",
 	       (void *)sIORemapBase, (void *)(sIORemapBase + bestGap), bestGap,
-	       sPhysicalBankStart, sAlignedHeapBase);
+	       sPhysicalBankStart, sPhysicalHeapBase);
 
 	return 0;
 }

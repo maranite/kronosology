@@ -20,6 +20,27 @@
  * local below (`sInstalledRAM`, `sPhysicalBankStart`, `physMemSize`,
  * `sIORemapBase`, `AlignedHeapBase`) matches the real source's own names.
  *
+ * NAMING FIX (round 46, 2026-07-29): ground truth has TWO distinct real
+ * `.bss` globals here, confirmed via `/home/share/Decomp/oa_export`'s own
+ * symbols.csv -- `sAlignedHeapBase` (0x6f58a8, the RAW
+ * `CSTGHeapManager_Initialize()` return value) and `sPhysicalHeapBase`
+ * (0x6f58ac, `sAlignedHeapBase - sIORemapBase + sPhysicalBankStart`). The
+ * final printk's format string literally says "AlignedHeapBase is
+ * 0x%lx" but its own real argument list passes `sPhysicalHeapBase`, not
+ * `sAlignedHeapBase` -- confirmed directly in ground truth's own
+ * decompile (`InitializeSTGHeap@00019bc0.c`), not a Ghidra artifact. An
+ * earlier pass of this file took that printk string at face value and
+ * named ITS OWN single local `sAlignedHeapBase` while actually computing
+ * (and storing) the `sPhysicalHeapBase` formula into it -- numerically
+ * correct (this project's `stgheap_get_aligned_heap_base()` always
+ * returned the right VALUE, since it's the only one of the two globals
+ * this function's own call graph ever consumed downstream, by
+ * `MemoryModProcFileOp_mmap`), but mismatched against ground truth's
+ * real variable name, and ground truth's real `sAlignedHeapBase` (the
+ * un-adjusted raw return value) was never modeled under any name at all.
+ * Fixed here: the renamed accessor below now matches ground truth, and a
+ * NEW accessor exposes the previously-unmodeled raw value.
+ *
  * NOTE: `CSTGHeapManager_Initialize`/`CSTGHeapManager_GetHeapSize` are
  * confirmed via relocation to be plain, UNMANGLED C-linkage symbols --
  * NOT methods of the `CSTGHeapManager` C++ class already forward-declared
@@ -88,7 +109,13 @@ void CleanupSharedHeap(void);
 unsigned long stgheap_get_installed_ram(void);
 unsigned long stgheap_get_physical_bank_start(void);
 unsigned long stgheap_get_ioremap_base(void);
+/* Ground truth's raw CSTGHeapManager_Initialize() return value (0x6f58a8). */
 unsigned long stgheap_get_aligned_heap_base(void);
+/* Ground truth's sAlignedHeapBase-adjusted-for-physical-offset (0x6f58ac) --
+ * what the final printk's "AlignedHeapBase" string actually prints despite
+ * its own name (see this header's NAMING FIX note above). Consumed by
+ * MemoryModProcFileOp_mmap (memorymod_procfileop.cpp). */
+unsigned long stgheap_get_physical_heap_base(void);
 unsigned long stgheap_get_heap_size(void);
 
 } /* extern "C" */
