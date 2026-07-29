@@ -4751,3 +4751,45 @@ KDIR=/home/build/linux-kronos` build green. Manifest 4035 ->
 Real-HW test that would help: none identified -- pure literal-
 constant reflection accessors + a confirmed no-op, no hardware I/O
 surface of their own.
+
+## Round 65 (OA.ko, solo, 2026-07-29): CSTGControllerRTData, 3-method batch
+
+Wide survey round: `CSTGLFO`, `CSTGProgramModeDrumTrackSlot`,
+`CKGGlobalParamMsgHandler`, `CSKMIDILocalCtrlMsgHandler`,
+`CSTGCalibrationMsgHandler`, `CKGControlMsgHandler`, `CKGEngine`, and
+~15 `CSTGPatch` candidates were all sampled and deferred -- register
+confusion (4-explicit-param thiscall exceeding the regparm3 budget),
+unrecoverable rodata/jumptables, the standing MsgHandler ctor/dtor/
+HandleMessage-triad policy, or the "forwards to an unreconstructed
+sibling/callee" pattern (`CSTGPatch`'s `UpdateToneAdjustCommonXxx`
+family calling still-pending `CSTGSlotVoiceData::ToneAdjustXxx`
+siblings, `InitVoiceNotifyWaveSeq` calling pending
+`CSTGWaveSeqGenerator::VoiceInitialized`, etc.) -- all landing a thin
+wrapper for one of these would misrepresent unreconstructed code as
+real, so none were taken.
+
+Found 3 genuinely clean, self-contained `CSTGControllerRTData`
+methods instead: `OnEndDownload()` (39B, zeroes `this+0x30..0x3c` and
+clears the low nibble of `this+0x2f`) and
+`ResetExtKnobJumpCatch(unsigned int)`/`ResetExtSliderJumpCatch(unsigned int)`
+(95B each, same shape at different base offsets -- copy a
+`STGAPIFrontPanelStatus::sInstance` byte through if it's a valid
+7-bit value, then gate a tri-state jump-catch flag on
+`CSTGGlobal::sInstance`'s `+0x29c9fc0` byte, matching this project's
+own already-established `oa_adsr_base.h` convention for that global
+offset). Both `Reset*` methods were manually cross-checked offset-
+by-offset against the ground-truth decompile's `iVar1+N` arithmetic
+before committing to the `slot[N]` abstraction used in the rewrite.
+Clean `this=EAX/idx=EDX` attribution throughout, no unresolved
+callees, no dispatch.
+
+Real host KAT (new file `verify/test_controller_rt_data_reset_ext_jump_catch.cpp`,
+11 checks across 3 sections, using the established `mmap32()` helper
+for simulating `CSTGGlobal::sInstance`'s large 32-bit offset).
+`make verify` full suite green (110 targets), zero regressions. Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build
+green. Manifest 4043 -> 4046/21,689 (18.655%).
+
+Real-HW test that would help: none identified -- pure field writes
+gated on already-modeled global state, no hardware I/O surface of
+their own.

@@ -719,6 +719,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_smoother_ctor verify/test_hdr_manager_init \
          verify/test_controller_rt_data_set_assignment verify/test_controller_rt_data_set_audio_in_solo \
          verify/test_controller_rt_data_reset_send_knobs_jump_catch verify/test_controller_rt_data_send_karma_cc \
+         verify/test_controller_rt_data_reset_ext_jump_catch \
          verify/test_slot_voice_data_midi_filters \
          verify/test_heap_manager_alloc_static verify/test_slot_voice_data_free \
          verify/test_channel_values_reset verify/test_audio_input_use_settings \
@@ -1433,6 +1434,9 @@ verify/test_controller_rt_data_set_audio_in_solo: verify/test_controller_rt_data
 
 verify/test_controller_rt_data_reset_send_knobs_jump_catch: verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp include/oa_global.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_reset_send_knobs_jump_catch.cpp src/engine/controller_rt_data_reset_send_knobs_jump_catch.cpp -o $@
+
+verify/test_controller_rt_data_reset_ext_jump_catch: verify/test_controller_rt_data_reset_ext_jump_catch.cpp src/engine/controller_rt_data_reset_ext_jump_catch.cpp include/oa_global.h include/oa_engine_init.h include/oa_setup_global_resources.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_reset_ext_jump_catch.cpp src/engine/controller_rt_data_reset_ext_jump_catch.cpp -o $@
 
 verify/test_controller_rt_data_send_karma_cc: verify/test_controller_rt_data_send_karma_cc.cpp src/engine/controller_rt_data_send_karma_cc.cpp include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_controller_rt_data_send_karma_cc.cpp src/engine/controller_rt_data_send_karma_cc.cpp -o $@

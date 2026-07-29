@@ -592,6 +592,17 @@ public:
 	 * an unconfirmed return width.
 	 */
 	int ConvertKnobToControl(const CSTGParamDescriptor &desc, unsigned char arg2);
+
+	/* round 65 (2026-07-29, solo): 3 further self-contained methods, no
+	 * unresolved callees. `this`/1st-arg land in EAX/EDX exactly per this
+	 * project's established regparm3 convention (Ghidra's own
+	 * `in_EAX`/`in_EDX` locals correlate 1:1 with the declared params, no
+	 * register confusion). See src/engine/
+	 * controller_rt_data_reset_ext_jump_catch.cpp.
+	 */
+	void OnEndDownload();
+	void ResetExtKnobJumpCatch(unsigned int idx);
+	void ResetExtSliderJumpCatch(unsigned int idx);
 };
 
 /*
