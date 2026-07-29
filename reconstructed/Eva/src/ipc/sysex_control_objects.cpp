@@ -3,6 +3,7 @@
 
 unsigned long CKGUtil::sm_poKGUIInfo;
 unsigned long CKGUtil::sm_poSeqDataManager;
+unsigned long CKGUtil::sm_poRegionHolder;
 
 int CSysExKarmaGEInfo::GetObjectPointer(int, int) const
 {

@@ -1741,3 +1741,64 @@ should know they exist and are untested/unmodeled, not silently absent.
 
   Real-HW test that would help: none identified -- same rationale as
   the sibling families above.
+
+- **CSysExGlobal/CSysExKarmaGE/CSysExGETemplate/CSysExRegion, 46/57
+  tractable methods (`sysex_objects_ge_region.h`/`.cpp`), round 42,
+  2026-07-29 (solo, no subagents)**. Fresh manifest survey of the
+  `CSysEx.../CSysExObjectBase` family's remaining siblings. Per-class
+  real literal constants: `CSysExGlobal`
+  (StorageId=5/NumBanks=1/HasDigests=1/Version=2/ObjectSize=
+  ObjectSizeForExport=0x6084), `CSysExKarmaGE` (6/0xc/1/0/0x9ec/0x9f0),
+  `CSysExGETemplate` (7/4/1/0/0x10580/0x10584), `CSysExRegion`
+  (0xb/1/1/1/0x130/0x130).
+
+  All 4 classes' `GetObjectPointer(int,int)` reconstructed:
+  `CSysExGlobal`'s discards both `CStorage::GetInstance()`/`GetGlobal()`
+  call results (real return type genuinely `void`, same discard shape
+  as round 41's `CSysExSongControl::GetObjectPointer`) -- `CStorage`
+  added as a new minimal no-op stand-in,
+  `storage_converter_ext_stubs.h`. `CSysExKarmaGE`/`CSysExGETemplate`
+  each call one new small real-but-unmodeled `CKGUtil` free function
+  (`GetUserGE`/`GetUserKarmaTemplate`, both added as no-op-returning-0
+  stand-ins on the existing `CKGUtil`, `sysex_control_objects.h`) then
+  add `index*stride`. `CSysExRegion`'s is FULLY concrete (no stand-in
+  needed): `(idx<10000 ? idx : 0)*0x130 + CKGUtil::sm_poRegionHolder`, a
+  new real confirmed static member (base of a 10000-entry region array)
+  also added to `CKGUtil` this round.
+
+  `CSysExRegion::GetTotalSizeForExport` is ALSO fully concrete and
+  reconstructed -- a genuine 8x-unrolled loop counting `0x130` for every
+  region in `[0,10000)` whose "active" flag byte
+  (`sm_poRegionHolder+0x18+i*0x130`) is nonzero. Real, confirmed quirk
+  preserved verbatim: the function's own 2 explicit arguments
+  (`param1`/`param2`, presumably meant to bound the counted range) are
+  completely UNUSED in ground truth's real disassembly -- it always
+  sums across the FULL 10000-entry range regardless of what's passed,
+  not "fixed" to actually respect the requested range.
+
+  Deliberately NOT reconstructed, for 3 distinct reasons: (1)
+  `CSysExGlobal::GetTotalSizeForExport` -- genuinely unresolvable vtable
+  jumptable ("Could not recover", same as round 40's family); (2)
+  `CSysExKarmaGE`/`CSysExGETemplate::GetTotalSizeForExport` -- fully
+  concrete, NO decompiler warning, but a real 2-call-per-item virtual
+  dispatch through THIS class's own vtable at raw offsets 0x38/0x1c
+  summing `GetXAtIndex(i)*GetXSize()` -- resolving which named methods
+  occupy those slots needs the base class's full vtable interface
+  reconstructed first, same deferral class as OA.ko's `CFileStream::
+  SetPositionBeginning` (round 49); (3)
+  `GetNumObjectsForDigest(int)` for `CSysExKarmaGE`/`CSysExGETemplate`/
+  `CSysExRegion` -- same genuinely-unresolvable vtable-slot-0x38
+  indirect call as reason (1). `CSysExGlobal`'s own
+  `GetNumObjectsForDigest` IS a trivial literal (`return 1`) and IS
+  reconstructed.
+
+  Same shared-vtable / non-virtual-dtor finding as every prior sibling
+  family re-confirmed for all 4 classes here too.
+
+  Real host KAT (`verify/test_sysex_objects_ge_region.cpp`, 39 checks,
+  including a real ~3MB backing buffer for `GetTotalSizeForExport`'s
+  own byte-scan). `make verify` full suite green. Eva manifest 2806 ->
+  2852/37,795 (7.546%).
+
+  Real-HW test that would help: none identified -- same rationale as
+  the sibling families above.

@@ -127,6 +127,21 @@ public:
 	}
 };
 
+// CStorage: the real, unmodeled global-object-storage singleton consulted by
+// CSysExGlobal::GetObjectPointer() (sysex_objects_ge_region.cpp, round 42).
+// Ground truth's own decompile shows two bare, unchained calls
+// (`CStorage::GetInstance(); CStorage::GetGlobal();`, both results
+// discarded, real declared return type genuinely `void` -- same "call
+// discards the result" shape already confirmed for
+// CSysExSongControl::GetObjectPointer, sysex_control_objects.h) -- modeled
+// here as the minimum viable no-op slice, not a real singleton/global
+// accessor pair.
+class CStorage {
+public:
+	static CStorage *GetInstance() { return 0; }
+	void *GetGlobal() { return 0; }
+};
+
 // ---- CFileKge: GE (Global Effects) file-format helper consulted by
 // CGEConverter::Int0000toExt0000 / CGETemplateConverter::Int0000toExt0000
 // (storage_format_converters.cpp) to compute a trailing "item code" appended

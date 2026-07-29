@@ -4085,6 +4085,56 @@ RECONSTRUCTED = {
     "089edf10",  # CSysExSongControl::GetVersion() const
     "089edf20",  # CSysExSongControl::GetObjectSize() const
     "089edf30",  # CSysExSongControl::GetObjectSizeForExport() const
+
+    # 2026-07-29 (round 42, solo, no subagents): CSysExGlobal/CSysExKarmaGE/
+    # CSysExGETemplate/CSysExRegion (sysex_objects_ge_region.h/.cpp), 4 more
+    # siblings of the CSysEx* family (sysex_objects_ge_region.h).
+    "089ec9a0",  # CSysExGlobal::GetStorageId() const
+    "089ec9b0",  # CSysExGlobal::GetNumBanks() const
+    "089ec9c0",  # CSysExGlobal::HasDigests() const
+    "089ec9d0",  # CSysExGlobal::GetVersion() const
+    "089ec9e0",  # CSysExGlobal::GetObjectSize() const
+    "089ec9f0",  # CSysExGlobal::GetObjectSizeForExport() const
+    "089eca00",  # CSysExGlobal::GetSysExBankId(int) const
+    "089eca10",  # CSysExGlobal::GetNumOfObject(int) const
+    "089eca20",  # CSysExGlobal::GetNumObjectsForDigest(int) const
+    "089ed3c0",  # CSysExGlobal::GetObjectPointer(int, int) const
+    "089ed050",  # CSysExGlobal::~CSysExGlobal() (D2)
+    "089ed620",  # CSysExGlobal::~CSysExGlobal() (D0)
+    "089edc00",  # CSysExKarmaGE::GetStorageId() const
+    "089edc10",  # CSysExKarmaGE::GetNumBanks() const
+    "089edc20",  # CSysExKarmaGE::HasDigests() const
+    "089edc30",  # CSysExKarmaGE::GetVersion() const
+    "089edc40",  # CSysExKarmaGE::GetObjectSize() const
+    "089edc50",  # CSysExKarmaGE::GetObjectSizeForExport() const
+    "089edc60",  # CSysExKarmaGE::GetSysExBankId(int) const
+    "089edc70",  # CSysExKarmaGE::GetNumOfObject(int) const
+    "089ebaa0",  # CSysExKarmaGE::GetObjectPointer(int, int) const
+    "089edca0",  # CSysExKarmaGE::~CSysExKarmaGE() (D2)
+    "089edcb0",  # CSysExKarmaGE::~CSysExKarmaGE() (D0)
+    "089eddc0",  # CSysExGETemplate::GetStorageId() const
+    "089eddd0",  # CSysExGETemplate::GetNumBanks() const
+    "089edde0",  # CSysExGETemplate::HasDigests() const
+    "089eddf0",  # CSysExGETemplate::GetVersion() const
+    "089ede00",  # CSysExGETemplate::GetObjectSize() const
+    "089ede10",  # CSysExGETemplate::GetObjectSizeForExport() const
+    "089ede20",  # CSysExGETemplate::GetSysExBankId(int) const
+    "089ede30",  # CSysExGETemplate::GetNumOfObject(int) const
+    "089ebc50",  # CSysExGETemplate::GetObjectPointer(int, int) const
+    "089ede60",  # CSysExGETemplate::~CSysExGETemplate() (D2)
+    "089ede70",  # CSysExGETemplate::~CSysExGETemplate() (D0)
+    "089ee0e0",  # CSysExRegion::GetStorageId() const
+    "089ee0f0",  # CSysExRegion::GetNumBanks() const
+    "089ee100",  # CSysExRegion::HasDigests() const
+    "089ee110",  # CSysExRegion::GetVersion() const
+    "089ee120",  # CSysExRegion::GetObjectSize() const
+    "089ee130",  # CSysExRegion::GetObjectSizeForExport() const
+    "089ee140",  # CSysExRegion::GetSysExBankId(int) const
+    "089ee150",  # CSysExRegion::GetNumOfObject(int) const
+    "089ebe00",  # CSysExRegion::GetObjectPointer(int, int) const
+    "089ebe20",  # CSysExRegion::GetTotalSizeForExport(int, int) const
+    "089ee180",  # CSysExRegion::~CSysExRegion() (D2)
+    "089ee190",  # CSysExRegion::~CSysExRegion() (D0)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

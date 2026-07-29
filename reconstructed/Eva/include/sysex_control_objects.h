@@ -66,6 +66,25 @@
 struct CKGUtil {
 	static unsigned long sm_poKGUIInfo;
 	static unsigned long sm_poSeqDataManager;
+
+	/* round 42 additions (sysex_objects_ge_region.h/.cpp) --
+	 * sm_poRegionHolder: real, confirmed static member
+	 * (`_ZN7CKGUtil16sm_poRegionHolderE`), the base of a 10000-entry,
+	 * 0x130-byte-stride region array (CSysExRegion::GetObjectPointer/
+	 * GetTotalSizeForExport index directly off it, byte offset +0x18
+	 * within each entry is a real "active" flag byte, confirmed via
+	 * GetTotalSizeForExport's own real disassembly).
+	 * GetUserGE/GetUserKarmaTemplate: real, confirmed free functions
+	 * (`_ZN7CKGUtil9GetUserGEEi`/`_ZN7CKGUtil20GetUserKarmaTemplateEi`)
+	 * whose own real bodies are NOT modeled here (out of scope, same
+	 * "declare the minimum viable slice, no-op body" convention as
+	 * CSeqDataManager below) -- both return 0, a neutral default that
+	 * still lets the callers' own real pointer arithmetic
+	 * (`base + index*stride`) be exercised and verified.
+	 */
+	static unsigned long sm_poRegionHolder;
+	static int GetUserGE(int) { return 0; }
+	static int GetUserKarmaTemplate(int) { return 0; }
 };
 
 /* CSeqDataManager: real, confirmed, entirely unmodeled elsewhere in
