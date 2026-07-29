@@ -4028,6 +4028,45 @@ RECONSTRUCTED = {
     "089ecee0",  # CSysExSetListName::GetVersion() const
     "089ecef0",  # CSysExSetListName::GetObjectSize() const
     "089ecf00",  # CSysExSetListName::GetObjectSizeForExport() const
+
+    # 2026-07-29 (solo, no subagents): CSysExSong/CSysExDrumKit/
+    # CSysExCombi/CSysExWaveSeq/CSysExSetList/CSysExSongTimbreSet family
+    # (sysex_objects.h/.cpp), sibling of the CSysEx*Name family above.
+    # GetNumObjectsForDigest() deliberately NOT credited for DrumKit/
+    # Combi/WaveSeq/SetList (real body is a genuinely unresolved indirect
+    # call, see sysex_objects.h's own header comment); Song's own trivial
+    # literal version IS credited. Dtors intentionally excluded (same
+    # "D0's free(this) not reproduced" convention as CLongBinaryFile).
+    "089ecf10",  # CSysExSong::GetStorageId() const
+    "089ecf20",  # CSysExSong::HasDigests() const
+    "089ecf30",  # CSysExSong::GetVersion() const
+    "089ecf40",  # CSysExSong::GetObjectSize() const
+    "089ecf50",  # CSysExSong::GetObjectSizeForExport() const
+    "089ecf60",  # CSysExSong::GetNumObjectsForDigest(int) const
+    "089ec810",  # CSysExDrumKit::GetStorageId() const
+    "089ec820",  # CSysExDrumKit::HasDigests() const
+    "089ec830",  # CSysExDrumKit::GetVersion() const
+    "089ec840",  # CSysExDrumKit::GetObjectSize() const
+    "089ec850",  # CSysExDrumKit::GetObjectSizeForExport() const
+    "089eca60",  # CSysExCombi::GetStorageId() const
+    "089eca70",  # CSysExCombi::HasDigests() const
+    "089eca80",  # CSysExCombi::GetVersion() const
+    "089eca90",  # CSysExCombi::GetObjectSize() const
+    "089ecaa0",  # CSysExCombi::GetObjectSizeForExport() const
+    "089ecb80",  # CSysExWaveSeq::GetStorageId() const
+    "089ecb90",  # CSysExWaveSeq::HasDigests() const
+    "089ecba0",  # CSysExWaveSeq::GetVersion() const
+    "089ecbb0",  # CSysExWaveSeq::GetObjectSize() const
+    "089ecbc0",  # CSysExWaveSeq::GetObjectSizeForExport() const
+    "089ecc10",  # CSysExSetList::GetStorageId() const
+    "089ecc20",  # CSysExSetList::HasDigests() const
+    "089ecc30",  # CSysExSetList::GetVersion() const
+    "089ecc40",  # CSysExSetList::GetObjectSize() const
+    "089ecc50",  # CSysExSetList::GetObjectSizeForExport() const
+    "089ecb30",  # CSysExSongTimbreSet::GetStorageId() const
+    "089ecb40",  # CSysExSongTimbreSet::GetVersion() const
+    "089ecb50",  # CSysExSongTimbreSet::GetObjectSize() const
+    "089ecb60",  # CSysExSongTimbreSet::GetObjectSizeForExport() const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

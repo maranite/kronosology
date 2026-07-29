@@ -1641,3 +1641,40 @@ should know they exist and are untested/unmodeled, not silently absent.
   Real-HW test that would help: none identified -- these are pure
   constant accessors with no observable I/O or state, called only as
   part of a larger not-yet-reconstructed SysEx object-transfer framework.
+
+- **CSysExSong/CSysExDrumKit/CSysExCombi/CSysExWaveSeq/CSysExSetList/
+  CSysExSongTimbreSet family, 30/36 tractable methods
+  (`sysex_objects.h`/`.cpp`), 2026-07-29 (solo, no subagents)**. The
+  main SysEx-transferable "full object" classes, sibling of the smaller
+  `CSysEx*Name`/`CSysExSetListSlotComment` family above (found the same
+  round). 5 of the 6 classes share an identical 6-method shape:
+  `GetStorageId()`/`HasDigests()` (always `1`)/`GetVersion()`/
+  `GetObjectSize()`/`GetObjectSizeForExport()` (identical per-class
+  literal)/`GetNumObjectsForDigest(int)`. `CSysExSongTimbreSet` is a
+  smaller 4-method sibling (no `HasDigests`/`GetNumObjectsForDigest`).
+
+  `GetNumObjectsForDigest(int)` deliberately NOT reconstructed for
+  `CSysExDrumKit`/`CSysExCombi`/`CSysExWaveSeq`/`CSysExSetList` -- their
+  real bodies are a genuinely unresolvable indirect call
+  (`(**(code**)(*(int*)param_1+0x38))()`, Ghidra's own decompile flags
+  "Could not recover jumptable, too many branches") through an
+  unconfirmed vtable slot on a caller-supplied `param_1` object (real
+  calling convention is `__cdecl`, no implicit `this` -- `param_1` is a
+  plain explicit argument, not this class's own instance). Declared as
+  genuinely unresolved externs (`CSysExDrumKit_GetNumObjectsForDigest_
+  Unresolved()` etc) rather than guessed at. `CSysExSong`'s OWN version
+  IS a trivial literal (`return 200`) and IS reconstructed/credited.
+
+  Independently re-confirmed the same shared-vtable finding as the
+  `CSysEx*Name` family: no `PTR__CSysExSong`/`PTR__CSysExDrumKit`/etc
+  vtable object exists in ground truth, only the shared
+  `PTR__CSysExObjectBase` -- consistent non-polymorphic-in-this-model
+  treatment across both families.
+
+  Real host KAT (`verify/test_sysex_objects.cpp`, 31 checks) confirms
+  every literal constant against the ground-truth decompile
+  independently. `make verify` full suite green. Eva manifest 2762 ->
+  2792/37,795 (7.387%).
+
+  Real-HW test that would help: none identified -- same rationale as
+  the `CSysEx*Name` family above.
