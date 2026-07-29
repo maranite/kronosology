@@ -4195,3 +4195,79 @@ Manifest 3806 -> 3840/21,689 (+34, 0 regressions).
 
 Real-HW test that would help: none identified -- pure per-instance/
 assigned-program field-read logic, no hardware I/O surface of its own.
+
+## OA.ko: CSTGWaveSequence Update* setter family, solo round 56 (2026-07-29)
+
+Extended the pre-existing `CSTGWaveSequence` class (already had a ctor
++ 34 `Getter*` methods from an earlier round, `Getter*` family in
+`src/engine/stg_wave_sequence_valuegetters.cpp`) with dtor, 4
+framework accessors (`GetNumParams`/`GetParamDescriptors`/
+`GetMessageHandlers`/`GetValueGetters`), `IsStereoSequence`, and 20
+`Update*(CSTGWaveSeqDataMessageContext&, STGConvertedParam&)` setters
+in a new file, `src/engine/stg_wave_sequence_updaters.cpp`.
+
+Methodology: every field offset used here is a CROSS-CHECK against
+the already-confirmed sibling `Getter*` family, not a fresh
+derivation -- read the full pre-existing `Getter*` implementation file
+before writing a single `Update*` body, and every offset landed here
+(`+0x4` bitfield, `+0x6`..`+0x13` whole-sequence fields, `+0x24`.
+.`+0x47` ctx.index*0x34-scaled per-step-record fields) matches its own
+already-confirmed `Getter*` counterpart exactly. Same cross-check
+convention already established for CSTGProgramModeDrumTrackSlot
+(round 55) and CKGParamEdit (round 52).
+
+Two field-write shapes: (1) whole-sequence fields at a fixed offset
+off `this` (`UpdateRunSequence`/`UpdateNoteOnAdvance`/
+`UpdateTimeTempoMode` share a 3-bit RMW bitfield at `+0x4`;
+`UpdateStartStep` through `UpdateLoopDirection` are plain fixed-offset
+byte/short writes); (2) per-step-record fields at
+`this + ctx.index*0x34 + <offset>` (`UpdateStepType` through
+`UpdateReverse`, mirroring the `Getter*` family's own per-step
+addressing using the SAME already-confirmed `CSTGWaveSeqDataMessageContext::index`
+field and `0x34` record stride). `UpdateReverse` is its own 1-bit RMW
+field, confirmed via the sibling getter's own mask.
+
+`IsStereoSequence()` is a real loop over the per-step record array
+(stride `0x34`), gated on `this[7]` (the same `EndStep` field
+`UpdateEndStep` writes) as the step-count bound, checking each
+record's own `+0x42` (`StepType`, the same field `UpdateStepType`
+writes) and `+0x23` (a stereo-flag bit) -- landed verbatim from the
+decompiled loop shape, not simplified.
+
+`~CSTGWaveSequence()` -- zeroes the vptr-shaped field at `this+0..3`
+raw (NOT a literal `&PTR__CSTGParamsOwner_006c04a8` reference -- that
+symbol is never actually declared anywhere in this codebase, per the
+round-55 lesson), same "opaque placeholder" convention as
+CSTGKeyTrack/CSTGPatch/CSTGMultibandDelay/
+CSTGProgramModeDrumTrackSlot.
+
+Deferred, 3 reasons (see the class's own header comment in
+`include/oa_global.h`): float-reinterpretation + unrecovered
+`.rodata`-constant methods (`UpdateDuration`, `UpdateCrossfadeTime`,
+`UpdateFadeInShape`, `UpdateFadeOutShape`, `UpdateSwingResolution`);
+larger-scope methods needing external validation tables/vtable
+dispatch not yet reconstructed (`UpdateBankSelect`,
+`UpdateBankSelectUUID`, `UpdateMultisampleBank`); and one
+unnamed-vtable-slot method (`Initialize`). Plus 4 methods the
+decompiler itself flagged as bad.
+
+Real host KAT: new standalone `verify/test_stg_wave_sequence_updaters.cpp`
+(37 checks) -- this class's own files are self-contained TUs needing
+only `oa_global.h`, confirmed by the pre-existing sibling
+`test_stg_wave_sequence_valuegetters` test's own simple link line, so
+no `test_global.cpp`-style shared-mock treatment was needed here
+(unlike round 55's `CSTGProgramModeDrumTrackSlot`, which extends
+`global.cpp` itself). One test-authoring bug caught by the test itself
+on first run: the `IsStereoSequence` loop's real stop condition is
+`StepType==0 AND (stereo-flag & 1)==1` (i.e. odd), not `StepType==0
+AND (stereo-flag & 1)==0` as an initial test fixture assumed --
+fixed by re-reading the decompiled `||`/`&&` shape and correcting the
+fixture, not the implementation.
+
+`make verify` full suite green (210+ targets, zero regressions). Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3840 -> 3872/21,689 (+32, 0 regressions).
+
+Real-HW test that would help: none identified -- pure in-memory
+sequence-data-structure field writes, no hardware I/O surface of its
+own.

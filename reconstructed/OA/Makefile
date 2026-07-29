@@ -234,6 +234,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_tone_adjust_valuegetters.o \
            src/engine/stg_hdr_track_valuegetters.o \
            src/engine/stg_wave_sequence_valuegetters.o \
+           src/engine/stg_wave_sequence_updaters.o \
            src/engine/stg_tg92_osc_base_valuegetters.o \
            src/engine/ckg_module_param_handler.o \
            src/engine/ckg_common_param_handler.o \
@@ -550,6 +551,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_tone_adjust_valuegetters.cpp \
        src/engine/stg_hdr_track_valuegetters.cpp \
        src/engine/stg_wave_sequence_valuegetters.cpp \
+       src/engine/stg_wave_sequence_updaters.cpp \
        src/engine/stg_tg92_osc_base_valuegetters.cpp \
        src/engine/ckg_module_param_handler.cpp \
        src/engine/ckg_common_param_handler.cpp \
@@ -838,6 +840,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_stg_tone_adjust_valuegetters \
          verify/test_stg_hdr_track_valuegetters \
          verify/test_stg_wave_sequence_valuegetters \
+         verify/test_stg_wave_sequence_updaters \
          verify/test_stg_tg92_osc_base_valuegetters \
          verify/test_ckg_module_param_handler \
          verify/test_ckg_common_param_handler \
@@ -1219,6 +1222,9 @@ verify/test_stg_hdr_track_valuegetters: verify/test_stg_hdr_track_valuegetters.c
 
 verify/test_stg_wave_sequence_valuegetters: verify/test_stg_wave_sequence_valuegetters.cpp src/engine/stg_wave_sequence_valuegetters.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_wave_sequence_valuegetters.cpp src/engine/stg_wave_sequence_valuegetters.cpp -o $@
+
+verify/test_stg_wave_sequence_updaters: verify/test_stg_wave_sequence_updaters.cpp src/engine/stg_wave_sequence_updaters.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_wave_sequence_updaters.cpp src/engine/stg_wave_sequence_updaters.cpp -o $@
 
 verify/test_stg_tg92_osc_base_valuegetters: verify/test_stg_tg92_osc_base_valuegetters.cpp src/engine/stg_tg92_osc_base_valuegetters.cpp include/oa_stg_tg92_osc_base.h include/oa_adsr_base.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_tg92_osc_base_valuegetters.cpp src/engine/stg_tg92_osc_base_valuegetters.cpp -o $@

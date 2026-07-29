@@ -2355,6 +2355,82 @@ struct CSTGWaveSequence {
 	STGConvertedParam &GetterTimeTempoMode(CSTGWaveSeqDataMessageContext &ctx);
 	STGConvertedParam &GetterTranspose(CSTGWaveSeqDataMessageContext &ctx);
 	STGConvertedParam &GetterTune(CSTGWaveSeqDataMessageContext &ctx);
+
+	/*
+	 * round 56 batch (2026-07-29, solo): the mirror-image `Update*`
+	 * (setter) family, landed using the EXACT SAME field offsets
+	 * already independently confirmed by the `Getter*` family above --
+	 * every offset below is a cross-check, not a fresh derivation.
+	 * `~CSTGWaveSequence()` -- both D0/D2 variants byte-identical, same
+	 * "opaque placeholder, no real vtable pointer independently
+	 * declared" convention as CSTGKeyTrack/CSTGPatch/
+	 * CSTGMultibandDelay/CSTGProgramModeDrumTrackSlot.
+	 * `IsStereoSequence() const` -- fully self-contained loop over the
+	 * per-step record array, no `ctx`, landed alongside.
+	 *
+	 * === Deferred, 3 distinct reasons (remaining pending methods) ===
+	 * (1) `UpdateDuration`/`UpdateCrossfadeTime`/`UpdateFadeInShape`/
+	 *     `UpdateFadeOutShape` -- each reads the incoming value via a
+	 *     genuine `float*` reinterpretation (confirmed, not a spurious
+	 *     Ghidra type-inference artifact: consistently `float*` across
+	 *     all 4, vs. every OTHER sibling's `undefined4*`/int
+	 *     typing) and the 2 FadeXxxShape variants additionally divide/
+	 *     compare against a real but unrecovered `.rodata` float
+	 *     constant (`_DAT_006ba80c`) -- same "missing-literal-value"
+	 *     deferral class already established for CSTGKeyTrack (round
+	 *     51)/CSTGMultibandDelay (round 54).
+	 * (2) `UpdateSwingResolution`/`UpdateBankSelect`/
+	 *     `UpdateBankSelectUUID`/`UpdateMultisampleBank` -- each does
+	 *     real work well beyond a plain field write (a bucket-list
+	 *     vtable-dispatch notification walk; a UUID-vs-`STGAPIError`
+	 *     validation gate against real but unrecovered `.data` tables
+	 *     `CSTGMultisampleBankUUIDBase::sLegacyBankPrefix`) -- each
+	 *     individually tractable but genuinely larger, out of this
+	 *     round's scope.
+	 * (3) `Initialize()` -- a genuine but UNNAMED vtable call (slot
+	 *     0x1c), same deferral class already established for
+	 *     CSTGKeyTrack/CSTGPatch's own unnamed-vtable-slot methods.
+	 * Additionally 4 methods flagged by the decompiler itself
+	 * (`in_stack_`/`unaff_`): `UpdateDurationAMSSource`,
+	 * `UpdatePositionAMSSource`, `ValidateParamChange`,
+	 * `GetUIParamValueForWaveSeq`.
+	 */
+	~CSTGWaveSequence();
+
+	static unsigned int GetNumParams();
+	static const void *GetParamDescriptors();
+	static const void *GetMessageHandlers();
+	static const void *GetValueGetters();
+
+	bool IsStereoSequence() const;
+
+	void UpdateRunSequence(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateNoteOnAdvance(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateTimeTempoMode(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+
+	void UpdateStartStep(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateEndStep(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateSoloStep(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateStartStepAMSSource(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateStartStepAMSIntensity(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateDurationAMSIntensity(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdatePositionAMSIntensity(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateLoopStart(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateLoopEnd(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateLoopRepeat(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateLoopDirection(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+
+	void UpdateStepType(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateLevel(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateMultisampleSelect(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateTune(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateTranspose(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateStartOffset(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateAMS1Output(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateAMS2Output(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateTempoBaseNote(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateTempoMultiplier(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateReverse(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
 };
 
 /*
