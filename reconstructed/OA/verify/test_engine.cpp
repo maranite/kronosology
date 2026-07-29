@@ -26,6 +26,12 @@
 #include "oa_engine_init.h"
 #include "oa_setup_global_resources.h"
 
+/* round 58: stg_program_slot_updaters.cpp (now linked in transitively via
+ * global.cpp's CSTGProgramSlot dtor) needs this real static definition;
+ * same one-symbol-per-binary requirement/local-copy convention already
+ * established by test_stg_wave_sequence_valuegetters.cpp. */
+STGConvertedParam CSTGParamsOwner::sValueGetterTemp;
+
 /* Batch 42: test [1] now stores its fake vtable/item addresses into
  * CSTGVoiceModelManager's real (packed 32-bit) `+0x30` slot -- their own
  * backing storage must therefore live in the low 4GB, same MAP_32BIT

@@ -979,6 +979,34 @@ struct CSTGToneAdjust {
  * has its own local copy of this symbol (confirmed via `grep -rln`).
  */
 extern "C" unsigned char _ZTV15CSTGProgramSlot[0xf0];
+
+/*
+ * CSTGProgramSlotMessageContext (round 58) -- minimal, not-independently-
+ * named context object the `UpdateXxx(CSTGProgramSlotMessageContext&,
+ * STGConvertedParam&)` setter family's channel-select subset takes by
+ * reference (same "only the fields this cluster's own methods read"
+ * treatment as CSTGPatchMessageContext/CSTGWaveSeqDataMessageContext).
+ * `ifxSlotIndex` (+0x4, confirmed via `UpdateIFXDrumkitPatch`) and
+ * `inputChannelIndex` (+0x18, confirmed via `UpdateInputSource`/
+ * `UpdateInputChannelSelect`) are two GENUINELY SEPARATE real int index
+ * fields -- not the same field read twice, confirmed by their disjoint
+ * offsets. NOTE: this is a distinct object from `this` for the Update*
+ * family; the sibling `GetValueXxx(CSTGProgramSlotMessageContext&)`
+ * value-getter family (also declared below) instead receives a pointer
+ * that reads at the SAME byte offsets `CSTGProgramSlot` itself already
+ * uses (confirmed cross-check against round 57's own plain accessors,
+ * e.g. `GetValueOutputBus`'s `+0x60` matches `GetOutputBus`'s own index
+ * byte) -- modeled by simply reading the passed-in reference at those
+ * literal offsets, matching ground truth exactly regardless of whether
+ * the real caller passes `this` itself or a same-layout view onto it.
+ */
+struct CSTGProgramSlotMessageContext {
+	unsigned char _unrecovered_0[4];
+	int ifxSlotIndex;			/* +0x4 */
+	unsigned char _unrecovered_8[0x10];	/* +0x8..+0x17, not read this round */
+	int inputChannelIndex;			/* +0x18 */
+};
+
 struct CSTGProgramSlot {
 	/* +0x0..+0x3, real class has a vtable (Initialize() dispatches
 	 * through slot 7 -- .text+0x1c/4 -- not independently named in
@@ -1229,6 +1257,94 @@ struct CSTGProgramSlot {
 	unsigned int GetFXControlBus() const;
 	unsigned int GetHDRBus() const;
 	unsigned int GetHDRBusType() const;
+
+	/*
+	 * Round 58 batch (2026-07-29, solo): 57 more methods -- one D0/D2
+	 * dtor pair (byte-identical, landed as ONE, same convention as
+	 * every other class in this project), `OverridesProgramScale`
+	 * (inverted bit test), `GetDKitBus`/`GetDKitBusType` (reuse round
+	 * 55's `STGAPIOutToPhysBusId`/`STGAPIOutToBusType` tables, index
+	 * byte at `this+99+index`), 21 `UpdateXxx(CSTGProgramSlotMessageContext&,
+	 * STGConvertedParam&)` setters (plain fixed-offset field writes
+	 * except 4 that either scale by a NEW ctx index field or index a
+	 * NEW real-but-unread `.rodata` slope-conversion table --
+	 * `kKeyZoneSlopeTable`/`kVelZoneSlopeTable`, "confirmed real,
+	 * content unread" treatment), and 33
+	 * `GetValueXxx(CSTGProgramSlotMessageContext&)` value-getters
+	 * returning `STGConvertedParam&` via the shared
+	 * `CSTGParamsOwner::sValueGetterTemp` (same wrapping convention as
+	 * CSTGWaveSequence's `Getter*` family, round 56) -- every single
+	 * offset here is a CROSS-CHECK against an already-confirmed
+	 * sibling: either round 57's own plain `Get*`/field-layout work
+	 * (e.g. `GetValueOutputBus`'s `+0x60` == `GetOutputBus`'s own
+	 * index byte) or this round's own `UpdateXxx` siblings (e.g.
+	 * `GetValueBankSelectEx2MSB`'s `+0xe` == `UpdateBankSelectEx2MSB`'s
+	 * own write target).
+	 *
+	 * Deferred, 1 reason: `GetWaveSeqSwingResolution()` forwards to
+	 * `CSTGProgram::GetWaveSeqSwingResolution` (a real but wholly
+	 * unreconstructed sibling class), deferred rather than guessed at.
+	 */
+	~CSTGProgramSlot();
+	bool OverridesProgramScale() const;
+	unsigned int GetDKitBus(unsigned int index) const;
+	unsigned int GetDKitBusType(unsigned int index) const;
+
+	void UpdateBankSelectEx2MSB(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateBankSelectEx2LSB(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateOscOnOffCtrl(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateDelayBaseNote(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateDelayTimes(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateKeyZoneBottom(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateKeyZoneTop(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateVelZoneBottom(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateVelZoneTop(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateKeySync(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateSwingPercent(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateQuantizeTrigger(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateVJSAssign(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateChordSource(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateIFXDrumkitPatch(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateInputSource(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateInputChannelSelect(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateKeyZoneBottomSlope(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateKeyZoneTopSlope(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateVelZoneBottomSlope(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateVelZoneTopSlope(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+
+	STGConvertedParam &GetValueOutputBus(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueFXControlBus(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueHDRBus(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueBankSelect(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueProgramId(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueMIDIChannel(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTrackStatus(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueBankSelectEx2MSB(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueBankSelectEx2LSB(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueForceOscMode(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueOscSelect(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueOscOnOffCtrl(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValuePortamentoTime(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTranspose(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueDelayType(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueDelayBaseNote(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueDelayTimes(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueKeyZoneBottom(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueKeyZoneBottomSlope(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueKeyZoneTop(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueKeyZoneTopSlope(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVelZoneBottom(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVelZoneBottomSlope(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVelZoneTop(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVelZoneTopSlope(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueKeySync(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueQuantizeTrigger(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVJSAssign(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueMaxNumNotes(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetChordModeValue(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetChordSourceValue(CSTGProgramSlotMessageContext &ctx) const;
+	static STGConvertedParam &GetChordSW();
+	STGConvertedParam &GetValueUseDrumkitBusSettings(CSTGProgramSlotMessageContext &ctx) const;
 };
 
 /*

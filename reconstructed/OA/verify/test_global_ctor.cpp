@@ -31,6 +31,13 @@
 #include "oa_internal.h" /* placement operator new(size_t, void*) */
 #include "oa_setup_global_resources.h"
 
+/* round 58: stg_program_slot_updaters.cpp (now linked in transitively via
+ * CSTGProgramSlot's dtor, called from CSTGProgramModeDrumTrackSlot's own)
+ * needs this real static definition; same one-symbol-per-binary
+ * requirement/local-copy convention already established by
+ * test_stg_wave_sequence_valuegetters.cpp. */
+STGConvertedParam CSTGParamsOwner::sValueGetterTemp;
+
 /* Same mocks test_global.cpp/test_managers.cpp need for
  * CSTGAudioBusManager's own real constructor (linked in via
  * managers.cpp). */

@@ -21,6 +21,13 @@
 #include "oa_engine.h"
 #include "oa_engine_init.h"
 
+/* round 58: stg_program_slot_updaters.cpp (now linked in transitively via
+ * CSTGProgramSlot's dtor, called from CSTGProgramModeDrumTrackSlot's own)
+ * needs this real static definition; same one-symbol-per-binary
+ * requirement/local-copy convention already established by
+ * test_stg_wave_sequence_valuegetters.cpp. */
+STGConvertedParam CSTGParamsOwner::sValueGetterTemp;
+
 /* CSTGGlobal's own framework metadata tables (round 48) -- contents out
  * of scope, only the address matters for these tests (same convention
  * as test_lfo_component.cpp's own STGLFOParams definition). */

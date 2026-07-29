@@ -4335,6 +4335,66 @@ Manifest 3872 -> 3899/21,689 (+27, 0 regressions).
 Real-HW test that would help: none identified -- pure field-read
 accessor logic, no hardware I/O surface of its own.
 
+## OA.ko: CSTGProgramSlot Update*/GetValue* batch (58 methods), solo round 58 (2026-07-29)
+
+Continued CSTGProgramSlot with a 58-method batch: a D0/D2 dtor pair
+(byte-identical, landed as ONE), `OverridesProgramScale` (inverted
+bit test), `GetDKitBus`/`GetDKitBusType` (reuse round 55's
+`STGAPIOutToPhysBusId`/`STGAPIOutToBusType` tables), 21
+`UpdateXxx(CSTGProgramSlotMessageContext&, STGConvertedParam&)`
+setters, and 33 `GetValueXxx(CSTGProgramSlotMessageContext&)`
+value-getters returning `STGConvertedParam&` via the shared
+`CSTGParamsOwner::sValueGetterTemp` (same wrapping convention as
+CSTGWaveSequence's `Getter*` family, round 56).
+
+New `struct CSTGProgramSlotMessageContext` declared (minimal, only
+the fields this cluster's own methods read): `ifxSlotIndex` (+0x4)
+and `inputChannelIndex` (+0x18), two GENUINELY SEPARATE real int
+index fields confirmed by their disjoint offsets, used by the 3
+channel-select `UpdateXxx` setters. The sibling `GetValueXxx` family
+instead receives a pointer that reads at the SAME byte offsets
+`CSTGProgramSlot` itself already uses (confirmed cross-check: e.g.
+`GetValueOutputBus`'s `+0x60` matches round 57's own `GetOutputBus`
+index byte; `GetValueBankSelectEx2MSB`'s `+0xe` matches this round's
+own `UpdateBankSelectEx2MSB` write target) -- modeled by reading the
+passed reference at those literal offsets, matching ground truth
+exactly regardless of whether the real caller passes `this` itself
+or a same-layout view onto it. 2 new real-but-unread `.rodata` slope
+tables added (`kKeyZoneSlopeTable`/`kVelZoneSlopeTable`).
+
+REGRESSION FOUND AND FIXED THIS ROUND: landing the FIRST real body
+for `CSTGProgramSlot::~CSTGProgramSlot()` broke 3 pre-existing verify
+targets (`test_engine`, `test_global`, `test_global_ctor`) that link
+`global.cpp` -- `CSTGProgramModeDrumTrackSlot`'s own dtor (round 55)
+uses real C++ inheritance (`: public CSTGProgramSlot`), so the
+compiler's IMPLICIT base-dtor call, previously silently unresolved
+(never linked against a body), suddenly needed
+`stg_program_slot_updaters.o`, which itself needed a second
+transitive dependency: `CSTGParamsOwner::sValueGetterTemp` (a shared
+static defined exactly once project-wide, in `adsr_base.cpp`, which
+was NOT already linked into those 3 targets and pulls in its own
+large unrelated dependency chain, `CSTGVoice::GetAMSSourceAddress`,
+if added). Fixed by adding `stg_program_slot_updaters.cpp` to the 3
+affected Makefile link lines and, instead of also linking
+`adsr_base.cpp`, appending a local `STGConvertedParam
+CSTGParamsOwner::sValueGetterTemp;` definition directly into
+`test_engine.cpp`/`test_global.cpp`/`test_global_ctor.cpp` -- the
+SAME local-copy convention already established by
+`test_stg_wave_sequence_valuegetters.cpp` for this exact symbol.
+
+Deferred, 1 reason: `GetWaveSeqSwingResolution()` forwards to
+`CSTGProgram::GetWaveSeqSwingResolution` (a real but wholly
+unreconstructed sibling class), deferred rather than guessed at.
+
+Real host KAT (62 checks, verify/test_stg_program_slot_updaters.cpp).
+`make verify` full suite green (all regressions from the dtor
+landing fixed, zero net regressions). Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3899 -> 3958/21,689 (+59, 0 regressions).
+
+Real-HW test that would help: none identified -- pure field-read/
+write accessor logic, no hardware I/O surface of its own.
+
 Real-HW test that would help: none identified -- pure in-memory
 sequence-data-structure field writes, no hardware I/O surface of its
 own.
