@@ -995,6 +995,67 @@ int main()
 		eng->~CKGEngine();
 	}
 
+	/* ---- ProcessForSeqWhenChangingGE(module) -- round 45, 2026-07-29,
+	 * solo. 2 early-return no-op guards (m_perfType==2; shared[0x7234]
+	 * ==2), then an EXTRA indexed ChangeValuesInBackupWhenChangingGE()
+	 * call (index from bankMgr[+0x97c7d4]) ONLY when
+	 * CKGUIMsgProcessor::ms_poInstance[+0x74] is set, ALWAYS followed
+	 * by the default-record update (confirmed via the real
+	 * fall-through jump, not a separate branch -- both calls fire when
+	 * the +0x74 gate is set). ---- */
+	{
+		setup();
+		unsigned char raw[sizeof(CKGEngine) + 64];
+		CKGEngine *eng = new (raw) CKGEngine();
+
+		eng->m_perfType = 0;
+		*(unsigned int *)(g_sharedBuf + 0x7234) = 0;
+
+		printf("  ProcessForSeqWhenChangingGE\n");
+
+		/* +0x74 clear -> only the default update fires. */
+		CKGUIMsgProcessor::ms_poInstance[0x74] = 0;
+		g_changeBackupGECalls = 0;
+		eng->ProcessForSeqWhenChangingGE(3);
+		check("  +0x74==0: exactly 1 call (default only)", g_changeBackupGECalls, 1);
+		check("  ...with the real module arg", g_lastChangeBackupGEModule, 3);
+		checkp("  ...common from GetSeqDefaultKarmaPerfCommon()",
+		       g_lastChangeBackupGECommon, g_sharedBuf + 0x3000);
+		checkp("  ...rec from GetSeqDefaultKarmaPerfModule()",
+		       g_lastChangeBackupGEModulePtr, g_sharedBuf + 0x4000);
+
+		/* +0x74 set -> BOTH the indexed AND the default update fire
+		 * (2 calls total); the LAST call observed is the default one,
+		 * since it always runs last. */
+		CKGUIMsgProcessor::ms_poInstance[0x74] = 1;
+		*(unsigned int *)(g_bankBuf + 0x97c7d4) = 7; /* seq index */
+		g_changeBackupGECalls = 0;
+		eng->ProcessForSeqWhenChangingGE(5);
+		check("  +0x74!=0: exactly 2 calls (indexed + default)", g_changeBackupGECalls, 2);
+		check("  ...last call's module arg is still the real module",
+		      g_lastChangeBackupGEModule, 5);
+		checkp("  ...last call is the DEFAULT one (falls through after the indexed one)",
+		       g_lastChangeBackupGECommon, g_sharedBuf + 0x3000);
+		checkp("  ...last call's rec is the default one too",
+		       g_lastChangeBackupGEModulePtr, g_sharedBuf + 0x4000);
+
+		/* m_perfType==2 -> no-op, 0 calls. */
+		eng->m_perfType = 2;
+		g_changeBackupGECalls = 0;
+		eng->ProcessForSeqWhenChangingGE(1);
+		check("  m_perfType==2: no-op", g_changeBackupGECalls, 0);
+		eng->m_perfType = 0;
+
+		/* shared[0x7234]==2 -> no-op, 0 calls. */
+		*(unsigned int *)(g_sharedBuf + 0x7234) = 2;
+		g_changeBackupGECalls = 0;
+		eng->ProcessForSeqWhenChangingGE(1);
+		check("  shared[0x7234]==2: no-op", g_changeBackupGECalls, 0);
+		*(unsigned int *)(g_sharedBuf + 0x7234) = 0;
+
+		eng->~CKGEngine();
+	}
+
 	printf(g_fail ? "\n%d CHECK(S) FAILED\n" : "\nALL CHECKS PASSED\n", g_fail);
 	return g_fail ? 1 : 0;
 }

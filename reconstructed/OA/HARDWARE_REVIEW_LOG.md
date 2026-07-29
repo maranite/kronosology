@@ -3393,3 +3393,51 @@ touching a KARMA realtime-controllable front-panel knob/pad/switch should
 now produce an audible/observable CC-driven effect that a VM-only build
 could never have exercised — this was previously a guaranteed silent
 no-op on real hardware too (the stub, not just the VM harness).
+
+## CKGEngine::ProcessForSeqWhenChangingGE — round 45 (2026-07-29, solo)
+
+Session-wide 200-subagent dispatch cap hit; continued solo. Considered
+`AssignRTParmFunction_Drm` (8294B, twice-deferred) again via the same
+native-execution-harness technique that cracked `IsRTParmFunctionSameGE`
+— rejected this time: 196 relocations and multiple real external calls
+within its body make it a genuinely stateful function, not a pure leaf
+safe to mmap+call directly. Also spot-checked `CSTGControllerRTData::
+ResetKnobsJumpCatch()` (2368B) — confirmed real but genuinely dense (an
+8-way mode-jump-table dispatch INTO a long per-knob-index sequence, not
+a simple unrolled loop); deferred rather than forced.
+
+Landed instead: `CKGEngine::ProcessForSeqWhenChangingGE(int)`
+(`.text+0x3accb0`, 186 bytes), already flagged in `oa_ckg_module_param_
+msg_handler.h`'s own header comment as "trivial control-flow itself,
+deferred only because its 2 real call targets are the still-deferred
+`ChangeValuesInBackupWhenChangingGE()` overloads." Reconstructed it
+anyway, linking against those 2 overloads as genuinely unresolved
+externs (same "expected Unknown symbol at insmod" convention as any
+other not-yet-real callee) — a real host KAT mock (already present in
+`test_ckg_engine.cpp`, added for `SendChangeGEToEngine()`'s own earlier
+batch) satisfies the link requirement for `make verify` without needing
+either overload's own real body.
+
+Two early-return no-op guards (`m_perfType==2`; the KARMA shared-memory
+blob's own `+0x7234` byte=="2"), then a genuinely NON-mutually-exclusive
+extra indexed update (index read from `CKGBankManager::ms_poInstance
+[+0x97c7d4]`, the SAME real field `oa_karma_seq_backup.h`'s own
+`CKGSeqBackupCommonParam`/`CKGSeqBackupModuleParam::GetValue()`
+independently confirms) gated on `CKGUIMsgProcessor::ms_poInstance
+[+0x74]`, ALWAYS followed unconditionally by a "default" update —
+confirmed via the real disassembly's own `jmp` back into the middle of
+the default-path instruction sequence (not a separate return), meaning
+BOTH updates fire when the msgProcessor gate is set, not just the
+indexed one.
+
+Real host KAT (new section in `verify/test_ckg_engine.cpp`, 10 checks)
+covers all 4 real paths: gate-clear (1 call), gate-set (2 calls, last
+one confirmed to be the default), and both no-op guards independently.
+`make verify` full suite green, real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green, `nm OA.ko | c++filt`
+confirms the new symbol's mangled name matches ground truth exactly.
+Manifest 3539 -> 3540/21,689 (+1, 0 regressions).
+
+Real-HW test that would help: none identified — this is an internal
+KARMA-sequencer backup-record bookkeeping path with no directly
+observable audio/UI effect on its own.

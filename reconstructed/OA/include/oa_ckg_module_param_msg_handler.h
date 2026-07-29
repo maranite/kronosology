@@ -713,10 +713,12 @@ public:
 	/* DEFERRED -- ground-truth offset 0x3acb00, 432 bytes. Same struct-copy family as
 	 * the 1-arg overload above, reversed direction. */
 	void ChangeValuesInBackupWhenChangingGE(int module, CKarmaPerfCommon *common, CKarmaPerfModule *rec);
-	/* DEFERRED -- ground-truth offset 0x3accb0, 192 bytes. Trivial control-flow
-	 * itself, but its only 2 real call targets are the 2 deferred
-	 * overloads directly above -- deferred alongside them rather than
-	 * declared-and-defined against not-yet-real dependencies. */
+	/* .text+0x3accb0, 186 bytes (round 45, 2026-07-29) -- own body now
+	 * real, see ckg_engine.cpp's own header comment. Its only 2 real
+	 * call targets are the 2 deferred `ChangeValuesInBackupWhenChangingGE()`
+	 * overloads directly above, which stay genuinely unresolved externs
+	 * (same "expected Unknown symbol at insmod" convention as any other
+	 * not-yet-reconstructed callee). */
 	void ProcessForSeqWhenChangingGE(int module);
 	/* .text+0x3acd70, 48 bytes. */
 	bool IsKarmaOn();

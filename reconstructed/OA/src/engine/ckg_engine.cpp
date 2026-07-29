@@ -1372,3 +1372,50 @@ void CKGEngine::UpdateUserGE(int a, int b)
 	}
 	((CKGBankManager *)CKGBankManager::ms_poInstance)->SetGECategoryToSharedMemory(a, b);
 }
+
+/*
+ * .text+0x3accb0, 186 bytes (round 45, 2026-07-29, solo -- session-wide
+ * 200-subagent dispatch cap hit, standing decompile-everything goal
+ * continued directly by the main-loop assistant). Confirmed real via
+ * `objdump -dr`; trivial control flow, but its own only 2 real call
+ * targets were the 2 `ChangeValuesInBackupWhenChangingGE()` overloads,
+ * which are STILL deferred (dense struct-copy bodies, see their own
+ * header comment) -- this method's own real body links against them as
+ * genuinely unresolved externs, same "expected Unknown symbol at
+ * insmod" convention as any other not-yet-reconstructed callee in this
+ * project.
+ *
+ * Two early-return no-op guards (m_perfType==2; the shared-memory blob's
+ * own +0x7234 byte=="2", i.e. `CKGBankManager::ms_poInstance[+8]` --
+ * "SharedMemBase()" in this header's own prose elsewhere, no actual
+ * method wraps it). Then, ONLY if `CKGUIMsgProcessor::ms_poInstance[+0x74]`
+ * is set, does an EXTRA indexed update first (index read from
+ * `CKGBankManager::ms_poInstance[+0x97c7d4]`, the SAME real field
+ * `oa_karma_seq_backup.h`'s own `CKGSeqBackupCommonParam`/
+ * `CKGSeqBackupModuleParam::GetValue()` already independently confirms) --
+ * BEFORE falling through UNCONDITIONALLY into the "default" update
+ * (confirmed via the real `jmp` back into the middle of the default-path
+ * instruction sequence, not a separate return -- both updates run when
+ * the msgProcessor flag is set, only the default one runs otherwise).
+ */
+void CKGEngine::ProcessForSeqWhenChangingGE(int module)
+{
+	if (m_perfType == 2)
+		return;
+
+	unsigned char *bankMgr = CKGBankManager::ms_poInstance;
+	unsigned char *shared = *(unsigned char **)(bankMgr + 8);
+	if (*(int *)(shared + 0x7234) == 2)
+		return;
+
+	if (*(CKGUIMsgProcessor::ms_poInstance + 0x74) != 0) {
+		unsigned int idx = *(unsigned int *)(bankMgr + 0x97c7d4);
+		unsigned char *m = ((CKGBankManager *)bankMgr)->GetSeqKarmaPerfModule(idx);
+		unsigned char *c = ((CKGBankManager *)bankMgr)->GetSeqKarmaPerfCommon(idx);
+		ChangeValuesInBackupWhenChangingGE(module, (CKarmaPerfCommon *)c, (CKarmaPerfModule *)m);
+	}
+
+	unsigned char *m2 = ((CKGBankManager *)bankMgr)->GetSeqDefaultKarmaPerfModule();
+	unsigned char *c2 = ((CKGBankManager *)bankMgr)->GetSeqDefaultKarmaPerfCommon();
+	ChangeValuesInBackupWhenChangingGE(module, (CKarmaPerfCommon *)c2, (CKarmaPerfModule *)m2);
+}
