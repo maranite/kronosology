@@ -368,3 +368,65 @@ reconstruction technique in this project's toolkit that reliably catches
 specific shape. All three bugs above were found and fixed in a single
 debug/fix/rebuild cycle once the KAT test existed; none were visible from a
 second or third pass of pure code reading.
+
+---
+
+## Lesson: CSmplMemManager -- Ghidra parameter-mismatch on a no-`this` __thiscall sibling, and an incidental-.bss-layout illusion (2026-07-28)
+
+`include/smpl_mem_manager.h` / `src/base/smpl_mem_manager.cpp` (55 `nm -C`
+entries, 52 reconstructed). Two distinct decompiler/analysis pitfalls, both
+caught and corrected before landing rather than silently transcribed:
+
+1. **Ghidra calling-convention misdetection on a real function that simply
+   never references `this`.** `CSmplMemManager::searchstereonoless(char*,
+   short, CUsrSample*, short, short)` doesn't touch `this` anywhere in its
+   body (it operates purely on globals via `Bless()`), so Ghidra correctly
+   detected `__cdecl` for it -- but then mis-offset the stack-argument
+   reads, producing garbled pseudocode (`_param_2`, `in_stack_0000000a`,
+   `(short)param_3 - 1` where a plain `short` was clearly meant). Its
+   sibling overload, `searchstereonomore(char*, short, CUsrSample*, short,
+   short)`, has the exact same "no `this` reference" shape but happened to
+   decompile cleanly and self-consistently. Trusting the pseudocode as-is
+   for the broken sibling would have silently swapped which of the 5
+   arguments is the search-floor bound. Went to raw `objdump` disassembly
+   instead (reading the prologue's stack-frame arithmetic to recover the
+   real per-argument byte offsets, then tracing the `strncmp`/
+   `GetSampleRate` call sites to confirm which offset fed which real
+   parameter) and confirmed: real signature is `(name, start, target,
+   floor, unusedCeil)`, with the 5th argument (`ceil`) provably never read
+   before `ret`. Lesson (reinforces the project's `verify-before-claim`
+   discipline): a same-class sibling decompiling cleanly is NOT evidence
+   the broken one's pseudocode can be trusted for argument order -- when a
+   `__cdecl`/no-`this` member function's pseudocode contains
+   `in_stack_...` or oddly-renamed `_paramN` identifiers, treat it as a
+   hard signal to re-derive from raw disassembly, not a cosmetic artifact.
+
+2. **Incidental 16-byte `.bss` spacing is not evidence of an array.**
+   `ramsize`/`ramtop`/`ramfreetop` are three separate 4-byte globals
+   (confirmed via `nm -C -S`: each individually `size=4`), yet several
+   methods (`getfreetop`/`setfreetop`/`isexistbank`/`getremainsize`/...)
+   index them via raw pointer arithmetic like `(&ramfreetop)[bank]` -- and
+   the three globals happen to sit exactly 0x10 bytes apart in this
+   specific build's `.bss`, alongside two other CONFIRMED-unrelated globals
+   from different classes at the same spacing (`CESSamplingTask::
+   m_poSmplPRManager`, a `getusedsampleno()` static-local guard variable).
+   This is almost certainly vestigial multi-bank plumbing from an earlier
+   codebase generation, never exercised with `bank!=0` by any confirmed
+   real caller on Kronos. Reproducing the literal OOB read (walking into
+   whatever the CURRENT toolchain's linker happens to place next) would be
+   both non-portable and actively unsafe in a fresh build; reinterpreted
+   instead as genuine small fixed-size per-bank arrays with a defensive
+   bank clamp -- a deliberate, documented deviation from bit-exact ground
+   truth, not a bug. Cross-reference: `[[eva_kontaktxml_shared_helper_technique]]`-
+   style "verify entanglement via real reads, not name matching" caution
+   applies here in reverse -- verify apparent-array shape via real symbol
+   sizes before trusting index arithmetic that LOOKS like a true array.
+
+Also deferred (not decompiler artifacts, genuine scope calls -- see
+`smpl_mem_manager.h`'s own class comment for full reasoning):
+`csmplmemmanagerstartup()` (boot-time bulk init touching unmodeled
+CUsrMultisample/CUsrSample/CUsrDrumsample raw layout), `multisamplecompare()`'s
+deep per-attack-point CUsrRel/CSmplPair renegotiation branch (fast path
+fully real), and the 3-argument `adjuststereomsno`/`adjuststereosampleno`
+cores (2-arg "sub" and 0-arg "adjust everything" wrappers around them ARE
+real).

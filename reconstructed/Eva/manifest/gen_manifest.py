@@ -3832,6 +3832,63 @@ RECONSTRUCTED = {
     "08185f50",  # CChunkClient::OnGetParamForSaveDump() const
     "08185fa0",  # CChunkClient::OnGetParamForLoadFile() const
     "08185ff0",  # CChunkClient::OnGetParamForLoadDump() const
+
+    # CSmplMemManager (smpl_mem_manager.h/.cpp), 2026-07-28. 52 of 55 real
+    # nm -C addresses reconstructed (3 deferred as documented stubs:
+    # csmplmemmanagerstartup, and the 3-arg adjuststereomsno/
+    # adjuststereosampleno cores -- see smpl_mem_manager.h's class comment).
+    "08d624b0",  # CSmplMemManager::CSmplMemManager()
+    "08d624e0",  # CSmplMemManager::~CSmplMemManager()
+    "08d62840",  # CSmplMemManager::setramsize()
+    "08d62870",  # CSmplMemManager::updateramsize(unsigned long)
+    "08d62890",  # CSmplMemManager::getnewmsno(int, short*, short*)
+    "08d62d20",  # CSmplMemManager::getnewmsnodec(int, short*, short*)
+    "08d63130",  # CSmplMemManager::incms(short)
+    "08d63150",  # CSmplMemManager::decms(short)
+    "08d631c0",  # CSmplMemManager::addms(short)
+    "08d634f0",  # CSmplMemManager::clearms()
+    "08d63500",  # CSmplMemManager::getfreemsnum(unsigned char*)
+    "08d63540",  # CSmplMemManager::getslidermsno(short)
+    "08d63710",  # CSmplMemManager::multisamplecompare(CUsrMultisample*, char*, CUsrMultisample*)
+    "08d63b50",  # CSmplMemManager::searchstereonoless(char*, short, CUsrMultisample*, short, short)
+    "08d64170",  # CSmplMemManager::searchstereonomore(char*, short, CUsrMultisample*, short, short)
+    "08d64ff0",  # CSmplMemManager::adjuststereomsnosub(short, short)
+    "08d65260",  # CSmplMemManager::adjuststereomsno()
+    "08d65380",  # CSmplMemManager::getnewsmplno(int, short*, short*, short)
+    "08d65860",  # CSmplMemManager::getnewsmplnodec(int, short*, short*, short)
+    "08d65e70",  # CSmplMemManager::incsmpl(short)
+    "08d65e90",  # CSmplMemManager::decsmpl(short)
+    "08d65f10",  # CSmplMemManager::addsmpl(short)
+    "08d66250",  # CSmplMemManager::clearsmpl()
+    "08d66270",  # CSmplMemManager::getfreesmplnum(unsigned char*)
+    "08d662b0",  # CSmplMemManager::getslidersampleno(short)
+    "08d66480",  # CSmplMemManager::searchstereonomore(char*, short, CUsrSample*, short, short)
+    "08d66620",  # CSmplMemManager::searchstereonoless(char*, short, CUsrSample*, short, short)
+    "08d66b00",  # CSmplMemManager::adjuststereosamplenosub(short, short)
+    "08d66d70",  # CSmplMemManager::adjuststereosampleno()
+    "08d66e90",  # CSmplMemManager::samplecompare(CUsrSample*, char*, CUsrSample*)
+    "08d66fa0",  # CSmplMemManager::isexistbank(unsigned char)
+    "08d66fc0",  # CSmplMemManager::getfreetop(unsigned char)
+    "08d66fd0",  # CSmplMemManager::setfreetop(unsigned char, unsigned long)
+    "08d67000",  # CSmplMemManager::writedata(unsigned char, char*, char*, unsigned long)
+    "08d67030",  # CSmplMemManager::readdata(unsigned char, char*, char*, unsigned long)
+    "08d67060",  # CSmplMemManager::cutdata(unsigned char, unsigned long, unsigned long)
+    "08d67150",  # CSmplMemManager::insertdata(unsigned char, unsigned long, unsigned long)
+    "08d67380",  # CSmplMemManager::dataclear(unsigned char, unsigned long, unsigned long)
+    "08d67530",  # CSmplMemManager::copydata(unsigned char, unsigned long, unsigned char, unsigned long, unsigned long)
+    "08d67610",  # CSmplMemManager::addrltv(short)
+    "08d67620",  # CSmplMemManager::decrltv(short)
+    "08d67630",  # CSmplMemManager::clearrltv()
+    "08d67640",  # CSmplMemManager::getuserltvnum()
+    "08d67650",  # CSmplMemManager::getfreerltvnum(unsigned char*)
+    "08d67690",  # CSmplMemManager::getremainsize(unsigned char)
+    "08d676c0",  # CSmplMemManager::getremainsize(unsigned long*)
+    "08d676e0",  # CSmplMemManager::getremainsmpltimems(unsigned char, int)
+    "08d67740",  # CSmplMemManager::getremainsmpltimeandsize(unsigned char, unsigned long*, unsigned char*)
+    "08d67820",  # CSmplMemManager::getusedsampleno(int, int*, int&)
+    "08d67960",  # CSmplMemManager::refreshhdfreesize(EDevice_Id)
+    "08d67990",  # CSmplMemManager::gethdfreesize()
+    "08d679c0",  # CSmplMemManager::dechdfreesize(unsigned long)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
