@@ -3968,6 +3968,21 @@ RECONSTRUCTED = {
     "08420d90",  # CFileKscList::SaveAutoLoad(char const*)
     "08420df0",  # CFileKscList::SaveBitDepth(char const*)
     "08420e50",  # CFileKscList::SaveLoadMethod(char const*)
+
+    # 2026-07-29 (solo, no subagents): CDirCD (dir_cd.h/.cpp) -- Akai/ISO
+    # CD-ROM directory driver. 10/~40 methods -- the smallest, self-
+    # contained ones (ctor/dtor + IsMixedCD/FindVolume/ReadNextEntry/etc
+    # deferred, see dir_cd.h).
+    "080d7e10",  # CDirCD::GetCurrEntry()
+    "080d7e20",  # CDirCD::GetRootHandle() const
+    "080d7e70",  # CDirCD::GetClusterSizeInSect() const
+    "080d7fe0",  # CDirCD::GetMaxDirEntrySize()
+    "080dbab0",  # CDirCD::GetNumAkaiPartition() const
+    "080db420",  # CDirCD::SetError(EDrvNotify)
+    "080daf80",  # CDirCD::ResetBufferedEntries()
+    "080db190",  # CDirCD::GetTotalSectors() const
+    "080dbad0",  # CDirCD::FindPartition(unsigned long, CDirCD::SAkaiPartition const*&) const
+    "080db790",  # CDirCD::GetPTRecord(unsigned int) const
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

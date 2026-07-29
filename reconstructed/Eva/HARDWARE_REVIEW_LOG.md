@@ -1504,4 +1504,70 @@ should know they exist and are untested/unmodeled, not silently absent.
   multi-field record round-trip (`#KSC`, `\r\n`, VendorId, `\r\n`,
   AutoLoad, `\r\n`) to exercise the CRLF-framing hypothesis end-to-end, not
   just field-by-field. Eva manifest 2700 -> 2718/37,795 (7.191%), commit
-  pending.
+  b6117ba.
+
+- **CDirCD, 10/~40 methods (`dir_cd.h`/`.cpp`), 2026-07-29 (solo, no
+  subagents)**. Real Akai/ISO CD-ROM directory driver
+  (`.rodata+0x08e86160` vtable, `0x08e862f8` typeinfo -- a real
+  `__si_class_type_info` whose base-type field, confirmed via a direct
+  `.rodata` byte read, points at `typeinfo for CDirectory`). `CDirectory`
+  ITSELF is a real, substantial, entirely separate class that embeds 3
+  MORE entirely unmodeled classes (`CRecentDirElems` 23 methods,
+  `CRecentFileElems` 12, `CRecentPathElems` 9, all destroyed by
+  `CDirectory::~CDirectory()`, confirmed via its own disassembly) -- found
+  mid-investigation, after the round-38 survey had already flagged
+  `CDirCD` as "not obviously entangled"; the entanglement is one level
+  deeper (in the BASE class) than that survey checked. Neither
+  `CDirectory` nor the 3 `CRecentXxxElems` siblings are reconstructed
+  this pass.
+
+  Scoped down to the 10 smallest, self-contained `CDirCD`-level methods
+  (accessed via raw `this`-offset arithmetic, no real ctor/dtor, no
+  `CDirectory` base-class modeling): `GetCurrEntry`/`GetRootHandle`/
+  `GetClusterSizeInSect`/`GetMaxDirEntrySize`/`GetNumAkaiPartition`/
+  `SetError`/`ResetBufferedEntries`/`GetTotalSectors`/`FindPartition`/
+  `GetPTRecord`. `GetTotalSectors()`'s own real body sums a real 16-bit
+  per-entry value (assembled from 2 non-adjacent bytes within an 8-byte
+  session-table record) times 75 -- the real CD-DA sectors-per-second
+  timing constant, confirmed via the literal `imul ...,0x4b` (75)
+  immediate. `GetPTRecord()`'s own real out-of-range path calls a
+  project-internal diagnostic/assert API via a global object's vtable
+  slot +0x94 -- modeled as an inert no-op extern (ground truth's own
+  control flow falls through and computes+returns the pointer regardless
+  of whether it fires). A real, caught-before-landing bug during this
+  pass: `GetRootHandle()`'s 3-way mode dispatch (modes 1/2/3) was
+  initially transcribed with cases 2 and 3 swapped (a raw
+  `switch`-vs-jump-table transcription slip, not a ground-truth
+  ambiguity) -- caught via careful cross-reading of the real disassembly
+  a second time before landing, not by the KAT (which would have passed
+  either way without ground-truth-derived expected values to catch it --
+  a reminder that swapped-but-internally-consistent branches are exactly
+  the class of bug a KAT built from the same transcription can't catch).
+
+  Deferred (real, disassembly not (fully) traced this pass): ctor/dtor,
+  `IsMixedCD()` (a genuine 350-byte two-phase alternating session-table
+  scan), `FindVolume()` (a real BINARY SEARCH over the volume table
+  followed by a linked-list traversal), `ReadNextEntry()`/
+  `AppendAkaiPartition()`/`GetAkaiPartition()`/`ChangeAkaiPartition()`/
+  `ClearAkaiPartition()`/`Register()`/`Unregister()`/`Invalidate()`/
+  `MediaOpen()`/`GetOwnerPartition()`/`GetRootSize()`/
+  `FindLastDataSessionOffset()`/`GetMediaLabel()`/
+  `UpdateElemInPathTable()`/`GetMaxMSNum()`/`GetNumOfMultisample()`, plus
+  `CCDConfigDir::DeserializePTR()` (a separate class touching
+  `CDirCD::PTRecord`).
+
+  Real host KAT (`verify/test_dir_cd.cpp`, 10 sections, 26 checks) uses a
+  raw manually-populated byte buffer cast to `CDirCD*` (no real ctor/dtor
+  call), same ctor-avoidance convention as `CFileKscList`'s own KAT.
+  `make verify` full suite green (91 binaries, 0 failures). `nm|c++filt`
+  confirms all 10 new symbols' mangled names match ground truth exactly
+  EXCEPT `SetError` (real param type `EDrvNotify`, an entirely unmodeled
+  enum, represented as plain `int` per this project's established
+  convention for unconfirmed enum types -- same accepted mangled-name
+  divergence as other instances of this pattern elsewhere in this
+  project). Eva manifest 2718 -> 2728/37,795 (7.218%), commit pending.
+
+  Real-HW test that would help: none identified -- this driver only
+  matters when a real Akai-format data CD is mounted, and only 10 of its
+  ~40 methods (none of the actual directory-traversal ones) are even
+  reconstructed yet.
