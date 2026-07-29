@@ -119,7 +119,18 @@ int main()
 	seq->UpdateReverse(ctx, P(0));
 	check("UpdateReverse(idx=0, 0) clears bit0 of +0x47", buf[0x47] == 0);
 
+	/* round 63: UpdateDuration/UpdateCrossfadeTime, cross-checked against
+	 * GetterDuration()/GetterCrossfadeTime()'s own +0x3e/+0x40 short reads.
+	 */
+	seq->UpdateDuration(ctx, P(1234));
+	check("UpdateDuration(idx=0) writes short at +0x3e", *(short *)(buf + 0x3e) == 1234);
+	seq->UpdateCrossfadeTime(ctx, P(-500));
+	check("UpdateCrossfadeTime(idx=0) writes short at +0x40", *(short *)(buf + 0x40) == -500);
+
 	ctx.index = 2;
+	seq->UpdateDuration(ctx, P(77));
+	check("UpdateDuration(idx=2) writes short at +0x3e+2*0x34", *(short *)(buf + 0x3e + 2 * 0x34) == 77);
+	check("UpdateDuration(idx=2) leaves idx=0's own record untouched", *(short *)(buf + 0x3e) == 1234);
 	seq->UpdateStepType(ctx, P(9));
 	check("UpdateStepType(idx=2) writes +0x42+2*0x34", buf[0x42 + 2 * 0x34] == 9);
 	check("UpdateStepType(idx=2) leaves idx=0's own record untouched", buf[0x42] == 5);

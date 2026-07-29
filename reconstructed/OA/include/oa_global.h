@@ -2775,6 +2775,13 @@ struct CSTGWaveSequence {
 	void UpdateTempoBaseNote(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
 	void UpdateTempoMultiplier(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
 	void UpdateReverse(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	/* round 63 (2026-07-29, solo): writes the same +0x3e/+0x40 per-step
+	 * short fields GetterDuration()/GetterCrossfadeTime() already read
+	 * (stg_wave_sequence_valuegetters.cpp) -- cross-checked, not a fresh
+	 * derivation. `this`/ctx/val land in EAX/EDX/ECX exactly per this
+	 * project's established regparm3 convention, no register confusion. */
+	void UpdateDuration(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
+	void UpdateCrossfadeTime(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val);
 };
 
 /*

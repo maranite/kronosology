@@ -182,3 +182,20 @@ void CSTGWaveSequence::UpdateReverse(CSTGWaveSeqDataMessageContext &ctx, STGConv
 	unsigned char *field = base + ctx.index * 0x34 + 0x47;
 	*field = (unsigned char)((*field & 0xfe) | (val.value != 0));
 }
+
+/* round 63 (2026-07-29, solo): writes the same +0x3e/+0x40 per-step short
+ * fields GetterDuration()/GetterCrossfadeTime() already read (see this
+ * file's own header comment) -- cross-checked against those getters, not a
+ * fresh derivation.
+ */
+void CSTGWaveSequence::UpdateDuration(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	*(short *)(base + ctx.index * 0x34 + 0x3e) = (short)val.value;
+}
+
+void CSTGWaveSequence::UpdateCrossfadeTime(CSTGWaveSeqDataMessageContext &ctx, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	*(short *)(base + ctx.index * 0x34 + 0x40) = (short)val.value;
+}

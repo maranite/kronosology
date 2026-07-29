@@ -4661,3 +4661,51 @@ overload, see above).
 
 Real-HW test that would help: none identified -- pure sequencer
 transport state-machine logic, no hardware I/O surface of its own.
+
+## Round 63 (OA.ko, solo, 2026-07-29): CSTGWaveSequence, 2-method batch
+
+Surveyed several "near-complete" classes first (CKGModuleParamMsgHandler
+4 pending, CKGCommonParamMsgHandler 3, CSTGControlMsgHandler 2, etc.) --
+all turned out to be the standing "ctor/dtor/`HandleMessage()` real but
+deliberately deferred" boilerplate this project already treats as a
+closed category for every `*MsgHandler` class (documented in
+`oa_ckg_module_param_msg_handler.h`'s own header comment), not a genuine
+opportunity. `CSTGProgramModeDrumTrackSlot`'s 4 pending methods and
+`CSTGKeyTrack`'s 11 all hit the established `in_EAX`/`in_ECX`/`in_EDX`-
+alongside-a-declared-`this`-parameter register-confusion red flag (this
+project's regparm3 convention is `this`=EAX/1st arg=EDX/2nd arg=ECX
+*implicit*, not usually spelled out as `in_EAX` when Ghidra ALSO
+declares a named `this` param in the same signature -- when both forms
+appear together for the SAME register, it signals Ghidra's own binding
+confusion, not a trustworthy read) plus several raw vtable dispatches
+into unconfirmed slots (`+0xc0`, `+0x5c`, `+0xf0`) -- deferred.
+`CSTGMultibandDelay`'s per-band `UpdateBandXLFOPhase/LFODepth/Time/
+LowDamping` family (16 methods) was VERY close -- clean `this=EAX/
+ctx=EDX/val=ECX` register attribution, no vtable dispatch -- but every
+one divides/multiplies by an unrecovered `.rodata` float constant
+(`_DAT_006bbda0`..`_DAT_006bbdbc`); the generic `UpdateBandXxx(...,int
+band)` siblings additionally reuse `this`'s own register slot to smuggle
+in the spilled 4th argument (band index) once the explicit-arg count
+exceeds regparm3's 3-register budget -- same red flag as
+`CSTGKeyTrack`. All deferred.
+
+Landed the 2 that survived: `CSTGWaveSequence::UpdateDuration`/
+`UpdateCrossfadeTime` -- write the exact same `+0x3e`/`+0x40` per-step
+`short` fields the already-reconstructed `GetterDuration()`/
+`GetterCrossfadeTime()` read (`stg_wave_sequence_valuegetters.cpp`),
+confirmed byte-for-byte via cross-check rather than fresh derivation.
+Clean `this=EAX/ctx=EDX(→ctx.index)/val=ECX` attribution, no dispatch,
+no unrecovered constants -- the two clean survivors of an 11-candidate
+family sample (`UpdateSwingResolution`/`UpdateDurationAMSSource`/
+`UpdatePositionAMSSource`/`ValidateParamChange`/`Initialize` all hit one
+of the same red flags above and stay deferred).
+
+Real host KAT (2 new checks + a same-`ctx.index=2` no-clobber check,
+appended to the existing `verify/test_stg_wave_sequence_updaters.cpp`,
+now 27 checks). `make verify` full suite green (109 targets), zero
+regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4033 ->
+4035/21,689 (18.604%).
+
+Real-HW test that would help: none identified -- pure per-step field
+writes, no hardware I/O surface of its own.
