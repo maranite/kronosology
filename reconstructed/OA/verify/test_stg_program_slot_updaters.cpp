@@ -192,6 +192,124 @@ int main()
 	ctxBuf[0x44] = 0x2; // bit0 clear
 	check("GetValueUseDrumkitBusSettings bit0 clear -> 0", slot->GetValueUseDrumkitBusSettings(*ctx2).value == 0);
 
+	// --- round 59 batch (43 methods) ---
+	memset(ctxBuf, 0, sizeof(ctxBuf));
+
+	ctxBuf[0x43] = 0x01;
+	check("GetValueMute bit0 of +0x43", slot->GetValueMute(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x02;
+	check("GetValuePriority bit1 of +0x43", slot->GetValuePriority(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x04;
+	check("GetValueUseProgramScale bit2 of +0x43", slot->GetValueUseProgramScale(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x08;
+	check("GetValueProgVectorVolume bit3 of +0x43", slot->GetValueProgVectorVolume(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x10;
+	check("GetValueProgVectorCC bit4 of +0x43", slot->GetValueProgVectorCC(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x20;
+	check("GetValueCombiVectorCC bit5 of +0x43", slot->GetValueCombiVectorCC(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x40;
+	check("GetValueEQAutoLoadProgram bit6 of +0x43", slot->GetValueEQAutoLoadProgram(*ctx2).value == 1);
+	ctxBuf[0x43] = 0x80;
+	check("GetValueEQBypass bit7 of +0x43", slot->GetValueEQBypass(*ctx2).value == 1);
+	ctxBuf[0x43] = 0;
+
+	ctxBuf[0x44] = 0x02;
+	check("GetValueEnableProgramChange bit1 of +0x44", slot->GetValueEnableProgramChange(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x04;
+	check("GetValueEnableAfterTouch bit2 of +0x44", slot->GetValueEnableAfterTouch(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x08;
+	check("GetValueEnableDamper bit3 of +0x44", slot->GetValueEnableDamper(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x10;
+	check("GetValueEnablePortamentoSW bit4 of +0x44", slot->GetValueEnablePortamentoSW(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x20;
+	check("GetValueEnableJSXAsAMS bit5 of +0x44", slot->GetValueEnableJSXAsAMS(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x40;
+	check("GetValueEnableJSY bit6 of +0x44", slot->GetValueEnableJSY(*ctx2).value == 1);
+	ctxBuf[0x44] = 0x80;
+	check("GetValueEnableJSmY bit7 of +0x44", slot->GetValueEnableJSmY(*ctx2).value == 1);
+	ctxBuf[0x44] = 0;
+
+	ctxBuf[0x45] = 0x01;
+	check("GetValueEnableRibbon bit0 of +0x45", slot->GetValueEnableRibbon(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x02;
+	check("GetValueEnableOtherCC bit1 of +0x45", slot->GetValueEnableOtherCC(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x04;
+	check("GetValueEnableKarmaWaveformSysex bit2 of +0x45", slot->GetValueEnableKarmaWaveformSysex(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x08;
+	check("GetValueEnableFootSwitch bit3 of +0x45", slot->GetValueEnableFootSwitch(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x10;
+	check("GetValueEnableFootPedal bit4 of +0x45", slot->GetValueEnableFootPedal(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x20;
+	check("GetValueEnableSW1 bit5 of +0x45", slot->GetValueEnableSW1(*ctx2).value == 1);
+	ctxBuf[0x45] = 0x40;
+	check("GetValueEnableSW2 bit6 of +0x45", slot->GetValueEnableSW2(*ctx2).value == 1);
+	ctxBuf[0x45] = 0;
+
+	ctxBuf[0x47] = 0x01;
+	check("GetValueEnableKnob1 bit0 of +0x47", slot->GetValueEnableKnob1(*ctx2).value == 1);
+	ctxBuf[0x47] = 0x80;
+	check("GetValueEnableKnob8 bit7 of +0x47", slot->GetValueEnableKnob8(*ctx2).value == 1);
+	ctxBuf[0x47] = 0;
+
+	*(int *)(ctxBuf + 0x6f) = 0x111;
+	check("GetValueTrackPan dual-writes value/displayValue from +0x6f",
+	      slot->GetValueTrackPan(*ctx2).value == 0x111 && CSTGParamsOwner::sValueGetterTemp.displayValue == 0x111);
+	*(int *)(ctxBuf + 0x73) = 0x222;
+	check("GetValueTrackLevel reads +0x73", slot->GetValueTrackLevel(*ctx2).value == 0x222);
+	*(int *)(ctxBuf + 0x77) = 0x333;
+	check("GetValueTrackSend1Level reads +0x77", slot->GetValueTrackSend1Level(*ctx2).value == 0x333);
+	*(int *)(ctxBuf + 0x7b) = 0x444;
+	check("GetValueTrackSend2Level reads +0x7b", slot->GetValueTrackSend2Level(*ctx2).value == 0x444);
+	*(int *)(ctxBuf + 0x19) = 0x555;
+	check("GetValuePitchBendRange reads +0x19", slot->GetValuePitchBendRange(*ctx2).value == 0x555);
+	*(int *)(ctxBuf + 0x1d) = 0x666;
+	check("GetValueDetune reads +0x1d", slot->GetValueDetune(*ctx2).value == 0x666);
+	*(int *)(ctxBuf + 0x3f) = 0x777;
+	check("GetValueSwingPercent reads +0x3f", slot->GetValueSwingPercent(*ctx2).value == 0x777);
+	*(int *)(ctxBuf + 0x31) = 0x888;
+	check("GetValueVolumeCenter reads +0x31", slot->GetValueVolumeCenter(*ctx2).value == 0x888);
+	*(int *)(ctxBuf + 0x48) = 0x999;
+	check("GetValueEQTrim reads +0x48", slot->GetValueEQTrim(*ctx2).value == 0x999);
+	*(int *)(ctxBuf + 0x4c) = 0xaaa;
+	check("GetValueEQLowGain reads +0x4c", slot->GetValueEQLowGain(*ctx2).value == 0xaaa);
+	*(int *)(ctxBuf + 0x50) = 0xbbb;
+	check("GetValueEQMidFreq reads +0x50", slot->GetValueEQMidFreq(*ctx2).value == 0xbbb);
+	*(int *)(ctxBuf + 0x54) = 0xccc;
+	check("GetValueEQMidGain reads +0x54", slot->GetValueEQMidGain(*ctx2).value == 0xccc);
+	*(int *)(ctxBuf + 0x58) = 0xddd;
+	check("GetValueEQHighGain reads +0x58", slot->GetValueEQHighGain(*ctx2).value == 0xddd);
+	memset(ctxBuf, 0, sizeof(ctxBuf));
+
+	buf[0x5c + 2] = (unsigned char)-3;
+	ctx2->inputChannelIndex = 2;
+	check("GetValueInputSource indexes this+0x5c by ctx.inputChannelIndex", slot->GetValueInputSource(*ctx2).value == -3);
+	buf[0x5e + 2] = (unsigned char)-4;
+	check("GetValueInputChannelSelect indexes this+0x5e by ctx.inputChannelIndex", slot->GetValueInputChannelSelect(*ctx2).value == -4);
+	ctx2->inputChannelIndex = 0;
+	buf[0x63 + 1] = (unsigned char)-8;
+	ctx2->ifxSlotIndex = 1;
+	check("GetValueIFXDrumkitPatch indexes this+0x63 by ctx.ifxSlotIndex", slot->GetValueIFXDrumkitPatch(*ctx2).value == -8);
+	ctx2->ifxSlotIndex = 0;
+
+	buf[0x46] = 0xf0;
+	slot->UpdateIgnoreSetListTranspose(*ctx2, P(1));
+	check("UpdateIgnoreSetListTranspose sets bit0, preserves upper bits", buf[0x46] == 0xf1);
+	slot->UpdateIgnoreSetListTranspose(*ctx2, P(0));
+	check("UpdateIgnoreSetListTranspose clears bit0", buf[0x46] == 0xf0);
+
+	buf[0x45] = 0x0e;
+	slot->UpdateEnableRibbon(*ctx2, P(1));
+	check("UpdateEnableRibbon sets bit0, preserves upper bits", buf[0x45] == 0x0f);
+	slot->UpdateEnableRibbon(*ctx2, P(0));
+	check("UpdateEnableRibbon clears bit0", buf[0x45] == 0x0e);
+
+	buf[0x44] = 0x3c;
+	slot->UpdateUseDrumkitBusSettings(*ctx2, P(1));
+	check("UpdateUseDrumkitBusSettings sets bit0, preserves upper bits", buf[0x44] == 0x3d);
+	slot->UpdateUseDrumkitBusSettings(*ctx2, P(0));
+	check("UpdateUseDrumkitBusSettings clears bit0", buf[0x44] == 0x3c);
+	buf[0x44] = buf[0x45] = buf[0x46] = 0;
+
 	printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

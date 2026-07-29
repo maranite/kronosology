@@ -4398,3 +4398,54 @@ write accessor logic, no hardware I/O surface of its own.
 Real-HW test that would help: none identified -- pure in-memory
 sequence-data-structure field writes, no hardware I/O surface of its
 own.
+
+## Round 59 (OA.ko, solo, 2026-07-29): CSTGProgramSlot, 43-method
+mechanical batch
+
+Continuation of `CSTGProgramSlot`'s remaining pending methods.
+Classified all 43 via a Python regex-driven scan of the pending
+ground-truth `.c` files into 4 clean pattern families (script kept
+at `/tmp/gen_round59.py`, same technique as round 54's
+`CSTGMultibandDelay` batch generator and round 59's own predecessor
+rounds):
+
+- Class A (24 methods): single-bit test getters reading `ctx+0x43`
+  through `ctx+0x47` (`GetValueMute`, `GetValuePriority`,
+  `GetValueUseProgramScale`, `GetValueEnableProgramChange` and 20
+  siblings) -- same byte range round 58 already confirmed via its
+  own `UpdateIgnoreSetListTranspose`@0x46/`UpdateEnableRibbon`@0x45/
+  `UpdateUseDrumkitBusSettings`@0x44 setters.
+- Class B (13 methods): 4-byte int reads dual-written to both
+  `STGConvertedParam::value` and `::displayValue` (the round-57-
+  confirmed field at +0x18) -- offsets cross-checked against round
+  57's own float getters at identical addresses
+  (`GetDetune`=+0x1d, `GetEQTrim`=+0x48 both reused verbatim here).
+- Class C (3 methods): `GetValueInputSource`/`GetValueInputChannelSelect`/
+  `GetValueIFXDrumkitPatch` -- ctx-indexed signed-byte table reads,
+  reusing round 58's exact `UpdateInputSource`/`UpdateInputChannelSelect`/
+  `UpdateIFXDrumkitPatch` base offsets (0x5c/0x5e/0x63) with the
+  ctx-relative `inputChannelIndex`/`ifxSlotIndex` fields as the index.
+- Class D (3 methods): single-bit setters
+  (`UpdateIgnoreSetListTranspose`, `UpdateEnableRibbon`,
+  `UpdateUseDrumkitBusSettings`), same shape as round 58's `Update*`
+  family.
+
+`GetValueIFXDrumkitPatch` needed one manual classification fix (its
+exact ground-truth formatting didn't match the initial regex);
+confirmed correct by direct read of its body before inclusion.
+
+All 43 bodies appended to the existing
+`src/engine/stg_program_slot_updaters.cpp` (round 58's file, same
+"extend the same file for the same class" convention used by Eva
+round 51 for `control_surface.cpp`). Declarations appended to
+`struct CSTGProgramSlot` in `include/oa_global.h`.
+
+Real host KAT (43 new checks appended to
+`verify/test_stg_program_slot_updaters.cpp`, 105 total in that
+file). `make verify` full suite green, zero failures, zero
+regressions (round 58's Makefile link-line fix already covers this
+file). Real `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+build green. Manifest 3958 -> 4001/21,689 (+43, 0 regressions).
+
+Real-HW test that would help: none identified -- pure field-read/
+write accessor logic, no hardware I/O surface of its own.

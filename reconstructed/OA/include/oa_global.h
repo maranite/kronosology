@@ -1345,6 +1345,72 @@ struct CSTGProgramSlot {
 	STGConvertedParam &GetChordSourceValue(CSTGProgramSlotMessageContext &ctx) const;
 	static STGConvertedParam &GetChordSW();
 	STGConvertedParam &GetValueUseDrumkitBusSettings(CSTGProgramSlotMessageContext &ctx) const;
+
+	/*
+	 * Round 59 batch (43 methods) -- mechanical pattern families identified
+	 * via regex-classification across all pending ground-truth .c files:
+	 *
+	 *   Class A (24 methods): single-bit test getters at ctx+0x43..+0x47,
+	 *   same byte-range already established by round 58's Update* setters
+	 *   (UpdateIgnoreSetListTranspose@0x46, UpdateEnableRibbon@0x45,
+	 *   UpdateUseDrumkitBusSettings@0x44).
+	 *
+	 *   Class B (13 methods): 4-byte int reads, dual-written to both
+	 *   STGConvertedParam::value and ::displayValue (round-57-confirmed
+	 *   field at +0x18) -- cross-checked against round 57's own float
+	 *   getters at identical offsets (GetDetune=+0x1d, GetEQTrim=+0x48).
+	 *
+	 *   Class C (3 methods): ctx-indexed signed-byte table reads, reusing
+	 *   round 58's exact UpdateIFXDrumkitPatch/UpdateInputSource/
+	 *   UpdateInputChannelSelect base offsets (0x5c/0x5e/0x63) with the
+	 *   ctx-relative index field.
+	 *
+	 *   Class D (3 methods): single-bit setters, same shape as round 58's
+	 *   Update* family.
+	 */
+	STGConvertedParam &GetValueMute(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValuePriority(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueUseProgramScale(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableProgramChange(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableAfterTouch(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableDamper(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnablePortamentoSW(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableJSXAsAMS(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableJSY(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableJSmY(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableRibbon(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob1(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKnob8(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableSW1(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableSW2(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableFootPedal(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableFootSwitch(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableOtherCC(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEnableKarmaWaveformSysex(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueProgVectorVolume(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueProgVectorCC(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueCombiVectorCC(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQAutoLoadProgram(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQBypass(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTrackPan(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTrackLevel(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTrackSend1Level(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueTrackSend2Level(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValuePitchBendRange(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueDetune(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueSwingPercent(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueVolumeCenter(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQTrim(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQLowGain(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQMidFreq(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQMidGain(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueEQHighGain(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueInputSource(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueInputChannelSelect(CSTGProgramSlotMessageContext &ctx) const;
+	STGConvertedParam &GetValueIFXDrumkitPatch(CSTGProgramSlotMessageContext &ctx) const;
+	void UpdateIgnoreSetListTranspose(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateEnableRibbon(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
+	void UpdateUseDrumkitBusSettings(CSTGProgramSlotMessageContext &ctx, STGConvertedParam &val);
 };
 
 /*

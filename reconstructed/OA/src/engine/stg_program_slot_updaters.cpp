@@ -317,3 +317,265 @@ STGConvertedParam &CSTGProgramSlot::GetValueUseDrumkitBusSettings(CSTGProgramSlo
 {
 	return SetValueGetterTemp(((unsigned char *)&ctx)[0x44] & 1);
 }
+
+/* Round 59 batch (43 methods) -- see header for class A/B/C/D pattern notes. */
+
+STGConvertedParam &CSTGProgramSlot::GetValueMute(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp(((unsigned char *)&ctx)[0x43] & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValuePriority(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 1) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueUseProgramScale(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 2) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableProgramChange(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 1) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableAfterTouch(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 2) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableDamper(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 3) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnablePortamentoSW(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 4) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableJSXAsAMS(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 5) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableJSY(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 6) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableJSmY(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x44] >> 7) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableRibbon(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp(((unsigned char *)&ctx)[0x45] & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob1(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp(((unsigned char *)&ctx)[0x47] & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKnob8(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x47] >> 7) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableSW1(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 5) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableSW2(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 6) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableFootPedal(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 4) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableFootSwitch(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 3) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableOtherCC(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 1) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEnableKarmaWaveformSysex(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x45] >> 2) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueProgVectorVolume(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 3) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueProgVectorCC(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 4) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueCombiVectorCC(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 5) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQAutoLoadProgram(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 6) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQBypass(CSTGProgramSlotMessageContext &ctx) const
+{
+	return SetValueGetterTemp((((unsigned char *)&ctx)[0x43] >> 7) & 1);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueTrackPan(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x6f);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueTrackLevel(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x73);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueTrackSend1Level(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x77);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueTrackSend2Level(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x7b);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValuePitchBendRange(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x19);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueDetune(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x1d);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueSwingPercent(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x3f);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueVolumeCenter(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x31);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQTrim(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x48);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQLowGain(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x4c);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQMidFreq(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x50);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQMidGain(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x54);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueEQHighGain(CSTGProgramSlotMessageContext &ctx) const
+{
+	int v = *(int *)(((unsigned char *)&ctx) + 0x58);
+	CSTGParamsOwner::sValueGetterTemp.value = v;
+	CSTGParamsOwner::sValueGetterTemp.displayValue = v;
+	return CSTGParamsOwner::sValueGetterTemp;
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueInputSource(CSTGProgramSlotMessageContext &ctx) const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	return SetValueGetterTemp((signed char)base[0x5c + *(int *)(((unsigned char *)&ctx) + 0x18)]);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueInputChannelSelect(CSTGProgramSlotMessageContext &ctx) const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	return SetValueGetterTemp((signed char)base[0x5e + *(int *)(((unsigned char *)&ctx) + 0x18)]);
+}
+
+STGConvertedParam &CSTGProgramSlot::GetValueIFXDrumkitPatch(CSTGProgramSlotMessageContext &ctx) const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	return SetValueGetterTemp((signed char)base[0x63 + *(int *)(((unsigned char *)&ctx) + 0x4)]);
+}
+
+void CSTGProgramSlot::UpdateIgnoreSetListTranspose(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x46] = (unsigned char)((base[0x46] & 0xfe) | (val.value != 0));
+}
+
+void CSTGProgramSlot::UpdateEnableRibbon(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x45] = (unsigned char)((base[0x45] & 0xfe) | (val.value != 0));
+}
+
+void CSTGProgramSlot::UpdateUseDrumkitBusSettings(CSTGProgramSlotMessageContext &, STGConvertedParam &val)
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0x44] = (unsigned char)((base[0x44] & 0xfe) | (val.value != 0));
+}
