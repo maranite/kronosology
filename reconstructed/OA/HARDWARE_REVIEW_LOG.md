@@ -3526,3 +3526,59 @@ should re-run the full kronos_vm boot-test sequence before trusting it —
 the existing virtual stand-in's own header comment documents the exact
 Eva-segfault-on-`/proc/.shm`-mmap regression a broken swap could
 reintroduce.
+
+## CDrumButtonLED + M3RPPRGlue_*LED + CSPRUIMsgSender::*DrumTrackLED, solo round 47 (2026-07-29)
+
+Continuation of solo mode. Landed a complete, self-contained 3-layer
+vertical slice through the front-panel drum-track button LED control
+path (11 functions total), found via a fresh class-inventory sweep:
+
+```
+CDrumButtonLED::start()/wakeup()/sleep()/initialize()
+  -> M3RPPRGlue_TurnOnLED/TurnOffLED/BlinkLED()
+    -> CSPRUIMsgSender::TurnOnDrumTrackLED/TurnOffDrumTrackLED/
+       BlinkDrumTrackLED()
+      -> SKSTGGate_SendToUI(CSKMessage const*)   [unresolved extern,
+                                                   real relocation-
+                                                   confirmed symbol,
+                                                   same treatment as
+                                                   KGOutGate_
+                                                   SendMessageToUI]
+```
+
+`CDrumButtonLED`'s own state: a single byte field (`mState`), confirmed
+via `initialize()`/`wakeup()` both writing 0, `sleep()` writing 1, and
+`start()` gating `TurnOnLED()` behind `mState==0`. `stop()` is `__cdecl`
+in ground truth (touches no member state at all) -- modeled as `static`
+to match. `CSKMessage` reused from the already-established
+`oa_ckg_control_ui_msg.h` (`raw[0x30]` opaque-payload convention).
+
+Real bug/quirk found and faithfully preserved, not "cleaned up": each of
+the 3 `CSPRUIMsgSender::*DrumTrackLED()` senders builds an IDENTICAL
+28-byte payload with a genuine 4-byte GAP at offset +0x0c that ground
+truth's own disassembly never assigns (`local_24` at offset 8 is only 4
+bytes, but the next local, `local_1c`, starts 8 bytes later at offset
+16 -- an 8-byte-apart pair of "4-byte" locals, meaning 4 bytes of real
+stack memory sent to `SKSTGGate_SendToUI()` are genuine uninitialized
+garbage in ground truth). This reconstruction zeroes that gap (rather
+than reproducing nondeterministic garbage) purely so the reconstruction
+itself has no undefined behavior -- functionally immaterial since
+nothing downstream of the unresolved `SKSTGGate_SendToUI` extern is
+modeled in this project.
+
+Real host KAT (`verify/test_drum_button_led.cpp`, 5 sections) exercises
+the full state machine (initialize/start/sleep/wakeup/stop) and
+independently verifies every byte of the built `CSKMessage` payload for
+each of the 3 real command ids (0x2e/0x2f/0x30). `make verify` full
+suite green (224 targets, 0 failures), real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green, `nm OA.ko | c++filt`
+confirms all 11 new symbols' mangled names match ground truth exactly.
+Manifest 3547 -> 3558/21,689 (+11, 0 regressions).
+
+Real-HW test that would help: pressing the physical drum-track button
+on a real Kronos and confirming the LED lights/blinks/turns off exactly
+per this state machine would be the natural real-hardware confirmation,
+though nothing about this reconstruction is currently wired into a live
+call path from real front-panel input (the caller of
+`CDrumButtonLED::start()`/`sleep()`/`wakeup()` itself is not yet
+traced).
