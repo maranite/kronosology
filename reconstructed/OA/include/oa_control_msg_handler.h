@@ -195,6 +195,11 @@ class CSTGDrumPadInterface {
 public:
 	static CSTGDrumPadInterface *sInstance;
 	void StartScanning();
+
+	/* .text+0x0034ced0, 1 byte (round 67, solo). Confirmed genuinely
+	 * empty (bare `ret`) in the real binary.
+	 */
+	static void Run();
 };
 
 /*

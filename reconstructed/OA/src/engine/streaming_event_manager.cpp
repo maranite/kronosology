@@ -57,6 +57,16 @@ CSTGStreamingEvent::CSTGStreamingEvent()
 	self[0xd1] &= 0xef;
 }
 
+/* Round 67 (solo): byte-identical D0/D1 pair (.text+0x5aafa0/0x5aafb0),
+ * restores the base class' own vtable pointer, `_ZTV14CSTGAudioEvent+8` --
+ * same idiom + `volatile` requirement as the already-real
+ * `CSTGPlaybackEvent::~CSTGPlaybackEvent()` (playback_event_methods.cpp).
+ */
+CSTGStreamingEvent::~CSTGStreamingEvent()
+{
+	*(volatile unsigned int *)this = ToU32(_ZTV14CSTGAudioEvent + 8);
+}
+
 CSTGStreamingEventManager::CSTGStreamingEventManager()
 {
 	/* events[401] is default-constructed automatically (a real C++ array

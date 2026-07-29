@@ -33,6 +33,9 @@ CSTGAudioEvent::CSTGAudioEvent() {}
  * test_engine_init.cpp already uses for _ZTV14CSTGAudioEvent/
  * _ZTV17CSTGPlaybackEvent/_ZTV15CSTGRecordEvent. */
 unsigned char _ZTV18CSTGStreamingEvent[40];
+/* round 67: same local-storage treatment, needed by the new
+ * ~CSTGStreamingEvent() check below (restores this base-class vtable). */
+unsigned char _ZTV14CSTGAudioEvent[40];
 
 /* TSTGArrayManager<T>::sInstance's own real storage (per-T instantiation)
  * lives in engine_init.cpp (not linked here) -- this file's own new
@@ -1269,6 +1272,12 @@ int main(void)
 			 *(unsigned int *)((unsigned char *)&sem->events[0] + 0x3c), headSlotAddr);
 		check_eq("events[2]'s own +0x3c owner == &manager->freeListHead",
 			 *(unsigned int *)((unsigned char *)&sem->events[2] + 0x3c), headSlotAddr);
+
+		/* round 67: ~CSTGStreamingEvent() resets the vtable pointer
+		 * back to _ZTV14CSTGAudioEvent+8 (the base class' own vtable). */
+		sem->events[0].~CSTGStreamingEvent();
+		check_eq("~CSTGStreamingEvent(): vtable pointer reset to _ZTV14CSTGAudioEvent+8",
+			 *(unsigned int *)&sem->events[0], ToU32(_ZTV14CSTGAudioEvent + 8));
 	}
 
 	printf("\n[28] CSTGSamplingDaemon::ProcessCommands() (sec 10.160)\n");

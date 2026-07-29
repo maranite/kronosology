@@ -84,6 +84,12 @@ void CSTGMessageHandler::HandleUnsupportedMessage(void *, int) { }
  * scope for this cluster (see header). */
 void CSTGDrumPadInterface::StartScanning() { }
 
+/* Round 67 (solo): CONFIRMED genuinely empty (`return;`, 1 byte) in the
+ * real binary -- unlike StartScanning() above, this is not an out-of-
+ * scope placeholder.
+ */
+void CSTGDrumPadInterface::Run() { }
+
 /* ------------------------------------------------------------------ */
 /* Constructor -- installs the vtable pointer (unused, see header), the */
 /* msgHandler table pointer, default reply tag, and the 54 real         */

@@ -642,6 +642,12 @@ int main()
 			 CSTGControlMsgHandler::sMsgHandler[0x10 / 4] != 0, 1);
 	}
 
+	section("CSTGDrumPadInterface::Run (round 67, confirmed empty)");
+	{
+		CSTGDrumPadInterface::Run();
+		check_eq("Run(): confirmed-empty body doesn't crash", 1, 1);
+	}
+
 	printf("%s (%d failed)\n", g_fail ? "FAILED" : "PASSED", g_fail);
 	return g_fail ? 1 : 0;
 }

@@ -4832,3 +4832,43 @@ ko KDIR=/home/build/linux-kronos` build green. Manifest 4046 ->
 
 Real-HW test that would help: none identified -- pure no-op/constant-
 return stubs, no hardware I/O surface of their own.
+
+## Round 67 (OA.ko, solo, 2026-07-29): CSTGDrumPadInterface::Run() + CSTGStreamingEvent dtor
+
+Surveyed near-complete classes. `CSTGDrumPadInterface::Cleanup()` (calls
+an unresolved, unnamed `func_0x00d2b168()`) and `CSTGMonitorMixer::
+OnEndDownload()` (an `in_stack_fffffff0` local -- the established
+"4-explicit-param thiscall exceeding the regparm3 budget" red flag)
+both hit established deferral criteria. `CSTGPerformanceVarsManager::
+CSTGPerformanceVarsManager()` was DELIBERATELY NOT implemented despite
+being genuinely simple (4 field writes): this project's own
+`ConstructPerformanceVarsManagerSelectorState()` free function
+(performance_vars_manager_init.cpp, round-27-ish `.ctors` systemic
+sweep) already exists specifically BECAUSE giving `sInstance` a real
+C++ constructor would silently make it a `.init_array`-initialized
+global again -- the exact class of bug that fix eliminated. Landing
+this manifest entry as a literal C++ constructor would regress that
+fix; left pending, documented here rather than attempted.
+`CSTGFrontPanelMsgHandler::~CSTGFrontPanelMsgHandler()`'s pending pair
+is the standing MsgHandler ctor/dtor/HandleMessage deferral policy,
+re-confirmed not re-litigated.
+
+Landed 2 genuinely clean items instead: `CSTGDrumPadInterface::Run()`
+(confirmed empty, 1-byte `return;`) and `CSTGStreamingEvent::
+~CSTGStreamingEvent()` (byte-identical D0/D1 pair, both addresses
+covered by ONE C++ destructor per this project's established name-
+based-manifest-matching precedent -- restores the base class' own
+vtable pointer, `_ZTV14CSTGAudioEvent+8`, using the same `volatile`-
+write idiom `CSTGPlaybackEvent::~CSTGPlaybackEvent()` already
+established for a destructor whose entire body is one memory write).
+
+Real host KAT (2 new checks: `verify/test_control_msg_handler.cpp`
+for `Run()`, `verify/test_managers.cpp` section [27] for the dtor,
+including a new local `_ZTV14CSTGAudioEvent[40]` definition matching
+this file's existing `_ZTV18CSTGStreamingEvent` treatment). `make
+verify` full suite green (exit 0), zero regressions. Real `make
+ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 4057 -> 4060/21,689 (18.719%).
+
+Real-HW test that would help: none identified -- pure vtable-pointer/
+no-op operations, no hardware I/O surface of their own.

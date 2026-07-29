@@ -1564,6 +1564,18 @@ struct CSTGHDRMiniModel {
  */
 struct CSTGStreamingEvent {
 	CSTGStreamingEvent();
+
+	/* .text+0x5aafa0/0x5aafb0, 7 bytes each -- BYTE-IDENTICAL D0/D1 pair
+	 * (round 67, solo), same "single C++ destructor covers both manifest
+	 * addresses" precedent as every other real dtor pair in this
+	 * project. Resets the vtable pointer back to `_ZTV14CSTGAudioEvent+8`
+	 * (the base class' own vtable) -- same idiom as the already-real
+	 * `CSTGPlaybackEvent::~CSTGPlaybackEvent()` (playback_event_methods.cpp),
+	 * including that same file's own `volatile` note (a destructor whose
+	 * entire body is one memory write needs it to survive GCC's dead-
+	 * store elimination).
+	 */
+	~CSTGStreamingEvent();
 	/*
 	 * HandleErrorReading() (`.text+0xd2070`, 22 bytes) confirmed real:
 	 * forwards `voice` (+0x70) to `CSTGVoiceAllocator::sInstance->
