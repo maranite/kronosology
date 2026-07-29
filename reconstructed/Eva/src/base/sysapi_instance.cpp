@@ -24,6 +24,7 @@
 #include "system_api.h"
 #include "scheduler.h"
 #include "ckernel.h"
+#include "config_manager.h"
 
 #include <new>
 #include <cstring>
@@ -170,6 +171,18 @@ inline void ApiWarn1(const char *fmt, const char *arg)
 	ApiWarn1Fn fn = *(ApiWarn1Fn *)((char *)vtbl + 0x90);
 	fn(Api, fmt, arg);
 }
+
+typedef void (*ApiAssertFn)(void *, const char *, const char *, int);
+
+/* Real Api+0x94 assert-report call -- same slot/shape already established in
+ * tempo.cpp/chunk_family.cpp/... (own per-file copy, not shared cross-TU by
+ * this project's established convention). */
+inline void ApiAssert(const char *file, int line)
+{
+	void *vtbl = *(void **)Api;
+	ApiAssertFn fn = *(ApiAssertFn *)((char *)vtbl + 0x94);
+	fn(Api, "Assertion failed in module %s, line %i.\n", file, line);
+}
 } // namespace
 
 int CSysApiInstance::RegisterApi(const char *name, CApiBase *api)
@@ -233,4 +246,90 @@ int CSysApiInstance::RegisterApi(const char *name, CApiBase *api)
 	COmegaPtrArray *apis = (COmegaPtrArray *)(self + 4);
 	apis->Add(descriptor);
 	return 1;
+}
+
+/* --- round 47 batch (2026-07-29, solo) --- see header for each one's own
+ * ground-truth address/size and derivation. */
+
+unsigned int CSysApiInstance::GetVersionMajor()
+{
+	return *(unsigned int *)CConfigManager::sm_pktVersionInfo;
+}
+unsigned int CSysApiInstance::GetVersionMinor()
+{
+	return *(unsigned int *)((char *)CConfigManager::sm_pktVersionInfo + 4);
+}
+unsigned int CSysApiInstance::GetVersionBuild()
+{
+	return *(unsigned int *)((char *)CConfigManager::sm_pktVersionInfo + 8);
+}
+unsigned int CSysApiInstance::GetVersionInfo()
+{
+	return *(unsigned int *)((char *)CConfigManager::sm_pktVersionInfo + 0xc);
+}
+unsigned int CSysApiInstance::GetVersionDate()
+{
+	return *(unsigned int *)((char *)CConfigManager::sm_pktVersionInfo + 0x10);
+}
+unsigned int CSysApiInstance::GetVersionTime()
+{
+	return *(unsigned int *)((char *)CConfigManager::sm_pktVersionInfo + 0x14);
+}
+
+unsigned int CSysApiInstance::GetDriversCount() const
+{
+	return *(unsigned int *)((char *)this + 0x28);
+}
+
+void *CSysApiInstance::GetDriver(unsigned int index) const
+{
+	if ((int)index < *(int *)((char *)this + 0x28))
+		return *(void **)(*(char **)((char *)this + 0x30) + index * 4);
+	return 0;
+}
+
+void CSysApiInstance::ResetIndexes()
+{
+	*(unsigned int *)g_poModuleManager = 0;
+	*(unsigned int *)(void *)g_poScheduler = 0;
+}
+
+void CSysApiInstance::GetTimeStamp()
+{
+	static unsigned int s_tTimeCounter = 0;
+	s_tTimeCounter++;
+}
+
+static unsigned int g_bExitRequested = 0;
+void CSysApiInstance::SetExitRequested() { g_bExitRequested = 1; }
+unsigned int CSysApiInstance::IsExitRequested() { return g_bExitRequested; }
+
+static unsigned int g_bViewerTaskRunning = 0;
+static unsigned int g_bHostInterfaceBusy = 0;
+unsigned int *CSysApiInstance::ViewerTaskRunning() { return &g_bViewerTaskRunning; }
+unsigned int *CSysApiInstance::HostInterfaceBusy() { return &g_bHostInterfaceBusy; }
+
+static void *g_poDummyMsgInput = 0;
+void *CSysApiInstance::GetDmyMsgInput() { return g_poDummyMsgInput; }
+
+namespace {
+/* Real, currently-unreconstructed HAL dependency -- file-local Tier-B stub,
+ * same established per-file convention as ckernel.cpp's/
+ * sysex_msg_task_base.cpp's own HAL_GetSystemTime() stubs (not shared
+ * cross-TU by this project's convention). */
+unsigned HAL_GetSystemTime() { return 0; }
+} // namespace
+
+void CSysApiInstance::GetTime()
+{
+	HAL_GetSystemTime();
+}
+
+int CSysApiInstance::GetUniqueID()
+{
+	static int s_dwUniqueID = 0;
+	s_dwUniqueID++;
+	if (s_dwUniqueID == 0)
+		ApiAssert("SysApin.cpp", 0xba);
+	return s_dwUniqueID;
 }

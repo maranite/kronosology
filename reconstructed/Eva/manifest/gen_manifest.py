@@ -4299,6 +4299,23 @@ RECONSTRUCTED = {
     "083217e0",  # CFilesys::get_fileioptr(EFileIOType)
     "08321840",  # CFilesys::get_fileioptr(char const*, EDevice_Id*)
     "083217b0",  # CFilesys::setbuf(CFilesys::EMsgTypFilesys, SFileIOPbuf*)
+    "08069c80",  # CSysApiInstance::GetVersionMajor()
+    "08069c90",  # CSysApiInstance::GetVersionMinor()
+    "08069ca0",  # CSysApiInstance::GetVersionBuild()
+    "08069cb0",  # CSysApiInstance::GetVersionInfo()
+    "08069cc0",  # CSysApiInstance::GetVersionDate()
+    "08069cd0",  # CSysApiInstance::GetVersionTime()
+    "08069ff0",  # CSysApiInstance::GetDriversCount() const
+    "0806a000",  # CSysApiInstance::GetDriver(unsigned int) const
+    "0806a110",  # CSysApiInstance::ResetIndexes()
+    "08069fe0",  # CSysApiInstance::GetTimeStamp()
+    "08069fc0",  # CSysApiInstance::SetExitRequested()
+    "08069fd0",  # CSysApiInstance::IsExitRequested()
+    "0806a130",  # CSysApiInstance::ViewerTaskRunning()
+    "0806a140",  # CSysApiInstance::HostInterfaceBusy()
+    "0806a1a0",  # CSysApiInstance::GetDmyMsgInput()
+    "0806b230",  # CSysApiInstance::GetTime()
+    "08069ce0",  # CSysApiInstance::GetUniqueID()
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

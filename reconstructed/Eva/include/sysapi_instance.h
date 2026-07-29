@@ -143,6 +143,67 @@ public:
 	 * this project's own 7 call sites already discards it as a bare statement.
 	 */
 	int RegisterApi(const char *name, CApiBase *api);
+
+	/* --- round 47 batch (2026-07-29, solo) --- trivial version/state accessors,
+	 * all self-contained (own `this` offsets, or already-declared globals) --
+	 * see .cpp for each one's own real ground-truth address/size. */
+
+	static unsigned int GetVersionMajor();
+	static unsigned int GetVersionMinor();
+	static unsigned int GetVersionBuild();
+	static unsigned int GetVersionInfo();
+	static unsigned int GetVersionDate();
+	static unsigned int GetVersionTime();
+
+	/* .text+0x08069ff0/0x0806a000. mDrivers embedded array, own +0x28 (count) /
+	 * +0x30 (array) -- see this header's own file-comment field-mapping (mDrivers
+	 * is the array at relative +0x1c, landing here). */
+	unsigned int GetDriversCount() const;
+	void *GetDriver(unsigned int index) const;
+
+	/* .text+0x0806a110, 24 bytes. Real body: `*g_poModuleManager = 0; *g_poScheduler
+	 * = 0;` -- zeroes each singleton's own first field (mBusy for CModuleManager;
+	 * CScheduler's own first field, not independently named). cc=__cdecl, no `this`. */
+	static void ResetIndexes();
+
+	/* .text+0x08069fe0, 15 bytes. Real body increments a function-local static
+	 * counter and returns void -- ground truth's own decompile shows no `return`
+	 * of the incremented value despite the "GetXxx" name; preserved as-is rather
+	 * than guessing the real callers only want the tick side effect. */
+	static void GetTimeStamp();
+
+	/* .text+0x08069fc0/0x08069fd0, 11/6 bytes. Own new static `g_bExitRequested`
+	 * (not previously declared anywhere in this project). */
+	static void SetExitRequested();
+	static unsigned int IsExitRequested();
+
+	/* .text+0x0806a130/0x0806a140, 6 bytes each. Real body returns the ADDRESS of
+	 * a static flag, not its value -- own new statics `g_bViewerTaskRunning`/
+	 * `g_bHostInterfaceBusy`, no real setter reconstructed yet (same "declared,
+	 * always its zero-init default until a future round" convention already used
+	 * project-wide, e.g. CTracer/CErrorHandler's own raw-blob treatment). */
+	static unsigned int *ViewerTaskRunning();
+	static unsigned int *HostInterfaceBusy();
+
+	/* .text+0x0806a1a0, 6 bytes. Own new static `g_poDummyMsgInput` (not previously
+	 * declared; unlike GetTraceMsgInput's own `g_poTracer`, this one has no other
+	 * real TU that already owns it, so a fresh static here is safe/correct, not a
+	 * state-duplication risk). */
+	static void *GetDmyMsgInput();
+
+	/* .text+0x0806b230, 13 bytes. Real body calls HAL_GetSystemTime() and discards
+	 * the result (void return) -- own file-local stub, matching this project's
+	 * established per-TU HAL_GetSystemTime() stub convention (ckernel.cpp/
+	 * sysex_msg_task_base.cpp each keep their own, not shared cross-TU). */
+	static void GetTime();
+
+	/* .text+0x08069ce0, 71 bytes. Own new static `sm_dwUniqueID` counter
+	 * (function-local, matching this project's established "not shared cross-TU
+	 * unless a 2nd caller needs it" convention). Real body: increments, and on
+	 * the (never-observed-in-practice) wraparound-to-0 case, logs via the SAME
+	 * Api+0x94 ApiAssert idiom already established project-wide (tempo.cpp,
+	 * chunk_family.cpp, ...). */
+	static int GetUniqueID();
 };
 
 /* Real global (CKernel::GetSysApi()'s own body: `return SysApiInstance;`). CORRECTED

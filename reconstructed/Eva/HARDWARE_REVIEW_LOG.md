@@ -1993,3 +1993,58 @@ should know they exist and are untested/unmodeled, not silently absent.
   field-only logic and message-passing scaffolding, no hardware I/O
   surface of its own (the actual disk/CD driver I/O lives entirely in
   the deferred `CDDriverIO`/per-device-vtable methods).
+
+- **CSysApiInstance, 17/75 clean pending methods (round 47)
+  (`sysapi_instance.h`/`sysapi_instance.cpp`), round 47, 2026-07-29 (solo, no
+  subagents -- session-wide cap hit, user chose "Continue solo"). CSysApiInstance
+  already had a substantial existing surface (Cleanup/EnableMultiTask/
+  WriteMessageToHost/AddModule/AddConstructor/RegisterApi) from earlier rounds;
+  scripted survey found 75 pending methods (67 clean), the smallest sorted by
+  size mostly being trivial version getters and thin forwarders into other
+  singleton managers (CScheduler/CModuleManager/CTracer/CErrorHandler/CKernel).
+
+  Landed the genuinely self-contained subset: 6 version getters
+  (CConfigManager::sm_pktVersionInfo field reads), GetDriversCount()/
+  GetDriver(uint) (pure `this`-relative reads of the already-documented
+  mDrivers embedded array at absolute +0x28/+0x30), ResetIndexes() (zeroes
+  g_poModuleManager's/g_poScheduler's own first field, both already-extern
+  singletons), GetTimeStamp() (function-local counter, void return matching
+  ground truth's own -- not obviously wrong -- lack of a `return`),
+  SetExitRequested/IsExitRequested/ViewerTaskRunning/HostInterfaceBusy/
+  GetDmyMsgInput (5 own-new file-scope statics, none previously declared
+  elsewhere so no state-duplication risk), GetTime() (own file-local
+  HAL_GetSystemTime() stub, matching this project's established "not shared
+  cross-TU" convention -- confirmed the hard way: an existing copy in
+  sysex_msg_task_base.cpp turned out to sit inside an anonymous namespace,
+  giving it internal linkage despite lacking the `static` keyword, so
+  declaring `extern` against it failed to link; fixed by adding this file's
+  own copy instead of trying to reuse that one), and GetUniqueID() (own
+  function-local counter + the SAME Api+0x94 `ApiAssert` idiom already
+  established project-wide, added as a local helper here matching
+  tempo.cpp/chunk_family.cpp's own per-file convention).
+
+  Explicitly did NOT attempt the much larger `CZ` class also surfaced by this
+  same survey (145 pending addresses) -- cz_util.h's own header comment
+  already documents this as a deliberately out-of-scope 247-raw-symbol/
+  59-real-method container, separate from the 2 already-reconstructed
+  self-contained methods (`StrCmpIgnoreCase`, the opaque-capacity ctor/dtor
+  pair) -- re-confirmed rather than re-litigated this round.
+
+  Deferred, 2 distinct reasons: (1) ~50 methods forwarding into other
+  singleton managers whose OWN target methods aren't reconstructed yet
+  (CModuleManager::GetTask/ReadModule/GetModule/GetOut/GetLink/ReadModMan;
+  CTracer/CErrorHandler -- both still opaque, vtable-dispatched-only classes)
+  -- would require expanding those classes' own surface first, out of this
+  round's scope. (2) `~CSysApiInstance()` (2 real addresses, otherwise fully
+  tractable -- calls already-real `COmegaPtrArray::Destroy()`/
+  `CGlobalObjectBase::~CGlobalObjectBase()`) needs one new vtable data symbol
+  (`PTR__CApiBase_08e79768`) not yet declared anywhere in this project --
+  simple but deliberately left for a dedicated follow-up rather than rushed.
+
+  Real host KAT (22 checks, verify/test_sysapi_instance_round47.cpp -- drives
+  the REAL, live `SysApiInstance` global directly, same convention as the
+  pre-existing test_sysapi_instance_register_api.cpp). make verify full suite
+  green, zero regressions. Eva manifest 2997 -> 3014/37,795 (7.975%).
+
+  Real-HW test that would help: none identified -- pure host-side field/
+  static-global accessor logic, no hardware-observable behavior of its own.
