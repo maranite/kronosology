@@ -62,7 +62,7 @@ unsigned char *CKGRTCHandler::ms_poInstance;
 unsigned char *CSKMIDIMsgProcessor::ms_poInstance;
 unsigned char *CKGMIDIMsgProcessor::ms_poInstance;
 unsigned char *CSPRClockHandler::ms_poInstance;
-unsigned char CSPRClockHandler::ms_oStatusMaster;
+unsigned int CSPRClockHandler::ms_oStatusMaster;
 CSPRSysExBufManager *CSPRMIDIMsgProcessor::ms_poSysExPlayBuf;
 CSTGMessageProcessor *CSTGMessageProcessor::sInstance;
 static unsigned char g_stgMsgProcBuf[0x1041];

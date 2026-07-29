@@ -856,6 +856,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_drum_button_led \
          verify/test_ckg_switch_family \
          verify/test_ckg_midi_msg_handler \
+         verify/test_spr_clock_handler \
          verify/test_ckg_engine \
          verify/test_kg_timer_manager \
          verify/test_rtparm_ge_table \
@@ -1264,6 +1265,9 @@ verify/test_ckg_switch_family: verify/test_ckg_switch_family.cpp src/engine/ckg_
 
 verify/test_ckg_midi_msg_handler: verify/test_ckg_midi_msg_handler.cpp src/engine/ckg_midi_msg_handler.cpp include/oa_ckg_midi_msg_handler.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_ckg_midi_msg_handler.cpp src/engine/ckg_midi_msg_handler.cpp -o $@
+
+verify/test_spr_clock_handler: verify/test_spr_clock_handler.cpp src/engine/spr_clock_handler.cpp include/oa_ckg_midi_msg_handler.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_spr_clock_handler.cpp src/engine/spr_clock_handler.cpp -o $@
 
 verify/test_ckg_engine: verify/test_ckg_engine.cpp src/engine/ckg_engine.cpp src/engine/kg_param_edit_ctor.cpp include/oa_ckg_module_param_msg_handler.h
 	# -fno-pie/-no-pie: this test round-trips CKGBankManager::ms_poInstance's

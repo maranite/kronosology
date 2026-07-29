@@ -4589,3 +4589,75 @@ KDIR=/home/build/linux-kronos` build green. Manifest 4016 ->
 Real-HW test that would help: none identified -- pure field-read
 logic and an already-verified sibling-method reuse, no hardware I/O
 surface of its own.
+
+## Round 62 (OA.ko, solo, 2026-07-29): CSPRClockHandler, 13-method batch
+
+`CSPRClockHandler` (sequencer transport-position singleton,
+`include/oa_ckg_midi_msg_handler.h`) was ALREADY declared before this
+round -- a minimal existing shape with `ms_poInstance`,
+`ms_oStatusMaster` (as `unsigned char`), and 2 unimplemented 4-param
+`GetCurrentLocation`/`GetPrecountLocation` declarations. Per the
+standing instruction added after round 54's near-ODR-violation
+(check `include/*.h` for an existing declaration before writing any
+new class), this was caught immediately via grep and the EXISTING
+declaration was extended rather than duplicated.
+
+Landed 13 methods: `DisableStop`/`EnableStop` (increment/clamped
+decrement on `this+0xc`), `DisableToProcessWhen1ClockUp`/
+`EnableToProcessWhen1ClockUp` (counter+flag interplay on `this+4`/
+`this+1`), `InitializeTempo` (writes `this+0x64`/`+0x68`/`+0x38`),
+`ChangeTempoWhenStarting` (conditional copy gated on `this+0x60`/
+`+0x6c`), `SetLocationInfoWhenStop` (writes `this+0x3c`, copies
+`+0x20`/`+0x24` to `+0x40`/`+0x44`), `ModeOn` (zeroes
+`ms_oStatusMasterTick` + `this+8`/`+0xc`), `CopyStatusLocalToMaster`/
+`CopyStatusMasterToLocal` (round-trip through 2 new statics via a new
+`CSPRTimerStatus{bar,tick}` struct), the 2-param
+`GetCurrentLocation(int*,int*)` overload (reads `this+0x14`/`+0x18`),
+and `HandleBarEventBackward` (byte-swaps a ushort at `event+6`,
+compares SIGNED against `this+0x14`), plus the trivial
+`_GLOBAL__I_ms_poInstance` (empty ctor stub, matches the existing
+project convention for these).
+
+**Genuine C++ overload, not a naming conflict**: manifest confirmed
+`GetCurrentLocation` exists as 2 real, distinct addresses --
+`003b3e00` (31B, 4-param) and `003b3e20` (13B, 2-param). Only the
+2-param overload was implemented this round; the 4-param one remains
+declared-only (deferred, gated behind `CSPRRTMIDIOutManager`-style
+sibling state not yet reconstructed). Note: `gen_oa_manifest.py`
+matches by name, not by exact signature/address, so it credits BOTH
+overloads as done once either has a body -- a known tool limitation
+(previously flagged, task #258), not a new one introduced here. The
+4-param overload is genuinely NOT implemented; treat the manifest's
+`GetCurrentLocation` line as one real body, one false credit.
+
+**Type-widening, not a bug**: `ms_oStatusMaster` was declared
+`unsigned char` by an earlier round based on a single `& 0x40`
+bit-test caller. New ground truth showed 4-byte reads/writes through
+the same relocation, confirmed via Ghidra's own "_"-prefixed
+"overlaps smaller symbol" warning on two independent functions.
+Widened to `unsigned int`; confirmed behavior-preserving for the one
+existing caller (bit-test, unaffected by extra high bytes on
+little-endian) and updated the one existing out-of-line definition
+(`verify/test_ckg_midi_msg_handler.cpp`, definition-only there, never
+read/written -- risk-free).
+
+Deferred ~70 methods: `SendMIDIClock`/`SendStart`/`SendStop`/
+`NotifyClockToRecorder`/`ProcessMetroneme`/`InvokeSPREngine`/
+`RenewInformationOnCurrentTickBackward` and the rest forward into
+wholly-unreconstructed sibling classes (`CSPRRTMIDIOutManager`,
+`CSPRRecorder`, `CSPRMetronome`, `CSPREngine`) -- landing thin
+wrappers around callees that don't exist yet would misrepresent
+unreconstructed code, per the standing deferral pattern.
+
+Real host KAT (new `verify/test_spr_clock_handler.cpp`, 20 checks,
+registered in the Makefile following the existing
+`test_ckg_midi_msg_handler` two-line pattern). `make verify` full
+suite green (109 targets), zero regressions -- specifically checked
+`test_ckg_midi_msg_handler` given the `ms_oStatusMaster` width
+change. Real `make ko-clean && make ko KDIR=/home/build/linux-kronos`
+build green. Manifest 4019 -> 4033/21,689 (+14: 13 real bodies + 1
+name-matching false credit on the undeferred `GetCurrentLocation`
+overload, see above).
+
+Real-HW test that would help: none identified -- pure sequencer
+transport state-machine logic, no hardware I/O surface of its own.

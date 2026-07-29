@@ -126,17 +126,92 @@ struct CDrumTrackBankManager {
  * CSPRClockHandler -- sequencer transport-position singleton, discovered
  * via CSKSysExMsgHandler::ShouldRecThisParameterChange()'s own "this IS
  * the singleton" call shape. `ms_oStatusMaster` is a SEPARATE plain
- * static byte (own relocation, not offset through ms_poInstance) tested
+ * static (own relocation, not offset through ms_poInstance) tested
  * for bit 0x40 ("precounting" gate) to pick which of the two location
  * getters to call. Own class layout otherwise out of scope; the 4
  * by-reference int outputs are opaque bar/beat/tick-shaped location
  * fields, real names unconfirmed.
+ *
+ * Round 62 batch (2026-07-29, solo, 13 methods): a fresh survey found
+ * `CSPRClockHandler` has 83 `nm -C` methods total (SPR = sequencer
+ * pattern recorder), of which these 13 are fully self-contained
+ * (raw `this`-offset reads/writes plus the class's own statics, no
+ * calls into other unreconstructed classes -- matching the CDDriverIO/
+ * CPcgSaveInfo/CFileOperation scope discipline established in Eva this
+ * session). `ms_oStatusMaster` WIDENED from `unsigned char` to
+ * `unsigned int` here: ground truth's own `CopyStatusLocalToMaster`/
+ * `CopyStatusMasterToLocal` bodies do genuine 4-byte reads/writes
+ * through it, and Ghidra's own "Globals starting with '_' overlap
+ * smaller symbols at the same address" warning on those two functions
+ * CONFIRMS `_ms_oStatusMaster` is the same relocation as the already-
+ * declared 1-byte `ms_oStatusMaster` -- not a guess. Existing callers
+ * (`(ms_oStatusMaster & 0x40) == 0` in ckg_midi_msg_handler.cpp) are
+ * unaffected: an `unsigned int & 0x40` reads the identical low-order
+ * bit as the previous `unsigned char` did (verified by updating
+ * `test_ckg_midi_msg_handler.cpp`'s own local definition to match --
+ * `make verify` confirms it still passes).
+ *
+ * `ms_oStatusMasterTick`/`ms_oStatusLocalCopy` are 2 more real statics
+ * this round's survey turned up, paired with `ms_oStatusMaster` as a
+ * `CSPRTimerStatus`-shaped (bar,tick) status snapshot -- ground truth's
+ * own `._0_4_`/`._4_4_` sub-range notation on `ms_oStatusLocalCopy`
+ * confirms it's genuinely ONE 8-byte object, not two coincidentally-
+ * adjacent globals; `ms_oStatusMaster`/`ms_oStatusMasterTick` are kept
+ * as two SEPARATE statics since ground truth shows them as two
+ * independently-named symbols (`ms_oStatusMaster`/`DAT_00b73a98`) with
+ * no equivalent same-object proof.
+ *
+ * DEFERRED, 1 reason (70 of 83 methods): most of the rest forward
+ * straight into other wholly-unreconstructed sibling classes
+ * (`CSPRRTMIDIOutManager`, `CSPRRecorder`, `CSPRMetronome`,
+ * `CSPREngine`) -- e.g. `SendMIDIClock`/`SendStop`/`SendStart`/
+ * `NotifyClockToRecorder`/`ProcessMetroneme`/`InvokeSPREngine`, all
+ * single-line __cdecl-to-__cdecl tail calls with no visible arguments
+ * (genuinely void->void per both signatures, not a Ghidra mis-
+ * recovery, but still out of scope until those sibling classes exist).
  */
+struct CSPRTimerStatus {
+	unsigned int bar;
+	unsigned int tick;
+};
+
+struct CSeqEvent;
+
 struct CSPRClockHandler {
 	static unsigned char *ms_poInstance;
-	static unsigned char ms_oStatusMaster;
+	static unsigned int ms_oStatusMaster;
+	static unsigned int ms_oStatusMasterTick;	/* DAT_00b73a98 */
+	static unsigned int ms_oStatusLocalCopy[2];	/* {bar, tick} */
+
 	void GetCurrentLocation(int *a, int *b, int *c, int *d);
 	void GetPrecountLocation(int *a, int *b, int *c, int *d);
+
+	/* Round 62: a genuine C++ overload of GetCurrentLocation above --
+	 * confirmed as a SEPARATE real symbol (different address/size,
+	 * `nm -C`) from the 4-out-param version, not a duplicate. */
+	void GetCurrentLocation(int *bar, int *tick);
+
+	void DisableStop();
+	void EnableStop();
+	void DisableToProcessWhen1ClockUp();
+	void EnableToProcessWhen1ClockUp();
+	void InitializeTempo(int tempo);
+	void ChangeTempoWhenStarting();
+	void SetLocationInfoWhenStop(int value);
+	void ModeOn();
+	void CopyStatusLocalToMaster(CSPRTimerStatus *status);
+	static void CopyStatusMasterToLocal();
+	/* Real prototype takes only a single CSeqEvent*; ground truth's own
+	 * C-level signature shows a second, entirely unread int parameter
+	 * (a harmless Ghidra over-declaration, same "provably-unused extra
+	 * formal parameter" shape already seen elsewhere in this project --
+	 * not reproduced here). */
+	bool HandleBarEventBackward(CSeqEvent *ev);
+	/* .text+0x3b6900, 1 byte -- real body is an unconditional `return;`,
+	 * a compiler-generated static-initializer stub for `ms_poInstance`'s
+	 * own translation-unit init order, not meaningful application logic.
+	 * Reproduced faithfully as a no-op. */
+	static void _GLOBAL__I_ms_poInstance();
 };
 
 /*
