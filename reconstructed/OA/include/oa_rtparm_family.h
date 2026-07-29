@@ -7,44 +7,34 @@
  * oa_rtparm_pe_table.h -- same overall KARMA-startup domain, natural
  * continuation of that work).
  *
- * Scope of THIS pass: the 56 smallest/most mechanical members (8..402
- * bytes) that were fully traced and verified against real
- * `objdump -dr -M intel` disassembly, per this project's standing "verify
- * tractability before committing to a whole cluster" rule -- reconstructed
- * bottom-up, smallest first.
- *
- * DELIBERATELY DEFERRED this pass (all real disassembly was read, but the
- * control flow was judged too dense/error-prone to safely claim
- * "reconstructed" without a dedicated follow-up pass -- left `pending`
- * rather than risk a wrong translation, matching this project's "verify
- * before claim" discipline):
- *   - LimitRTParmEditValues (130B) / LimitRTParmEditValuesRow (421B):
- *     interleaved two-index computation (an edit-value index AND a
- *     GetRTParmDescriptorGE-driven min/max lookup) feeding a branchy
- *     clamp with several early-exit paths -- needs a dedicated re-read.
- *   - UpdateRTParmIfSame_GE (238B): a dual-path loop that checks BOTH
- *     pointer-identity ("does this RTParm* literally equal the current
- *     array slot's address") and, on mismatch, falls back to a 3-byte
- *     content compare -- genuinely confusing control flow (the fail path
- *     re-enters mid-loop at a different label than the match path),
- *     highest risk of the functions sampled this pass.
- *   - GetRTParmModAndID (264B): a dynamic binary/linear range search
- *     against gKS+0x1f40 with per-branch bound computations; capture was
- *     also incomplete at session end (tail not independently re-verified).
- *   - GetRTParmShortNameStringPtr (235B, RTParmShortNameGroup): nested
- *     string-length/scan loops with several interacting cursors --
- *     RTParmShortNameGroup's other 3 members (ctor, SetRTParmShortName-
- *     StringPtr, SetProductArrays) ARE reconstructed below; this one
- *     stays declared-only on the class.
- *   - DoRTParmMultiEnablePE (291B) / DoRTParmMultiEnableGE (409B): a
- *     nested nested loop (8 modules x up to 8 rows) with byte inversion,
- *     bit-accumulation across TWO parallel per-module tables, and an
- *     early-break-on-unsigned-overflow condition mid-inner-loop -- the
- *     single densest control flow sampled this pass short of the still-
- *     untouched giants (DoRTParmMultiLogic{GE,PE}).
- * All 7 stay `pending` in the manifest; their real disassembly locations
- * (ground-truth ELF, `nm -C -S` name+size) are unchanged and available for
- * a focused follow-up.
+ * Scope: the 56 smallest/most mechanical members (8..402 bytes) fully
+ * traced bottom-up in the first pass, PLUS the 7 members that pass
+ * deliberately deferred (LimitRTParmEditValues{,Row}, UpdateRTParmIfSame_GE,
+ * GetRTParmModAndID, RTParmShortNameGroup::GetRTParmShortNameStringPtr,
+ * DoRTParmMultiEnable{PE,GE}), reconstructed in a dedicated follow-up pass
+ * (2026-07-29) after a full independent re-derivation of each one's real
+ * control flow against fresh `objdump -dr -M intel` disassembly. Every one
+ * of the 7 turned out tractable once fully traced -- none needed a real
+ * simplification/guess; see each function's own header comment in
+ * src/engine/rtparm_family.cpp for the derivation. Two were genuinely
+ * simpler than the first pass's own risk assessment suggested once fully
+ * unwound: LimitRTParmEditValuesRow collapses to a plain independent
+ * `clamp(f4,lo,hi); clamp(f6,lo,hi); clamp(f0,min(f4,f6),max(f4,f6))`
+ * (ground truth's own branchy structure is a compiler if-conversion
+ * artifact of exactly that, not a genuinely different algorithm), and
+ * UpdateRTParmIfSame_GE's "two different re-entry labels" turned out to be
+ * two compiler-duplicated copies of the SAME loop-continue code (one
+ * reached via the self-skip path, one via the post-match path) -- a plain
+ * C `for`/`continue` loop reproduces both faithfully. Three more, however,
+ * really are as dense as first assessed and are transcribed close to
+ * label-for-label rather than restructured, to avoid a silent behavior
+ * change: GetRTParmModAndID (a two-level range search collapsed into two
+ * uniform sub-loops after full derivation, but the derivation itself
+ * needed care), and DoRTParmMultiEnable{PE,GE} (kept as literal nested
+ * loops matching ground truth's own iteration bounds/pointer strides,
+ * including two real NEW callees this pass found: `Do_KM_rtp_val_out_pe`
+ * (distinct from the already-declared `KM_rtp_val_out_pe`) and
+ * `IsRTParmFunctionSameGE`, both declared `extern` below, `pending`).
  *
  * The family's largest members (AssignRTParmFunction_Drm 8294B,
  * RevertRTSceneBuffers* 8095B, DoRTParmMultiLogicPE 4556B,
@@ -114,11 +104,21 @@
  *     32*8-entry RTParmEdit-shaped array at +0x2ea (current) / +0x6ea
  *     (compare), stride 8, indexed `module*32+ge` (GetRTParmEditGE,
  *     CopyRTParmEditTo{OtherBuffer,Module,Master}).
- *   - GenMod: holds a GenEffect* at +0xc (used by the deferred
+ *   - GenMod: a single "module index" byte at +0x0 (UpdateRTParmIfSame_GE,
+ *     found this pass), a GenEffect* at +0xc (used by
  *     UpdateRTParmIfSame_GE) and two 32-entry, 0x28-byte-stride
  *     RTParmFunctionTable-shaped "current"/"compare" buffers at +0x86a4 /
  *     +0x8ba4 (ResetRTParmGELastVal, CopyRTParmFunctionToOtherBuffer) --
  *     RTParmBufferSelect (0/1) selects between them.
+ *   - The gKS 0x280c region (below, `module*0x9cc+0x280c`, stride 8,
+ *     32 slots/module) re-confirmed this pass (LimitRTParmEditValuesRow,
+ *     GetRTParmModAndID, DoRTParmMultiEnableGE) to hold real RTParm-shaped
+ *     records: `type` (+0), `subId` (+1), a "mask" byte (+2, already used
+ *     by IsRTParmPairAssignedGE's own `d & e[2]` check) -- consistent with,
+ *     not a correction of, the existing "RTParmFunctionTable-shaped" note
+ *     below (that labels the table's own 0x28-stride *destination*
+ *     buffers the mask/type bytes here get copied into, e.g.
+ *     SetRTParmMultiBackupGE's `dst[i*0x28+0x20] = src[i*8+2]`).
  *   - gKS (`CSTGGlobal`-adjacent KARMA scene blob, .bss, 0x402a8 bytes):
  *     holds, per GE module slot (stride 0x9d10, 8 modules), a "current"
  *     RTParmFunctionTable-shaped 32-entry/0x28-stride buffer at
@@ -277,6 +277,19 @@ short ScaleRTParmValue(RTParmEdit *rtd, unsigned char value, unsigned char useCo
 void KM_rtp_val_out_pe(RTParm_pub *rtParm, unsigned char a, unsigned char b) __attribute__((regparm(3)));
 void Do_KM_rtp_update_name(unsigned char a, unsigned char b) __attribute__((regparm(3)));
 void Do_KM_rtp_update_all_names(unsigned char a, unsigned long mask) __attribute__((regparm(3)));
+/* Do_KM_rtp_val_out_pe -- a SEPARATE real symbol from KM_rtp_val_out_pe
+ * above (confirmed distinct mangled name, `_Z20Do_KM_rtp_val_out_peP6RTParmhh`
+ * vs the RTParm_pub-taking one) -- real callee of UpdateRTParmIfSame_GE,
+ * found this pass. */
+void Do_KM_rtp_val_out_pe(RTParm *rtParm, unsigned char a, unsigned char b) __attribute__((regparm(3)));
+/* IsRTParmFunctionSameGE -- real, large (3907B, surveyed-not-attempted)
+ * sibling of the already-reconstructed IsRTParmFunctionSamePE; real
+ * callee of DoRTParmMultiEnableGE, found this pass. */
+bool IsRTParmFunctionSameGE(unsigned char kind, unsigned char idx, unsigned char b, unsigned char c) __attribute__((regparm(3)));
+/* CountOnBits -- real, not-yet-reconstructed (`_Z11CountOnBitsmh`); real
+ * callee of RTParmShortNameGroup::GetRTParmShortNameStringPtr, found this
+ * pass. */
+unsigned long CountOnBits(unsigned long mask, unsigned char width) __attribute__((regparm(3)));
 }
 
 /* RTParmNameManager -- real class (see header comment). Only
@@ -299,7 +312,16 @@ public:
 	RTParmShortNameGroup() __attribute__((regparm(3)));
 	void SetRTParmShortNameStringPtr(const char (*str)[24], unsigned short a, unsigned short b) __attribute__((regparm(3)));
 	void SetProductArrays(RTParmNameProductID product, unsigned short a, unsigned short b) __attribute__((regparm(3)));
-	unsigned short GetRTParmShortNameStringPtr(RTParmNameProductID product, unsigned char useAlt, unsigned char a);
+	/* Reconstructed this pass. Ground truth's own return register (eax
+	 * at the end of the function) holds a raw pointer into the 24-byte-
+	 * wide string table this-> +0x0 points to (or 0/NULL) -- NOT an
+	 * `unsigned short` as previously (incorrectly) declared here; fixed
+	 * as part of implementing the body, since the mangled symbol itself
+	 * never encodes a C++ return type and the prior placeholder was
+	 * simply wrong. Also adds the missing `regparm(3)` -- ground truth
+	 * passes `this`/`product`/`useAlt` in eax/edx/ecx and `a` on the
+	 * stack, matching every other method on this class. */
+	const char *GetRTParmShortNameStringPtr(RTParmNameProductID product, unsigned char useAlt, unsigned char a) __attribute__((regparm(3)));
 	/* Confirmed minimum real extent: the ctor zeroes +0x0..+0x17 (24
 	 * bytes: a 4-byte pointer field, then ten 2-byte fields) -- real
 	 * total size may be larger (unconfirmed), this is a lower bound, not
@@ -310,11 +332,13 @@ public:
 	unsigned char _data[0x18];
 };
 
-/* ---- 48 of the 56 reconstructed members (the other 8 are class methods
- * declared on RTParmShortNameGroup/RTParmNameManager/CKGSysExBuffer above
- * and CKGParamEdit::GetRTParmBufferSelectId in
+/* ---- 48 of the first pass's 56 reconstructed members (the other 8 are
+ * class methods declared on RTParmShortNameGroup/RTParmNameManager/
+ * CKGSysExBuffer above and CKGParamEdit::GetRTParmBufferSelectId in
  * oa_ckg_module_param_msg_handler.h), in ascending ground-truth
- * size order (matches src/engine/rtparm_family.cpp's own layout) ---- */
+ * size order (matches src/engine/rtparm_family.cpp's own layout). The
+ * follow-up pass's own 6 free-function members are declared further below,
+ * after this block. ---- */
 extern "C++" {
 
 void ResetDynRTParmWindow(unsigned char *p) __attribute__((regparm(3)));
@@ -366,6 +390,17 @@ bool IsRTParmFunctionSamePE(unsigned char kind, unsigned char a, unsigned char b
 int GetRTParmCurValueFromOffset(const RTParmFunctionTable *table, void *base, unsigned char idx) __attribute__((regparm(3)));
 unsigned char IsRTParmPairAssignedPE(unsigned char a, unsigned char b, unsigned char c) __attribute__((regparm(3)));
 unsigned char *GetRTParmAssigned_PE(Performance *perf, unsigned char a, unsigned char b, unsigned char c) __attribute__((regparm(3)));
+
+/* ---- the 6 (of 7) free-function members deferred from the first pass,
+ * reconstructed in the follow-up pass documented above (the 7th,
+ * RTParmShortNameGroup::GetRTParmShortNameStringPtr, is declared in-class
+ * above) ---- */
+unsigned int GetRTParmModAndID(RTParm *rtParm, unsigned char *out) __attribute__((regparm(3)));
+bool LimitRTParmEditValues(EditBuffer *eb) __attribute__((regparm(3)));
+bool LimitRTParmEditValuesRow(EditBuffer *eb, unsigned char module, unsigned char ge, RTParmBufferSelect sel) __attribute__((regparm(3)));
+void UpdateRTParmIfSame_GE(GenMod *genMod, RTParm *rtParm, RTParmEdit *rtd, RTParmBufferSelect sel) __attribute__((regparm(3)));
+void DoRTParmMultiEnablePE() __attribute__((regparm(3)));
+void DoRTParmMultiEnableGE(unsigned char module, RTParmBufferSelect sel) __attribute__((regparm(3)));
 
 } /* extern "C++" */
 

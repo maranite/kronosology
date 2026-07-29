@@ -917,3 +917,380 @@ unsigned char *GetRTParmAssigned_PE(Performance *perf, unsigned char p1, unsigne
 	}
 	return 0;
 }
+
+/* =====================================================================
+ * Follow-up pass (2026-07-29): the 6 free-function members deliberately
+ * deferred from the first pass (see oa_rtparm_family.h's own header
+ * comment for the full re-derivation summary). The 7th deferred member,
+ * RTParmShortNameGroup::GetRTParmShortNameStringPtr, is below too (it's a
+ * class method, declared in-class in the header).
+ * ===================================================================== */
+
+/* ==== GetRTParmModAndID -- .text+0x5245ed, 264 bytes ====
+ * Ground truth's own `eax` argument is a genuine pointer into gKS (every
+ * comparison against it carries a real `R_386_32 gKS` relocation, i.e.
+ * the disassembly's literal immediates like `0x1f40`/`0x290c` are really
+ * `gKS+0x1f40`/`gKS+0x290c`) -- NOT a caller-computed integer offset as
+ * the first pass's own deferral note speculated. Once that's recognized,
+ * both of the function's two dense "compare against a jump-by-8 table of
+ * addresses" halves collapse to a single uniform indexed-slot search
+ * (independently re-derived and cross-checked against the *out write
+ * order twice before committing).
+ *   - rtParm < gKS+0x1f40: `*out` = which of Performance's own 8
+ *     "pair-group" bases (+0x26a, +0x272, ..., +0x2a2, stride 8) rtParm
+ *     equals, or 8 if none match; always returns 0.
+ *   - rtParm >= gKS+0x1f40 and < gKS+0x290c, OR gKS[0x1e5] (the module/
+ *     "channel" count) <= 1: channel n = 0.
+ *   - otherwise: n = the channel index such that rtParm falls in
+ *     [gKS+0x290c+(n-1)*0x9cc, gKS+0x290c+n*0x9cc) for n>=1, capped at
+ *     gKS[0x1e5]-1 if rtParm is past the last valid channel's own range
+ *     (ground truth checks the bound BEFORE computing each candidate
+ *     boundary, so the cap can fire without ever testing that channel's
+ *     own boundary -- reproduced faithfully via the same early-check
+ *     order below, not simplified into a single loop condition).
+ *   Either way, `*out` is then set to which of channel n's own 32 fixed
+ *   0x280c-region slots (stride 8, see the header's own confirmed-facts
+ *   note) rtParm equals, or 32 if none match, and the function returns n. */
+unsigned int GetRTParmModAndID(RTParm *rtParm, unsigned char *out)
+{
+	unsigned char *p = (unsigned char *)rtParm;
+	unsigned int n;
+
+	if (p < gKS + 0x1f40) {
+		static const unsigned int kBase[8] = { 0x26a, 0x272, 0x27a, 0x282, 0x28a, 0x292, 0x29a, 0x2a2 };
+		*out = 8;
+		for (unsigned int j = 0; j < 8; ++j) {
+			if (p == gKS + kBase[j]) {
+				*out = (unsigned char)j;
+				break;
+			}
+		}
+		return 0;
+	}
+
+	{
+		unsigned char bound = gKS[0x1e5];
+		if (bound <= 1 || p < gKS + 0x290c) {
+			n = 0;
+		} else {
+			unsigned int r = 1;
+			for (;;) {
+				if (r + 1 >= bound) { n = r; break; }
+				if (p < gKS + 0x290c + r * 0x9cc) { n = r; break; }
+				++r;
+			}
+		}
+	}
+
+	{
+		unsigned char *base = gKS + n * 0x9cc + 0x280c;
+		*out = 32;
+		for (unsigned int slot = 0; slot < 32; ++slot) {
+			if (p == base + slot * 8) {
+				*out = (unsigned char)slot;
+				break;
+			}
+		}
+	}
+	return n;
+}
+
+/* ==== LimitRTParmEditValuesRow -- .text+0x525367, 421 bytes ====
+ * Ground truth's own dense, cross-linked branch tree (the header's own
+ * first-pass deferral note calls it "several early-exit paths that share
+ * labels across both the sel==0 and sel!=0 halves") is a compiler
+ * if-conversion of a plain double clamp, verified by exhaustively tracing
+ * every branch of both halves and confirming they always reduce to the
+ * same two comparisons per field (independently re-derived, not assumed):
+ * clamp field4 and field6 (of the RTParmEdit "row") independently into
+ * [desc.min, desc.max], then clamp field0 into [min(field4,field6),
+ * max(field4,field6)]. `sel` selects the "current" (+0x2ea) vs "compare"
+ * (+0x6ea) RTParmEdit buffer, same as every other GE table
+ * current/compare pair in this family. The descriptor lookup itself reads
+ * a real RTParm{type,subId} pair straight out of the gKS 0x280c-region
+ * slot for this (module,ge) -- same slot GetRTParmModAndID above
+ * searches, and DoRTParmMultiEnableGE below reads too. */
+bool LimitRTParmEditValuesRow(EditBuffer *eb, unsigned char module, unsigned char ge, RTParmBufferSelect sel)
+{
+	unsigned char *base = (unsigned char *)eb;
+	short *row = (short *)(base + (unsigned int)module * 0x100 /* 32*8 */
+	                        + (unsigned int)ge * 8 + (sel != 0 ? 0x6ea : 0x2ea));
+	unsigned char *rtpSlot = base + (unsigned int)module * 0x9cc + 0x280c + (unsigned int)ge * 8;
+	unsigned char *desc = GetRTParmDescriptorGE(rtpSlot[0], rtpSlot[1]);
+	short lo = *(short *)(desc + 0x18);
+	short hi = *(short *)(desc + 0x1a);
+	short *f0 = row + 0;
+	short *f4 = row + 2; /* +4 bytes */
+	short *f6 = row + 3; /* +6 bytes */
+	bool changed = false;
+
+	if (*f4 < lo) { *f4 = lo; changed = true; }
+	if (*f4 > hi) { *f4 = hi; changed = true; }
+	if (*f6 < lo) { *f6 = lo; changed = true; }
+	if (*f6 > hi) { *f6 = hi; changed = true; }
+
+	short mn = (*f4 <= *f6) ? *f4 : *f6;
+	short mx = (*f4 <= *f6) ? *f6 : *f4;
+	if (*f0 < mn) { *f0 = mn; changed = true; }
+	else if (*f0 > mx) { *f0 = mx; changed = true; }
+
+	return changed;
+}
+
+/* ==== LimitRTParmEditValues -- .text+0x52550c, 130 bytes ====
+ * The caller of LimitRTParmEditValuesRow above: 4 channels (module*0x9cc
+ * stride, matching GetRTParmModAndID's own channel stride), skipped
+ * entirely if the channel's own WORD at +0x1f40 reads 0xffff (a
+ * "disabled" sentinel -- same +0x1f40 boundary GetRTParmModAndID checks
+ * too). Ground truth's own 2nd call passes `sel = module+1` (NOT a plain
+ * 1) -- reproduced verbatim below since LimitRTParmEditValuesRow only
+ * ever tests `sel != 0`, so this is behaviorally identical to passing 1,
+ * just an odd-but-real artifact of however the original source expressed
+ * "the compare buffer" here. */
+bool LimitRTParmEditValues(EditBuffer *eb)
+{
+	unsigned char *base = (unsigned char *)eb;
+	bool changed = false;
+
+	for (unsigned int module = 0; module < 4; ++module) {
+		unsigned char *chBase = base + module * 0x9cc;
+		if (*(unsigned short *)(chBase + 0x1f40) == 0xffff)
+			continue;
+		for (unsigned int ge = 0; ge < 32; ++ge) {
+			if (LimitRTParmEditValuesRow(eb, (unsigned char)module, (unsigned char)ge, RTPARM_BUFFER_CURRENT))
+				changed = true;
+			if (LimitRTParmEditValuesRow(eb, (unsigned char)module, (unsigned char)ge, (RTParmBufferSelect)(module + 1)))
+				changed = true;
+		}
+	}
+	return changed;
+}
+
+/* ==== UpdateRTParmIfSame_GE -- .text+0x52502f, 238 bytes ====
+ * Scans GenEffect's own 32-entry, 8-byte-stride RTParm array (+0x8cc, see
+ * the header's confirmed facts) for every slot whose {type,subId} content
+ * matches rtParm's own (a 3rd byte is compared too: exact match, OR a
+ * nonzero bitwise AND -- same "compatible if any bit overlaps" shape as
+ * LimitRTParmEditValuesRow's descriptor lookup uses a plain 2-byte
+ * {type,subId} match, no analogous mask here). The slot that IS rtParm
+ * itself (pointer identity, not content) is skipped, not updated --
+ * ground truth's own two differently-addressed copies of the loop-
+ * continue code (one reached via the self-skip path, one via the
+ * post-match path) are the SAME logical "continue", reproduced here with
+ * a single `continue`, not two. No return value (void) -- ground truth
+ * never sets eax meaningfully before its final `ret`. */
+void UpdateRTParmIfSame_GE(GenMod *genMod, RTParm *rtParm, RTParmEdit *rtd, RTParmBufferSelect sel)
+{
+	unsigned char *rp = (unsigned char *)rtParm;
+	if (rp[0] == 0)
+		return;
+
+	unsigned char module = *(unsigned char *)genMod; /* GenMod+0x0, found this pass */
+	unsigned char *ge = *(unsigned char **)((unsigned char *)genMod + 0xc);
+	unsigned char *arrayBase = ge + 0x8cc;
+	unsigned short newVal = *(unsigned short *)rtd;
+	unsigned int gksOff = (sel != 0) ? 0x6ea : 0x2ea;
+
+	for (unsigned int i = 0; i < 32; ++i) {
+		unsigned char *slot = arrayBase + i * 8;
+		if (slot == rp)
+			continue;
+		if (slot[0] != rp[0] || slot[1] != rp[1])
+			continue;
+		if (slot[2] != rp[2] && (slot[2] & rp[2]) == 0)
+			continue;
+
+		unsigned int idx = (unsigned int)module * 32 + i;
+		*(unsigned short *)(gKS + idx * 8 + gksOff) = newVal;
+		Do_KM_rtp_val_out_pe((RTParm *)slot, (unsigned char)i, 1);
+	}
+}
+
+/* ==== DoRTParmMultiEnablePE -- .text+0x52a640, 291 bytes ====
+ * For each of gKS's own 8 "pair-group" slots (+0x26a, stride 8 -- NOT a
+ * hardware "module" despite the name used below; there is no module
+ * parameter, ground truth reads `gKS[slot*8+0x26a/0x26b/0x26c]` directly)
+ * not yet covered by an accumulated "seen" bitmask, scans the higher-
+ * indexed slots (slot+1..7) for an RT-function-table entry
+ * IsRTParmFunctionSamePE considers "the same"; every match accumulates a
+ * per-slot OR-bitmask (bit = 1<<otherSlotIndex) and OR's a flag byte from
+ * the matched entry. It then walks the same higher-slot range a second
+ * time, writing the (bit-inverted) accumulated flag byte into a second,
+ * 0x28-byte-stride gKS table (`slot*40+0x16f24`, entry +0x24) wherever
+ * the corresponding bit is set in the accumulated mask, ORing in a
+ * per-row byte from the first table along the way. Both of ground
+ * truth's own early-skip checks ("if rowStart>bound, skip the whole
+ * inner loop") are redundant with the loops' own natural bounds (the
+ * starting index is already >= the bound in exactly those cases, so the
+ * loop runs 0 iterations either way) and are therefore omitted below --
+ * a real, confirmed simplification, not a guess. Literal otherwise (not
+ * further restructured), matching this project's "verify before claim"
+ * discipline for the pass's densest control flow. */
+void DoRTParmMultiEnablePE()
+{
+	unsigned short seenMask = 0;
+	unsigned short bit = 1;
+
+	for (unsigned int slot = 0; slot < 8; ++slot, bit = (unsigned short)(bit << 1)) {
+		unsigned char flagByte = gKS[slot * 8 + 0x26c];
+
+		if (seenMask & bit)
+			continue;
+
+		unsigned short acc = bit;
+		{
+			unsigned char *tbl = gKS + slot * 8 + 0x272;
+			unsigned char valB = gKS[slot * 8 + 0x26b];
+			unsigned char valA = gKS[slot * 8 + 0x26a];
+			for (unsigned int r = slot + 1; r < 8; ++r, tbl += 8) {
+				if (IsRTParmFunctionSamePE(valA, valB, tbl[0], tbl[1])) {
+					unsigned short bitVal = (unsigned short)(1u << r);
+					acc |= bitVal;
+					flagByte |= tbl[2];
+					seenMask |= bitVal;
+				}
+			}
+		}
+
+		unsigned char *rowSlot = gKS + slot * 8 + 0x26a;
+		unsigned char *tbl2 = gKS + slot * 40 + 0x16f24;
+		flagByte = (unsigned char)~flagByte;
+
+		for (unsigned int r2 = slot; r2 <= 7; ++r2, rowSlot += 8, tbl2 += 0x28) {
+			unsigned short bitVal2 = (unsigned short)(1u << r2);
+			if (bitVal2 > acc)
+				break;
+			if (!(bitVal2 & acc))
+				continue;
+			unsigned char v = flagByte;
+			tbl2[0x24] = v;
+			v = (unsigned char)(v | rowSlot[2]);
+			tbl2[0x24] = v;
+		}
+	}
+}
+
+/* ==== DoRTParmMultiEnableGE -- .text+0x52c872, 409 bytes ====
+ * Same overall shape as DoRTParmMultiEnablePE above, but for a single,
+ * caller-supplied `module` and looping over gKS's per-module 0x280c-
+ * region's own 32 GE slots (see the header's confirmed facts, and
+ * GetRTParmModAndID/LimitRTParmEditValuesRow above -- same table) instead
+ * of PE's 8 fixed pair-group slots. `sel` picks the "current" (+0x1f73c)
+ * vs "compare" (+0x1fc3c) per-module GetRTParmFunctionGE-shaped
+ * destination table (0x28-byte stride, matching every other GE current/
+ * compare pair in this family). Uses `IsRTParmFunctionSameGE`, a real,
+ * large (3907B, still `pending`) sibling of the already-reconstructed
+ * IsRTParmFunctionSamePE -- only the call site's own argument order is
+ * needed here, not its body. Same redundant-early-skip-check omission as
+ * DoRTParmMultiEnablePE above (confirmed the same way: the loop's own
+ * starting index already fails its own bound in exactly those cases). */
+void DoRTParmMultiEnableGE(unsigned char module, RTParmBufferSelect sel)
+{
+	unsigned char *fixedBase = gKS + (unsigned int)module * 0x9cc + 0x280c;
+	unsigned int modOff = (unsigned int)module * 0x9d10;
+
+	unsigned int seenMask = 0;
+	unsigned int bit = 1;
+
+	for (unsigned int ge = 0; ge < 32; ++ge, bit <<= 1) {
+		unsigned char flagByte = fixedBase[ge * 8 + 2];
+
+		if (seenMask & bit)
+			continue;
+
+		unsigned int acc = bit;
+		{
+			unsigned char *tbl = fixedBase + ge * 8 + 8; /* = module*0x9cc+(ge+1)*8+0x280c == module*0x9cc+ge*8+0x2814 */
+			unsigned char idx = fixedBase[ge * 8 + 1];
+			unsigned char type = fixedBase[ge * 8 + 0];
+			for (unsigned int r = ge + 1; r < 32; ++r, tbl += 8) {
+				if (IsRTParmFunctionSameGE(type, idx, tbl[0], tbl[1])) {
+					unsigned int bitVal = 1u << r;
+					acc |= bitVal;
+					flagByte |= tbl[2];
+					seenMask |= bitVal;
+				}
+			}
+		}
+
+		unsigned char *funcTbl = gKS + modOff + ge * 0x28 + (sel != 0 ? 0x1fc3c : 0x1f73c);
+		unsigned char *rowSlot = fixedBase + ge * 8;
+		flagByte = (unsigned char)~flagByte;
+
+		for (unsigned int r2 = ge; r2 <= 0x1f; ++r2, rowSlot += 8, funcTbl += 0x28) {
+			unsigned int bitVal2 = 1u << r2;
+			if (bitVal2 > acc)
+				break;
+			if (!(bitVal2 & acc))
+				continue;
+			unsigned char v = flagByte;
+			funcTbl[0x24] = v;
+			v = (unsigned char)(v | rowSlot[2]);
+			funcTbl[0x24] = v;
+		}
+	}
+}
+
+/* ==== RTParmShortNameGroup::GetRTParmShortNameStringPtr -- .text+0x564522,
+ * 235 bytes ====
+ * Given a product index, picks a starting index into a 24-byte-wide
+ * string table (this-> +0x0) via this-> +0x8/+0xa (start/len, the same
+ * per-product pair SetProductArrays above writes) -- offset by
+ * `useAlt * this->+0x6` (the same "stride" SetRTParmShortNameStringPtr's
+ * own 3rd argument sets) rows, and further offset within [start,
+ * start+len) by `CountOnBits(a,8)-1` when `a != 0` (else 0). If the
+ * resulting table entry is an empty string, walks backward (one 24-byte
+ * entry at a time) toward `start` for the nearest non-empty entry,
+ * returning NULL if none is found. Ground truth's real return register
+ * (eax) holds this raw string pointer (or 0), NOT an `unsigned short` --
+ * see the header's own note on this fix. */
+const char *RTParmShortNameGroup::GetRTParmShortNameStringPtr(RTParmNameProductID product, unsigned char useAlt, unsigned char a)
+{
+	unsigned char *base = (unsigned char *)this;
+	unsigned int idx = (unsigned int)product;
+	unsigned short len = *(unsigned short *)(base + idx * 4 + 0xa);
+	if (len == 0)
+		return 0;
+
+	unsigned short start = *(unsigned short *)(base + idx * 4 + 8);
+	short index;
+
+	if (len > 1) {
+		int seed = 0;
+		if (a != 0)
+			seed = (signed char)(CountOnBits((unsigned long)a, 8) - 1);
+		int sum = seed + (int)start;
+		int end = (int)start + (int)len - 1;
+		index = (short)((sum < end) ? sum : end);
+	} else {
+		index = (short)(start + len - 1);
+	}
+	if (index < (short)start)
+		return 0;
+
+	/* packed 32-bit pointer field (see SetRTParmShortNameStringPtr's own
+	 * comment above) -- NOT a native 8-byte pointer read on a 64-bit
+	 * host build. */
+	unsigned char *strTable = (unsigned char *)(unsigned long)(*(unsigned int *)base);
+	unsigned short stride = *(unsigned short *)(base + 6);
+	unsigned int rowStride = (unsigned int)useAlt * stride;
+	const char *p = (const char *)(strTable + ((unsigned int)(unsigned short)index + rowStride) * 24);
+
+	if (*p != 0)
+		return p;
+
+	/* first candidate is an empty string -- walk backward toward
+	 * `start` for the nearest non-empty entry. */
+	const char *q = p - 24;
+	short i = (short)(index - 1);
+	unsigned char ch = 0;
+	while ((short)start <= i) {
+		ch = (unsigned char)*q;
+		p = q;
+		q -= 24;
+		if (ch != 0)
+			break;
+		--i;
+	}
+	return ch ? p : 0;
+}

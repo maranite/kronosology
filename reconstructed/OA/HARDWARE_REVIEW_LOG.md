@@ -3291,3 +3291,59 @@ Real-HW test that would help: none of this batch is independently
 front-panel-observable — same reasoning as the CKGEngine batch above,
 these are internal KARMA table-lookup/state-mirror helpers with no
 single-path audio/UI effect.
+
+## RTParm family follow-up — ALL 7 deferred members reconstructed (2026-07-29)
+
+Dedicated follow-up to the bottom-up batch immediately above: took the 7
+deliberately-deferred members (`LimitRTParmEditValues{,Row}`,
+`UpdateRTParmIfSame_GE`, `GetRTParmModAndID`, `RTParmShortNameGroup::
+GetRTParmShortNameStringPtr`, `DoRTParmMultiEnable{PE,GE}`) and re-traced
+each from fresh `objdump -dr -M intel` disassembly (the `-r` flag turned
+out load-bearing — see below). All 7 landed. `AssignRTParmFunction_Drm`
+(8294B) still not attempted, remains `pending`.
+
+Key finding: `GetRTParmModAndID`'s literal-looking immediates
+(`cmp eax,0x1f40` etc.) all carry real `R_386_32 gKS` relocations — the
+true comparison is against `&gKS+0x1f40`, not a bare integer. The prior
+pass's own deferral note speculated the parameter was a caller-computed
+integer offset; it's actually a genuine pointer into `gKS`. Two of the
+7 (`LimitRTParmEditValuesRow`, `UpdateRTParmIfSame_GE`) turned out to be
+compiler if-conversion/duplication of much simpler source
+(`LimitRTParmEditValuesRow` collapses to
+`clamp(f4,lo,hi); clamp(f6,lo,hi); clamp(f0,min(f4,f6),max(f4,f6))`) once
+every branch was exhaustively traced and cross-checked — confirmed only
+after full tracing, not assumed from the shape. The other 3 stayed as
+dense as first assessed and are transcribed close to label-for-label.
+
+Two real new callees found, declared `extern` (`pending`, not attempted):
+`Do_KM_rtp_val_out_pe` (distinct mangled symbol from the already-declared
+`KM_rtp_val_out_pe`) and `IsRTParmFunctionSameGE` (3907B, real sibling of
+the already-reconstructed `IsRTParmFunctionSamePE`), plus `CountOnBits`.
+Fixed a real pre-existing header bug on `GetRTParmShortNameStringPtr`
+(missing `regparm(3)`, wrong `unsigned short` return type — ground truth
+returns a raw string-table pointer, `const char *`).
+
+One real KAT-caught bug in this pass's OWN new code: `GetRTParmShortNameStringPtr`'s
+first draft read the class's packed 32-bit string-table pointer field as
+a native 8-byte pointer, segfaulting the KAT host immediately — same bug
+class already fixed once in this exact class's setter, in the PRIOR pass.
+Fixed via the established packed-32-bit read/cast convention.
+
+Also discovered: `RTParm_menu_ge_*`/`RTParm_menu_pe_*` (this project's
+own tables) are zero-initialized placeholders, not populated with real
+ground-truth `.rodata` bytes — a pre-existing scope boundary. The new
+`LimitRTParmEditValuesRow` KAT pokes its one needed descriptor record
+directly rather than assuming real linked-in content, after a real-bytes-
+based first attempt produced a false failure against otherwise-correct
+code.
+
+`make verify` full suite green (0 FAIL) and a real `make ko-clean && make
+ko KDIR=/home/build/linux-kronos` build both green; `nm OA.ko | c++filt`
+confirms all 7 new symbols' mangled names match ground truth exactly.
+Manifest 3529 -> 3536/21,689 (+7, 0 regressions, verified via a
+`git stash`-isolated before/after full name-set diff). No new
+`DECOMPILE_ERRORS.md` entry — no compile/link blocker this pass.
+
+Real-HW test that would help: none identified — same reasoning as the
+parent batch above, these remain internal KARMA table-lookup/edit-value-
+clamp helpers with no single-path audio/UI-observable effect.

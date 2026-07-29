@@ -30,4 +30,16 @@ void CSKParameterChangeMessage::SetValue(int) { }
 void CSysExBuffer::SendSysExMassage(unsigned char *) { }
 
 void RTParmNameManager::GetRTParmNameString(GenEffect *, RTParm *, char *, bool) { }
-unsigned short RTParmShortNameGroup::GetRTParmShortNameStringPtr(RTParmNameProductID, unsigned char, unsigned char) { return 0; }
+
+/* Added for the follow-up (2026-07-29) pass's 7 deferred members. */
+int g_do_km_rtp_val_out_pe_calls;
+void Do_KM_rtp_val_out_pe(RTParm *, unsigned char, unsigned char) { ++g_do_km_rtp_val_out_pe_calls; }
+bool IsRTParmFunctionSameGE(unsigned char, unsigned char, unsigned char, unsigned char) { return false; }
+unsigned long CountOnBits(unsigned long mask, unsigned char width)
+{
+	unsigned long n = 0;
+	for (unsigned char i = 0; i < width; ++i)
+		if (mask & (1UL << i))
+			++n;
+	return n;
+}
