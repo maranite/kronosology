@@ -4135,6 +4135,25 @@ RECONSTRUCTED = {
     "089ebe20",  # CSysExRegion::GetTotalSizeForExport(int, int) const
     "089ee180",  # CSysExRegion::~CSysExRegion() (D2)
     "089ee190",  # CSysExRegion::~CSysExRegion() (D0)
+
+    # 2026-07-29 (round 43, solo, no subagents): CMemoryAccessor's full
+    # 12-method Read/Write{Big,Little}{16,24,32}Bit family
+    # (storage_converter_ext_stubs.h). 3 of these (WriteBig32Bit/
+    # ReadLittle16Bit/WriteLittle16Bit) were ALREADY real+committed
+    # since round 46 but never added here -- a genuine manifest-crediting
+    # gap, fixed alongside crediting this round's 9 new siblings.
+    "0838dbc0",  # CMemoryAccessor::ReadBig32Bit(unsigned char const*)
+    "0838dbf0",  # CMemoryAccessor::WriteBig32Bit(unsigned char*, unsigned long) [gap fix, round 46]
+    "0838dc20",  # CMemoryAccessor::ReadBig24Bit(unsigned char const*)
+    "0838dc40",  # CMemoryAccessor::WriteBig24Bit(unsigned char*, unsigned long)
+    "0838dc60",  # CMemoryAccessor::ReadBig16Bit(unsigned char const*)
+    "0838dc80",  # CMemoryAccessor::WriteBig16Bit(unsigned char*, unsigned short)
+    "0838dca0",  # CMemoryAccessor::ReadLittle32Bit(unsigned char const*)
+    "0838dcd0",  # CMemoryAccessor::WriteLittle32Bit(unsigned char*, unsigned long)
+    "0838dd00",  # CMemoryAccessor::ReadLittle24Bit(unsigned char const*)
+    "0838dd20",  # CMemoryAccessor::WriteLittle24Bit(unsigned char*, unsigned long)
+    "0838dd40",  # CMemoryAccessor::ReadLittle16Bit(unsigned char const*) [gap fix, round 46]
+    "0838dd60",  # CMemoryAccessor::WriteLittle16Bit(unsigned char*, unsigned short) [gap fix, round 46]
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

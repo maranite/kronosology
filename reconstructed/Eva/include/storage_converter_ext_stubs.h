@@ -179,14 +179,79 @@ public:
 // protocol (file_ksc_list.h/.cpp) -- both real, tiny, self-contained
 // (`.text+0x838dd40`/`0x838dd60`, 17/18 bytes, zero relocations/calls),
 // exact shape confirmed via direct `objdump -dr`.
+//
+// Round 43 (2026-07-29, solo) completed the family: the remaining 9
+// Read/Write{Big,Little}{16,24,32}Bit siblings, plus an own-manifest-
+// gap fix -- the 3 methods above (WriteBig32Bit/ReadLittle16Bit/
+// WriteLittle16Bit) had been real and committed since round 46 but were
+// NEVER added to gen_manifest.py's RECONSTRUCTED set, so they showed
+// `pending` despite being done; fixed alongside crediting this round's
+// 9 new ones (see manifest/gen_manifest.py's own round-43 comment).
+// All 12 are plain byte-shuffle encode/decode, no relocations/calls,
+// each independently confirmed against its own ground-truth decompile.
 class CMemoryAccessor {
 public:
+	static unsigned int ReadBig32Bit(const unsigned char *src)
+	{
+		return (unsigned int)src[0] << 24 | (unsigned int)src[1] << 16 |
+		       (unsigned int)src[2] << 8 | (unsigned int)src[3];
+	}
+
 	static void WriteBig32Bit(unsigned char *dst, unsigned long value)
 	{
 		dst[0] = static_cast<unsigned char>(value >> 24);
 		dst[1] = static_cast<unsigned char>(value >> 16);
 		dst[2] = static_cast<unsigned char>(value >> 8);
 		dst[3] = static_cast<unsigned char>(value);
+	}
+
+	static unsigned int ReadBig24Bit(const unsigned char *src)
+	{
+		return (unsigned int)src[0] << 16 | (unsigned int)src[1] << 8 | (unsigned int)src[2];
+	}
+
+	static void WriteBig24Bit(unsigned char *dst, unsigned long value)
+	{
+		dst[0] = static_cast<unsigned char>(value >> 16);
+		dst[1] = static_cast<unsigned char>(value >> 8);
+		dst[2] = static_cast<unsigned char>(value);
+	}
+
+	static unsigned short ReadBig16Bit(const unsigned char *src)
+	{
+		return static_cast<unsigned short>((src[0] << 8) | src[1]);
+	}
+
+	static void WriteBig16Bit(unsigned char *dst, unsigned short value)
+	{
+		dst[0] = static_cast<unsigned char>(value >> 8);
+		dst[1] = static_cast<unsigned char>(value);
+	}
+
+	static unsigned int ReadLittle32Bit(const unsigned char *src)
+	{
+		return (unsigned int)src[0] | (unsigned int)src[1] << 8 |
+		       (unsigned int)src[2] << 16 | (unsigned int)src[3] << 24;
+	}
+
+	static void WriteLittle32Bit(unsigned char *dst, unsigned long value)
+	{
+		dst[0] = static_cast<unsigned char>(value);
+		dst[1] = static_cast<unsigned char>(value >> 8);
+		dst[2] = static_cast<unsigned char>(value >> 16);
+		dst[3] = static_cast<unsigned char>(value >> 24);
+	}
+
+	static unsigned int ReadLittle24Bit(const unsigned char *src)
+	{
+		return (unsigned int)src[0] | (unsigned int)src[1] << 8 | (unsigned int)src[2] << 16;
+	}
+
+	static void WriteLittle24Bit(unsigned char *dst, unsigned long value)
+	{
+		dst[0] = static_cast<unsigned char>(value);
+		dst[1] = static_cast<unsigned char>(value >> 8);
+		dst[2] = static_cast<unsigned char>(value >> 16);
 	}
 
 	static unsigned short ReadLittle16Bit(const unsigned char *src)

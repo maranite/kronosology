@@ -1742,6 +1742,27 @@ should know they exist and are untested/unmodeled, not silently absent.
   Real-HW test that would help: none identified -- same rationale as
   the sibling families above.
 
+  **Follow-up round 43 (2026-07-29)**: while surveying for the next
+  cluster, found the family's own utility class `CMemoryAccessor`
+  (`storage_converter_ext_stubs.h`) 3/12 already-real methods
+  (`WriteBig32Bit`/`ReadLittle16Bit`/`WriteLittle16Bit`, committed
+  since round 46) had NEVER been added to `gen_manifest.py`'s
+  `RECONSTRUCTED` set -- a genuine manifest-crediting gap, same class
+  of bug as the earlier "mangled-name grep" finding (see the
+  deferred-registry rounds). Fixed by crediting all 3 alongside landing
+  the remaining 9 siblings for real: `ReadBig32Bit`/`ReadBig24Bit`/
+  `WriteBig24Bit`/`ReadBig16Bit`/`WriteBig16Bit`/`ReadLittle32Bit`/
+  `WriteLittle32Bit`/`ReadLittle24Bit`/`WriteLittle24Bit` -- completing
+  the full 12-method Read/Write{Big,Little}{16,24,32}Bit family. All 12
+  are plain byte-shuffle encode/decode with zero relocations/calls,
+  each independently confirmed against its own ground-truth decompile
+  (`.text+0x838dbc0`..`0x838dd80`). Real host KAT
+  (`verify/test_memory_accessor.cpp`, 18 checks). `make verify` full
+  suite green. Eva manifest 2852 -> 2864/37,795 (7.578%).
+
+  Real-HW test that would help: none identified -- pure byte-shuffle
+  utility with no observable I/O or hardware surface.
+
 - **CSysExGlobal/CSysExKarmaGE/CSysExGETemplate/CSysExRegion, 46/57
   tractable methods (`sysex_objects_ge_region.h`/`.cpp`), round 42,
   2026-07-29 (solo, no subagents)**. Fresh manifest survey of the
