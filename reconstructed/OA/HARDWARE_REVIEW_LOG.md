@@ -4992,3 +4992,50 @@ Real-HW test that would help: none identified for the dtor itself
 the ctor fix genuinely changes what a real `CSTGFrontPanel` instance's
 first 4 bytes contain, so worth a quick sanity boot-test alongside any
 future kronos_vm session touching front-panel init.
+
+## Round 71 (OA.ko, solo, 2026-07-29): CSTGMessageHandler's own SendMidiParam + dtor
+
+Found via a fresh done>0/pending>0 manifest scan (excluding the 3
+`*MsgHandler` subclasses + `CSTGFrontPanel`, all just closed). The
+shared `CSTGMessageHandler` base class itself had 4 pending members:
+`SendMidiParam` (1 byte), its own D0/D1 dtor pair (7 bytes each,
+`.text+0x5ab1c0`/`0x5ab1d0`), and `HandleMessage` (59 bytes).
+
+Landed `SendMidiParam(STGMessage const&)` (confirmed genuinely empty,
+ignores its own argument) and `~CSTGMessageHandler()` (resets
+`_vtablePtr` to ITS OWN vtable slot, `_ZTV18CSTGMessageHandler + 8` --
+the base class's own dtor, same shape as every subclass's dtor from
+round 69, just targeting itself; volatile-store fix applied
+proactively per that same round's GCC -O2 finding).
+
+`HandleMessage(STGMessage const&)` deliberately DEFERRED: real body is
+the generic dispatch core every subclass's `sMsgHandler[]` table is
+invoked through -- reads `this->_msgHandlerTable[msg->index * 8]`,
+decodes the low bit of the resulting function pointer as a GCC
+member-function-pointer vtable-relative thunk (the SAME PMF idiom
+already independently established on the Eva side for `SDescriptor::
+getterFn`/`setterFn`, edit_server.h -- notable cross-project
+convention match), then calls it. Ghidra's own decompile shows the
+final call taking ZERO arguments (`(*pcVar2)();`), directly
+inconsistent with every one of the 51+ real handler methods this
+table dispatches to (all take `(const T *param, int source)`) --
+confirmed lost-argument decompiler artifact, matching red flags #5
+(internally-inconsistent Ghidra signature) and #7 (deep pointer-chain
+dispatch into unconfirmed slots) from this project's standing
+deferral checklist. Matches the existing "MsgHandler ctor/dtor/
+HandleMessage" project-wide deferral policy exactly -- not
+re-litigated.
+
+Real host KAT (`test_control_msg_handler.cpp` extended, 2 new checks:
+`SendMidiParam(NULL)` doesn't crash, dtor resets to its own vtable
+slot -- read via a raw buffer, not `->_vtablePtr`, since this class
+has no declared data members of its own). `make verify` full suite
+green (exit 0), zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4069 -> 4072/
+21,689 (18.774%).
+
+Real-HW test that would help: none for the landed pieces (`_vtablePtr`
+confirmed install-only). `HandleMessage`'s real argument-passing
+convention would need either a real disassembly deep-dive past what
+Ghidra recovered, or a live dynamic trace on real hardware/kronos_vm,
+before it could be safely reconstructed.

@@ -319,6 +319,36 @@ public:
 class CSTGMessageHandler {
 public:
 	void HandleUnsupportedMessage(void *msg, int source);
+
+	/* .text+0x5ab070, 1 byte, __cdecl static. Round 71 (2026-07-29,
+	 * solo): confirmed genuinely empty (`return;`) in the real binary --
+	 * ignores its own `STGMessage const&` argument entirely. */
+	static void SendMidiParam(const void *msg);
+
+	/* D0/D1 byte-identical (round 71): resets `_vtablePtr` to this
+	 * class's OWN vtable (`_ZTV18CSTGMessageHandler + 8`) -- the base
+	 * class's own dtor, same shape as every subclass's own dtor
+	 * (round 69), just targeting itself instead of a derived class'
+	 * slot. `_vtablePtr` modeled the same "raw first 4 bytes, no named
+	 * field" way as `CSTGFrontPanel` (round 70) -- this class has no
+	 * data members of its own, every subclass supplies its own layout. */
+	~CSTGMessageHandler();
+
+	/* HandleMessage(STGMessage const&) (.text+0xfbab0, 59 bytes) --
+	 * deliberately DEFERRED. Real body is the generic dispatch core
+	 * every subclass's `sMsgHandler[]` table is invoked through: reads
+	 * `this->_msgHandlerTable[msg->index * 8]`, decodes the low bit of
+	 * the resulting function pointer as a GCC member-function-pointer
+	 * vtable-relative thunk (same PMF idiom as Eva's own `SDescriptor::
+	 * getterFn`/`setterFn`, edit_server.h), then calls it. Ghidra's own
+	 * decompile shows the final call taking ZERO arguments
+	 * (`(*pcVar2)();`), which is internally inconsistent with every one
+	 * of the 51+ real handler methods this table dispatches to (all take
+	 * `(const T *param, int source)`) -- confirmed lost-argument
+	 * decompiler artifact, not real ground truth. Matches this project's
+	 * standing "MsgHandler ctor/dtor/HandleMessage" deferral policy:
+	 * treated as real but deliberately out of scope, not re-litigated
+	 * per class. */
 };
 
 /*

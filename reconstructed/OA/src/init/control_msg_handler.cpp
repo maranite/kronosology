@@ -79,6 +79,19 @@ CSTGDrumPadInterface *CSTGDrumPadInterface::sInstance;
  * fallback, own body deliberately not reconstructed (see header). */
 void CSTGMessageHandler::HandleUnsupportedMessage(void *, int) { }
 
+/* CSTGMessageHandler::SendMidiParam -- confirmed genuinely empty in the
+ * real binary (round 71), ignores its own argument entirely. */
+void CSTGMessageHandler::SendMidiParam(const void *) { }
+
+/* CSTGMessageHandler::~CSTGMessageHandler -- the base class's own dtor,
+ * resets to its own vtable slot (round 71). */
+CSTGMessageHandler::~CSTGMessageHandler()
+{
+	/* volatile: see CSTGControlMsgHandler's identical dtor note
+	 * (round 69, GCC -O2 dead-store-elimination). */
+	*(void * volatile *)this = _ZTV18CSTGMessageHandler + 8;
+}
+
 /* CSTGDrumPadInterface::StartScanning -- own body deliberately not
  * reconstructed, real drum-pad scan-trigger hardware protocol is out of
  * scope for this cluster (see header). */

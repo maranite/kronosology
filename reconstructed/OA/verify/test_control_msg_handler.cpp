@@ -666,6 +666,22 @@ int main()
 		delete[] buf;
 	}
 
+	section("CSTGMessageHandler (round 71): SendMidiParam + own dtor");
+	{
+		/* CSTGMessageHandler itself has no declared data members (every
+		 * subclass supplies its own layout) -- allocate a plain raw
+		 * buffer rather than sizeof(CSTGMessageHandler) (which would be
+		 * 1 byte, not enough to hold the 4-byte vtable-pointer write). */
+		CSTGMessageHandler::SendMidiParam((void *)0);
+		check_eq("SendMidiParam(NULL) doesn't crash (confirmed empty body)", 1, 1);
+
+		unsigned char buf[16];
+		CSTGMessageHandler *h = reinterpret_cast<CSTGMessageHandler *>(buf);
+		h->~CSTGMessageHandler();
+		check_eq("dtor resets to its own vtable slot",
+			 *(long *)buf, (long)(_ZTV18CSTGMessageHandler + 8));
+	}
+
 	printf("%s (%d failed)\n", g_fail ? "FAILED" : "PASSED", g_fail);
 	return g_fail ? 1 : 0;
 }
