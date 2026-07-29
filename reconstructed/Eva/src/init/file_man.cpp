@@ -99,6 +99,62 @@ void CFileMan::EnableBackgroundJobs(int enabled)
 	mBackgroundJobsEnabled = enabled;
 }
 
+/* Round 55 batch -- see file_man.h. */
+
+unsigned int CFileMan::GetFile(int index) const
+{
+	if (index < 0x80 && mUnitTable[index].mField0 == 0)
+		return static_cast<unsigned int>(mUnitTable[index].mField4);
+	return 0;
+}
+
+unsigned int CFileMan::GetUnitForModify(int index) const
+{
+	if (index < 0x80 && mHandleTable[index].mField0 == 0)
+		return static_cast<unsigned int>(mHandleTable[index].mField4);
+	return 0;
+}
+
+void *CFileMan::GetIOCTLDev(int index)
+{
+	if (static_cast<unsigned int>(index) > 0x1f)
+		return 0;
+	if (mIOCTLDevTable[index].mField0 == 0)
+		return &mIOCTLDevTable[index];
+	return 0;
+}
+
+int CFileMan::RemoveIOCTLDev(int index)
+{
+	if (static_cast<unsigned int>(index) < 0x20 && mIOCTLDevTable[index].mField0 == 0) {
+		mIOCTLDevTable[index].mField0 = 1;
+		mIOCTLDevTable[index].mField4 = 0;
+		mIOCTLDevTable[index].mField8 = 0;
+		mIOCTLDevTable[index].mFieldC = 0;
+		return 1;
+	}
+	return 0;
+}
+
+void CFileMan::UnitNameCompare(const char *a, const char *b)
+{
+	CZ::StrCmpIgnoreCase(a, b);
+}
+
+bool CFileMan::IsAccessDenied(unsigned char requested, unsigned char granted)
+{
+	bool denied;
+	if (((requested & 1) != 0 && (granted & 1) == 0) ||
+	    ((requested & 2) != 0 && (granted & 2) == 0)) {
+		denied = true;
+	} else if ((requested & 4) != 0) {
+		denied = (granted & 4) == 0;
+	} else {
+		denied = false;
+	}
+	return denied;
+}
+
 extern "C" void CFileManSetupVSlot(void *obj)
 {
 	static_cast<CFileMan *>(obj)->Setup();

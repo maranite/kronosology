@@ -71,6 +71,8 @@
 #include "omega_ptr_array.h"
 #include "chunk_on_demand.h"
 #include "rm_job.h"
+#include "rm_api_callback.h"
+#include "res_entry.h"
 
 class CResMan : public CModule {
 public:
@@ -88,6 +90,51 @@ public:
 	 * all out of scope for this ctor-focused pass, not declared here.
 	 */
 	void Start();
+
+	/* Round 55 batch (2026-07-29, solo) -- 4 further small, self-contained
+	 * methods. Deferred siblings from the same survey: OnLoad/OnLoadRes/OnSetRes/
+	 * OnDelete/OnSave's own 10-byte "non-virtual thunk to ..." forwarders (each
+	 * decompiles as literally calling itself by the same demangled short name --
+	 * an Itanium-ABI virtual-vs-non-virtual overload disambiguation artifact,
+	 * not real self-recursion; they really forward into this class' own
+	 * 272-2023-byte OnXxx bodies, already flagged out of scope above), FindClose
+	 * (forwards into the 819B RemoveHandle, unreconstructed), UnloadAllRes
+	 * (forwards into the 1715B LRUUnloadRes, a genuinely deep resource-GC
+	 * routine -- IsOnDemand(), the free function it also calls, IS reconstructed
+	 * below as a standalone utility since it's real and self-contained on its
+	 * own).
+	 */
+
+	/* .text+0x0815fc60, 16 bytes. Doesn't touch `this` at all -- reads
+	 * g_atResFamilies[family]'s own +0x28 field directly (same opaque
+	 * raw-offset-access convention as res_family.h's own header note; this is
+	 * the method that gives that +0x28 field its "auto-unload enabled" meaning).
+	 */
+	int IsAutoUnloadEnabled(unsigned char family) const;
+
+	/* .text+0x0815fd30, 78 bytes. Doesn't touch `this` -- writes
+	 * g_atResFamilies[family]'s +0x2c field (same table IsAutoUnloadEnabled()
+	 * reads +0x28 from). Real: out-of-range family (>=32) fires a soft assert
+	 * (Api+0x94) then writes anyway (ground truth falls through, not an early
+	 * return -- same "assert-then-continue" idiom already used elsewhere, e.g.
+	 * res_entry.h's CResInfo(const unsigned char*)).
+	 */
+	void SetLoadRes(unsigned char family, int value) const;
+
+	/* .text+0x0815fb10, 115 bytes. Real critical-section test-and-set on
+	 * this+0x50 (within mUnknown34's own opaque range): if currently 0 (free),
+	 * claims it by storing `owner`; returns true iff this call was the one that
+	 * claimed it. NULL `owner` fires a soft assert (Api+0x94) first but the real
+	 * code proceeds into the critical section regardless (same "assert is
+	 * diagnostic-only, not a guard" idiom as SetLoadRes() above).
+	 */
+	bool TestAndSetBusy(CRMApiCallBack *owner);
+
+	/* .text+0x0815ac50, 107 bytes. Doesn't touch `this` -- frees `*map` (with a
+	 * soft assert if it's already NULL, matching every other Api+0x94
+	 * diagnostic-only site) and always NULLs the caller's pointer afterward.
+	 */
+	void UnPrepareDestMap(STriplet **map) const;
 
 private:
 	void            *mCallbackVtbl;

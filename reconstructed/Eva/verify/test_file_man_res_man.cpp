@@ -38,6 +38,8 @@
 #include "cz_util.h"
 #include "file_man.h"
 #include "res_man.h"
+#include "res_table.h"
+#include "res_family.h"
 #include "system_api.h"
 
 static int g_fail;
@@ -105,11 +107,24 @@ static int FakeGetScopeId(void *api)
 }
 typedef int (*GetScopeIdFn)(void *);
 
-/* Slot +0x38 = index 14, +0x3c = index 15 -- sized generously past that, matching
- * this project's own "properly-sized fake vtable" KAT convention (see out_link.h's
- * header note on the "96-slot-fake-Api-vtable" gotcha).
+/* Round 55 batch: SetLoadRes()/TestAndSetBusy()/UnPrepareDestMap()/IsOnDemand()'s
+ * own Api+0x94 soft-assert-report call. Matches res_entry.cpp's own ApiAssert()
+ * shape exactly; just needs to not crash for these KAT purposes.
  */
-static void *g_fakeApiVtbl[20] = { 0 };
+static int g_assertCount;
+static void FakeAssert(void *api, const char *fmt, const char *file, int line)
+{
+	(void)api; (void)fmt; (void)file; (void)line;
+	g_assertCount++;
+}
+typedef void (*AssertFn)(void *, const char *, const char *, int);
+
+/* Slot +0x38 = index 14, +0x3c = index 15, +0x94 = index 37 -- sized generously
+ * past that, matching this project's own "properly-sized fake vtable" KAT
+ * convention (see out_link.h's header note on the "96-slot-fake-Api-vtable"
+ * gotcha).
+ */
+static void *g_fakeApiVtbl[40] = { 0 };
 struct FakeApiObj {
 	void *vtbl;
 };
@@ -211,6 +226,7 @@ int main()
 
 		g_fakeApiVtbl[0x38 / 4] = (void *)(GetCfgFn)FakeGetConfigString;
 		g_fakeApiVtbl[0x3c / 4] = (void *)(GetScopeIdFn)FakeGetScopeId;
+		g_fakeApiVtbl[0x94 / 4] = (void *)(AssertFn)FakeAssert;
 		g_fakeApi.vtbl = g_fakeApiVtbl;
 		Api = reinterpret_cast<CSystemApi *>(&g_fakeApi);
 
@@ -302,6 +318,121 @@ int main()
 		int before34 = I32(rm, 0x34);
 		rm->Start();
 		check("Start() doesn't touch any field", I32(rm, 0x34) == before34);
+
+		free(raw);
+	}
+
+	/* --- Round 55 batch (2026-07-29, solo) --- */
+	printf("[9] CFileMan round 55 batch\n");
+	{
+		unsigned char *raw = (unsigned char *)malloc(sizeof(CFileMan));
+		CFileMan *fm = new (raw) CFileMan();
+
+		CFileMan::UnitNameCompare("Foo", "foo"); /* real: void, calls CZ::StrCmpIgnoreCase
+		                                           * but discards the result -- genuinely
+		                                           * useless in the real binary, faithfully
+		                                           * preserved; just confirm it doesn't crash */
+		check("UnitNameCompare: doesn't crash (real function discards its own comparison)", true);
+
+		check("IsAccessDenied: requested bit not granted -> denied",
+		      CFileMan::IsAccessDenied(1, 0) == true);
+		check("IsAccessDenied: requested bit granted -> not denied (falls to bit2 check, unset)",
+		      CFileMan::IsAccessDenied(1, 1) == false);
+		check("IsAccessDenied: bit1 unset in granted -> denied",
+		      CFileMan::IsAccessDenied(2, 0) == true);
+		check("IsAccessDenied: neither bit0/1 requested, bit2 unset -> not denied",
+		      CFileMan::IsAccessDenied(0, 0) == false);
+		check("IsAccessDenied: bit2 requested and granted -> not denied",
+		      CFileMan::IsAccessDenied(4, 4) == false);
+		check("IsAccessDenied: bit2 requested, not granted -> denied",
+		      CFileMan::IsAccessDenied(4, 0) == true);
+
+		/* ctor already sets every mUnitTable[i]/mHandleTable[i]/mIOCTLDevTable[i]
+		 * to {1,0,...} ("free") -- GetXxx() on a still-free slot returns 0.
+		 */
+		check("GetFile(): still-free slot -> 0", fm->GetFile(5) == 0);
+		check("GetFile(): out-of-range index -> 0", fm->GetFile(200) == 0);
+		check("GetUnitForModify(): still-free slot -> 0", fm->GetUnitForModify(5) == 0);
+		check("GetIOCTLDev(): still-free slot -> 0 (unclaimed)", fm->GetIOCTLDev(3) == 0);
+		check("GetIOCTLDev(): out-of-range index -> 0", fm->GetIOCTLDev(200) == 0);
+
+		/* Directly claim mUnitTable[5]/mHandleTable[7]/mIOCTLDevTable[3] via the
+		 * same {flag=0 (in use), value} shape the real ctor establishes, using
+		 * the friend test-hook convention already used elsewhere in this file.
+		 */
+		*(int *)((unsigned char *)fm + 0x2c + 5 * 8) = 0;      /* mUnitTable[5].mField0 = 0 (in use) */
+		*(int *)((unsigned char *)fm + 0x2c + 5 * 8 + 4) = 77; /* mUnitTable[5].mField4 = 77 */
+		check("GetFile(): in-use slot -> stored value", fm->GetFile(5) == 77);
+
+		*(int *)((unsigned char *)fm + 0x42c + 7 * 8) = 0;
+		*(int *)((unsigned char *)fm + 0x42c + 7 * 8 + 4) = 88;
+		check("GetUnitForModify(): in-use slot -> stored value", fm->GetUnitForModify(7) == 88);
+
+		*(int *)((unsigned char *)fm + 0x82c + 3 * 0x10) = 0; /* mIOCTLDevTable[3].mField0 = 0 (in use) */
+		void *dev = fm->GetIOCTLDev(3);
+		check("GetIOCTLDev(): in-use slot -> address of that slot",
+		      dev == (void *)((unsigned char *)fm + 0x82c + 3 * 0x10));
+
+		check("RemoveIOCTLDev(): already-free slot -> 0 (no-op)", fm->RemoveIOCTLDev(9) == 0);
+		check("RemoveIOCTLDev(): in-use slot -> 1, resets to {1,0,0,0}",
+		      fm->RemoveIOCTLDev(3) == 1 && fm->GetIOCTLDev(3) == 0 &&
+		      I32(fm, 0x82c + 3 * 0x10) == 1);
+
+		free(raw);
+	}
+
+	printf("[10] CResMan round 55 batch\n");
+	{
+		unsigned char *raw = (unsigned char *)malloc(sizeof(CResMan));
+		CResMan *rm = new (raw) CResMan();
+
+		/* g_atResFamilies is a real global array; its own static-initializer
+		 * ctor already ran before main() (CResFamily::CResFamily(), +0x24/+0x28/
+		 * +0x2c all default to 1 -- res_family.cpp).
+		 */
+		check("IsAutoUnloadEnabled(): default (ctor sets +0x28 = 1)",
+		      rm->IsAutoUnloadEnabled(0) == 1);
+		check("IsOnDemand(): default (ctor sets +0x24 = 1, != 0 -> false)",
+		      IsOnDemand(0) == false);
+
+		g_assertCount = 0;
+		rm->SetLoadRes(0, 4660 /* 0x1234 */);
+		check("SetLoadRes(): writes g_atResFamilies[0]+0x2c",
+		      *(int *)((unsigned char *)&g_atResFamilies[0] + 0x2c) == 4660);
+		check("SetLoadRes(): in-range family -> no assert", g_assertCount == 0);
+
+		g_assertCount = 0;
+		rm->SetLoadRes(50, 1); /* out of range (>0x1f) -- soft assert, writes anyway (UB address in
+		                          * real hardware; here g_atResFamilies is exactly 32 elements, so
+		                          * this intentionally checks the assert fires, not the OOB write). */
+		check("SetLoadRes(): out-of-range family -> soft assert fires", g_assertCount == 1);
+
+		g_assertCount = 0;
+		CRMApiCallBack *owner1 = reinterpret_cast<CRMApiCallBack *>(0x1234);
+		bool claimed1 = rm->TestAndSetBusy(owner1);
+		check("TestAndSetBusy(): first claim succeeds", claimed1 == true);
+		check("TestAndSetBusy(): valid owner -> no assert", g_assertCount == 0);
+
+		CRMApiCallBack *owner2 = reinterpret_cast<CRMApiCallBack *>(0x5678);
+		bool claimed2 = rm->TestAndSetBusy(owner2);
+		check("TestAndSetBusy(): already-busy -> second claim fails", claimed2 == false);
+
+		g_assertCount = 0;
+		rm->TestAndSetBusy(0);
+		check("TestAndSetBusy(): NULL owner -> soft assert fires (still proceeds)", g_assertCount == 1);
+
+		STriplet **map = (STriplet **)malloc(sizeof(STriplet *));
+		*map = (STriplet *)malloc(sizeof(STriplet));
+		g_assertCount = 0;
+		rm->UnPrepareDestMap(map);
+		check("UnPrepareDestMap(): frees *map and NULLs it", *map == 0);
+		check("UnPrepareDestMap(): non-NULL input -> no assert", g_assertCount == 0);
+
+		g_assertCount = 0;
+		rm->UnPrepareDestMap(map); /* *map is already NULL now */
+		check("UnPrepareDestMap(): NULL *map -> soft assert fires, still NULLs (no-op)",
+		      g_assertCount == 1 && *map == 0);
+		free(map);
 
 		free(raw);
 	}

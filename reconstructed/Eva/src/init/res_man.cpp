@@ -4,9 +4,32 @@
 
 #include "res_man.h"
 #include "omega_vtables.h"
+#include "res_family.h"
+#include "system_api.h"
 
 #include <cstdlib>
 #include <new>
+
+extern CSystemApi *Api; /* mains.cpp */
+extern void HAL_DisableInterrupts();
+extern void HAL_EnableInterrupts();
+
+namespace {
+
+/* Real Api+0x94 soft-assert-report call -- same slot/shape as res_entry.cpp's
+ * own ApiAssert(); real calls here are diagnostic-only, the code always falls
+ * through and completes the operation regardless (see each caller's own
+ * comment in res_man.h).
+ */
+inline void ApiAssert(const char *file, int line)
+{
+	typedef void (*Fn)(void *, const char *, const char *, int);
+	void *vtbl = *(void **)Api;
+	Fn fn = *(Fn *)((char *)vtbl + 0x94);
+	fn(Api, "Assertion failed in module %s, line %i.\n", file, line);
+}
+
+} // namespace
 
 /* Real class-static global (symbols.csv: CResMan::SysName, 4 bytes, a `const
  * char*`) -- same "opaque, content not decoded" treatment as file_man.cpp's own
@@ -90,6 +113,51 @@ CResMan::CResMan()
 void CResMan::Start()
 {
 	/* Confirmed genuinely empty (`return 0;`) in the real binary. */
+}
+
+/* Round 55 batch -- see res_man.h. Neither of these touches `this`. */
+
+int CResMan::IsAutoUnloadEnabled(unsigned char family) const
+{
+	return *reinterpret_cast<int *>(
+		reinterpret_cast<unsigned char *>(&g_atResFamilies[family]) + 0x28);
+}
+
+void CResMan::SetLoadRes(unsigned char family, int value) const
+{
+	if (family > 0x1f)
+		ApiAssert("ResMan.cpp", 0xc7a);
+	*reinterpret_cast<int *>(
+		reinterpret_cast<unsigned char *>(&g_atResFamilies[family]) + 0x2c) = value;
+}
+
+bool CResMan::TestAndSetBusy(CRMApiCallBack *owner)
+{
+	if (owner == 0)
+		ApiAssert("ResMan.cpp", 0xc38);
+
+	HAL_DisableInterrupts();
+	unsigned char *slot = mUnknown34 + 0x1c; /* absolute this+0x50 */
+	CRMApiCallBack *cur = *reinterpret_cast<CRMApiCallBack **>(slot);
+	if (cur == 0)
+		*reinterpret_cast<CRMApiCallBack **>(slot) = owner;
+	HAL_EnableInterrupts();
+	return cur == 0;
+}
+
+void CResMan::UnPrepareDestMap(STriplet **map) const
+{
+	STriplet *ptr = *map;
+	if (ptr == 0) {
+		ApiAssert("ResMan.cpp", 0x949);
+		ptr = *map;
+	}
+	if (ptr != 0) {
+		HAL_DisableInterrupts();
+		free(ptr);
+		HAL_EnableInterrupts();
+	}
+	*map = 0;
 }
 
 extern "C" void CResManStartVSlot(void *obj)

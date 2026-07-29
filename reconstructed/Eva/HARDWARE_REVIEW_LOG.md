@@ -2464,3 +2464,78 @@ Eva manifest 3104 -> 3127/37,795 (8.274%).
 
 Real-HW test that would help: none identified -- pure field-read/
 write accessor logic, no hardware I/O surface of its own.
+
+## Round 55 (Eva, solo, 2026-07-29): CFileMan (6) / CResMan (4) / IsOnDemand batch
+
+Continued the CFileMan/CResMan god-objects (`file_man.h`/`res_man.h`,
+first touched round 62/Stage 6 for their ctors only) rather than
+starting a wholly-fresh class -- most other high-pending-count
+candidates surveyed this round (`CControlSurface`'s 112 pending
+methods, `CFileOperation`'s remaining 103) turned out to forward
+into either unreconstructed sibling classes (`CTrackStatus`, `CMMI`)
+or the already-flagged-out-of-scope `Execute()`/`LRUUnloadRes()`
+massive dispatchers.
+
+Landed 6 `CFileMan` methods: `GetFile`/`GetUnitForModify` (read
+`mUnitTable`/`mHandleTable`'s `{flag,value}` slot entries -- the
+first EXTERNAL confirmation of those two tables' real semantics,
+previously only inferred from the ctor's own uniform `{1,0}`
+initialization), `GetIOCTLDev`/`RemoveIOCTLDev` (read/reset
+`mIOCTLDevTable` entries, same confirmation for that table),
+`UnitNameCompare` (real: `void`, not `int` -- calls
+`CZ::StrCmpIgnoreCase` but DISCARDS the result and returns nothing;
+initially mis-modeled as returning the comparison during this round,
+caught via the `-Wsign-compare` build warning on the KAT's own
+`== 0xffffffffu` check and fixed to match ground truth exactly
+rather than "fixing" the real function into something more useful),
+`IsAccessDenied` (pure 3-bit access-flag test, doesn't touch `this`
+at all -- flattened Ghidra `bVar1=...,(...)||...` comma-operator
+boolean chain manually traced back to the equivalent nested-if source
+to confirm the rewrite preserves exact branch semantics).
+
+Landed 4 `CResMan` methods: `IsAutoUnloadEnabled`/`SetLoadRes` (read/
+write `g_atResFamilies[family]`'s own `+0x28`/`+0x2c` opaque-buffer
+fields directly -- `res_family.h`'s existing raw-offset-access
+convention, first real semantic attribution for those 2 fields),
+`TestAndSetBusy` (real critical-section test-and-set on `this+0x50`,
+within the existing `mUnknown34` opaque range), `UnPrepareDestMap`
+(frees a caller-owned `STriplet*` and always NULLs it). Also landed
+the free function `IsOnDemand(unsigned int)` (new `res_table.h`/
+`.cpp`, matching its own Api-assert call site's `"ResTable.cpp"`
+filename literal) -- found via `CResMan::UnloadAllRes()`'s own call
+site while surveying; `UnloadAllRes()` itself stays deferred since
+its OTHER callee, `LRUUnloadRes()`, is a genuinely deep 1715-byte
+resource-GC routine.
+
+All 4 `SetLoadRes`/`TestAndSetBusy`/`UnPrepareDestMap`/`IsOnDemand`
+soft-assert (`Api`+0x94) on bad input but proceed anyway -- same
+"diagnostic-only, not a guard" idiom as `res_entry.cpp`'s existing
+`ApiAssert()`; each gets its own file-local copy of that helper
+(`res_man.cpp`, `res_table.cpp`), following the established
+per-TU-local-helper convention rather than a shared header.
+
+Deferred (documented in each header): the 5 `OnLoad`/`OnLoadRes`/
+`OnSetRes`/`OnDelete`/`OnSave` 10-byte "non-virtual thunk to ..."
+forwarders (each decompiles as literally calling itself by the same
+demangled short name -- an Itanium-ABI virtual/non-virtual overload
+disambiguation artifact, not real self-recursion; they forward into
+this class' own already-flagged 272-2023-byte real bodies),
+`FindClose` (forwards to the 819B unreconstructed `RemoveHandle`),
+`GetNumInstalledUnit`/`DriverSupportPartitions`/
+`GetNumDriverDescriptions`/`GetDriverName` (all dispatch through
+`this`'s own unconfirmed vtable slots 0xbc/0xc0 into a wholly
+undeclared `CVirtualDriverBase`), `EndWritePartitionTable`
+(`CDriverTaskBase` undeclared + `CSysApiInstance::EnableLevel`
+unreconstructed), both `~CFileMan` overloads (the 41B D0 wrapper
+forwards into a genuine 1928B god-object teardown, out of scope,
+same boundary as this class' own ~60-method backlog).
+
+Real host KAT (12 new checks appended to the existing
+`verify/test_file_man_res_man.cpp`, extending its fake-Api-vtable
+setup with an `Api`+0x94 soft-assert stub). `make verify` full suite
+green (105 targets), zero regressions. `make objs` (real `-m32`
+target-ABI compile) green. Eva manifest 3127 -> 3138/37,795 (8.303%).
+
+Real-HW test that would help: none identified -- pure field-read/
+write accessor + critical-section logic, no hardware I/O surface of
+its own.

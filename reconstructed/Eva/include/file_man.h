@@ -73,6 +73,56 @@ public:
 	void Config();
 	void Start();
 
+	/* Round 55 batch (2026-07-29, solo) -- 6 further small, self-contained
+	 * methods confirming mUnitTable/mHandleTable/mIOCTLDevTable's own real
+	 * {flag, ...} slot semantics (header comment above), plus 2 that don't
+	 * touch `this` at all. Deferred siblings from the same survey:
+	 * DriverSupportPartitions/GetNumDriverDescriptions/GetDriverName (all 3
+	 * dispatch through this's own unconfirmed vtable slot 0xc0 into a wholly
+	 * undeclared CVirtualDriverBase), GetNumInstalledUnit (dispatches through
+	 * this's own unconfirmed vtable slot 0xbc), EndWritePartitionTable
+	 * (CDriverTaskBase undeclared + CSysApiInstance::EnableLevel unreconstructed),
+	 * ~CFileMan (both the 41B D0 wrapper and the 1928B D1 body it forwards to --
+	 * the latter is a genuine god-object teardown, out of scope, same boundary
+	 * as this class's own ~60-method backlog).
+	 */
+
+	/* .text+0x080fc760, 22 bytes. mUnitTable[i]: mField0==0 (in use) -> return
+	 * mField4 (the stored value); else 0. Confirms mUnitTable's {flag,value}
+	 * slot semantics from the outside (GetUnitForModify does the same for
+	 * mHandleTable below).
+	 */
+	unsigned int GetFile(int index) const;
+
+	/* .text+0x080fc780, 34 bytes. Same shape as GetFile() but on mHandleTable. */
+	unsigned int GetUnitForModify(int index) const;
+
+	/* .text+0x080fc9c0, 38 bytes. Real return type is the raw address of
+	 * mIOCTLDevTable[index] (Ghidra mis-inferred it as CFileMan* from the
+	 * shared `this + offset` arithmetic shape) when that slot's mField0==0
+	 * (in use), else NULL.
+	 */
+	void *GetIOCTLDev(int index);
+
+	/* .text+0x080fc980, 63 bytes. Resets mIOCTLDevTable[index] back to its
+	 * ctor-default free state ({1,0,0,0}) if it was in use (mField0==0);
+	 * returns 1 on success, 0 otherwise (bad index or already free).
+	 */
+	int RemoveIOCTLDev(int index);
+
+	/* .text+0x08105390, 13 bytes. Real: `void`, not `int` -- calls
+	 * CZ::StrCmpIgnoreCase (cz_util.h) but DISCARDS its result and returns
+	 * nothing. Faithfully preserved as a genuinely useless real function
+	 * rather than "fixed" into returning the comparison it computes.
+	 */
+	static void UnitNameCompare(const char *a, const char *b);
+
+	/* .text+0x08105350, 56 bytes. Pure bit-flag comparison, doesn't touch
+	 * `this` at all -- real access-permission-vs-request bit test (bit0/1/2 =
+	 * read/write/exclusive-style flags, exact meaning not decoded).
+	 */
+	static bool IsAccessDenied(unsigned char requested, unsigned char granted);
+
 	/* .text+0x080fc740, 11 bytes / .text+0x080fc750, 15 bytes -- trivial real
 	 * accessors for mBackgroundJobsEnabled, confirming that field's meaning.
 	 */

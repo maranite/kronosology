@@ -4435,6 +4435,18 @@ RECONSTRUCTED = {
     "083d0af0",  # CFileOperation::GetLinuxMountPoint(int)
     "083c6090",  # CFileOperation::GetResultBlocknoGetcurpos(EAudioStatusMMC*,uchar*)
     "083d0810",  # CFileOperation::EnableFileCache(int)
+    # -- round 55 (2026-07-29, solo): CFileMan (6) / CResMan (4) / IsOnDemand batch --
+    "080fc760",  # CFileMan::GetFile(int)
+    "080fc780",  # CFileMan::GetUnitForModify(int)
+    "080fc9c0",  # CFileMan::GetIOCTLDev(int)
+    "080fc980",  # CFileMan::RemoveIOCTLDev(int)
+    "08105390",  # CFileMan::UnitNameCompare(char const*,char const*)
+    "08105350",  # CFileMan::IsAccessDenied(uchar,uchar)
+    "0815fc60",  # CResMan::IsAutoUnloadEnabled(uchar) const
+    "0815fd30",  # CResMan::SetLoadRes(uchar,int) const
+    "0815fb10",  # CResMan::TestAndSetBusy(CRMApiCallBack*)
+    "0815ac50",  # CResMan::UnPrepareDestMap(STriplet**) const
+    "08068b20",  # IsOnDemand(uint) (free function, ResTable.cpp)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
