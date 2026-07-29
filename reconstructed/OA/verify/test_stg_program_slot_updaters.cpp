@@ -13,6 +13,7 @@ extern "C" unsigned char kKeyZoneSlopeTable[32];
 extern "C" unsigned char kVelZoneSlopeTable[32];
 
 STGConvertedParam CSTGParamsOwner::sValueGetterTemp;
+CSTGGlobal *CSTGGlobal::sInstance;
 
 static int g_fail;
 static void check(const char *label, bool ok)
@@ -401,6 +402,62 @@ int main()
 		buf[0x3e] = 0;
 
 		*(unsigned char **)(buf + 5) = 0;
+	}
+
+	// --- round 61 batch (3 methods) ---
+	{
+		unsigned char gbuf[0x700];
+		memset(gbuf, 0, sizeof(gbuf));
+		CSTGGlobal::sInstance = (CSTGGlobal *)gbuf;
+
+		buf[0xd] = 4;
+		buf[0xe] = 0x11;
+		buf[0xf] = 0x22;
+		char p1 = 0, p2 = 0;
+		slot->GetMIDIProgramBank(p1, p2);
+		check("GetMIDIProgramBank: this+0xd==4 -> direct copy from this+0xe/+0xf",
+		      p1 == (char)0x11 && p2 == (char)0x22);
+		buf[0xd] = 0;
+		buf[0xe] = 0;
+		buf[0xf] = 0;
+
+		buf[9] = 5; // an alias bank id ConvertAliasPgmBankToMidiBank maps deterministically
+		char p3 = 0x7f, p4 = 0x7f;
+		slot->GetMIDIProgramBank(p3, p4);
+		check("GetMIDIProgramBank: this+0xd!=4 -> forwards to ConvertAliasPgmBankToMidiBank",
+		      !(p3 == 0x7f && p4 == 0x7f));
+		buf[9] = 0;
+
+		check("ShouldResendCCOnFilterChange(10) -> false", slot->ShouldResendCCOnFilterChange(10) == false);
+		check("ShouldResendCCOnFilterChange(0x5b) -> false", slot->ShouldResendCCOnFilterChange(0x5b) == false);
+		check("ShouldResendCCOnFilterChange(0x5d) -> false", slot->ShouldResendCCOnFilterChange(0x5d) == false);
+		check("ShouldResendCCOnFilterChange(other, e.g. 3) -> true", slot->ShouldResendCCOnFilterChange(3) == true);
+		*(int *)(gbuf + 0x684) = 2;
+		check("ShouldResendCCOnFilterChange(7), global mode==2 -> false", slot->ShouldResendCCOnFilterChange(7) == false);
+		*(int *)(gbuf + 0x684) = 1;
+		check("ShouldResendCCOnFilterChange(7), global mode!=2 -> true", slot->ShouldResendCCOnFilterChange(7) == true);
+		memset(gbuf, 0, sizeof(gbuf));
+
+		buf[0xd] = 0;
+		check("ShouldSendSeqTrackMIDIOutput: this+0xd==0 -> false", slot->ShouldSendSeqTrackMIDIOutput() == false);
+		buf[0xd] = 1;
+		check("ShouldSendSeqTrackMIDIOutput: this+0xd==1 -> false", slot->ShouldSendSeqTrackMIDIOutput() == false);
+		buf[0xd] = 2;
+		check("ShouldSendSeqTrackMIDIOutput: global mode!=2 -> false", slot->ShouldSendSeqTrackMIDIOutput() == false);
+		*(int *)(gbuf + 0x684) = 2;
+		gbuf[0x6a4] = 0;
+		check("ShouldSendSeqTrackMIDIOutput: mode==2, +0x6a4==0 -> true", slot->ShouldSendSeqTrackMIDIOutput() == true);
+		gbuf[0x6a4] = 1;
+		buf[0x10] = 0x10;
+		check("ShouldSendSeqTrackMIDIOutput: +0x6a4!=0, this+0x10==0x10 -> false", slot->ShouldSendSeqTrackMIDIOutput() == false);
+		buf[0x10] = 5;
+		gbuf[0x6b8] = 5;
+		check("ShouldSendSeqTrackMIDIOutput: this+0x10==g+0x6b8 -> false", slot->ShouldSendSeqTrackMIDIOutput() == false);
+		gbuf[0x6b8] = 9;
+		check("ShouldSendSeqTrackMIDIOutput: this+0x10!=g+0x6b8 -> true", slot->ShouldSendSeqTrackMIDIOutput() == true);
+		buf[0xd] = 0;
+		buf[0x10] = 0;
+		memset(gbuf, 0, sizeof(gbuf));
 	}
 
 	printf(g_fail ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_fail);

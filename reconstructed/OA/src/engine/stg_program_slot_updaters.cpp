@@ -677,3 +677,50 @@ bool CSTGProgramSlot::GetWaveSeqQuantizeTrigger() const
 	const unsigned char *patch = *(const unsigned char *const *)(base + 5);
 	return patch[0xc2f] & 1;
 }
+
+/* Round 61 batch (3 methods) -- see header for derivation notes. */
+
+void CSTGProgramSlot::GetMIDIProgramBank(char &param_1, char &param_2) const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	if ((signed char)base[0xd] == 4) {
+		param_1 = (char)base[0xe];
+		param_2 = (char)base[0xf];
+		return;
+	}
+	USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank((signed char)base[9], param_1, param_2);
+}
+
+bool CSTGProgramSlot::ShouldResendCCOnFilterChange(unsigned char ccNum) const
+{
+	if (ccNum == 10)
+		return false;
+	if (ccNum < 0xb) {
+		if (ccNum == 7) {
+			unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+			return *(int *)(g + 0x684) != 2;
+		}
+	} else {
+		if (ccNum == 0x5b)
+			return false;
+		if (ccNum == 0x5d)
+			return false;
+	}
+	return true;
+}
+
+bool CSTGProgramSlot::ShouldSendSeqTrackMIDIOutput() const
+{
+	const unsigned char *base = (const unsigned char *)this;
+	unsigned char *g = (unsigned char *)CSTGGlobal::sInstance;
+
+	if (base[0xd] == 0 || base[0xd] == 1)
+		return false;
+	if (*(int *)(g + 0x684) != 2)
+		return false;
+	if (g[0x6a4] == 0)
+		return true;
+	if (base[0x10] == 0x10)
+		return false;
+	return g[0x6b8] != base[0x10];
+}

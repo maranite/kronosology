@@ -4514,3 +4514,78 @@ green. Manifest 4001 -> 4016/21,689 (+15, 0 regressions).
 
 Real-HW test that would help: none identified -- pure field-read/
 write accessor logic, no hardware I/O surface of its own.
+
+## Round 61 (OA.ko, solo, 2026-07-29): CSTGProgramSlot, 3-method batch
+(diminishing returns confirmed)
+
+CSTGProgramSlot's remaining ~130 pending methods were re-surveyed for
+this round, including 2 methods round 60's log had flagged as
+promising future-round unlock targets
+(`UpdateEnableAssignableSwitch`/`Knob`, `SetEffectiveDetune`/
+`SetEffectivePitchBendRange`). On closer reading both turned out to
+be poor picks after all:
+
+- `UpdateEnableAssignableSwitch`/`Knob`'s own ground truth shows
+  `*(int *)this == 0` as a branch condition -- nonsensical as a
+  literal read of `this` (never null in a real member call) -- plus
+  several `unaff_EBX`/`unaff_ESI`/`in_stack_ffffffXX` locals with no
+  clear tie to the function's own declared parameters. This is the
+  4-explicit-parameter case exceeding the 3-register regparm3/
+  thiscall budget, and Ghidra's own register allocation for the
+  spilled 4th argument looks genuinely confused, not just
+  differently-shaped from what this project's usual `this`-in-EAX
+  convention expects. Deferred rather than guessed at.
+- `SetEffectiveDetune` chases a multi-level pointer through
+  `CSTGGlobal::sInstance + 0x29c990c + index*0xc`, then two MORE
+  levels of indirection, then two SEPARATE raw vtable calls at
+  `+0xb6b`/`+0xb6f` -- genuinely deep, multi-subsystem logic, not
+  the "simple setter" its name and round 60's framing suggested.
+
+Landed the 3 methods that survived scrutiny instead:
+`GetMIDIProgramBank` (reuses the already-reconstructed
+`USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank` -- ground
+truth's own call site shows only the bankId argument explicitly, but
+its own out1/out2 char& params are already sitting in the exact same
+registers this function's own out-params arrived in, so they pass
+straight through unchanged -- the same implicit-register-passthrough
+convention already trusted elsewhere in this project),
+`ShouldResendCCOnFilterChange`, and `ShouldSendSeqTrackMIDIOutput`
+(both pure `CSTGGlobal::sInstance` + own-field reads, no new
+dependencies).
+
+Also surveyed and deferred: `ShouldResetChannelStripKnobJumpCatch`
+(computes `this - index*0xe8` to address an unidentified sibling
+array via negative offsets -- same risk class as round 58's
+"backwards indexing," not confidently attributable without more
+cross-referencing) and `ShouldStoreSeqValue` (its own mangled name
+`ShouldStoreSeqValue(unsigned long)` disagrees in arity with its
+Ghidra-declared 2-int-parameter C signature -- an internal
+inconsistency, not just an unfamiliar shape).
+
+**Standing conclusion for future rounds**: CSTGProgramSlot's
+remaining backlog (~127 methods after this round) is now
+qualitatively harder than rounds 57-61's -- most of what's left
+gates behind unrecoverable `.rodata` constants/descriptor addresses
+(GetUIInputTrim's `CSTGParamDescriptor` address family, 6 methods;
+GetWaveSeqSwingAmount's threshold, round 60), genuinely deep
+multi-subsystem pointer chains (the `0x29c990c` table family), or
+Ghidra register-allocation confusion on 4-argument thiscall
+functions. A future round should either accept this and cherry-pick
+what remains, or pivot to a fresh class entirely.
+
+Real host KAT (16 new checks appended to
+`verify/test_stg_program_slot_updaters.cpp`, 150 total in that
+file). Needed a new cross-TU link: `GetMIDIProgramBank` calls
+`USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank`, defined in the
+separate `alias_bank_convert.cpp` (not previously linked into this
+test) -- added to the Makefile's link line for this target, plus a
+local `CSTGGlobal *CSTGGlobal::sInstance;` definition (this test's
+own copy, following `test_alias_bank_convert.cpp`'s own established
+precedent for that symbol). `make verify` full suite green, zero
+regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. Manifest 4016 ->
+4019/21,689 (+3, 0 regressions).
+
+Real-HW test that would help: none identified -- pure field-read
+logic and an already-verified sibling-method reuse, no hardware I/O
+surface of its own.

@@ -1034,8 +1034,8 @@ verify/test_stg_key_track: verify/test_stg_key_track.cpp src/engine/stg_key_trac
 verify/test_stg_program_slot_getters: verify/test_stg_program_slot_getters.cpp src/engine/stg_program_slot_getters.cpp include/oa_global.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_program_slot_getters.cpp src/engine/stg_program_slot_getters.cpp -o $@
 
-verify/test_stg_program_slot_updaters: verify/test_stg_program_slot_updaters.cpp src/engine/stg_program_slot_updaters.cpp include/oa_global.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_program_slot_updaters.cpp src/engine/stg_program_slot_updaters.cpp -o $@
+verify/test_stg_program_slot_updaters: verify/test_stg_program_slot_updaters.cpp src/engine/stg_program_slot_updaters.cpp src/engine/alias_bank_convert.cpp include/oa_global.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_program_slot_updaters.cpp src/engine/stg_program_slot_updaters.cpp src/engine/alias_bank_convert.cpp -o $@
 
 verify/test_stg_patch: verify/test_stg_patch.cpp src/engine/stg_patch.cpp include/oa_stg_patch.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_patch.cpp src/engine/stg_patch.cpp -o $@

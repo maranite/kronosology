@@ -1456,6 +1456,31 @@ struct CSTGProgramSlot {
 	int GetChordMode() const;
 	bool GetWaveSeqKeySync() const;
 	bool GetWaveSeqQuantizeTrigger() const;
+
+	/*
+	 * Round 61 batch (3 methods) -- CSTGProgramSlot's remaining ~130
+	 * pending methods increasingly gate behind either unrecoverable
+	 * `.rodata` constants (e.g. GetUIInputTrim's CSTGParamDescriptor
+	 * address, GetWaveSeqSwingAmount's threshold from round 60),
+	 * internally-inconsistent Ghidra signatures (ShouldStoreSeqValue's
+	 * own mangled name vs. its declared param list disagree on arity),
+	 * or `this - index*0xe8`-style backwards indexing into an unknown
+	 * sibling array (ShouldResetChannelStripKnobJumpCatch) -- so this
+	 * round intentionally landed only the 3 fully self-contained
+	 * survivors rather than force through those.
+	 *
+	 * GetMIDIProgramBank reuses the already-reconstructed
+	 * `USTGAliasBankTypes::ConvertAliasPgmBankToMidiBank` -- ground
+	 * truth's own call site shows only 1 explicit argument (bankId),
+	 * but its own out1/out2 char& params are already sitting in the
+	 * SAME two registers (EDX/ECX) this function's own out-params
+	 * arrived in, so they pass straight through unchanged (same
+	 * implicit-register-passthrough convention already trusted
+	 * elsewhere in this project, not a mis-recovery).
+	 */
+	void GetMIDIProgramBank(char &param_1, char &param_2) const;
+	bool ShouldResendCCOnFilterChange(unsigned char ccNum) const;
+	bool ShouldSendSeqTrackMIDIOutput() const;
 };
 
 /*
