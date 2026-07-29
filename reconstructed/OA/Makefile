@@ -261,7 +261,8 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/param_convertor.o \
            src/engine/am_exp2_ess.o \
            src/engine/adsr_base.o \
-           src/engine/lfo_component.o
+           src/engine/lfo_component.o \
+           src/engine/stg_key_track.o
 
 # Matches every other reconstructed C++ kernel module's confirmed build
 # flags exactly (AT88VirtualChip, KorgUsbAudioVirtualDriver, OmapNKS4Module).
@@ -651,6 +652,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/am_exp2_ess.cpp \
        src/engine/adsr_base.cpp \
        src/engine/lfo_component.cpp \
+       src/engine/stg_key_track.cpp \
        src/engine/rtparm_ge_table.cpp \
        src/engine/rtparm_pe_table.cpp \
        src/engine/rtparm_family.cpp \
@@ -761,6 +763,7 @@ TESTS := verify/test_klm_auth verify/test_crypto verify/test_bank_memory verify/
          verify/test_seq_led \
          verify/test_param_convertor \
          verify/test_adsr_base \
+         verify/test_stg_key_track \
          verify/test_lfo_component \
          verify/test_ckg_seq_backup \
          verify/test_stg_string_valuegetters \
@@ -1004,6 +1007,9 @@ verify/test_param_convertor: verify/test_param_convertor.cpp src/engine/param_co
 
 verify/test_adsr_base: verify/test_adsr_base.cpp src/engine/adsr_base.cpp include/oa_adsr_base.h include/oa_global.h include/oa_engine.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_adsr_base.cpp src/engine/adsr_base.cpp -o $@
+
+verify/test_stg_key_track: verify/test_stg_key_track.cpp src/engine/stg_key_track.cpp include/oa_stg_key_track.h include/oa_adsr_base.h include/oa_global.h include/oa_engine.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_key_track.cpp src/engine/stg_key_track.cpp -o $@
 
 verify/test_lfo_component: verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp include/oa_lfo.h include/oa_adsr_base.h include/oa_global.h include/oa_engine.h include/oa_engine_init.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_lfo_component.cpp src/engine/lfo_component.cpp src/engine/lfo_stepseq_quad.cpp -o $@

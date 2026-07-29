@@ -3794,3 +3794,72 @@ external-MIDI-clock-sync backlog draining would both be directly
 observable on a real Kronos (front-panel tempo LED blink rate, MIDI
 clock slaving) -- flagged for the eventual real-hardware verification
 pass, not attempted here.
+
+## OA.ko: CSTGKeyTrack (key-tracking DSP component), solo round 51 (2026-07-29)
+
+Continuation of solo mode. Scripted survey of manifest/oa_functions.csv
+for small, "no in_stack/unaff_/Could-not-recover" pending clusters
+(re-derived the earlier "STG value-getter family" discovery method)
+found `CSTGKeyTrack` (24 pending methods, ZERO ambiguous-register
+markers in ANY of them per raw grep -- a genuinely clean class).
+Landed 15/24; 9 deferred across 2 DISTINCT, independently-verified
+reasons (see below) -- not guessed at either way.
+
+Confirmed real object layout cross-validates 3 already-established
+project conventions in one class: `_slotInfo` (+0x08) reuses the exact
+SAME `CSTGComponentSlotInfo` struct/offset already confirmed by
+CSTGADSRBase/CSTGLFO; `GetOutput`/`FreeVoice` independently re-confirm
+the SAME "quad table" per-voice addressing formula
+(`(note&3)+(note>>2)*0xcc0`) documented in oa_lfo.h; `InitializeQuad`
+writes the SAME shared "no AMS source" default address
+(`CSTGGlobal::sInstance+0x29c9fa0`) as CSTGADSRBase's own
+`InitializeQuad`. `InitializeQuad`/`PrepareSubRateAddressFixupTable`
+confirmed genuinely `static` (ground truth shows NO `this` parameter
+at all, `cc=__regparm3`, unlike every real-`this`-taking method here).
+`PrepareSubRateAddressFixupTable` reuses the already-declared
+`CSTGSubRateAddressFixupTable` struct verbatim (own real body appends
+exactly 1 entry per call, vs. CSTGADSRBase's own 8 -- confirmed via
+direct disassembly, not assumed).
+
+**2 distinct, independently-diagnosed deferral reasons** (own paragraph
+since conflating them would be wrong): (1) `PrecomputeData`/
+`UpdateLowRamp`/`UpdateMidLowRamp`/`UpdateMidHighRamp`/`UpdateHighRamp`
+each make a genuine, fully-concrete virtual call through THIS class's
+own vtable at raw offset 0xc0 (no "could not recover" warning, just no
+independent confirmation of the target method) -- same class as
+`CFileStream::SetPositionBeginning` (round 49). (2)
+`ConvertIntRampToSlope`/`ConvertSlopeToIntRamp`/`CalculateKeyTracking`
+(and its 3 callers `InitVoice`/`InitVoiceUsingInput`/`ProcessSubRate`)
+are fully concrete, recoverable control flow that compares against or
+multiplies by real named-but-unrecovered floating-point `.rodata`
+literal constants (Ghidra's own `_DAT_006bab6c`-style placeholders) --
+genuinely different from (1): not a vtable-slot ambiguity, a
+missing-literal-value one, discovered only by reading past the control
+flow into the actual comparison operands.
+
+**Own host/target pointer-width bug caught before commit, twice**:
+first, `InitializeQuad`'s pointer-slot writes (adjacent to int fields 4
+bytes later in the REAL target's 0x30-byte struct) would have used
+native 8-byte `void**` writes (this project's OWN established
+CSTGADSRBase precedent) and silently overrun into the int block on
+this 64-bit host -- caught by re-deriving the exact byte layout before
+writing any code, not by a failing KAT. Second, `FreeVoice`'s summed
+quad-table address needed an explicit truncate-to-`unsigned int`-then-
+zero-extend (this project's established ToU32-style convention) since
+naive `int`-width pointer arithmetic on a real host pointer would
+silently truncate; caught the SAME way. Also caught a THIRD, more
+subtle one only via a live segfault: the class's own `void*`-typed
+vptr placeholder field (8 bytes on host) silently shifted every field
+after it by 4 bytes relative to the real 32-bit target's own byte
+offsets, breaking the test's own raw `+0x08` `_slotInfo` poke -- fixed
+by using a 4-byte placeholder array instead (never dereferenced as a
+real pointer, so no loss of fidelity).
+
+Real host KAT (`verify/test_stg_key_track.cpp`, 21 checks, including a
+`mmap32`'d mock voice-model table for the FreeVoice truncate/zero-
+extend round-trip). `make verify` full suite green. Real `make
+ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+Manifest 3593 -> 3608/21,689 (+15, 0 regressions).
+
+Real-HW test that would help: none identified -- pure DSP parameter-
+modulation math, no observable hardware I/O surface.
