@@ -2712,3 +2712,47 @@ suite green (110 targets, 0 failures, exit 0), zero regressions.
 
 Real-HW test that would help: none identified -- pure in-memory
 table/counter operations, no hardware I/O surface of their own.
+
+## Round 59 (Eva, solo, 2026-07-29): USTGAPICombi overload + USTGAPILCDControl 7-method batch
+
+Surveyed near-complete classes with only 1-2 pending methods each
+(`COmegaInterface`/`CConfigManager`/`CFsConverterNormal`/`CSysExGlobal`/
+`CSysExRegion`/`USTGAPIKLM` etc.) -- all hit the "Could not recover
+jumptable... Too many branches" red flag (unconfirmed vtable
+dispatch) or a class-level deliberate deferral already documented
+(`CSysExMsgTaskBase`'s pending entry is its own D0 "deleting
+destructor" variant, `.text+0x08184f20` -- confirmed this project's
+own standing policy from `CEditClient`'s D0/D1 precedent (edit_man.h)
+already covers this exact case: D0 = D1 body + `free(this)`, not
+modeled when nothing in this reconstruction's own traced call graph
+reaches it; `CControllerTracer`'s own single pending entry is the
+already-flagged round-57 `kInvalidBytePair` discrepancy, deliberately
+not touched again this round).
+
+Landed 1 genuinely clean overload plus 7 confirmed-empty stubs instead:
+`USTGAPICombi::UpdateControllerInfoParameter(unsigned,unsigned,int,
+eSTGMsgPerfType)` -- a real 4-param convenience overload, confirmed
+via direct disassembly to forward into the ALREADY-real 6-param
+sibling with `a1=0`/`a2=0xffff` hardcoded (NOT the "forwards to
+unreconstructed sibling" deferral case -- the forward target already
+exists). `USTGAPILCDControl::SetBlackLevel/SetAllRGBLevels/
+SetRGBLevel/SetContrast/SetColorTemp/SetSpreadSpectrumClock/
+SetPadDrive2` -- all 7 confirmed genuinely empty (`mov eax,0; ret`,
+3 bytes each) real functions that ignore every one of their own
+declared parameters; this build's entire LCD-control command surface
+is a real, but wholly stubbed-out, no-op. `USTGAPIKLM::
+InstallOptionFile` re-confirmed as correctly deferred (its own header
+comment already documents the genuinely deep S-file/option-file
+parser it forwards into, `CSTGInstalledEXProducts::InstallProductFile`
+et al.) -- not attempted.
+
+Real host KAT (1 new check in `verify/test_ustg_api_wrappers.cpp`
+confirming the exact forwarded wire bytes with `a1=0`/`a2=0xffff`;
+new file `verify/test_lcd_control.cpp`, 7 checks). `make verify` full
+suite green (exit 0), zero regressions. `make objs` (real `-m32`
+target-ABI compile) green. Eva manifest 3164 -> 3172/37,795 (8.393%).
+
+Real-HW test that would help: none identified -- the 7 LCD-control
+stubs are confirmed no-ops with no real hardware behavior to verify;
+the CombiParameter overload is a pure wire-format forward already
+covered by its sibling methods' own real-hardware notes.

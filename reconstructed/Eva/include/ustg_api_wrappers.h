@@ -87,6 +87,15 @@ public:
 	static void UpdateCombiParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType);
 	static void UpdateVectorMotionParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType);
 	static void UpdateControllerInfoParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType);
+
+	/* .text+0x08ddc080, 61 bytes (round 59, solo). Real 4-param convenience
+	 * overload: `return UpdateControllerInfoParameter(0, 0xffff, a1, a2, a3,
+	 * perfType);` -- forwards into the 6-param version above with a1/a2
+	 * hardcoded, confirmed byte-for-byte via direct disassembly. NOT the
+	 * "unreconstructed sibling" deferral case -- the 6-param target this
+	 * forwards to is already real (see .cpp).
+	 */
+	static void UpdateControllerInfoParameter(unsigned a1, unsigned a2, int a3, eSTGMsgPerfType perfType);
 	static void UpdateAudioInputParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType);
 	static void UpdateEffectBalanceParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType);
 

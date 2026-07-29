@@ -61,3 +61,42 @@ bool USTGAPILCDControl::LoadStoredSettings()
 	USTGUserAPI::SendSTGMessageWithSource((const STGMessage *)&msg);
 	return true;
 }
+
+/* Round 59 (solo): 7 confirmed genuinely-empty methods -- each a literal
+ * 3-byte `mov eax,0; ret` in the real binary, ignoring every declared
+ * parameter. See lcd_control.h's own header comment.
+ */
+bool USTGAPILCDControl::SetBlackLevel(eLCDColorSelect, unsigned char)
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetAllRGBLevels()
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetRGBLevel(eLCDColorSelect, eLCDColorSelect, short)
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetContrast(float)
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetColorTemp(eLCDColorTemp)
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetSpreadSpectrumClock(unsigned char, unsigned char)
+{
+	return false;
+}
+
+bool USTGAPILCDControl::SetPadDrive2(unsigned char, unsigned char)
+{
+	return false;
+}

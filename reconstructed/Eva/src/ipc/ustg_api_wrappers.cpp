@@ -65,6 +65,14 @@ void USTGAPICombi::UpdateControllerInfoParameter(unsigned a1, unsigned a2, int a
 	SendCombiParamMsg(2, a1, a2, a3, a4, a5, perfType);
 }
 
+/* Round 59 (solo): real 4-param convenience overload, forwards into the
+ * 6-param version above with a1=0/a2=0xffff hardcoded -- see ustg_api_wrappers.h.
+ */
+void USTGAPICombi::UpdateControllerInfoParameter(unsigned a1, unsigned a2, int a3, eSTGMsgPerfType perfType)
+{
+	UpdateControllerInfoParameter(0, 0xffff, a1, a2, a3, perfType);
+}
+
 void USTGAPICombi::UpdateAudioInputParameter(unsigned a1, unsigned a2, int a3, unsigned a4, int a5, eSTGMsgPerfType perfType)
 {
 	SendCombiParamMsg(4, a1, a2, a3, a4, a5, perfType);

@@ -85,6 +85,17 @@ int main()
 		expect_wire("UpdateControllerInfoParameter wire bytes (subcode=2)", &exp, sizeof(exp));
 	}
 	{
+		/* round 59: 4-param convenience overload -- forwards to the 6-param
+		 * version above with a1=0/a2=0xffff hardcoded, own params passed
+		 * through as a3/a4/a5/perfType.
+		 */
+		struct __attribute__((packed)) { unsigned short len, sub; unsigned int type, subcode, a1, a2, a4, a3, a5, perf; } exp = {
+			0x24, 1, 2, 2, /*a1*/0, /*a2*/0xffff, /*a4*/61, /*a3*/60, /*a5*/62, /*perf*/9
+		};
+		USTGAPICombi::UpdateControllerInfoParameter(60, 61, 62, 9);
+		expect_wire("UpdateControllerInfoParameter(4-param) forwards with a1=0/a2=0xffff", &exp, sizeof(exp));
+	}
+	{
 		struct __attribute__((packed)) { unsigned short len, sub; unsigned int type, subcode, a1, a2, a4, a3, a5, perf; } exp = {
 			0x24, 1, 2, 4, 40, 41, 43, 42, 44, 7
 		};

@@ -4476,6 +4476,15 @@ RECONSTRUCTED = {
     "081029a0",  # CFileMan::RemoveHandle(int)
     "080fc8c0",  # CFileMan::AddIOCTLDev(EDeviceAccess,CDriverTaskBase*,CFMDriverInterface*)
     "080fc800",  # CFileMan::CheckNumInstalledUnit() const
+    # -- round 59 (2026-07-29, solo): USTGAPICombi 4-param overload + USTGAPILCDControl 7-method batch --
+    "08ddc080",  # USTGAPICombi::UpdateControllerInfoParameter(unsigned,unsigned,int,eSTGMsgPerfType)
+    "08e1dc40",  # USTGAPILCDControl::SetBlackLevel(eLCDColorSelect,uchar)
+    "08e1dc50",  # USTGAPILCDControl::SetAllRGBLevels()
+    "08e1dc60",  # USTGAPILCDControl::SetRGBLevel(eLCDColorSelect,eLCDColorSelect,short)
+    "08e1dcc0",  # USTGAPILCDControl::SetContrast(float)
+    "08e1dcd0",  # USTGAPILCDControl::SetColorTemp(eLCDColorTemp)
+    "08e1dce0",  # USTGAPILCDControl::SetSpreadSpectrumClock(uchar,uchar)
+    "08e1dcf0",  # USTGAPILCDControl::SetPadDrive2(uchar,uchar)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
