@@ -1944,3 +1944,52 @@ should know they exist and are untested/unmodeled, not silently absent.
   Real-HW test that would help: none identified -- pure host-side
   static-global/struct-field accessor logic, no hardware-observable
   behavior of its own.
+
+- **CFilesys, 9/68 clean pending methods
+  (`filesys.h`/`filesys.cpp`), round 46, 2026-07-29 (solo, no
+  subagents -- session-wide cap hit, user chose "Continue solo").
+  Scripted survey of manifest/eva_functions.csv grouped pending
+  methods by class average size -- surfaced `CFilesys` (84 pending
+  methods, avg 118 bytes, 68/84 decompiler-clean). Landed FAR less than
+  the size metric suggested: the overwhelming majority of its "meaty"
+  methods either make a genuine but UNNAMED vtable call through one of
+  10 per-device driver pointers (same deferral class as
+  CSTGKeyTrack/CSTGPatch in OA.ko), or forward directly into the
+  separate, entirely unreconstructed `CDDriverIO` static-method family
+  -- confirmed real base for a 10-slot device-pointer table (+0x20)
+  and a single fallback driver pointer (+0x1c) via TWO independent
+  index-computation idioms landing on the same base
+  (`get_fileioptr`'s own `idx*4+0x20` vs `remove()`'s own
+  `driveLetterAsciiCode*4-0xe4`, both = +0x20 for drive 'A').
+
+  Landed the field-only subset: `eventhandling`/`startup` (trivial
+  no-ops), `new_fptr` (ignores its own real 1st param), `CheckError`
+  (one-shot sticky-error latch), both `get_fileioptr` overloads (pure
+  field switch / drive-letter routing, no vtable call), `setbuf` (sets
+  the shared `msg`/`buf` static scratch, same idiom as CESDiskTask),
+  and `~CFilesys` (2 real ground-truth addresses with genuinely
+  DIFFERENT bodies -- 11-byte vptr-reset-only vs 39-byte
+  vptr-reset+`HAL_Disable/EnableInterrupts`-wrapped `free(this)` --
+  modeled as ONE C++ dtor doing only the vptr reset, matching this
+  project's own already-established `CFileIoDos::~CFileIoDos()`
+  precedent for the exact same D0-vs-D2 divergence). `run()` landed
+  VERBATIM as a real infinite `for(;;){}` (genuine ground truth, no
+  decompiler warning) -- deliberately never invoked by the KAT (would
+  hang the test process), only its address is taken to prove it's
+  real, correctly-typed, linkable code.
+
+  Deferred, 3 reasons: (1) 16 decompiler-flagged
+  (`in_stack_`/`unaff_`); (2) ~50 methods with an unnamed per-device
+  vtable-slot call; (3) ~9 methods forwarding into the separate
+  `CDDriverIO` cluster, plus `GetInstance()` (needs the 631-byte real
+  ctor) and `directexec()` (its sole callee `decode()` is itself
+  reason-(1)-flagged).
+
+  Real host KAT (20 checks, verify/test_filesys.cpp). make verify full
+  suite green, zero regressions. Eva manifest 2987 -> 2997/37,795
+  (7.930%).
+
+  Real-HW test that would help: none identified -- pure host-side
+  field-only logic and message-passing scaffolding, no hardware I/O
+  surface of its own (the actual disk/CD driver I/O lives entirely in
+  the deferred `CDDriverIO`/per-device-vtable methods).

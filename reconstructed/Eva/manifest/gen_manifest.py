@@ -4289,6 +4289,16 @@ RECONSTRUCTED = {
     "08de7530",  # CESDiskTask::SetNewDirDialog(unsigned char, unsigned char const*)
     "08de7570",  # CESDiskTask::GetNewDirDialog(unsigned char, unsigned char*)
     "08ddd810",  # CESDiskTask::CopyBytes(unsigned char*, unsigned char const*, int)
+    "083217a0",  # CFilesys::eventhandling()
+    "083217d0",  # CFilesys::startup()
+    "08320240",  # CFilesys::run()
+    "083218b0",  # CFilesys::new_fptr(EDevice_Id, int)
+    "08320230",  # CFilesys::~CFilesys() (D2 variant)
+    "08320250",  # CFilesys::~CFilesys() (D0 variant, same reconstructed body)
+    "08324ee0",  # CFilesys::CheckError(int)
+    "083217e0",  # CFilesys::get_fileioptr(EFileIOType)
+    "08321840",  # CFilesys::get_fileioptr(char const*, EDevice_Id*)
+    "083217b0",  # CFilesys::setbuf(CFilesys::EMsgTypFilesys, SFileIOPbuf*)
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods
