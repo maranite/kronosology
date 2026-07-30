@@ -44,3 +44,33 @@ void CSTGVPMEG::UpdateTriggerAtNoteOn(CSTGPatchMessageContext &, STGConvertedPar
 	unsigned char *flags = base + 0x4f;
 	*flags = (*flags & 0xfe) | (newVal.value != 0);
 }
+
+/* .text+0x5b89f0..0x5b8a80, round 76 -- boilerplate registration
+ * accessors + 3 more real AMS accessors, see header comment. */
+
+extern "C" unsigned char STGVPMEGParams[544];
+extern "C" unsigned char _ZN9CSTGVPMEG16sMessageHandlersE[96];
+extern "C" unsigned char _ZN9CSTGVPMEG13sValueGettersE[96];
+
+int CSTGVPMEG::GetId() { return 0x1d; }
+int CSTGVPMEG::GetNumParams() { return 10; }
+const void *CSTGVPMEG::GetParamDescriptors() { return STGVPMEGParams; }
+const void *CSTGVPMEG::GetMessageHandlers() { return _ZN9CSTGVPMEG16sMessageHandlersE; }
+const void *CSTGVPMEG::GetValueGetters() { return _ZN9CSTGVPMEG13sValueGettersE; }
+
+bool CSTGVPMEG::TriggersAtNoteOn(int)
+{
+	unsigned char *base = (unsigned char *)this;
+	return (base[0x4f] & 1) != 0;
+}
+
+bool CSTGVPMEG::StateHasLevelAMS(unsigned char index)
+{
+	return index < 4;
+}
+
+int CSTGVPMEG::GetAMSLevelModSource(unsigned char)
+{
+	unsigned char *base = (unsigned char *)this;
+	return (signed char)base[0x3e];
+}

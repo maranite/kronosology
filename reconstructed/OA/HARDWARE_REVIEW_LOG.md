@@ -5147,6 +5147,48 @@ kronos` build green. OA.ko manifest 4083 -> 4084/21,689 (18.830%).
 Real-HW test that would help: none identified -- static-initializer
 tracking only, zero behavior change.
 
+## Round 76 (OA.ko, solo, 2026-07-30): CSTGVPMEG boilerplate + AMS accessors (8 methods)
+
+Found via the standing done>0/pending>0 manifest scan, continuing
+round 75's work on `CSTGVPMEG`. Landed 8 of the remaining 14 pending
+members:
+- The standard 5-method component-registration boilerplate (`GetId`,
+  `GetNumParams`, `GetParamDescriptors`, `GetMessageHandlers`,
+  `GetValueGetters`), same shape as every other STG component class
+  (e.g. `CSTGLFO`, oa_lfo.h). Table sizes (`STGVPMEGParams[544]`,
+  `sMessageHandlers[96]`, `sValueGetters[96]`) confirmed via
+  `symbols.csv` next-symbol-delta math, not guessed.
+- `TriggersAtNoteOn(int)`: bit 0 of the same `+0x4f` field
+  `GetTriggerAtNoteOn()`/`UpdateTriggerAtNoteOn()` already use.
+- `StateHasLevelAMS(unsigned char)`: real single-argument signature
+  (Ghidra mis-split it as 2 params; confirmed the real body reads DL,
+  the first real argument's low byte, not the second param it
+  declared) -- `return index < 4;`.
+- `GetAMSLevelModSource(unsigned char)`: reads the SAME shared
+  `+0x3e` field as `GetAMS1LevelModSource()` -- the index argument is
+  genuinely ignored (this class has one shared field, not a per-index
+  array, matching the header's own already-documented dialect note).
+
+2 methods deliberately left pending: `GetName()` -- its target string
+address didn't resolve cleanly in this export's `strings.csv` (falls
+inside a `.rodata.cst8` constant-pool region per `objdump -h`, not
+the expected string section; not worth guessing rather than
+transcribing) -- and `GetAMSLevelModIntensity(unsigned char)`
+(longdouble/x87 return convention needs more care than this round's
+other items). The remaining `GetAMSTimeModSource`/
+`GetAMSTimeModIntensity` pair and the dtor pair are also still
+pending, not yet examined this round.
+
+Real host KAT (`test_stg_vpm_eg_valuegetters.cpp` extended, 9 new
+checks, including cross-checks against the round-75 `Get*` family's
+own already-verified values on the same deterministic buffer
+pattern). `make verify` full suite green, zero regressions. Real
+`make ko-clean && make ko KDIR=/home/build/linux-kronos` build green.
+OA.ko manifest 4089 -> 4098/21,689 (18.894%).
+
+Real-HW test that would help: none identified -- pure field
+read/boilerplate accessors, no hardware-facing side effects.
+
 ## Round 75 (OA.ko, solo, 2026-07-30): CSTGVPMEG's Update* writer family (5 methods)
 
 Found via the standing done>0/pending>0 manifest scan: `CSTGVPMEG`

@@ -62,6 +62,42 @@ struct CSTGVPMEG {
 	void UpdateAMS1TimeModSource(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateAMS1TimeModIntensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 	void UpdateTriggerAtNoteOn(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+
+	/* .text+0x5b89f0..0x5b8a80, round 76 -- boilerplate component-
+	 * registration accessors (GetId/GetNumParams/GetParamDescriptors/
+	 * GetMessageHandlers/GetValueGetters, same shape already established
+	 * for every other STG component class, e.g. CSTGLFO/oa_lfo.h) plus 3
+	 * more real, unambiguous AMS accessors. `GetName()` (own address
+	 * 0x5b8a00) and `GetAMSLevelModIntensity(unsigned char)` (own address
+	 * 0x5b8a80, longdouble/x87 return) deliberately left pending this
+	 * round -- GetName's target string address didn't resolve cleanly in
+	 * this export's strings.csv (falls inside a `.rodata.cst8` constant-
+	 * pool region per objdump -h, not the expected string section; not
+	 * worth guessing), and the Intensity accessor needs more care for its
+	 * x87 return convention than this round's other items. */
+	static int GetId();
+	static int GetNumParams();
+	static const void *GetParamDescriptors();
+	static const void *GetMessageHandlers();
+	static const void *GetValueGetters();
+
+	/* .text+0x5b8a50, 8 bytes. Bit 0 of the same TriggerAtNoteOn field
+	 * GetTriggerAtNoteOn()/UpdateTriggerAtNoteOn() already use (+0x4f) --
+	 * `param_1` (the real 2nd argument) confirmed unused. */
+	bool TriggersAtNoteOn(int unused);
+
+	/* .text+0x5b8a60, 7 bytes. Real signature is a single byte argument
+	 * (an AMS-source index) -- Ghidra mis-split it as 2 params
+	 * (`undefined4 param_1` unused, `byte param_2` unread); the real body
+	 * reads DL, the LOW BYTE OF THE FIRST real argument (EDX per this
+	 * project's regparm(3) convention), not ECX/param_2. */
+	bool StateHasLevelAMS(unsigned char index);
+
+	/* .text+0x5b8a70, 5 bytes. Same "index argument genuinely ignored"
+	 * shape as UpdateAMS1LevelModSource's own header note above -- this
+	 * class only has ONE shared Level-Mod-Source field (+0x3e), not a
+	 * per-index array, so any index value returns the same field. */
+	int GetAMSLevelModSource(unsigned char index);
 };
 
 #endif
