@@ -467,6 +467,12 @@ int CSTGBusInfo::GetSignalSelectionForBusType(int busType)
 	return kSignalSelectionTable[idx];
 }
 
+/* CSTGBusInfo::IsBusSupported(eSTGBusID) -- see header comment. */
+bool CSTGBusInfo::IsBusSupported(int busId)
+{
+	return (unsigned int)(busId - 6) > 3 && (unsigned int)(busId - 0x2a) > 2;
+}
+
 /*
  * CBusChangeStateMachine::StartBusChange(int, int, unsigned int)
  * (`.text+0x462c0`, 67 bytes, sec 10.151) confirmed regparm(3): this=EAX,

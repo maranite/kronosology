@@ -373,6 +373,22 @@ int main(void)
 			 (unsigned int)CSTGAudioInputMixerBase::ShouldMute(99), 0u);
 	}
 
+	{
+		printf("[round 72] CSTGBusInfo::IsBusSupported\n");
+		/* Excluded range [6,9]: false. */
+		check_eq("IsBusSupported(6) -> false", (unsigned int)CSTGBusInfo::IsBusSupported(6), 0u);
+		check_eq("IsBusSupported(9) -> false", (unsigned int)CSTGBusInfo::IsBusSupported(9), 0u);
+		/* Excluded range [0x2a,0x2c]: false. */
+		check_eq("IsBusSupported(0x2a) -> false", (unsigned int)CSTGBusInfo::IsBusSupported(0x2a), 0u);
+		check_eq("IsBusSupported(0x2c) -> false", (unsigned int)CSTGBusInfo::IsBusSupported(0x2c), 0u);
+		/* Outside both ranges: true. */
+		check_eq("IsBusSupported(5) -> true", (unsigned int)CSTGBusInfo::IsBusSupported(5), 1u);
+		check_eq("IsBusSupported(10) -> true", (unsigned int)CSTGBusInfo::IsBusSupported(10), 1u);
+		check_eq("IsBusSupported(0x29) -> true", (unsigned int)CSTGBusInfo::IsBusSupported(0x29), 1u);
+		check_eq("IsBusSupported(0x2d) -> true", (unsigned int)CSTGBusInfo::IsBusSupported(0x2d), 1u);
+		check_eq("IsBusSupported(0) -> true", (unsigned int)CSTGBusInfo::IsBusSupported(0), 1u);
+	}
+
 	printf("=========================================================\n");
 	if (g_fail) {
 		printf("RESULT: %d check(s) FAILED\n", g_fail);

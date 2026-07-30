@@ -5039,3 +5039,34 @@ confirmed install-only). `HandleMessage`'s real argument-passing
 convention would need either a real disassembly deep-dive past what
 Ghidra recovered, or a live dynamic trace on real hardware/kronos_vm,
 before it could be safely reconstructed.
+
+## Round 72 (OA.ko, solo, 2026-07-29): CSTGBusInfo::IsBusSupported
+
+Found via the standing done>0/pending>0 manifest scan. `CSTGBusInfo`
+was otherwise fully reconstructed; `IsBusSupported(int)` was its one
+remaining pending member -- a small, self-contained, static range-
+exclusion predicate with no vtable/object-lifetime involvement.
+
+Two other candidates surfaced by the same scan were examined and
+correctly deferred, not landed:
+- `CFileStream::SetPositionBeginning` -- raw indirect dispatch through
+  an unconfirmed vtable slot (red flag #7).
+- `CKorgUsbAudioDriverMidiPorts::CMidiPortPair::InputCallback` --
+  already-documented deliberately-unmodeled nested class (fixed thunk
+  pointer at a raw offset, never called from within OA.ko's own call
+  graph, only by an external companion USB kernel module).
+
+Landed `IsBusSupported(int busId)`: `(unsigned)(busId-6) > 3 &&
+(unsigned)(busId-0x2a) > 2` -- excludes bus IDs in `[6,9]` and
+`[0x2a,0x2c]`, true everywhere else (confirmed straight from Ghidra's
+decompile, no ambiguity).
+
+Real host KAT (`test_audio_input_mixer.cpp` extended, 9 new checks:
+both excluded ranges' endpoints false, 5 values outside both ranges
+true, including the `busId=0` unsigned-wraparound case). `make verify`
+full suite green (exit 0), zero regressions. Real `make ko-clean &&
+make ko KDIR=/home/build/linux-kronos` build green. Manifest 4072 ->
+4073/21,689 (18.779%).
+
+Real-HW test that would help: none identified -- pure predicate, no
+state, no side effects.

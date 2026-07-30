@@ -2258,6 +2258,16 @@ struct CSTGEQ {
 struct CSTGBusInfo {
 	static int GetSignalSelectionForBusType(int busType);
 
+	/* IsBusSupported(eSTGBusID) (round 72, `.text+0x358c0`, 22 bytes)
+	 * confirmed: a plain double range-exclusion check, transcribed
+	 * exactly as observed (real ground truth: `3 < (id-6U) &&
+	 * 2 < (id-0x2aU)`, i.e. true iff `id` falls OUTSIDE both [6,9] and
+	 * [0x2a,0x2c] -- presumably those 2 ranges are reserved/special bus
+	 * IDs excluded from "supported", not independently confirmed beyond
+	 * the literal comparison). Real enum type `eSTGBusID` not modeled --
+	 * plain `int`, matching this project's established convention. */
+	static bool IsBusSupported(int busId);
+
 	/* CSTGProgramModeDrumTrackSlot::GetInputBus() (round 55, batch 55) --
 	 * real symbol, content not independently confirmed (opaque byte
 	 * table, same "confirmed real, content unread" treatment as this
