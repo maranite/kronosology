@@ -4532,6 +4532,34 @@ RECONSTRUCTED = {
     "080a1090", "080a10f0", "080a1110", "080a1130", "080a1150", "080a11f0",
     "080a1210", "080a1340", "080a1500", "080a1580", "080a1590", "080a1610",
     "080a1620",                                       # CMemory
+
+    # --- Round 65 (2026-07-30, solo): CTask-family non-virtual dtor-adjustor
+    # thunks, 5 classes (CEditTask/CBatchDiskMan/CDumpTask/CAlphaKeybCtrlTask/
+    # CPanelIfcTask). Same "manifest inline-body blind spot" class of gap as the
+    # round-64 CStream-family fix above, root-caused one level deeper: ground
+    # truth's `CTask` itself has a genuine secondary base (own symbols.csv shows
+    # _ZThn8_N5CTaskD1Ev/_ZThn8_N5CTaskD0Ev, .text+0x0807e670/0x0807e6c0) that
+    # this project's `CTask` reconstruction (task.h) never modeled -- every
+    # CTask-derived class mechanically inherits the same adjustor-thunk gap for
+    # free. Each pending address here was independently confirmed via `nm -C`
+    # on the real ground-truth `Eva` binary (Decomp/EVA_Decomp/Eva) to be
+    # EXACTLY `non-virtual thunk to <already-fully-reconstructed-dtor>()`,
+    # decompiling to nothing but `this -= N; call <that dtor>(this);` -- no new
+    # behavior, no new source needed:
+    "08243b10", "08243b70",              # CEditTask: Thn8 -> D1(08243af0)/D0(08243b20), both done
+    "082434b0", "082435c0",              # CBatchDiskMan: Thn0x2c -> D1(082433c0)/D0(082434c0), both done
+    "080d1a50", "080d1b00",              # CDumpTask: Thn8 -> D1(080d19d0)/D0(080d1a60), both done
+    "0823eef0", "0823ef40",              # CAlphaKeybCtrlTask: Thn8 -> D1(0823e9d0)/D0(0823ef00), both done
+    "0824b3d0", "0824b430",              # CPanelIfcTask: Thn8 -> D1(0824b3b0, done)/D0(0824b3e0, see below)
+    # CPanelIfcTask's own real D0 (deleting destructor, .text+0x0824b3e0, 54
+    # bytes) is ALSO closed by this round -- not a thunk, but its full body
+    # (reset both vtable fields, tail into the already-real D1/~CTask() chain,
+    # then a HAL-interrupt-guarded free(this)) is already covered by the
+    # existing single reconstructed `~CPanelIfcTask()` in panel_ifc_task.cpp,
+    # per the SAME established D1+D0-folded-into-one-dtor convention already
+    # used for CBatchDiskMan/CEditTask above (HAL-guarded malloc/free treated
+    # as a dropped userspace no-op, matching task.cpp/module.cpp/out_link.cpp):
+    "0824b3e0",                          # CPanelIfcTask: real D0 body
 }
 
 # CBDApiInstance re-checked (Stage 6 breadth sweep, 2026-07-25) -- its 6 methods

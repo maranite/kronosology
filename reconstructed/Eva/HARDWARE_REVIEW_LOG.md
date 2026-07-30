@@ -2976,3 +2976,50 @@ fix rather than new reconstruction.
 
 No real-HW test needed -- purely a manifest bookkeeping fix, zero
 behavior change.
+
+## Round 65 (Eva, solo, 2026-07-30): CTask-family dtor-adjustor thunks, 5 classes
+
+Found via the standing done>0/pending>0 manifest scan. `CEditTask`,
+`CBatchDiskMan`, `CDumpTask`, `CAlphaKeybCtrlTask`, and `CPanelIfcTask`
+each had exactly 2 (or 3, for `CPanelIfcTask`) leftover pending dtor
+addresses despite every other member already being fully real.
+
+Same "manifest inline-body blind spot" class of gap as round 64's
+CStream-family fix, root-caused one level deeper this time: ground
+truth's own `CTask` (this project's common base for every one of these
+5 classes) genuinely has a secondary base requiring adjustor thunks --
+confirmed directly in `symbols.csv`: `_ZThn8_N5CTaskD1Ev`/
+`_ZThn8_N5CTaskD0Ev` (.text+0x0807e670/0x0807e6c0) -- that this
+project's own `CTask` reconstruction (task.h) never modeled. Every
+CTask-derived class mechanically inherits the identical thunk gap for
+free; it isn't 5 separate findings, it's 1 root cause surfacing 5
+times.
+
+Each of the 9 dtor-thunk addresses (2 per class, 08243b10/08243b70,
+082434b0/082435c0, 080d1a50/080d1b00, 0823eef0/0823ef40, 0824b3d0/
+0824b430) was independently confirmed via `nm -C` on the real
+ground-truth `Eva` binary (`Decomp/EVA_Decomp/Eva`) to be EXACTLY
+`non-virtual thunk to <already-fully-reconstructed-dtor>()`,
+decompiling to nothing but `this -= N; call <that dtor>(this);` --
+targeting a D1 or D0 that this project's manifest already counts done
+for every one of the 5 classes.
+
+`CPanelIfcTask` additionally had its own real D0 (deleting destructor,
+.text+0x0824b3e0, 54 bytes, NOT a thunk) still pending. Its full body
+(reset both vtable fields, tail into the already-real D1/`~CTask()`
+chain, then a HAL-interrupt-guarded `free(this)`) is already covered
+by the existing single reconstructed `~CPanelIfcTask()`
+(panel_ifc_task.cpp) under this project's own established
+D1+D0-folded-into-one-dtor convention (already used identically for
+`CBatchDiskMan`/`CEditTask` in earlier rounds -- HAL-guarded malloc/
+free treated as a dropped userspace no-op, matching task.cpp/
+module.cpp/out_link.cpp). Added alongside the 9 thunks, 10 total.
+
+Manifest-only fix, `gen_manifest.py` the only file changed. `make
+verify` full suite green, zero regressions (no source changed). `make
+link` clean (unresolved Stage 2/3 symbols unchanged/expected, see
+Makefile header). Eva manifest 3221 -> 3232/37,795 (8.522% ->
+8.551%).
+
+No real-HW test needed -- purely a manifest bookkeeping fix, zero
+behavior change.
