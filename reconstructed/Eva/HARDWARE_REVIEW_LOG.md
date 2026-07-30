@@ -3023,3 +3023,39 @@ Makefile header). Eva manifest 3221 -> 3232/37,795 (8.522% ->
 
 No real-HW test needed -- purely a manifest bookkeeping fix, zero
 behavior change.
+
+## Round 66 (Eva, solo, 2026-07-30): CSysExCombi/DrumKit/SetList/WaveSeq D1 dtor addresses
+
+Found via the standing done>0/pending>0 manifest scan. `CSysExCombi`/
+`CSysExDrumKit`/`CSysExSetList`/`CSysExWaveSeq` each had 3 pending
+addresses: `GetNumObjectsForDigest` and a D1/D0 dtor pair.
+
+`GetNumObjectsForDigest` correctly re-confirmed as already-deferred:
+Ghidra's own decompile flags "Could not recover jumptable, too many
+branches" on a genuinely unresolved indirect call through an
+unconfirmed vtable slot on a caller-supplied (not `this`) object --
+already documented in this exact header's own comment, not
+re-litigated.
+
+The dtor pairs: each class's `~ClassName() {}` already exists
+(sysex_objects.h), matching this project's own already-established
+"non-polymorphic-in-this-project's-model" convention for the whole
+CSysEx* object family (sysex_object_names.h/long_binary_file.cpp) --
+ground truth's own D1 body is an 11-byte plain vtable-pointer reset
+(`*this = &PTR__CSysExObjectBase_08f7a908; return;`, confirmed
+identical across all 4 classes via fresh ground-truth decompile), which
+the existing empty dtor already covers faithfully (no vtable modeled
+in this project's non-polymorphic reconstruction, so there's nothing
+left to write). Each class's own D0 (deleting variant, +`free(this)`
+inside a `HAL_DisableInterrupts()`/`HAL_EnableInterrupts()` bracket)
+stays correctly deferred, matching the SAME already-standing
+"D0's free(this) not reproduced" convention this project applies
+project-wide to this non-polymorphic class family -- not re-litigated.
+
+Added the 4 D1 addresses to `gen_manifest.py`'s `RECONSTRUCTED` set.
+Manifest-only fix, no source changed. `make verify` full suite green,
+zero regressions. `make link` clean. Eva manifest 3232 -> 3236/37,795
+(8.562%).
+
+No real-HW test needed -- purely a manifest bookkeeping fix, zero
+behavior change.

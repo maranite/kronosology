@@ -4063,6 +4063,22 @@ RECONSTRUCTED = {
     "089ecc30",  # CSysExSetList::GetVersion() const
     "089ecc40",  # CSysExSetList::GetObjectSize() const
     "089ecc50",  # CSysExSetList::GetObjectSizeForExport() const
+
+    # Round 66 (2026-07-30): CSysExCombi/CSysExDrumKit/CSysExSetList/
+    # CSysExWaveSeq's own D1 dtor addresses -- same "plain empty ~ClassName()
+    # covers the non-deleting D1, D0's free(this) deliberately not
+    # reproduced" convention already established for this exact family
+    # (sysex_object_names.h/long_binary_file.cpp). Each confirmed via fresh
+    # ground-truth decompile to be the identical 11-byte
+    # `*this = &PTR__CSysExObjectBase_08f7a908; return;` shape, already
+    # covered by the existing `~CSysExCombi() {}` etc bodies (sysex_objects.h)
+    # -- manifest-only fix, no source changed. GetNumObjectsForDigest and
+    # each class's own D0 (deleting) address remain correctly deferred, not
+    # added (unresolved indirect dispatch / undocumented free(this) resp.).
+    "089ed040",  # CSysExCombi::~CSysExCombi() [D1]
+    "089ed070",  # CSysExDrumKit::~CSysExDrumKit() [D1]
+    "089ed010",  # CSysExSetList::~CSysExSetList() [D1]
+    "089ed020",  # CSysExWaveSeq::~CSysExWaveSeq() [D1]
     "089ecb30",  # CSysExSongTimbreSet::GetStorageId() const
     "089ecb40",  # CSysExSongTimbreSet::GetVersion() const
     "089ecb50",  # CSysExSongTimbreSet::GetObjectSize() const
