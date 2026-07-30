@@ -3111,3 +3111,32 @@ manifest 3248 -> 3250/37,795 (8.599%).
 
 No real-HW test needed -- pure clamp, no side effects, no hardware
 interaction.
+
+## Round 69 (Eva, solo, 2026-07-30): CControllerTracer::_GLOBAL__I_CControllerTracer
+
+Found via the standing done>0/pending>0 manifest scan: `CControllerTracer`
+was otherwise fully reconstructed (19/20 done); its one remaining
+pending member was GCC's synthetic per-translation-unit static
+initializer.
+
+Investigation found this is NOT the class's own construction: ground
+truth's real body sets two unrelated file-scope 2-byte globals
+({0xff,0xff} and {0x40,0x00}) that merely happen to share the SAME
+source-level names (`kInvalidBytePair`/`kPitchBendDefault`) as this
+project's own already-reconstructed `kInvalidBytePair`
+(param_tracer.h, a genuinely DIFFERENT real `.bss` symbol at
+0x0930a390, confirmed `{0,0}` and already correctly used by
+`controller_tracer.h`'s own field-init logic). This is the SAME
+coincidental-name-collision-via-internal-linkage-statics pattern
+already documented and deliberately left unmodeled for the
+`RTRouterApiInstance`-TU's own colliding pair (mains.cpp's own header
+comment, "not modeled since nothing in this reconstruction reads
+either") -- a third sighting of the same pattern, not a new class of
+bug. Landed as an empty `__attribute__((constructor))` no-op, matching
+that same precedent.
+
+`make verify` full suite green, zero regressions. `make link` clean.
+Eva manifest 3250 -> 3251/37,795 (8.602%).
+
+No real-HW test needed -- confirmed unmodeled dead-name-collision
+globals, zero behavior change either way.

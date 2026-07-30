@@ -19,6 +19,23 @@ static const unsigned char kDefaultCCTable[128] = {
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
 
+/* global.constructors.keyed.to.CControllerTracer@08093030.c, 29 bytes -- round 69.
+ * NOT this class's own construction: ground truth's real body sets two UNRELATED
+ * file-scope 2-byte globals ({0xff,0xff} and {0x40,0x00}) that merely happen to
+ * share the SAME source-level names ("kInvalidBytePair"/"kPitchBendDefault") as
+ * this project's own `kInvalidBytePair` (param_tracer.h, a DIFFERENT real .bss
+ * symbol at 0x0930a390, confirmed {0,0} and already used by controller_tracer.h's
+ * own field-init logic -- see that header's own note). Same coincidental-name-
+ * collision-via-internal-linkage-statics pattern already documented and left
+ * unmodeled for the RTRouterApiInstance-TU pair, mains.cpp. Nothing in this
+ * reconstruction reads either of THIS pair -- not modeled, matching that same
+ * precedent.
+ */
+__attribute__((constructor))
+static void ConstructControllerTracerFileStatics()
+{
+}
+
 /* ---- construction --------------------------------------------------------------- */
 
 CControllerTracer::CControllerTracer() : mChannel(0)

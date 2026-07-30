@@ -3235,6 +3235,8 @@ RECONSTRUCTED = {
     "0808efa0",  # CControllerTracer::Reset()
     "0808f090",  # CControllerTracer::CControllerTracer()
     "0808f100",  # CControllerTracer::CControllerTracer(unsigned char)
+    "08093030",  # CControllerTracer::_GLOBAL__I_CControllerTracer (round 69, unrelated
+                 # colliding-name globals, not modeled -- see controller_tracer.cpp)
     "0808f170",  # CControllerTracer::EraseCtrl(unsigned char)
     "0808f1c0",  # CControllerTracer::EraseCtrls(unsigned char const*)
     "0808f2a0",  # CControllerTracer::SetDefCtrls(unsigned char const*)
