@@ -52,6 +52,16 @@ struct CSTGVPMEG {
 	STGConvertedParam &GetAMS1TimeModIntensity(CSTGPatchMessageContext &ctx);
 	STGConvertedParam &GetAMS1TimeModSource(CSTGPatchMessageContext &ctx);
 	STGConvertedParam &GetTriggerAtNoteOn(CSTGPatchMessageContext &ctx);
+
+	/* .text+0x1b80f0..0x1b8130, round 75 -- the matching Update* writer
+	 * half of the 5 getters above, same field offsets (cross-checked
+	 * against the already-confirmed getters, not a fresh derivation).
+	 * See stg_vpm_eg_updaters.cpp for the per-method shape notes. */
+	void UpdateAMS1LevelModSource(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateAMS1LevelModIntensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateAMS1TimeModSource(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateAMS1TimeModIntensity(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
+	void UpdateTriggerAtNoteOn(CSTGPatchMessageContext &ctx, STGConvertedParam &newVal);
 };
 
 #endif

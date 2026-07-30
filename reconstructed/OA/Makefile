@@ -214,6 +214,7 @@ OA-objs := src/auth/klm_manager.o \
            src/engine/stg_pitch_mod_common_valuegetters.o \
            src/engine/stg_pitch_mod_common_plus_ams_valuegetters.o \
            src/engine/stg_vpm_eg_valuegetters.o \
+           src/engine/stg_vpm_eg_updaters.o \
            src/engine/stg_pitch_base_valuegetters.o \
            src/engine/stg_vpm_mixer_valuegetters.o \
            src/engine/stg_vpm_audio_input_valuegetters.o \
@@ -533,6 +534,7 @@ SRC := src/auth/klm_manager.cpp \
        src/engine/stg_pitch_mod_common_valuegetters.cpp \
        src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp \
        src/engine/stg_vpm_eg_valuegetters.cpp \
+       src/engine/stg_vpm_eg_updaters.cpp \
        src/engine/stg_pitch_base_valuegetters.cpp \
        src/engine/stg_vpm_mixer_valuegetters.cpp \
        src/engine/stg_vpm_audio_input_valuegetters.cpp \
@@ -1174,8 +1176,8 @@ verify/test_stg_pitch_mod_common_valuegetters: verify/test_stg_pitch_mod_common_
 verify/test_stg_pitch_mod_common_plus_ams_valuegetters: verify/test_stg_pitch_mod_common_plus_ams_valuegetters.cpp src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp include/oa_stg_pitch_mod_common_plus_ams.h include/oa_adsr_base.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_pitch_mod_common_plus_ams_valuegetters.cpp src/engine/stg_pitch_mod_common_plus_ams_valuegetters.cpp -o $@
 
-verify/test_stg_vpm_eg_valuegetters: verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp include/oa_stg_vpm_eg.h include/oa_adsr_base.h
-	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp -o $@
+verify/test_stg_vpm_eg_valuegetters: verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_updaters.cpp include/oa_stg_vpm_eg.h include/oa_adsr_base.h
+	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_valuegetters.cpp src/engine/stg_vpm_eg_updaters.cpp -o $@
 
 verify/test_stg_pitch_base_valuegetters: verify/test_stg_pitch_base_valuegetters.cpp src/engine/stg_pitch_base_valuegetters.cpp include/oa_stg_pitch_base.h include/oa_adsr_base.h
 	$(HOST_CXX) $(HOST_CXXFLAGS) verify/test_stg_pitch_base_valuegetters.cpp src/engine/stg_pitch_base_valuegetters.cpp -o $@

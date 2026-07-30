@@ -5146,3 +5146,40 @@ kronos` build green. OA.ko manifest 4083 -> 4084/21,689 (18.830%).
 
 Real-HW test that would help: none identified -- static-initializer
 tracking only, zero behavior change.
+
+## Round 75 (OA.ko, solo, 2026-07-30): CSTGVPMEG's Update* writer family (5 methods)
+
+Found via the standing done>0/pending>0 manifest scan: `CSTGVPMEG`
+had 19 pending members. The 5 `Update*` writers were the cleanest
+subset -- the exact mirror-image writer half of the already-fully-
+reconstructed `Get*` reader family (stg_vpm_eg_valuegetters.cpp,
+include/oa_stg_vpm_eg.h's own header comment). Every field offset
+here is a direct cross-check against that existing getter family, not
+a fresh derivation: `AMS1LevelModSource`/`AMS1TimeModSource` are
+plain fixed-offset signed-byte writes (0x3e/0x2d); the `*Intensity`
+siblings are ctx-indexed 32-bit writes via the family's established
+bare-stride-4 `CtxIndex()` helper (0x3f/0x2e); `TriggerAtNoteOn` is a
+single-bit (bit 0) mask-and-set. Confirmed straight from each
+method's own ground-truth decompile, zero ambiguity, no display
+predicate or cross-voice propagation (unlike the more complex
+`CSTGADSRBase::Update*` family, adsr_base.cpp).
+
+The remaining 14 pending `CSTGVPMEG` members (`GetId`/`GetName`/
+`GetNumParams`/etc boilerplate descriptor accessors, `TriggersAtNoteOn`/
+`StateHasLevelAMS`, the non-"1"-suffixed `GetAMS*ModSource/Intensity`
+pair, and the dtor pair) were surveyed but left for a future round --
+a distinct, larger cluster not part of this round's clean Update*
+writer scope.
+
+Landed all 5 `Update*` methods (`stg_vpm_eg_updaters.cpp`, new file,
+registered in the Makefile's SRC/obj lists and the existing
+`test_stg_vpm_eg_valuegetters` verify target).
+
+Real host KAT (`test_stg_vpm_eg_valuegetters.cpp` extended, 6 new
+write-then-readback checks via the already-verified Get* siblings).
+`make verify` full suite green, zero regressions. Real `make ko-clean
+&& make ko KDIR=/home/build/linux-kronos` build green. OA.ko manifest
+4084 -> 4089/21,689 (18.853%).
+
+Real-HW test that would help: none identified -- pure field
+read/write, no hardware-facing side effects.

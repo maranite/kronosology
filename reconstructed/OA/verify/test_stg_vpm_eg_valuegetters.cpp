@@ -55,6 +55,39 @@ int main(void)
 	s->GetTriggerAtNoteOn(ctx);
 	check_eq("CSTGVPMEG::GetTriggerAtNoteOn value", CSTGParamsOwner::sValueGetterTemp.value, 0L);
 
+	printf("\nCSTGVPMEG updater family (round 75, write-then-readback via the Get* siblings above)\n");
+	{
+		STGConvertedParam p;
+		p.value = 0x11;
+		s->UpdateAMS1LevelModSource(ctx, p);
+		s->GetAMS1LevelModSource(ctx);
+		check_eq("UpdateAMS1LevelModSource round-trip", CSTGParamsOwner::sValueGetterTemp.value, 0x11L);
+
+		p.value = 0x1234;
+		s->UpdateAMS1LevelModIntensity(ctx, p);
+		s->GetAMS1LevelModIntensity(ctx);
+		check_eq("UpdateAMS1LevelModIntensity round-trip", CSTGParamsOwner::sValueGetterTemp.value, 0x1234L);
+
+		p.value = -5;
+		s->UpdateAMS1TimeModSource(ctx, p);
+		s->GetAMS1TimeModSource(ctx);
+		check_eq("UpdateAMS1TimeModSource round-trip", CSTGParamsOwner::sValueGetterTemp.value, -5L);
+
+		p.value = 0x5678;
+		s->UpdateAMS1TimeModIntensity(ctx, p);
+		s->GetAMS1TimeModIntensity(ctx);
+		check_eq("UpdateAMS1TimeModIntensity round-trip", CSTGParamsOwner::sValueGetterTemp.value, 0x5678L);
+
+		p.value = 1;
+		s->UpdateTriggerAtNoteOn(ctx, p);
+		s->GetTriggerAtNoteOn(ctx);
+		check_eq("UpdateTriggerAtNoteOn(1) round-trip", CSTGParamsOwner::sValueGetterTemp.value, 1L);
+		p.value = 0;
+		s->UpdateTriggerAtNoteOn(ctx, p);
+		s->GetTriggerAtNoteOn(ctx);
+		check_eq("UpdateTriggerAtNoteOn(0) round-trip", CSTGParamsOwner::sValueGetterTemp.value, 0L);
+	}
+
 	printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "all tests passed");
 	return g_fail ? 1 : 0;
 }
