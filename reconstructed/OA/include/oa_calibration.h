@@ -124,6 +124,17 @@ public:
 	 * `CSTGControlMsgHandler`'s dtor, see oa_control_msg_handler.h. */
 	~CSTGCalibrationMsgHandler();
 
+	/* .text+0xef120, 8 bytes -- GCC's synthetic per-TU static initializer
+	 * (named after this TU's FIRST static requiring dynamic init,
+	 * `sInstance`, not necessarily what its body touches). Ground truth's
+	 * real body zeroes `sDamperCalibrator` (calibration_msg_handler.cpp) --
+	 * already guaranteed by that static's own zero-initialized storage
+	 * duration with no source change needed, so this is an empty body
+	 * declared only for address tracking, matching this project's
+	 * established `_GLOBAL__I_*` convention (CSPRClockHandler::
+	 * _GLOBAL__I_ms_poInstance(), spr_clock_handler.cpp). */
+	static void _GLOBAL__I_sInstance();
+
 	/* Joystick X (controller id 5) */
 	static void StartJSXCalibration();
 	static void EndJSXCalibration();

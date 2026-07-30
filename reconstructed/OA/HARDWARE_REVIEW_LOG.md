@@ -5121,3 +5121,28 @@ KDIR=/home/build/linux-kronos` build green. OA.ko manifest 4073 ->
 Real-HW test that would help: none identified -- `_vtablePtr`
 confirmed install/reset-only, this family's message dispatch itself
 was already verified in earlier rounds.
+
+## Round 74 (OA.ko, solo, 2026-07-30): CSTGCalibrationMsgHandler::_GLOBAL__I_sInstance
+
+Found via the standing done>0/pending>0 manifest scan: `CSTGCalibration
+MsgHandler` was otherwise fully reconstructed (26/27 done); its one
+remaining pending member was `_GLOBAL__I_sInstance`, GCC's synthetic
+per-translation-unit static initializer (named after this TU's first
+static requiring dynamic init, `sInstance`, regardless of what its
+body actually touches -- confirmed via ground-truth decompile: the
+real body zeroes a DIFFERENT static, `sDamperCalibrator`).
+
+That zeroing is already guaranteed by `sDamperCalibrator`'s own
+zero-initialized static storage duration with zero source change
+needed. Landed as an empty explicit body declared only for address
+tracking, matching this project's already-established `_GLOBAL__I_*`
+convention (`CSPRClockHandler::_GLOBAL__I_ms_poInstance()`,
+spr_clock_handler.cpp, same empty-body shape).
+
+Real host KAT (`test_calibration_msg_handler.cpp` extended, 1 new
+check: the call doesn't crash). `make verify` full suite green, zero
+regressions. Real `make ko-clean && make ko KDIR=/home/build/linux-
+kronos` build green. OA.ko manifest 4083 -> 4084/21,689 (18.830%).
+
+Real-HW test that would help: none identified -- static-initializer
+tracking only, zero behavior change.

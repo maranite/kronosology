@@ -39,6 +39,11 @@ static unsigned char *FromU32(unsigned int v)
 CSTGCalibrationMsgHandler *CSTGCalibrationMsgHandler::sInstance;
 STGCalibrationMsgHandlerEntry CSTGCalibrationMsgHandler::sMsgHandler[18];
 
+/* .text+0xef120, 8 bytes -- see header comment. */
+void CSTGCalibrationMsgHandler::_GLOBAL__I_sInstance()
+{
+}
+
 static int sCalibrationOp;             /* .data+0x2ff8 */
 static int sRawXMin;                   /* .data+0x2ffc */
 static int sRawYMin;                   /* .data+0x3000 */

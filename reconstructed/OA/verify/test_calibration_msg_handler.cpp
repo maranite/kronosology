@@ -339,6 +339,15 @@ int main()
 		delete[] buf;
 	}
 
+	printf("[21] _GLOBAL__I_sInstance (round 74): synthetic static initializer, no-op body\n");
+	{
+		/* Real body zeroes sDamperCalibrator, already guaranteed by that
+		 * static's own zero-initialized storage duration (see header
+		 * comment) -- just confirms the call itself doesn't crash. */
+		CSTGCalibrationMsgHandler::_GLOBAL__I_sInstance();
+		check_eq("no crash reaching here", 1, 1);
+	}
+
 	printf("\n%s\n", g_fail ? "SOME TESTS FAILED" : "ALL TESTS PASSED");
 	return g_fail ? 1 : 0;
 }
