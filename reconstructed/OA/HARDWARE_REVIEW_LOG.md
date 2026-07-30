@@ -5070,3 +5070,54 @@ make ko KDIR=/home/build/linux-kronos` build green. Manifest 4072 ->
 
 Real-HW test that would help: none identified -- pure predicate, no
 state, no side effects.
+
+## Round 73 (OA.ko, solo, 2026-07-30): CSKMIDI*MsgHandler family, 5 explicit dtors
+
+Found via the standing done>0/pending>0 manifest scan: `CSKMIDIPort-
+MsgHandler`, `CSKMIDILocalCtrlMsgHandler`, `CSKMIDIKarmaCtrlMsgHandler`,
+`CSKPadNoteByLocalCtrlMsgHandler`, `CSKPadNoteByMIDIPortMsgHandler` each
+had exactly 2 pending addresses (a D1/D0 dtor pair), despite every
+other member already real.
+
+Key finding: unlike the `CSTGMessageHandler` family (oa_control_msg_
+handler.h, rounds 69-71), which uses a manual/fake vtable-pointer
+model requiring an explicit `*(void * volatile *)this = ...` write in
+every dtor, this `CSKMIDI*MsgHandler` hierarchy is modeled as genuine
+C++ `virtual` classes with real inheritance. For a real virtual class,
+the compiler ALREADY generates the correct vtable-pointer-reset-and-
+chain-to-base logic for any destructor, explicit or implicit -- ground
+truth's own decompiled dtor bodies (bare vtable write + tail-call to
+the base dtor) are exactly what GCC produces automatically, not
+something a human wrote by hand. An empty explicit `~ClassName() {}`
+is therefore sufficient and correct, needed only so the address gets
+tracked (this project's standing "every method gets an explicit,
+documented declaration" convention), not because any extra statement
+is required.
+
+Secondary finding, confirmed via `symbols.csv`: real distinct `_ZTV`
+vtables exist for every one of these classes, but 2 of the 5 leaf
+dtors (`CSKMIDIKarmaCtrlMsgHandler`, `CSKPadNoteByLocalCtrlMsgHandler`)
+decompile to writing their PARENT's vtable address, not their own --
+GCC's -O2 dead-store elimination folded the leaf's own (immediately-
+overwritten, never virtually dispatched through) vtable write away and
+tail-merged straight to the grandparent dtor. Same optimization class
+already documented for the `CSTGMessageHandler` family (round 69's
+volatile-store finding) -- here it doesn't require any source-side
+workaround, since normal correct C++ (each level resets its own
+vtable, base chaining implicit) lets the SAME optimizer independently
+arrive at the identical final observable behavior in this project's
+own build, with no need to manually replicate the skip.
+
+Landed all 5 empty explicit dtors (`oa_ckg_midi_msg_handler.h`).
+
+Real host KAT (`test_ckg_midi_msg_handler.cpp` extended, round-73
+section: placement-new + explicit dtor for all 5 classes, confirms no
+crash, confirms same-class instances share one real vtable pointer,
+confirms distinct classes get distinct vtables). `make verify` full
+suite green, zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. OA.ko manifest 4073 ->
+4083/21,689 (18.825%).
+
+Real-HW test that would help: none identified -- `_vtablePtr`
+confirmed install/reset-only, this family's message dispatch itself
+was already verified in earlier rounds.

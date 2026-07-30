@@ -936,6 +936,17 @@ public:
 	/* .text+0x355d10, 47 bytes. */
 	CSKMIDIPortMsgHandler();
 
+	/* .text+0x5d7410/0x5d7430 (D1/D0). Ground truth's own dtor body is a
+	 * bare vtable-pointer-reset + tail-call to the base dtor -- exactly
+	 * what a normal C++ virtual destructor's compiler-generated logic
+	 * already does for this genuinely-`virtual` class hierarchy (unlike
+	 * the CSTGMessageHandler family, oa_control_msg_handler.h, which uses
+	 * a manual/fake vtable-pointer model and needs an explicit write).
+	 * An empty explicit body here is sufficient and correct -- declared
+	 * only so this address is tracked, not because any extra statement is
+	 * needed. */
+	~CSKMIDIPortMsgHandler() {}
+
 	/* .text+0x355a30, 3 bytes. */
 	virtual bool ShouldSendChannelMessageToMIDIPort();
 	/* .text+0x355a40, 1 byte -- empty. */
@@ -969,6 +980,10 @@ public:
 	virtual bool ShouldNotifyToKarmaController();
 	/* .text+0x355c10, 3 bytes. */
 	virtual bool CheckNoteMessageAndTriggerPad();
+
+	/* .text+0x5d7450/0x5d7470 (D1/D0). Same "empty body is correct"
+	 * reasoning as CSKMIDIPortMsgHandler::~CSKMIDIPortMsgHandler() above. */
+	~CSKPadNoteByMIDIPortMsgHandler() {}
 };
 
 /*
@@ -1000,6 +1015,10 @@ public:
 
 	/* .text+0x3458d0, 245 bytes. */
 	CSKMIDILocalCtrlMsgHandler();
+
+	/* .text+0x5d7350/0x5d7370 (D1/D0). Same "empty body is correct"
+	 * reasoning as CSKMIDIPortMsgHandler::~CSKMIDIPortMsgHandler() above. */
+	~CSKMIDILocalCtrlMsgHandler() {}
 
 	/* === Overrides of CSKMIDIInMsgHandler's 8 pure virtuals (any
 	 * declaration order -- these occupy already-fixed inherited vtable
@@ -1079,6 +1098,18 @@ public:
 	virtual bool ShouldNotifyToKarmaController();
 	/* .text+0x3459e0, 24 bytes. */
 	virtual bool CheckNoteMessageAndTriggerPad();
+
+	/* .text+0x5d73d0/0x5d73f0 (D1/D0). Same "empty body is correct"
+	 * reasoning as CSKMIDIPortMsgHandler::~CSKMIDIPortMsgHandler() above --
+	 * ground truth's own decompiled body here writes the PARENT
+	 * (CSKMIDILocalCtrlMsgHandler)'s vtable address, not a distinct one of
+	 * its own, because this leaf adds no new data members and GCC's -O2
+	 * dead-store elimination folds the intermediate level away (same class
+	 * of optimization as this project's documented dtor volatile-store
+	 * finding, oa_control_msg_handler.h) -- a normal compiler-generated
+	 * destructor for this genuinely-`virtual` class produces equivalent
+	 * observable behavior with no manual code needed. */
+	~CSKMIDIKarmaCtrlMsgHandler() {}
 };
 
 /*
@@ -1093,6 +1124,12 @@ public:
 	virtual bool ShouldNotifyToKarmaController();
 	/* .text+0x345160, 3 bytes. */
 	virtual bool CheckNoteMessageAndTriggerPad();
+
+	/* .text+0x5d7390/0x5d73b0 (D1/D0). Same PARENT-vtable-write +
+	 * dead-store-elimination shape as CSKMIDIKarmaCtrlMsgHandler's own
+	 * dtor above (this leaf is CSKMIDILocalCtrlMsgHandler's OTHER
+	 * 2-pad-note-slot-only child) -- see that dtor's comment. */
+	~CSKPadNoteByLocalCtrlMsgHandler() {}
 };
 
 /*

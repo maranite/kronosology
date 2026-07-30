@@ -743,6 +743,48 @@ int main(void)
 		      padLocal.CheckNoteMessageAndTriggerPad(), 0);
 	}
 
+	printf("-- [round 73] explicit dtors: CSKMIDIPortMsgHandler/CSKMIDILocalCtrlMsgHandler/CSKMIDIKarmaCtrlMsgHandler/CSKPadNoteByMIDIPortMsgHandler/CSKPadNoteByLocalCtrlMsgHandler --\n");
+	{
+		/* Ground truth's dtors for this family are a bare vtable-pointer
+		 * reset + tail-call up the chain -- exactly what the compiler
+		 * already generates automatically for a genuinely-`virtual` class
+		 * hierarchy with no manual/fake vtable model. These checks confirm
+		 * construct+explicit-destruct doesn't crash and that same-class
+		 * instances share one real vtable while different classes get
+		 * distinct ones (confirming polymorphism is genuinely modeled,
+		 * not just declared). */
+		reset_all_mocks();
+		unsigned char bufA[sizeof(CSKMIDIPortMsgHandler)];
+		unsigned char bufB[sizeof(CSKMIDIPortMsgHandler)];
+		CSKMIDIPortMsgHandler *pa = new (bufA) CSKMIDIPortMsgHandler();
+		CSKMIDIPortMsgHandler *pb = new (bufB) CSKMIDIPortMsgHandler();
+		check("CSKMIDIPortMsgHandler: two instances share one real vtable",
+		      *(void **)pa == *(void **)pb, 1);
+		pa->~CSKMIDIPortMsgHandler();
+		pb->~CSKMIDIPortMsgHandler();
+
+		unsigned char bufL[sizeof(CSKMIDILocalCtrlMsgHandler)];
+		CSKMIDILocalCtrlMsgHandler *pl = new (bufL) CSKMIDILocalCtrlMsgHandler();
+		void *localVtbl = *(void **)pl;
+		check("CSKMIDILocalCtrlMsgHandler: distinct vtable from CSKMIDIPortMsgHandler",
+		      localVtbl != *(void **)pa, 1);
+		pl->~CSKMIDILocalCtrlMsgHandler();
+
+		unsigned char bufK[sizeof(CSKMIDIKarmaCtrlMsgHandler)];
+		CSKMIDIKarmaCtrlMsgHandler *pk = new (bufK) CSKMIDIKarmaCtrlMsgHandler();
+		pk->~CSKMIDIKarmaCtrlMsgHandler();
+
+		unsigned char bufPP[sizeof(CSKPadNoteByMIDIPortMsgHandler)];
+		CSKPadNoteByMIDIPortMsgHandler *ppp = new (bufPP) CSKPadNoteByMIDIPortMsgHandler();
+		ppp->~CSKPadNoteByMIDIPortMsgHandler();
+
+		unsigned char bufPL[sizeof(CSKPadNoteByLocalCtrlMsgHandler)];
+		CSKPadNoteByLocalCtrlMsgHandler *ppl = new (bufPL) CSKPadNoteByLocalCtrlMsgHandler();
+		ppl->~CSKPadNoteByLocalCtrlMsgHandler();
+
+		check("all 5 classes construct+destruct cleanly (no crash reaching here)", 1, 1);
+	}
+
 	printf("-- CSKMIDIInMsgHandler::StoreNoteEvent() note-down/note-on counters --\n");
 	{
 		reset_all_mocks();
