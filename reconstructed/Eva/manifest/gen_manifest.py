@@ -4549,6 +4549,25 @@ RECONSTRUCTED = {
     "080a1210", "080a1340", "080a1500", "080a1580", "080a1590", "080a1610",
     "080a1620",                                       # CMemory
 
+    # Round 67 (2026-07-30, solo): 12 more CSysEx* classes' own D1 dtor
+    # addresses -- same convention as round 66 above (plain empty
+    # ~ClassName() already covers ground truth's 11-byte
+    # `*this = &PTR__CSysExObjectBase_08f7a908; return;` D1 body; D0's
+    # free(this) stays deferred). Each confirmed via fresh ground-truth
+    # decompile to be the identical shape. Manifest-only, no source changed.
+    "089ecfe0",  # CSysExCombiName::~CSysExCombiName() [D1]
+    "089ecfa0",  # CSysExDrumKitName::~CSysExDrumKitName() [D1]
+    "089edd70",  # CSysExKarmaGEInfo::~CSysExKarmaGEInfo() [D1]
+    "089ecfd0",  # CSysExProgName::~CSysExProgName() [D1]
+    "089ecf90",  # CSysExSetListName::~CSysExSetListName() [D1]
+    "089ed000",  # CSysExSetListSlotComment::~CSysExSetListSlotComment() [D1]
+    "089ecff0",  # CSysExSetListSlotName::~CSysExSetListSlotName() [D1]
+    "089ecf80",  # CSysExSong::~CSysExSong() [D1]
+    "089edf40",  # CSysExSongControl::~CSysExSongControl() [D1]
+    "089ecfc0",  # CSysExSongName::~CSysExSongName() [D1]
+    "089ed030",  # CSysExSongTimbreSet::~CSysExSongTimbreSet() [D1]
+    "089ecfb0",  # CSysExWaveSeqName::~CSysExWaveSeqName() [D1]
+
     # --- Round 65 (2026-07-30, solo): CTask-family non-virtual dtor-adjustor
     # thunks, 5 classes (CEditTask/CBatchDiskMan/CDumpTask/CAlphaKeybCtrlTask/
     # CPanelIfcTask). Same "manifest inline-body blind spot" class of gap as the

@@ -3059,3 +3059,26 @@ zero regressions. `make link` clean. Eva manifest 3232 -> 3236/37,795
 
 No real-HW test needed -- purely a manifest bookkeeping fix, zero
 behavior change.
+
+## Round 67 (Eva, solo, 2026-07-30): 12 more CSysEx* classes' D1 dtor addresses
+
+Same discovery method and same finding as round 66, extended to the
+rest of the CSysEx* object family surfaced by the scan:
+`CSysExCombiName`/`CSysExDrumKitName`/`CSysExKarmaGEInfo`/
+`CSysExProgName`/`CSysExSetListName`/`CSysExSetListSlotComment`/
+`CSysExSetListSlotName`/`CSysExSong`/`CSysExSongControl`/
+`CSysExSongName`/`CSysExSongTimbreSet`/`CSysExWaveSeqName`. Each
+already has an empty `~ClassName() {}` (sysex_object_names.h/
+sysex_objects.h/sysex_control_objects.h); each ground-truth D1 body
+independently confirmed via fresh decompile to be the identical
+11-byte `*this = &PTR__CSysExObjectBase_08f7a908; return;` shape
+already covered by that existing empty dtor. D0 stays deferred per
+the same standing convention.
+
+Added all 12 D1 addresses to `gen_manifest.py`'s `RECONSTRUCTED` set.
+Manifest-only fix, no source changed. `make verify` full suite green,
+zero regressions. `make link` clean. Eva manifest 3236 -> 3248/37,795
+(8.594%).
+
+No real-HW test needed -- purely a manifest bookkeeping fix, zero
+behavior change.
