@@ -60,6 +60,24 @@ COmegaPtrArray::COmegaPtrArray(int growBy, int initialCapacity, int ownFlag)
 		mArray = (void **)malloc(initialCapacity * sizeof(void *));
 }
 
+/* .text+0x0817c650 (D1) / 0x0817c8f0 (D0), round 70 -- see header comment. */
+COmegaPtrArray::~COmegaPtrArray()
+{
+	extern void *PTR__COmegaPtrArray_08e80be0[];
+	mVtbl = (void *)PTR__COmegaPtrArray_08e80be0;
+}
+
+/* .text+0x080a72f0, round 70 -- see header comment. */
+void *COmegaPtrArray::SetAtIndex(int index, const void *item)
+{
+	void *old = 0;
+	if (index < mCount) {
+		old = mArray[index];
+		mArray[index] = (void *)item;
+	}
+	return old;
+}
+
 int COmegaPtrArray::Add(const void *item)
 {
 	void **arr;

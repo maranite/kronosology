@@ -80,6 +80,9 @@ RECONSTRUCTED = {
     "080a7200",  # COmegaPtrArray::FindIndex
     "080a6f20",  # COmegaPtrArray::RemoveAtIndex
     "080a7310",  # COmegaPtrArray::Shrink
+    "080a72f0",  # COmegaPtrArray::SetAtIndex (round 70)
+    "0817c650",  # COmegaPtrArray::~COmegaPtrArray() [D1] (round 70)
+    "0817c8f0",  # COmegaPtrArray::~COmegaPtrArray() [D0] (round 70)
     "08062380",  # CScheduler::CScheduler
     "08062b40",  # CScheduler::InsertLevel
     "08063120",  # CScheduler::Enable

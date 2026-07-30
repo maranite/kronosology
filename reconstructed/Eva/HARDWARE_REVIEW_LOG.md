@@ -3140,3 +3140,36 @@ Eva manifest 3250 -> 3251/37,795 (8.602%).
 
 No real-HW test needed -- confirmed unmodeled dead-name-collision
 globals, zero behavior change either way.
+
+## Round 70 (Eva, solo, 2026-07-30): COmegaPtrArray::SetAtIndex + dtor
+
+Found via the standing done>0/pending>0 manifest scan. `COmegaPtrArray`
+was otherwise fully reconstructed (8/11 done); its header comment had
+already explicitly flagged `SetAtIndex()` as "real but unreconstructed
+... nothing on any traced call path invokes it, out of scope for this
+pass" -- re-examined this round: the body is simple and unambiguous
+(bounds-checked slot overwrite, returns the old value), same "real
+body, no confirmed caller, not fabricated" category as this project's
+own `BPM::Normalize()`/`MPQN::Normalize()` precedent (round 68).
+
+`~COmegaPtrArray()` (D1 @ 0x0817c650 / D0 @ 0x0817c8f0): unlike the
+non-polymorphic `CSysEx*` family's own dtors, `mVtbl` here IS an
+actively-swapped raw field in this reconstruction (every derived
+flavor -- `TNamedPtrArray<T>`, `TPtrArray<T>` -- manually overwrites
+it after base-constructing a `COmegaPtrArray`), so resetting it in
+the dtor is meaningful, not a no-op. D1 does the plain reset; D0
+additionally wraps `free(this)` in a `HAL_DisableInterrupts()`/
+`HAL_EnableInterrupts()` bracket -- same "D0's free(this) not
+reproduced" convention already established project-wide. Landed a
+single dtor covering the D1 case, matching this project's own
+established `PTR__COmegaPtrArray_08e80be0` placeholder already used
+by every ctor.
+
+Real host KAT (new file `test_omega_ptr_array.cpp`, 6 checks:
+`SetAtIndex` in-bounds/out-of-bounds/neighbor-preservation, and a
+placement-constructed dtor call confirming the vtbl-reset behavior).
+`make verify` full suite green, zero regressions. `make link` clean.
+Eva manifest 3251 -> 3254/37,795 (8.610%).
+
+Real-HW test that would help: none identified -- pure in-memory
+container operations, no hardware-facing side effects.

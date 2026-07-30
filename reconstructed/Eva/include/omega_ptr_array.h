@@ -60,6 +60,18 @@ class COmegaPtrArray {
 public:
 	COmegaPtrArray();
 
+	/* .text+0x0817c650 (D1) / 0x0817c8f0 (D0), round 70. D1 is a plain
+	 * mVtbl reset to this class's OWN base placeholder
+	 * (PTR__COmegaPtrArray_08e80be0) -- meaningful here (unlike the
+	 * non-polymorphic CSysEx* family's own dtors) since mVtbl is an
+	 * actively-swapped raw field in this reconstruction (see header
+	 * comment above). D0 additionally wraps `free(this)` in a
+	 * HAL_DisableInterrupts()/HAL_EnableInterrupts() bracket -- same
+	 * "not reproduced here" convention already established project-wide
+	 * (e.g. long_binary_file.cpp's own header comment) -- this plain
+	 * dtor covers the D1 case faithfully. */
+	~COmegaPtrArray();
+
 	/* .text+0x080a6c10, 113 bytes -- the second real COmegaPtrArray constructor
 	 * overload (symbols.csv: _ZN14COmegaPtrArrayC1Eiii). Real param order confirmed
 	 * from CKernel::AddGlobalObject's own call site (`COmegaPtrArray(this,1,0,0)`)
@@ -107,6 +119,14 @@ public:
 	 * known real caller (CResMan::CResMan()) -- kept void here to match.
 	 */
 	void RemoveAll(int callDtorCallback);
+
+	/* .text+0x080a72f0, 30 bytes, round 70. Bounds-checked: no-op (returns
+	 * 0) if index >= mCount. Otherwise overwrites the slot and returns the
+	 * OLD value -- real, but nothing on any traced call path invokes it,
+	 * same "real body, no confirmed caller, not fabricated" category as
+	 * this project's own BPM::Normalize()/MPQN::Normalize() precedent
+	 * (tempo.h). */
+	void *SetAtIndex(int index, const void *item);
 
 	/* .text+0x080a7310, 356 bytes. Real "shrink to fit": reallocates the backing array
 	 * down to mCount slots (or frees it entirely if mCount == 0). Only does anything
