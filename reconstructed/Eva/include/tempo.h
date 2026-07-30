@@ -5,9 +5,15 @@
  * Both are real, tiny classes confirmed via `nm -C`/direct disassembly:
  *   BPM::SetLowerLimit(unsigned int)  .text+0x0816ba80, 129 bytes
  *   BPM::SetUpperLimit(unsigned int)  .text+0x0816bb10, 129 bytes
- *   BPM::Normalize()                  .text+0x0816bba0 -- NOT reconstructed, no caller
- *                                      found on the traced boot path
- *   MPQN::Normalize()                 .text+0x0816bbd0 -- ditto
+ *   BPM::Normalize()                  .text+0x0816bba0, 39 bytes -- round 68:
+ *                                      reconstructed. No caller found on the
+ *                                      traced boot path, but the body itself is
+ *                                      simple and unambiguous (plain clamp to
+ *                                      [sm_LowerLimit, sm_UpperLimit]) -- not
+ *                                      fabricated, transcribed directly from
+ *                                      ground truth.
+ *   MPQN::Normalize()                 .text+0x0816bbd0, 32 bytes -- ditto,
+ *                                      same shape, MPQN's own limit pair.
  *
  * BPM stores tempo limits in beats-per-minute (`unsigned short`, confirmed via
  * `nm -C -S`: both `BPM::sm_LowerLimit`/`sm_UpperLimit` are 2-byte data symbols);
@@ -38,17 +44,28 @@
 
 class MPQN {
 public:
+	static void SetLowerLimit(unsigned int bpm);
+	static void SetUpperLimit(unsigned int bpm);
+	/* Instance clamp: *this = clamp(*this, sm_LowerLimit, sm_UpperLimit). */
+	void Normalize();
+
 	static int sm_LowerLimit;
 	static int sm_UpperLimit;
+
+	unsigned int value;
 };
 
 class BPM {
 public:
 	static void SetLowerLimit(unsigned int bpm);
 	static void SetUpperLimit(unsigned int bpm);
+	/* Instance clamp: *this = clamp(*this, sm_LowerLimit, sm_UpperLimit). */
+	void Normalize();
 
 	static unsigned short sm_LowerLimit;
 	static unsigned short sm_UpperLimit;
+
+	unsigned short value;
 };
 
 #endif /* TEMPO_H */

@@ -81,3 +81,25 @@ void BPM::SetUpperLimit(unsigned int bpm)
 	MPQN::sm_UpperLimit = (int)(60000000LL / (long long)(int)(unsigned int)sm_UpperLimit);
 	MPQN::sm_LowerLimit = MPQN::sm_UpperLimit;
 }
+
+/* .text+0x0816bba0, 39 bytes -- round 68. */
+void BPM::Normalize()
+{
+	if (value < sm_LowerLimit) {
+		value = sm_LowerLimit;
+		return;
+	}
+	if (value > sm_UpperLimit)
+		value = sm_UpperLimit;
+}
+
+/* .text+0x0816bbd0, 32 bytes -- round 68, same shape as BPM::Normalize(). */
+void MPQN::Normalize()
+{
+	if (value < (unsigned int)sm_LowerLimit) {
+		value = sm_LowerLimit;
+		return;
+	}
+	if (value > (unsigned int)sm_UpperLimit)
+		value = sm_UpperLimit;
+}

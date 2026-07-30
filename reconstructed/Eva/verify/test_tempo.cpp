@@ -79,6 +79,32 @@ int main()
 	check("SetLowerLimit(60) normal branch: MPQN::sm_LowerLimit unchanged (250000)",
 	      MPQN::sm_LowerLimit == 250000);
 
+	/* round 68: BPM::Normalize()/MPQN::Normalize() -- plain clamp to
+	 * [sm_LowerLimit, sm_UpperLimit]. Current statics at this point:
+	 * BPM {60, 240}, MPQN {250000, 1000000}.
+	 */
+	BPM bpm;
+	bpm.value = 10;
+	bpm.Normalize();
+	check("BPM::Normalize() clamps below sm_LowerLimit", bpm.value == BPM::sm_LowerLimit);
+	bpm.value = 999;
+	bpm.Normalize();
+	check("BPM::Normalize() clamps above sm_UpperLimit", bpm.value == BPM::sm_UpperLimit);
+	bpm.value = 100;
+	bpm.Normalize();
+	check("BPM::Normalize() leaves in-range value unchanged", bpm.value == 100);
+
+	MPQN mpqn;
+	mpqn.value = 1;
+	mpqn.Normalize();
+	check("MPQN::Normalize() clamps below sm_LowerLimit", mpqn.value == (unsigned int)MPQN::sm_LowerLimit);
+	mpqn.value = 9999999;
+	mpqn.Normalize();
+	check("MPQN::Normalize() clamps above sm_UpperLimit", mpqn.value == (unsigned int)MPQN::sm_UpperLimit);
+	mpqn.value = 500000;
+	mpqn.Normalize();
+	check("MPQN::Normalize() leaves in-range value unchanged", mpqn.value == 500000);
+
 	printf("\n%d checks failed\n", g_fail);
 	return g_fail ? 1 : 0;
 }

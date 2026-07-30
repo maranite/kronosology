@@ -382,6 +382,8 @@ RECONSTRUCTED = {
     "0816ba80",  # BPM::SetLowerLimit(unsigned int)
     "0816bb10",  # BPM::SetUpperLimit(unsigned int)
     "0816bc00",  # BPM::_GLOBAL__I_sm_LowerLimit (static ctor -> MPQN defaults)
+    "0816bba0",  # BPM::Normalize() (round 68)
+    "0816bbd0",  # MPQN::Normalize() (round 68)
 
     # --- Stage 6: SetMask/~CTask batch (2026-07-25). CTask::SetMask(EMask) and
     # CTask::~CTask() reconstructed (task.h/task.cpp) -- both were the two real,

@@ -3082,3 +3082,32 @@ zero regressions. `make link` clean. Eva manifest 3236 -> 3248/37,795
 
 No real-HW test needed -- purely a manifest bookkeeping fix, zero
 behavior change.
+
+## Round 68 (Eva, solo, 2026-07-30): BPM::Normalize() / MPQN::Normalize()
+
+Found via the standing done>0/pending>0 manifest scan. `tempo.h`'s own
+header comment had explicitly flagged both as "NOT reconstructed, no
+caller found on the traced boot path" (Stage 6 breadth sweep,
+2026-07-25) -- re-examined this round: both bodies are simple,
+unambiguous plain clamps (`*this = clamp(*this, sm_LowerLimit,
+sm_UpperLimit)`) with zero decompiler ambiguity, matching this
+project's standing "real body, no confirmed caller, not fabricated"
+category (same as the already-documented `OmegaExitThread` precedent,
+round-64 HARDWARE_REVIEW_LOG entry) -- landing a correct, verified
+body doesn't require a live caller when the ground truth itself is
+unambiguous.
+
+Added an instance `value` field to both `BPM` (`unsigned short`) and
+`MPQN` (`unsigned int`) -- previously static-utility-only classes with
+no modeled instance layout -- matching ground truth's own `this`-sized
+storage (`sizeof(BPM)==2`, `sizeof(MPQN)==4`, confirmed by the
+decompile's own `*(ushort*)this`/`*(uint*)this` dereferences).
+
+Real host KAT (`test_tempo.cpp` extended, 6 new checks: below-range/
+above-range/in-range for both classes, run against the suite's
+existing post-`SetLowerLimit`/`SetUpperLimit` static state). `make
+verify` full suite green, zero regressions. `make link` clean. Eva
+manifest 3248 -> 3250/37,795 (8.599%).
+
+No real-HW test needed -- pure clamp, no side effects, no hardware
+interaction.
