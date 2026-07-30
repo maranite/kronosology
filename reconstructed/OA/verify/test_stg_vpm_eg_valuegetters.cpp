@@ -79,6 +79,20 @@ int main(void)
 		 * check above -- same field, index argument genuinely ignored. */
 		check_eq("GetAMSLevelModSource(anyIndex) matches GetAMS1LevelModSource()",
 			 s->GetAMSLevelModSource(7), -71L);
+		/* buf[0x2d]==42 signed, matches GetAMS1TimeModSource's own check
+		 * above -- same field, index argument genuinely ignored. */
+		check_eq("GetAMSTimeModSource(anyIndex) matches GetAMS1TimeModSource()",
+			 s->GetAMSTimeModSource(2), 42L);
+	}
+
+	printf("\n~CSTGVPMEG (round 77): both D1/D0 collapse to one vptr-zeroing body\n");
+	{
+		unsigned char dtorbuf[0x60];
+		memset(dtorbuf, 0xAA, sizeof(dtorbuf));
+		CSTGVPMEG *d = (CSTGVPMEG *)dtorbuf;
+		d->~CSTGVPMEG();
+		check_eq("dtor zeroes first 4 bytes (vptr placeholder)",
+			 *(unsigned int *)dtorbuf, 0L);
 	}
 
 	printf("\nCSTGVPMEG updater family (round 75, write-then-readback via the Get* siblings above)\n");

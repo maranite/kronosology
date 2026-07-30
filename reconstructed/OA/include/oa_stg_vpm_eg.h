@@ -98,6 +98,23 @@ struct CSTGVPMEG {
 	 * class only has ONE shared Level-Mod-Source field (+0x3e), not a
 	 * per-index array, so any index value returns the same field. */
 	int GetAMSLevelModSource(unsigned char index);
+
+	/* .text+0x5b8a90, round 77 -- same "index ignored, one shared field"
+	 * shape as GetAMSLevelModSource() above, this time reading the
+	 * AMS1TimeModSource field (+0x2d). */
+	int GetAMSTimeModSource(unsigned char index);
+
+	/* .text+0x5b8d20 (D1) / 0x5b8d30 (D0), round 77 -- byte-identical
+	 * real bodies (confirmed both ground-truth addresses decompile
+	 * identically): reset vptr to the shared, install-only
+	 * `PTR__CSTGParamsOwner_006c04a8` placeholder, no free()/
+	 * HAL_DisableInterrupts() in either variant -- same "opaque
+	 * placeholder, no real vtable pointer needed, both D1/D0 collapse to
+	 * one body" treatment already established for CSTGKeyTrack/
+	 * CSTGPatch/CSTGMultibandDelay/CSTGProgramModeDrumTrackSlot/
+	 * CSTGWaveSequence (this exact family of vtable-install-only
+	 * classes). */
+	~CSTGVPMEG();
 };
 
 #endif

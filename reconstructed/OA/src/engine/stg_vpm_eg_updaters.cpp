@@ -74,3 +74,17 @@ int CSTGVPMEG::GetAMSLevelModSource(unsigned char)
 	unsigned char *base = (unsigned char *)this;
 	return (signed char)base[0x3e];
 }
+
+int CSTGVPMEG::GetAMSTimeModSource(unsigned char)
+{
+	unsigned char *base = (unsigned char *)this;
+	return (signed char)base[0x2d];
+}
+
+/* .text+0x5b8d20 (D1) / 0x5b8d30 (D0), round 77 -- both variants
+ * byte-identical, see header comment. */
+CSTGVPMEG::~CSTGVPMEG()
+{
+	unsigned char *base = (unsigned char *)this;
+	base[0] = base[1] = base[2] = base[3] = 0;
+}

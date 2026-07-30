@@ -5189,6 +5189,43 @@ OA.ko manifest 4089 -> 4098/21,689 (18.894%).
 Real-HW test that would help: none identified -- pure field
 read/boilerplate accessors, no hardware-facing side effects.
 
+## Round 77 (OA.ko, solo, 2026-07-30): CSTGVPMEG::GetAMSTimeModSource + dtor
+
+Found via the standing scan, closing out most of `CSTGVPMEG`'s
+remaining pending members. `GetAMSTimeModSource(unsigned char)`: same
+"index genuinely ignored, one shared field" shape as
+`GetAMSLevelModSource()` (round 76), this time reading the
+`AMS1TimeModSource` field (+0x2d).
+
+`~CSTGVPMEG()` (both D1 @ 0x5b8d20 and D0 @ 0x5b8d30): confirmed
+byte-identical ground-truth bodies, resetting vptr to the shared
+`PTR__CSTGParamsOwner_006c04a8` install-only placeholder with no
+`free()`/`HAL_DisableInterrupts()` in either variant -- the exact
+same "opaque placeholder, both D1/D0 collapse to one body" shape
+already established project-wide for `CSTGKeyTrack`/`CSTGPatch`/
+`CSTGMultibandDelay`/`CSTGProgramModeDrumTrackSlot`/
+`CSTGWaveSequence`, all in this same vtable-install-only class
+family. Landed as a plain 4-byte zero, matching that exact
+precedent's own convention (no named placeholder member needed,
+`CSTGVPMEG` has no other declared data members).
+
+`CSTGVPMEG` now has only 4 pending members left: `GetName()`
+(unresolved string address), `GetAMSLevelModIntensity`/
+`GetAMSTimeModIntensity` (x87 longdouble return, deferred together in
+round 76), left for a future round.
+
+Real host KAT (`test_stg_vpm_eg_valuegetters.cpp` extended, 2 new
+checks: `GetAMSTimeModSource` cross-check against the already-
+verified `GetAMS1TimeModSource`, and a placement-constructed dtor
+call confirming the vptr-zeroing behavior). `make verify` full suite
+green, zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build green. OA.ko manifest 4098 ->
+4101/21,689 (18.908%).
+
+Real-HW test that would help: none identified -- pure field read +
+install-only vtable placeholder reset, no hardware-facing side
+effects.
+
 ## Round 75 (OA.ko, solo, 2026-07-30): CSTGVPMEG's Update* writer family (5 methods)
 
 Found via the standing done>0/pending>0 manifest scan: `CSTGVPMEG`
