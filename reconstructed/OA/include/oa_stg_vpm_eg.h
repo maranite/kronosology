@@ -68,13 +68,10 @@ struct CSTGVPMEG {
 	 * GetMessageHandlers/GetValueGetters, same shape already established
 	 * for every other STG component class, e.g. CSTGLFO/oa_lfo.h) plus 3
 	 * more real, unambiguous AMS accessors. `GetName()` (own address
-	 * 0x5b8a00) and `GetAMSLevelModIntensity(unsigned char)` (own address
-	 * 0x5b8a80, longdouble/x87 return) deliberately left pending this
-	 * round -- GetName's target string address didn't resolve cleanly in
-	 * this export's strings.csv (falls inside a `.rodata.cst8` constant-
-	 * pool region per objdump -h, not the expected string section; not
-	 * worth guessing), and the Intensity accessor needs more care for its
-	 * x87 return convention than this round's other items. */
+	 * 0x5b8a00) deliberately left pending -- its target string address
+	 * didn't resolve cleanly in this export's strings.csv (falls inside a
+	 * `.rodata.cst8` constant-pool region per objdump -h, not the expected
+	 * string section; not worth guessing). */
 	static int GetId();
 	static int GetNumParams();
 	static const void *GetParamDescriptors();
@@ -103,6 +100,21 @@ struct CSTGVPMEG {
 	 * shape as GetAMSLevelModSource() above, this time reading the
 	 * AMS1TimeModSource field (+0x2d). */
 	int GetAMSTimeModSource(unsigned char index);
+
+	/* .text+0x5b8a80, round 78 -- confirmed via `objdump -dr` on the
+	 * real ground-truth OA.ko (`_ZN9CSTGVPMEG23GetAMSLevelModIntensityEhh`):
+	 *   movzbl %cl,%ecx ; flds 0x3f(%eax,%ecx,4) ; ret
+	 * this=EAX, 1st extra arg=EDX (genuinely unused, confirmed dead),
+	 * 2nd extra arg=ECX=index. Real return type is `float` -- Ghidra's
+	 * "longdouble" here just reflects the x87 FLD/ST0 return mechanism,
+	 * not an actual 80-bit value. Same per-index float-array field
+	 * (+0x3f, stride 4) UpdateAMS1LevelModIntensity() already writes. */
+	float GetAMSLevelModIntensity(unsigned char unused, unsigned char index);
+
+	/* .text+0x5b8aa0, round 78 -- identical shape to the Level sibling
+	 * above (`_ZN9CSTGVPMEG22GetAMSTimeModIntensityEhh`), reading the
+	 * AMS1TimeModIntensity field at +0x2e instead of +0x3f. */
+	float GetAMSTimeModIntensity(unsigned char unused, unsigned char index);
 
 	/* .text+0x5b8d20 (D1) / 0x5b8d30 (D0), round 77 -- byte-identical
 	 * real bodies (confirmed both ground-truth addresses decompile

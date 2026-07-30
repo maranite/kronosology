@@ -5262,3 +5262,45 @@ write-then-readback checks via the already-verified Get* siblings).
 
 Real-HW test that would help: none identified -- pure field
 read/write, no hardware-facing side effects.
+
+## Round 78 (OA.ko, solo, 2026-07-30): GetAMSLevelModIntensity/GetAMSTimeModIntensity
+
+Found via the standing done>0/pending>0 manifest scan -- `CSTGVPMEG`
+was the top candidate (avg pending size 7 bytes, 21/24 already done).
+Of its 3 remaining pending members, 2 were the `*ModIntensity`
+accessors previously deferred (round 76) as "needs more care for its
+x87 return convention." Confirmed via `objdump -dr` on the real
+ground-truth `OA.ko` (`_ZN9CSTGVPMEG23GetAMSLevelModIntensityEhh`):
+
+```
+movzbl %cl,%ecx
+flds   0x3f(%eax,%ecx,4)
+ret
+```
+
+this=EAX, 1st extra arg=EDX (genuinely dead -- confirmed unread),
+2nd extra arg=ECX=index. The "x87 return convention" concern
+resolved to nothing more than Ghidra's generic `longdouble` label for
+any FLD/ST0 return -- the real return type is plain `float`, no
+80-bit precision or rounding behavior to model. Reads the same
+per-index float field (+0x3f, stride 4) the already-reconstructed
+`UpdateAMS1LevelModIntensity()` writes; `GetAMSTimeModIntensity` is
+byte-identical except for the field offset (+0x2e, matching
+`UpdateAMS1TimeModIntensity`'s own field).
+
+`CSTGVPMEG::GetName()` (own address 0x5b8a00) remains the sole
+pending member of this class -- re-confirmed via `objdump -h` that
+its target string address still falls inside a `.rodata.cst8`
+constant-pool region, not a string section; not worth guessing.
+
+Real host KAT (`test_stg_vpm_eg_valuegetters.cpp`, 3 new checks):
+confirms both new accessors read the identical underlying bits the
+already-verified ctx-indexed `Get*` siblings read (bit-pattern
+comparison, not a re-derived expected float value), plus confirms the
+unused first argument has no effect on the result. `make verify` full
+suite green, zero regressions. Real `make ko-clean && make ko
+KDIR=/home/build/linux-kronos` build clean. OA.ko manifest 4101 ->
+4103/21,689 (18.917%).
+
+Real-HW test that would help: none identified -- pure field read, no
+hardware-facing side effects.

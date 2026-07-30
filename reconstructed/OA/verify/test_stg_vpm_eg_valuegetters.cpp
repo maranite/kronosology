@@ -85,6 +85,34 @@ int main(void)
 			 s->GetAMSTimeModSource(2), 42L);
 	}
 
+	printf("\nGetAMSLevelModIntensity/GetAMSTimeModIntensity (round 78, direct float accessors)\n");
+	{
+		/* ctx's own index field is fixed at 3 above, so GetAMS1LevelModIntensity(ctx)
+		 * reads the same 4 bytes (0x3f + 3*4 = 0x4b) that GetAMSLevelModIntensity(_,3)
+		 * reads directly -- same location, different reinterpretation (raw int32 via
+		 * the ctx path above vs a real `flds` float load here). Confirm both read the
+		 * identical underlying bits rather than re-deriving an independent expected
+		 * float value. */
+		float lvl = s->GetAMSLevelModIntensity(0, 3);
+		int lvlBits;
+		memcpy(&lvlBits, &lvl, sizeof(lvlBits));
+		check_eq("GetAMSLevelModIntensity(_,3) bit-pattern matches GetAMS1LevelModIntensity's raw read",
+			 lvlBits, -1458934836L);
+
+		float tm = s->GetAMSTimeModIntensity(0, 3);
+		int tmBits;
+		memcpy(&tmBits, &tm, sizeof(tmBits));
+		check_eq("GetAMSTimeModIntensity(_,3) bit-pattern matches GetAMS1TimeModIntensity's raw read",
+			 tmBits, 444324925L);
+
+		/* `unused` (EDX/1st extra arg) confirmed dead in the real body -- varying it
+		 * must not change the result. */
+		float lvl2 = s->GetAMSLevelModIntensity(0xAB, 3);
+		int lvl2Bits;
+		memcpy(&lvl2Bits, &lvl2, sizeof(lvl2Bits));
+		check_eq("GetAMSLevelModIntensity: unused first arg has no effect", lvl2Bits, lvlBits);
+	}
+
 	printf("\n~CSTGVPMEG (round 77): both D1/D0 collapse to one vptr-zeroing body\n");
 	{
 		unsigned char dtorbuf[0x60];

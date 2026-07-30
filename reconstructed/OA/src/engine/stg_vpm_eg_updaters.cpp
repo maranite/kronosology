@@ -81,6 +81,22 @@ int CSTGVPMEG::GetAMSTimeModSource(unsigned char)
 	return (signed char)base[0x2d];
 }
 
+/* .text+0x5b8a80, round 78. `unused` is EDX, confirmed dead in the real
+ * body (only `this`/EAX and `index`/ECX are read). Real return is a
+ * plain float loaded via `flds`; see header comment. */
+float CSTGVPMEG::GetAMSLevelModIntensity(unsigned char, unsigned char index)
+{
+	unsigned char *base = (unsigned char *)this;
+	return *(float *)(base + 0x3f + (unsigned)index * 4);
+}
+
+/* .text+0x5b8aa0, round 78 -- same shape, AMS1TimeModIntensity field. */
+float CSTGVPMEG::GetAMSTimeModIntensity(unsigned char, unsigned char index)
+{
+	unsigned char *base = (unsigned char *)this;
+	return *(float *)(base + 0x2e + (unsigned)index * 4);
+}
+
 /* .text+0x5b8d20 (D1) / 0x5b8d30 (D0), round 77 -- both variants
  * byte-identical, see header comment. */
 CSTGVPMEG::~CSTGVPMEG()
