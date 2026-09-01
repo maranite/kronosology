@@ -110,6 +110,26 @@ Lives at the root of an OS update USB stick.
 
 ---
 
+## `.PCG` portable snapshot files
+
+Programs/Combis/DrumKits/WaveSequences/SetLists/Global — the "Disk → Save PCG"
+format. Full container + per-object breakdown, hex-verified against real files,
+now has its own document: [`pcg_file_format.md`](pcg_file_format.md). It also
+explains how the `Sample Bank UUID` fields referenced by Programs/DrumKits/Wave
+Sequences tie into the option-file / PCM-bank scheme documented below.
+
+---
+
+## `.KSC`/`.KMP`/`.KSF` user sample family
+
+User-created sample collections — what a `.PCG`'s Bank-UUID sample references resolve
+to when they point outside the factory EXs PCM banks. `.KSC` (collection manifest,
+plain text) / `.KMP` (multisample map) / `.KSF` (single sample, holds real
+big-endian 16-bit PCM) are hex-decoded chunk-by-chunk against real files in
+[`ksc_kmp_ksf_file_format.md`](ksc_kmp_ksf_file_format.md).
+
+---
+
 ## PCM bank files (`/korg/rw/PCM/Bank<NN>` and `/korg/rw2/PCM/Bank<NN>`)
 
 Binary. The actual sample data. Layout is the `CSTGMultisampleBank` on-disk format —

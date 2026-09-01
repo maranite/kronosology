@@ -46,19 +46,19 @@
  *      void  (*__gmp_free_func)       (void *, size_t);
  * ========================================================================= */
 
-void *do_gmp_alloc(size_t size)
+static void *do_gmp_alloc(size_t size)
 {
 	/* binary: __kmalloc(size, GFP_KERNEL)  (0xd0 == GFP_KERNEL) */
 	return kmalloc(size, GFP_KERNEL);
 }
 
-void do_gmp_free(void *ptr, size_t size)
+static void do_gmp_free(void *ptr, size_t size)
 {
 	/* size is ignored; kzfree() uses ksize() internally and scrubs the buffer */
 	kzfree(ptr);
 }
 
-void *do_gmp_realloc(void *ptr, size_t old_size, size_t new_size)
+static void *do_gmp_realloc(void *ptr, size_t old_size, size_t new_size)
 {
 	size_t cur = ptr ? ksize(ptr) : 0;
 	void *n;
@@ -270,6 +270,15 @@ static int __init STGGmp_init(void)
 static void __exit STGGmp_exit(void)
 {
 }
+
+/* Real binary exports this as a separate no-op alongside the module_exit
+ * callback (confirmed via disassembly of the shipping STGGmp.ko: a single
+ * `ret`, in .exit.text right after STGGmp_exit's body) - reproduced verbatim
+ * even though nothing in this project's traced call graph invokes it. */
+void GmpLibSupport_Exit(void)
+{
+}
+EXPORT_SYMBOL(GmpLibSupport_Exit);
 
 module_init(STGGmp_init);
 module_exit(STGGmp_exit);

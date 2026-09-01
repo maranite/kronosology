@@ -196,7 +196,12 @@ by a Sync record (`op == 0x87`). Dispatch is on `op` and, for buttons, on `idx &
 - `op == 3` - aftertouch. The calibration input is the 10-bit ADC reassembly
   `raw10 = (dLo << 2) | (dHi >> 6)`, not a naive 16-bit little-endian combine of
   `dLo`/`dHi`. This is the same `raw10` value the test-mode branch already computes
-  independently for its own `0x61` diagnostic event.
+  independently for its own `0x61` diagnostic event. **Real-hardware confirmed
+  2026-07-29** against the production Kronos: RT Knob 1, Tempo, and Damper
+  wire captures all decode cleanly with this exact formula, three of them
+  landing precisely on its own `0`/`1023` endpoints at physical hard stops -
+  see `OmapNKS4DummyHCDFix/README.md`'s "Full real-hardware confirmation of
+  the `raw10` formula" section for the full capture data.
 - `idx == 0x71`, `op == 7`, `op == 0x1f`, `op == 8`, and the `op < 9`/`op >= 9` split
   cover the remaining dispatch paths (S/PDIF clock status, shutdown-request, and other
   event classes).

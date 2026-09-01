@@ -66,8 +66,8 @@ Details in [`../modules/loadmod.ko_analysis.md`](../modules/loadmod.ko_analysis.
 
 ## Patches
 
-There **is** a 3-bypass patch to `loadmod.ko` in this project (added 2026-05-26 when we
-needed to ship a patched `loadoa`). Patched MD5: `28d1cec16f1d893f1d78241b62a989d9`.
+There is a 3-bypass patch to `loadmod.ko` in this project, needed to ship a patched
+`loadoa`. Patched MD5: `28d1cec16f1d893f1d78241b62a989d9`.
 
 The patched loadmod doesn't change *functionality* — it bypasses the integrity gates that
 would otherwise reject any modification to `/sbin/loadoa` (which **is** in the MD5 file

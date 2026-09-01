@@ -3,8 +3,8 @@
 A comprehensive reference for the studied internals of the Korg Kronos OS,
 binaries, kernel modules, security model, and file formats.
 
-This index lives at `docs/`. Top-level docs in ``
-remain authoritative for their topics and are linked from here.
+This index lives at `docs/`. Top-level docs elsewhere in the repo remain
+authoritative for their topics and are linked from here.
 
 ---
 
@@ -53,6 +53,9 @@ remain authoritative for their topics and are linked from here.
 |---|---|
 | `/proc/.oacmd` command protocol (the `AU:`/`LM:`/`CL:` etc. dispatcher) | [interfaces/proc_oacmd.md](interfaces/proc_oacmd.md) |
 | File formats — `AuthorizationStrings`, `EXsInstall.exsins`, option files, `install.info` | [interfaces/file_formats.md](interfaces/file_formats.md) |
+| **`.PCG` portable snapshot format — full container + Program/Combi/DrumKit/WaveSequence/SetList/Global breakdown, sample-reference architecture** | [interfaces/pcg_file_format.md](interfaces/pcg_file_format.md) |
+| **`.PCG` corpus verification (2026-08) — 32 real Kronos files, checksums/A-B frames/UUIDs/reference-graph + hardware load results** | [interfaces/pcg_corpus_verification_2026-08.md](interfaces/pcg_corpus_verification_2026-08.md) |
+| **`.KSC`/`.KMP`/`.KSF` sample family — collection manifest, multisample map, single sample, hex-decoded from real files** | [interfaces/ksc_kmp_ksf_file_format.md](interfaces/ksc_kmp_ksf_file_format.md) |
 
 ### Committed-preset memory — `preload/`
 
@@ -119,7 +122,7 @@ set lists, globals, KARMA data, effect presets, drum-track patterns.
 
 ## Reproducibility checklist
 
-- All Ghidra work is in the `kronos.rep` project at ``
+- All Ghidra work is in the `kronos.rep` project
 - `OA.ko` is **versioned** — must be checked out before saves (Project window → right-click → Check Out)
 - The `.claude/memory/` directory holds session-persistent notes that complement these docs
 - `kallsyms.txt` (live `/proc/kallsyms` from a running Kronos) gives runtime base addresses

@@ -326,6 +326,41 @@ either way. The general shape of the prediction (smooth, correctly-decoded
 analog data on the same channel/opcode) is now real-hardware-backed; the
 exact displayed number is still a derivation, not a measurement.
 
+**Full real-hardware confirmation of the `raw10` formula (2026-07-29),
+against the production Kronos (192.168.100.15), using the same
+`nks4_sniff.c` hook** (rebuilt clean against `/home/build/linux-kronos`,
+md5-verified identical `OmapNKS4Module.ko` target to the one the hook was
+originally validated against). Unlike the 2026-07-21 dev-board sweeps,
+this round deliberately captured each control sitting at a *known physical
+extreme* (hard stop) rather than mid-sweep, which lets the raw10 land on
+an exact expected constant instead of just "plausible and monotonic":
+
+- **RT Knob 1** (`idx=0x08`), swept to the max clockwise hard stop:
+  16 samples, smoothly increasing, landing exactly on **`raw10=1023`**
+  (`2^10-1`, the true maximum of a 10-bit field) on the very last sample.
+- **Tempo** (`idx=0x1a` = device_code 26, matching this file's own
+  dispatch-table decode above), swept CCW to its hard stop: 13 samples,
+  landing exactly on **`raw10=0`**. Swept CW to the opposite hard stop:
+  16 samples, landing exactly on **`raw10=1023`**.
+- **Damper pedal** (`idx=0x1d` = device_code 29, "rear-panel Damper" per
+  the same table): a full press-hold-release cycle showed the raw value
+  descend to a local minimum then climb back to **`raw10=1023`** at rest
+  (released) - captured independently twice, both times settling on the
+  same constant.
+
+All four sweeps decode cleanly with `raw10 = (dLo<<2)|(dHi>>6)` (every
+raw 16-bit wire value divides evenly by 64, i.e. is `raw10<<6` with zero
+low-order bits) and three of them land exactly on the formula's own
+known-constant endpoints (`0` or `1023`) rather than an arbitrary
+mid-range number - as strong a confirmation as this measurement technique
+can give. This also independently reconfirms the `idx`-to-`device_code`
+mapping above from live wire traffic for three separate codes (8, 26, 29),
+not just disassembly. **Still not measured:** the specific
+`raw10=0x100 -> displayed 16` claim - no on-screen value was correlated
+this round either (the panel was in Set List/combi context without a
+visible RT Knob readout), so the post-`ApplyNKS4Calibration()` displayed
+number remains a derivation rather than an observation.
+
 For every OTHER
 `device_code` (including Aftertouch, `7`) `nks4_inject.c` itself states no
 value-scaling formula is hardware-confirmed, so no displayed-value claim is
@@ -348,9 +383,12 @@ made for those - see Known limitations.
   shape is established. One exception: combining this transform with
   `nks4_inject.c`'s own separately hardware-confirmed `byte0=value*2`
   formula for the RT Knobs/Sliders/Value Slider group gives a concrete
-  predicted value (`16`) for the virtual gadget's own RT Knob 1 event -
-  not independently re-verified against real hardware, but a real
-  derivation rather than an arbitrary choice. A second exception, found via
+  predicted value (`16`) for the virtual gadget's own RT Knob 1 event - the
+  underlying `raw10` formula itself is now real-hardware-confirmed (see
+  the 2026-07-29 production-hardware section above, landing exactly on the
+  formula's own `0`/`1023` endpoints across RT Knob 1, Tempo, and Damper),
+  but the specific `raw10=0x100 -> displayed 16` number is still a
+  derivation, not a direct on-screen measurement. A second exception, found via
   fresh disassembly: `device_code=7` (Aftertouch)'s decompile showed
   `AnalogControllerHandler`'s `case 7` as a raw store with Ghidra's own
   "WARNING: Store size is inaccurate" flag - that warning was masking an

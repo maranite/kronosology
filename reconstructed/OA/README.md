@@ -1091,6 +1091,38 @@ live physical interaction — a normal scoped task, not an open mystery.
 
 ## Known limitations
 
+- **Current build (round 68, 2026-07-29) does not `insmod` at all — checked
+  offline before attempting live hardware, not yet fixed.** Cross-checking
+  `nm -u OA.ko` against every symbol actually provided by the real
+  `STGEnabler`/`STGGmp`/`OmapNKS4Module`/`USBMidiAccessory` plus this
+  project's own `KorgUsbAudioVirtualDriver` stub leaves **~690 genuinely
+  unresolved symbols**, not the base-kernel/RTAI noise `nm -u`'s raw count
+  (821) suggests. Two distinct causes:
+  1. The Karma engine work added 2026-07-28/29 (`ckg_engine.cpp` /
+     `CKGEngine`, round 45+) reaches forward into whole subsystems Stage 4
+     ("Voice models & DSP") hasn't reconstructed yet: the entire RTParm
+     per-parameter callback table (`RT_bnd_amt`, `RT_dur_val`,
+     `RT_env_att_time`, ... hundreds of individual functions), plus
+     `CKGParamEdit`, `CKGRTCHandler`, `CKGBankManager`,
+     `CMIDIFlowParamHolder`, `CSTGHeapManager_*`, and `BirthOfKarma`
+     itself. This isn't a bug - it's Stage 4 genuinely not started yet,
+     confirmed via `git log -S` showing these call sites postdate the last
+     working real-hardware boot (2026-07-21, reached
+     `OA_DEBUG_MARKER 14`). Needs real implementations (Stage 4 work), not
+     stubs pretending otherwise, before another real boot attempt is
+     worthwhile.
+  2. Separately, two newly-added files - `src/engine/param_convertor.cpp`
+     and `src/engine/am_exp2_ess.cpp` - use plain `float`/`double` math
+     (`floorf`, `sqrtf`, `lrintf`, ...), which under normal kernel Kbuild
+     flags compiles to calls into libgcc soft-float helpers
+     (`__divsf3`/`__mulsf3`/...) that don't exist in a kernel module -
+     same class of bug already found and fixed in `STGGmp.ko`'s `xsize`
+     estimate (see that project's README). `stg_rtai_setup()`'s own
+     `rt_linux_use_fpu(1)` call strongly suggests the real firmware uses
+     genuine hardware FPU in real-time context rather than soft-float
+     emulation, so the likely fix is a build-flag change for these two
+     files specifically, not writing 17 soft-float functions from
+     scratch. Not yet attempted.
 - **`CSTGComPort`'s exact UART port addresses are unconfirmed** for K1 —
   see the 2026-07-21 real-hardware section above: on the real K2 dev
   board tested, the chip-detection *key* (not the addresses) turned out

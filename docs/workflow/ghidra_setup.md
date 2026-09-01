@@ -1,33 +1,40 @@
 # Ghidra Project Setup & Conventions
 
-## How Ghidra was set up to study the Korg Kronos
+## How this project's Ghidra setup was built
 
-I started with several data sources to perform this analysis:
-1. The Korg factory v3.2.1 updater. This allowed me to understand the anaotomy of an update. 
-   Inside the update tar file, the UpdateOs binary can be found under `/sbin/` which was analysed to understand how updates are validated and applied to the Kronos.
-2. The kronos_rooting repo provides a link to an updater which (among other things) installs dropbear. Being able to SSH in to the Kronos was crucial to testing out patches and understanding kernel states as well as uncovering some quirks in the NKS4 USB device that cause it to "wedge"  -  presumably this is the real reason the Kronos requires a phyiscal power cycle after an update - because the Korg developers realised they could not safely soft-reboot their own creation.
-3. The Korg 3-DVD factory re-installer. This can be easily unpacked for a comprehensive offline record of what an out-of-box Kronos' bootable filesystem looks like.
-4. A dump of files running on my own live Kronos.
+Analysis draws on several data sources:
+1. The Korg factory v3.2.1 updater. Its update tar file contains `UpdateOS` under
+   `/sbin/`, analyzed to understand how updates are validated and applied to the
+   Kronos.
+2. The `kronos_rooting` repo's updater installs dropbear, enabling SSH access —
+   essential for testing patches, inspecting kernel state, and studying the NKS4
+   USB device's "wedge" failure mode (see
+   [`../modules/OmapNKS4Module.ko_chip_wedge.md`](../modules/OmapNKS4Module.ko_chip_wedge.md)),
+   which is plausibly the real reason the Kronos requires a physical power cycle
+   after certain kinds of restart — Korg's own developers may not have trusted a
+   soft-reboot to be safe.
+3. The Korg 3-DVD factory re-installer, unpacked for a comprehensive offline record
+   of an out-of-box Kronos's bootable filesystem.
+4. A dump of files from a live Kronos.
 
-In practice, the binaries recovered form the live Kronos were imported into Ghidra for the main analysis.
-**All binaries were imported as separate programs** into the Ghidra project:
+In practice, binaries recovered from a live Kronos are what get imported into
+Ghidra for the main analysis. **All binaries are imported as separate programs**
+into the Ghidra project:
 
 | Program | Purpose | Value |
-|---|---|----|
-| `OA.ko` | What you experience as the Kronos - all audio, enginers, banks, etc. | Patching to remove authenticity checks |
-| `UpdateOS` | Program to apply updates |  Ability to author & apply own updates without root |
-| `loadmod.ko` | Evil, hacky authenticity policeman |  Speeding up boot time, bypassing pointless integrity checks |
-| `loadoa` | Boot-up program which loads realtime modules, loadmod and OA, etc. |  Enables us to relocate OA.ko |
-| `InstallEXs` | Handles installation of Korg EXs extension banks | Understanding where extensions go. how 
-| `Eva` | A program which facilities the Kronos display | None |
-| `OmapNKS4Module.ko` | Handles comms with NKS4 (aka. the Shark) sister board | None | 
-| `STGEnabler.ko` | Enables bigint math | None |
-| `STGGmp.ko` | Enables bigint math | None |
-`options` are written |
-| `GetPubIdMod.ko` | Retrieves `publid-id` from ATMEL chip | None |
+|---|---|---|
+| `OA.ko` | The synthesis engine — all audio, engines, banks, etc. | Patching to remove authenticity checks |
+| `UpdateOS` | Applies firmware updates | Ability to author & apply own updates without root |
+| `loadmod.ko` | Boot-time integrity/authenticity gatekeeper | Speeding up boot time, bypassing unneeded integrity checks |
+| `loadoa` | Boot-up program that loads realtime modules, loadmod, OA, etc. | Enables relocating OA.ko |
+| `InstallEXs` | Handles installation of Korg EXs extension banks | Understanding where extensions go and how options are written |
+| `Eva` | Drives the Kronos display | — |
+| `OmapNKS4Module.ko` | Handles comms with the NKS4 (front-panel) sister board | — |
+| `STGEnabler.ko` | Enables bigint math | — |
+| `STGGmp.ko` | Enables bigint math | — |
+| `GetPubIdMod.ko` | Retrieves the Public ID from the Atmel chip | — |
 
 ---
-
 
 ## Address mapping cheatsheet
 

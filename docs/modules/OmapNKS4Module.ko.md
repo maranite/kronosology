@@ -16,7 +16,7 @@ uses to talk to that chip.
 
 ---
 
-## ⚠ Binary version warning (found 2026-07-17)
+## ⚠ Binary version warning
 
 **There are two different builds of this module in the repo — do not conflate them.**
 
@@ -35,12 +35,11 @@ code-identical to the real target (same driver, earlier revision) but **is not
 reliable ground truth for anything that differs** — confirmed by diffing `nm`
 symbol tables, not just file size.
 
-`kronosology/reconstructed/OmapNKS4Module/` and `KronosNKS4/docs/protocol.md` were
-already built from/verified against the **correct** 89849-byte binary (confirmed by
-their own cited source paths) — they remain the right starting point. No saved
-Ghidra project existed anywhere in the repo for the correct binary until a fresh
-import in the 2026-07-17 session (see `KronosNKS4/docs/gaps.md`'s
-`CActiveSenseThread` writeup for what came out of it).
+`kronosology/reconstructed/OmapNKS4Module/` and `KronosNKS4/docs/protocol.md` are
+built from/verified against the **correct** 89849-byte binary (confirmed by their
+own cited source paths) — they remain the right starting point. No saved Ghidra
+project exists in the repo for the correct binary (see `KronosNKS4/docs/gaps.md`'s
+`CActiveSenseThread` writeup for what a fresh import turned up).
 
 ---
 
@@ -58,30 +57,26 @@ intended extension point — and the one we propose using for a small `oa_authge
 helper module that exposes the chip secret (or a generated auth string) to userspace
 without modifying `OA.ko`. See [`../crypto/auth_string_algorithm.md`](../crypto/auth_string_algorithm.md).
 
-**Also exported (confirmed 2026-07-21 via `readelf -x __ksymtab_strings` +
-`nm` on the genuine stock binary, md5 `461156bba798c21f94871cb6c8da1595`,
-pulled live from a real Kronos 2 dev board's `/tmp/sysprobe/sbin/`) — the 11
-video-panel functions `OmapVideoModule.ko` depends on:**
+**Also exported** (confirmed via `readelf -x __ksymtab_strings` + `nm` on the genuine
+stock binary, md5 `461156bba798c21f94871cb6c8da1595`) — the 11 video-panel functions
+`OmapVideoModule.ko` depends on:
 `COmapNKS4_AddToProgressBar`, `COmapNKS4_GetProgressBarPercent`,
 `COmapNKS4_GetTitleScreenVersion`, `COmapNKS4_IncProgressBar`,
 `COmapNKS4_SetProgressBarPercent`, `OmapNKS4InitLCDRegs`,
 `OmapNKS4SendFillData`, `OmapNKS4SendPixelDataRegion`,
 `OmapNKS4UpdateColorPal`, `OmapNKS4UpdateScreenInfo`, `OmapNKS4XAxisByteSize`.
 
-This resolved what looked like a real mystery: `OmapVideoModule.ko`'s own
-`modinfo` shows `depends=` empty even in the *genuine* stock binary, which
-looked like it might mean these symbols resolve through something other
-than the standard kernel module-loading mechanism. They don't — `depends=`
-is a build-time-only convenience field, populated only when the importing
-module's build had the exporter's `Module.symvers` available; it has no
-bearing on runtime `find_symbol()` resolution, which only checks whether
-the exporting module is already loaded with a real `__ksymtab` (confirmed
-present and correct here). Real `loadoa.c` already gets the order right
-(`OmapNKS4Module.ko` insmod'd and initialized, *then* `OmapVideoModule.ko`
-right after — `loadoa/loadoa.c:442-447`); an earlier "Unknown symbol"
-dmesg failure seen this session was purely an artifact of an ad-hoc manual
-test inserting `OmapVideoModule.ko` before `OmapNKS4Module` had loaded, not
-a genuine gap on real hardware.
+`OmapVideoModule.ko`'s own `modinfo` shows `depends=` empty even in the genuine
+stock binary — this does not mean these symbols resolve through something other
+than the standard kernel module-loading mechanism. `depends=` is a build-time-only
+convenience field, populated only when the importing module's build had the
+exporter's `Module.symvers` available; it has no bearing on runtime `find_symbol()`
+resolution, which only checks whether the exporting module is already loaded with a
+real `__ksymtab` (confirmed present and correct here). Real `loadoa.c` gets the
+load order right (`OmapNKS4Module.ko` insmod'd and initialized, then
+`OmapVideoModule.ko` right after — `loadoa/loadoa.c:442-447`); an "Unknown symbol"
+dmesg failure is purely an artifact of inserting `OmapVideoModule.ko` before
+`OmapNKS4Module` has loaded, not a gap on real hardware.
 
 **Confirmed gap in THIS PROJECT'S OWN reconstruction**
 (`reconstructed/OmapNKS4Module/`): none of these 11 functions have an
@@ -124,8 +119,8 @@ self-contained) — see [`GetPubIdMod.ko.md`](GetPubIdMod.ko.md).
 | Phase 1 prototypes | 56 applied (of 72 attempted; 16 errors are template instantiations) |
 | Phase 2 struct layouts | 0 built (no class-pattern field-access evidence — mostly C-style code) |
 | Phase 3a return types | 20 refined |
-| Versioned in Ghidra | No — a fresh, unpersisted Ghidra MCP session was run against the correct 89849-byte binary on 2026-07-17 (see below), but no `.gpr` project file was saved as part of that pass |
-| Deep RE | Mostly not pursued (the exported symbols are well-known), **except** `CActiveSenseThread`/`CSTGOmapNKS4Fifos::TriggerOutputInterrupt`, freshly and fully decompiled 2026-07-17 — see `KronosNKS4/docs/gaps.md` |
+| Versioned in Ghidra | No — Ghidra MCP sessions run against the correct 89849-byte binary have not had their `.gpr` project file saved |
+| Deep RE | Mostly not pursued (the exported symbols are well-known), **except** `CActiveSenseThread`/`CSTGOmapNKS4Fifos::TriggerOutputInterrupt`, fully decompiled — see `KronosNKS4/docs/gaps.md` |
 
 The full chip protocol is in scope for future work if we want a userspace re-implementation
 of `nv2ac_read_data`. The cleaner solution remains a helper `.ko` that just calls the

@@ -121,7 +121,9 @@ reached in practice — `main` calls `exit()`/returns).
    path. **This means the reconstructed binary's `argv[0]` matters**: naming the staged
    VM binary anything other than `EvaSim`/`EvaSimSVGA`/`Eva` changes which of these three
    branches fires. Recommend staging it as literally `Eva` to match the real hardware
-   path (the one we actually care about validating).
+   path (the one we actually care about validating). **Confirmed 2026-07-29**: the real
+   production invocation is exactly `/korg/Eva/Eva` (see the real-launch-wrapper note
+   further down) — basename `Eva`, as predicted.
 6. `CCommDriver::getInstance(argv)` — real constructor call the first time (`operator
    new(0x18)` then placement `CCommDriver(this, argv)`), caches to a static `singleton`.
    A **separate, zero-argument** `CCommDriver::getInstance()` overload exists elsewhere in
@@ -1488,11 +1490,27 @@ confirm what it actually passes (it lives inside the encrypted `Eva.img`, not pr
 any extracted rootfs on this share — `docs/workflow/deploying_patches.md`/
 `boot_optimization_analysis.md` both just say `exec /korg/Eva/Eva`, which may be a
 paraphrase rather than the literal invocation). Flagged, not "fixed" — adding a NULL
-check the real binary doesn't have would misrepresent the function's own contract. **Any
-live `kronos_vm` boot test of this reconstruction from here on must invoke Eva with at
-least one `argv` entry containing `'='`** to avoid tripping this real bug; this batch did
-not perform a live boot test for exactly this reason (no confirmed-real invocation line to
-test against) — left for a future pass once/if the real launch wrapper is found.
+check the real binary doesn't have would misrepresent the function's own contract.
+
+**Real launch wrapper found (2026-07-29), and it contradicts the "at least one
+NAME=VALUE entry" conclusion above.** Read `/proc/<pid>/cmdline` for the actual
+running `Eva` process on the production Kronos (192.168.100.15, PID 1372,
+`PPid=1` — a direct child of init, no intermediate wrapper script survives
+into `/proc` for inspection): the real invocation is **`/korg/Eva/Eva` with
+zero arguments** (`argc=1`, `argv[0]` only, no `NAME=VALUE` entries of any
+kind). Since this demonstrably runs without segfaulting, the "must contain
+at least one `=`-bearing entry" inference above is wrong — the more likely
+explanation is that the per-argv-entry loop is bounded by `argc` starting
+from index 1 (skipping `argv[0]`), so with no extra arguments the loop body
+- and the unchecked `strchr()` - simply never executes, rather than there
+being a hidden real argument this project failed to find. **Not yet
+re-verified in the disassembly**: the loop's actual starting index/bound
+should be rechecked to confirm this explanation instead of "an argument
+exists somewhere," but the empirical launch command itself is now
+ground-truthed and no longer an open question. **Any live `kronos_vm` boot
+test of this reconstruction should invoke Eva as `/korg/Eva/Eva` with no
+arguments**, matching the real launch exactly, rather than synthesizing a
+`NAME=VALUE` entry that real production never actually passes.
 
 `Eva_IsSimulation()`/`Eva_IsSimulationSVGA()` (`.text+0x0804cd30`/`0x0804cd40`, 13 bytes
 each — real, trivial `return s_eAppMode == N;` accessors) were split out of

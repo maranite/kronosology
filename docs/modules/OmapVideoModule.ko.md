@@ -1,7 +1,7 @@
 # OmapVideoModule.ko — Kronos `/dev/fb1` front-panel framebuffer driver
 
-Reconstructed 2026-07-21 from `3.2.1 update contents/sbin/OmapVideoModule.ko`
-(ELF32 LSB relocatable, i386, **not stripped** — full symtab, BuildID
+Reconstructed from `3.2.1 update contents/sbin/OmapVideoModule.ko` (ELF32 LSB
+relocatable, i386, **not stripped** — full symtab, BuildID
 `b167779090bcdf61f1c48d035d2d8afb23e4267d`). Four byte-identical copies exist
 elsewhere in the repo (md5 `bcce18c4128eee8596057d790000225d`) — irrelevant,
 same binary.
@@ -15,11 +15,6 @@ same binary.
 | modinfo | `author=Korg R&D`, `description=Korg OMAP Video interface Support`, `license=GPL`, `version=1.0.0`, `depends=` (empty), `vermagic=2.6.32.11-korg SMP preempt mod_unload ATOM ` |
 | Load order | `STGEnabler.ko → STGGmp.ko → OmapNKS4Module.ko → **OmapVideoModule.ko** → GetPubIdMod.ko → loadmod.ko → KorgUsbAudioDriver.ko → USBMidiAccessory.ko → OA.ko` (see `MASTER_REFERENCE.md` §6) |
 | Reconstructed source | `kronosology/reconstructed/OmapVideoModule/` |
-
-**Note:** this doc's prose was written directly by the RE agent (cloud), not
-delegated through the `qwen-docs`/Ollama pipeline — that delegation instruction
-was only added to `re-decompiler.md` after this doc was already produced.
-Facts were independently re-verified against the built `.ko` regardless.
 
 ## Architecture summary
 
@@ -219,42 +214,31 @@ brief's "sizes/names may differ slightly from compiler differences" note.
   so the two docs cross-reference cleanly without requiring a rename in
   either.
 
-## Real-hardware load readiness (2026-07-21)
+## Real-hardware load readiness
 
-An initial ad-hoc test on a real Kronos 2 dev board hit
-`OmapVideoModule: Unknown symbol COmapNKS4_GetTitleScreenVersion` (and 10
-similar errors) in dmesg, raising a real concern: the genuine stock
-binary's own `depends=` field is empty (see `modinfo` row above), so it
-wasn't obvious the standard kernel module-loading mechanism would ever
-resolve these 11 `OmapNKS4Module.ko` symbols at all.
+The genuine stock `OmapNKS4Module.ko` exports all 11 symbols this module needs via a
+normal `__ksymtab` (confirmed via `readelf`/`nm` on a copy pulled live from a real
+Kronos 2 dev board) — see [`OmapNKS4Module.ko.md`](OmapNKS4Module.ko.md)'s "Exported
+kernel symbols" section. The empty `depends=` field in `modinfo` (see table above) is
+a build-time metadata artifact with no effect on runtime symbol resolution, and real
+`loadoa.c` inserts `OmapNKS4Module.ko` before `OmapVideoModule.ko`
+(`loadoa/loadoa.c:442-447`), so load order is not a real concern on stock hardware.
 
-Root-caused and closed out — see
-[`OmapNKS4Module.ko.md`](OmapNKS4Module.ko.md)'s "Exported kernel symbols"
-section for the full writeup. Short version: the genuine stock
-`OmapNKS4Module.ko` (confirmed via `readelf`/`nm` on a copy pulled live from
-the dev board) really does export all 11 needed symbols via a normal
-`__ksymtab`; the empty `depends=` is just a build-time metadata artifact
-with no effect on runtime resolution; and real `loadoa.c` already inserts
-`OmapNKS4Module.ko` before `OmapVideoModule.ko` (`loadoa/loadoa.c:442-447`).
-The earlier dmesg failure was purely this session's own manual test
-inserting things out of order.
+**Practical implication:** this reconstruction's `OmapVideoModule.ko` should load
+cleanly against a board where the genuine stock `OmapNKS4Module.ko` is already
+resident (its real exports are already in kernel memory) — no dependency on this
+project's own `OmapNKS4Module` reconstruction being fixed up first (that
+reconstruction is separately confirmed to still be missing all 11
+`EXPORT_SYMBOL()` calls).
 
-**Practical implication:** this reconstruction's `OmapVideoModule.ko`
-should load cleanly against a board where the genuine stock
-`OmapNKS4Module.ko` is already resident (its real exports are already in
-kernel memory) — no dependency on this project's own `OmapNKS4Module`
-reconstruction being fixed up first (that reconstruction is separately
-confirmed to still be missing all 11 `EXPORT_SYMBOL()` calls).
-
-**CONFIRMED on real hardware (2026-07-21):** `insmod` returned `rc=0` on
-the dev board with the genuine stock `OmapNKS4Module.ko` already loaded —
-zero "Unknown symbol" errors, all 11 imports resolved. Own init log:
-`COmapNKS4VideoAPI::UpdateScreenInfo() base = 0x58d7f000, X=800, Y=600`
-and `fb1: Virtual OMAP frame buffer device, using 468K of video memory`.
-`lsmod` showed `OmapNKS4` refcount incremented to 1 with `OmapVideoModule`
-as dependent, confirming real kernel-tracked symbol resolution, not
-coincidental success. `/dev/fb1` needed a manual `mknod c 29 1` (this
-rescue image has no devtmpfs), then a basic read worked cleanly.
+**Confirmed on real hardware**: `insmod` returned `rc=0` on a dev board with the
+genuine stock `OmapNKS4Module.ko` already loaded — zero "Unknown symbol" errors, all
+11 imports resolved. Own init log: `COmapNKS4VideoAPI::UpdateScreenInfo() base =
+0x58d7f000, X=800, Y=600` and `fb1: Virtual OMAP frame buffer device, using 468K of
+video memory`. `lsmod` showed `OmapNKS4` refcount incremented to 1 with
+`OmapVideoModule` as dependent, confirming real kernel-tracked symbol resolution.
+`/dev/fb1` needed a manual `mknod c 29 1` on that rescue image (no devtmpfs), then a
+basic read worked cleanly.
 
 Follow-up test (`KronosFB/narrow_flush_test.c`) drove a deliberately
 narrow `OMAPFB_FLUSH` (137×60px, `width=137` vs. the panel's real

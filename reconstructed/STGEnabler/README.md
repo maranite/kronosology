@@ -70,6 +70,32 @@ make
 
 Produces `STGEnabler.ko`. `make clean` removes build artifacts.
 
+## Real-hardware verification (2026-07-29)
+
+Never previously boot-tested. A live functional test (unload the real module,
+load ours) was judged too risky to run against the production Kronos
+(192.168.100.15) — `STGEnabler` is depended on by the currently-running `OA`
+audio engine (`STGEnabler 3 OA,USBMidiAccessory,OmapNKS4`, uptime ~11min at
+test time), and `init_module` unconditionally reprograms the live RTAI timer
+via `stg_rtai_setup()` (`rt_set_oneshot_mode()` + `start_rt_timer(0)`) —
+tearing that down live to swap modules risked hanging the in-use instrument.
+
+Instead did a safe, read-only comparison: pulled the real `/sbin/STGEnabler.ko`
+off the production unit and compared against this reconstruction offline.
+**Result: exported symbol table is byte-for-byte identical** (same 14 symbols,
+same names: `stg_usb_alloc_urb`, `stg_usb_free_urb`, `stg_usb_submit_urb`,
+`stg_usb_register_driver`, `stg_usb_deregister`,
+`stg_usb_driver_claim_interface`, `stg_sched_setscheduler`,
+`stg_set_cpus_allowed`, `stg_cpumask_of_cpu`, `stg_rtai_setup`, `stg_mkdir`,
+`stg_get_free_diskspace`, plus `init_module`/`cleanup_module`). `vermagic`
+also matches exactly (`2.6.32.11-korg SMP preempt mod_unload ATOM`).
+
+Not yet verified: actual runtime behavior of `stg_rtai_setup()` and the VFS
+helpers (`stg_mkdir`, `stg_get_free_diskspace`) — symbol-table matching
+confirms the ABI surface, not the function bodies. A real functional test
+still needs either the .16 dev board (where a hang has no real-world cost)
+or a maintenance window on production.
+
 ## Known limitations
 
 - The `struct korgfs_sb_info` offsets used by `stg_get_free_diskspace` are

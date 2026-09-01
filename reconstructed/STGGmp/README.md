@@ -125,3 +125,35 @@ no computed bignum result (only the harmless internal pre-allocation size).
 - The GMP arithmetic is upstream 4.2.x - match the exact point release to the firmware
   if byte-identical behaviour matters, but any 4.2.x is functionally equivalent.
 - `MODULE_LICENSE("GPL")` matches what the loader expects; GMP itself is LGPL-2.1+.
+
+## Real-hardware verification (2026-07-29)
+
+Never previously boot-tested. `STGGmp` is currently loaded and depended on by
+the live `OA`/`loadmod` audio engine on the production Kronos
+(192.168.100.15), so a real unload/reload functional test was skipped as too
+risky (see [[STGEnabler's README]](../STGEnabler/README.md) for the same
+reasoning) — instead did a safe, read-only comparison against the real
+`/sbin/STGGmp.ko` pulled off the unit. `vermagic` matched exactly. Comparing
+exported symbols found two real gaps, since fixed:
+
+1. `do_gmp_alloc`/`do_gmp_free`/`do_gmp_realloc` were plain (non-`static`)
+   functions, so they leaked into the module's global symbol table even
+   though the real binary keeps them local. `do_gmp_alloc`/`do_gmp_free` were
+   already byte-identical to the real disassembly; `do_gmp_realloc` was
+   logically equivalent (same ksize/kmalloc/copy logic, different register
+   allocation from a newer gcc). Fixed by adding `static`.
+2. The real binary separately exports `GmpLibSupport_Exit` — disassembly
+   showed it's a single `ret` in `.exit.text`, a no-op distinct from the
+   `module_exit` callback (`STGGmp_exit`, which stays local/static in both).
+   Not present in this reconstruction at all; added back as a matching
+   exported no-op, since nothing in this project's traced call graph invokes
+   it and its real behavior is fully characterized (does nothing).
+
+After both fixes, `nm`'s exported (`T`) symbol list is byte-for-name
+identical between the real `/sbin/STGGmp.ko` and this reconstruction's build.
+
+Not yet verified: actual arithmetic correctness against a real caller (only
+covered by the host-side `verify/run_xsize_kat.sh` KAT so far) and
+`stg_rtai_setup`-adjacent init-order behavior under a real `insmod`. Needs
+the .16 dev board or a maintenance window on production, same as
+`STGEnabler`.

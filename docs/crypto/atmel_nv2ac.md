@@ -86,14 +86,12 @@ These are bookmarked with category `patch_for_auth` in the Ghidra project.
 
 ---
 
-## Config-zone cross-check across 3 real units (2026-07-16)
+## Config-zone cross-check across 3 real units
 
-Full `KronosExtract.bin`-format captures from three physically different
-units — two Kronos (referred to here as `947e`, `6630`) and one Nautilus
-(`2D68`) — became available, the first time this project has had more than
-one unit's data to compare. (Device identifiers/public IDs intentionally
-not reproduced here — private per-device info.) Diffed the full 128-byte
-config zone across all three:
+`KronosExtract.bin`-format captures from three physically different units — two Kronos
+(referred to here as `947e`, `6630`) and one Nautilus (`2D68`) — were diffed across the
+full 128-byte config zone. (Device identifiers/public IDs intentionally not reproduced
+here — private per-device info.)
 
 - **`cfg[0x00:0x10]`, `cfg[0x20:0x28]` (`d508d549d58ad7cb`), and
   `cfg[0x40:0x50]` (`4142434445464748494a4b4c4d4e4f50` — literally the ASCII
@@ -126,14 +124,13 @@ config zone across all three:
   see `cryptoloop_keys.md`), which use the AT88 chip via entirely different
   call paths (`loadmod.ko`'s `RetrieveSecurityICKey`, or the boot_auth
   tooling) not yet cross-checked against this table.
-- Checked whether any of the config-zone slot data or the freely-readable
-  IdN (`cfg[0x19:0x20]`) has any derivable relationship to the Zone0 secret
-  (`0x00`-`0x27`) — direct substring match, byte-wise XOR (pairwise across
-  units and within a unit), and hashing (MD5/SHA1/SHA256 of IdN, salted and
-  unsalted) all came up negative on all three units. No evidence of any
-  derivation; see `auth_string_algorithm.md`'s existing "no known way to
-  forge without the chip secret" conclusion, now checked empirically rather
-  than only argued from the chip's designed security properties.
+- No derivable relationship exists between the config-zone slot data / the
+  freely-readable IdN (`cfg[0x19:0x20]`) and the Zone0 secret (`0x00`-`0x27`) — checked
+  via direct substring match, byte-wise XOR (pairwise across units and within a unit),
+  and hashing (MD5/SHA1/SHA256 of IdN, salted and unsalted) on all three units, all
+  negative. Consistent with `auth_string_algorithm.md`'s "no known way to forge without
+  the chip secret" conclusion, now checked empirically rather than only argued from the
+  chip's designed security properties.
 
 ---
 

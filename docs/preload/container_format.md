@@ -81,12 +81,12 @@ reasons. Specific endian-ness per record type is documented in each family's MD 
 
 ---
 
-## Checksums (CORRECTED 2026-06-24)
+## Checksums
 
-**Previous documentation incorrectly stated there are no checksums.** There ARE two
-embedded checksum bytes in the header. Writing record data without updating them causes
-Eva to load corrupt state (confirmed: patching `GLBL.BIN` without checksum update killed
-all networking on a live Kronos, requiring a PCG reload to recover).
+There are two embedded checksum bytes in the header. Writing record data without
+updating them causes Eva to load corrupt state — confirmed: patching `GLBL.BIN` without
+a checksum update killed all networking on a live Kronos, requiring a PCG reload to
+recover. Always update both checksum bytes when patching record data.
 
 ### Checksum fields
 
